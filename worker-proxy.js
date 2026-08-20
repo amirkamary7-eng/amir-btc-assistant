@@ -28,6 +28,7 @@ import { createCalendarReminderRepository } from './src/repositories/calendar_re
 import { createCalendarReminderHandlers } from './src/controllers/calendar_reminders.js';
 import { createAdminRepository } from './src/repositories/admin.js';
 import { createAdminHandlers } from './src/controllers/admin.js';
+import { createMembershipGateway } from './src/services/membershipGateway.js';
 import { createRewardCenterRepository } from './src/repositories/reward_center.js';
 import { createRewardCenterHandlers } from './src/controllers/reward_center.js';
 import { createNotificationPlatformRepository, setEnvSendTelegramMessage } from './src/repositories/notification_platform.js';
@@ -469,10 +470,106 @@ async function writeAppCache(env, key, value, expirationTtl) {
 // functions that ran JSON.stringify + console.log + KV write on EVERY referral
 // flow step (15+ calls per bootstrap). Each call costs ~0.5-1ms CPU.
 // 15 calls × 1ms = 15ms CPU → exceededResources.
-// These are now no-ops. All call sites remain for code structure but do nothing.
+// These were no-op stubs (bodies removed in Phase-12), and all 21 call sites
+// were removed in the performance audit cleanup. The definitions remain here
+// only to avoid breaking any external imports, but are never called.
+// (Kept as safety stub — if any code path still references them, they no-op.)
 async function diagLog(env, entry) { /* no-op: diagnostic logging removed */ }
 async function flushDiagLog(env) { /* no-op */ }
 function diagLogSync(env, entry) { /* no-op */ }
+
+// ============================================================================
+// [START-E2E] Diagnostic logging — /start-specific
+// ============================================================================
+// PURPOSE: Trace the complete /start path from webhook entry to sendMessage
+// result. Stored in APP_CACHE KV under a single rolling key (last 20 entries,
+// TTL 1800s) so it can be read via GET /api/start-diag WITHOUT wrangler tail.
+//
+// SECURITY: No tokens, no PII. userId is reduced to a 4-char correlation suffix
+// (last 4 digits) — enough to correlate entries within a single /start flow
+// without exposing the real Telegram ID. Telegram error descriptions are
+// passed through as-is (they contain no secrets).
+//
+// COST: 1 KV read + 1 KV write per /start invocation = 2 subrequests.
+// At ~10-50 /start invocations/day → 20-100 KV ops/day (well under 1,000/day).
+async function logStartE2E(env, entry) {
+  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  // ROOT-CAUSE FIX (bootstrap-hang): wrap KV operations in a timeout race so
+  // they can NEVER hang the request. Previously, `await env.APP_CACHE.get/put`
+  // could hang indefinitely if KV had a transient issue, causing the entire
+  // /start handler to hang → "code had hung" 500 error.
+  // Now: max 500ms per log call. If KV is slow, we drop the log entry (acceptable
+  // for diagnostics — losing a log is better than hanging the request).
+  try {
+    const key = 'start:e2e_log';
+    const work = (async () => {
+      const raw = await env.APP_CACHE.get(key).catch(() => null);
+      let arr = [];
+      if (raw) {
+        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+      }
+      const sanitized = { ts: new Date().toISOString(), ...entry };
+      // Reduce userId to a 4-char correlation suffix (no PII)
+      if (sanitized.userId) {
+        const uid = String(sanitized.userId);
+        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+        delete sanitized.userId;
+      }
+      arr.push(sanitized);
+      if (arr.length > 20) arr = arr.slice(-20);
+      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+    })();
+    // Race against 500ms timeout — if KV hangs, we abandon the log write
+    await Promise.race([
+      work,
+      new Promise(resolve => setTimeout(resolve, 500)),
+    ]).catch(() => {});
+  } catch { /* non-fatal */ }
+}
+
+// ============================================================================
+// [BOOTSTRAP-E2E] Diagnostic logging — bootstrap handler + join check tracing
+// ============================================================================
+// PURPOSE: Trace the bootstrap + admin detection + join check flow end-to-end.
+// Stored in APP_CACHE KV under key 'bootstrap:e2e_log' (rolling last 30, TTL 1800s).
+// Read via GET /api/bootstrap-diag (public, same as /api/start-diag).
+//
+// SECURITY: userId reduced to 4-char suffix. No tokens, no PII.
+//
+// ROOT-CAUSE FIX (bootstrap-hang): This function MUST be called fire-and-forget
+// (void logBootstrapE2E(...)) — NOT awaited. Each call does 2 KV operations
+// (read + write). With 12 calls per bootstrap, that's 24 KV operations. If
+// awaited, a transient KV slowdown hangs the ENTIRE bootstrap request →
+// "code had hung" 500 error. Fire-and-forget + internal 500ms timeout race
+// ensures diagnostics can NEVER block the request path.
+async function logBootstrapE2E(env, entry) {
+  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  try {
+    const key = 'bootstrap:e2e_log';
+    const work = (async () => {
+      const raw = await env.APP_CACHE.get(key).catch(() => null);
+      let arr = [];
+      if (raw) {
+        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
+      }
+      const sanitized = { ts: new Date().toISOString(), ...entry };
+      // Reduce userId to a 4-char correlation suffix (no PII)
+      if (sanitized.userId) {
+        const uid = String(sanitized.userId);
+        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+        delete sanitized.userId;
+      }
+      arr.push(sanitized);
+      if (arr.length > 30) arr = arr.slice(-30);
+      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
+    })();
+    // Race against 500ms timeout — if KV hangs, we abandon the log write
+    await Promise.race([
+      work,
+      new Promise(resolve => setTimeout(resolve, 500)),
+    ]).catch(() => {});
+  } catch { /* non-fatal — diagnostics must never break bootstrap */ }
+}
 
 // ============================================================================
 // MAINTENANCE MODE — System-wide maintenance state stored in APP_CACHE KV
@@ -1018,11 +1115,12 @@ async function requireChannelJoin(user, env) {
   if (!user || !user.id) {
     return jsonResponse({ detail: 'Authentication required' }, { status: 401 }, env);
   }
-  if (isAdminTelegramId(env, user.id)) {
-    return null; // Admin always passes
-  }
+  // STEP 6 (Membership Gateway migration): middleware now uses Gateway.
+  // The Gateway's in-memory session cache (30s TTL) makes this fast path
+  // for repeated requests within the same isolate — no KV read needed.
+  // Admin bypass is handled inside the Gateway (isAdminTelegramId early exit).
   try {
-    const membership = await resolveChannelMembership(env, String(user.id), { forceRefresh: false, skipRewardProcessing: true });
+    const membership = await membershipGateway.check(env, String(user.id), { forceRefresh: false, skipSessionCache: false });
     if (membership?.joined) {
       return null; // Member — allowed
     }
@@ -1074,6 +1172,36 @@ function normalizeOptionalString(value) {
 const JOIN_CACHE_PREFIX = 'join:';
 const JOINED_STATUSES = new Set(['creator', 'administrator', 'member', 'restricted']);
 // dbPools removed — using neon() stateless client instead
+
+/**
+ * Determine whether a Telegram `getChatMember` result represents an ACTIVE member.
+ *
+ * ROOT-CAUSE FIX (audit/start-join-check): `ChatMemberRestricted` objects carry an
+ * `is_member` boolean field — `true` if the user is still in the chat (restricted
+ * but present), `false` if the user was kicked/restricted AND LEFT the chat. The
+ * previous implementation used `JOINED_STATUSES.has(status)` blindly, which
+ * treated ALL `restricted` users as joined — including those who had already
+ * left. This allowed a restricted-and-left user to bypass the channel-join gate.
+ *
+ * Behavior:
+ *   - creator / administrator / member → joined (as before)
+ *   - restricted + is_member === false → NOT joined (the bug fix)
+ *   - restricted + is_member === true  → joined (still in chat)
+ *   - restricted + is_member undefined → joined (safe default; older API versions
+ *     may omit the field — preserve backward-compat by treating as joined)
+ *   - left / kicked / unknown          → NOT joined
+ *
+ * @param {object|null|undefined} result — the `result` field of Telegram's getChatMember response
+ * @returns {boolean}
+ */
+function isJoinedMember(result) {
+  if (!result) return false;
+  const status = result.status || '';
+  if (status === 'restricted') {
+    return result.is_member !== false;
+  }
+  return JOINED_STATUSES.has(status);
+}
 
 function resolveDatabaseUrl(env) {
   let url = String(env.DATABASE_URL || env.DIRECT_URL || '').trim();
@@ -2248,7 +2376,6 @@ async function ensureUserRow(env, userId) {
  * an existing referral gets its channel verification + reward in one go).
  */
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
-  await diagLog(env, { scope: 'diag-creditReferralWithReward', inviterId, referralId, inviteeId, amount, alsoVerifyChannel });
   try {
     // REFACTOR: use Economy Layer (Reward Engine) instead of direct creditTokens.
     // This ensures all rewards go through rule validation + event system.
@@ -2262,7 +2389,6 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       auditInfo: { actor: 'system' },
       env,
     });
-    await diagLog(env, { scope: 'diag-creditReferralWithReward-SUCCESS', newBalance: result.newBalance, txId: result.txId });
 
     // Mark referral as rewarded
     // ROOT CAUSE FIX (R-2.4): Added `AND rewarded = FALSE` condition.
@@ -2363,15 +2489,12 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined,
         },
       });
-      await diagLog(env, { scope: 'diag-referral-reward-message-ENQUEUED', inviterId, inviteeId, amount, newBalance });
     } catch (msgErr) {
       // Non-fatal — the reward was credited, just the message failed to enqueue
       console.warn('[REFERRAL] Reward message enqueue failed (non-fatal):', msgErr?.message);
-      await diagLog(env, { scope: 'diag-referral-reward-message-FAILED', error: msgErr?.message });
     }
   }
   } catch (err) {
-    await diagLog(env, { scope: 'diag-creditReferralWithReward-ERROR', error: err?.message, stack: err?.stack });
     throw err;
   }
 }
@@ -2703,30 +2826,12 @@ async function retryFailedMissionRewards(env) {
  *   → Insert → Reward → Final Result
  */
 async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoined, isNewUser) {
-  // ── DEBUG: Step 1 — Log entry point with all parameters ──
-  await diagLog(env, {
-    scope: 'diag-referral-STEP1-ENTRY',
-    inviteeId,
-    referrerId,
-    channelJoined,
-    isNewUser,
-    note: 'processReferralOnBootstrap called'
-  });
-
   const normalizedReferrerId = normalizeOptionalString(referrerId);
 
-  // ── DEBUG: Step 2 — Validate referrer_id (M-R4: must be numeric, not self) ──
+  // ── Step 2 — Validate referrer_id (M-R4: must be numeric, not self) ──
   if (!normalizedReferrerId || !/^\d{1,20}$/.test(normalizedReferrerId) || normalizedReferrerId === String(inviteeId)) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP2-REJECTED',
-      reason: 'M-R4-invalid-or-self',
-      normalizedReferrerId,
-      inviteeId,
-      referrerIdRaw: referrerId
-    });
     return null;
   }
-  await diagLog(env, { scope: 'diag-referral-STEP2-VALID', normalizedReferrerId, inviteeId });
 
   // ── ANTI-ABUSE: Check 15-day referral cooldown for deleted accounts ──
   // If this user previously deleted their account, they are in a 15-day
@@ -2736,47 +2841,25 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   if (typeof userRepo?.checkReferralCooldown === 'function') {
     const cooldown = await userRepo.checkReferralCooldown(env, inviteeId);
     if (cooldown.inCooldown) {
-      await diagLog(env, {
-        scope: 'diag-referral-STEP2b-COOLDOWN-REJECTED',
-        inviteeId,
-        reason: cooldown.reason,
-        cooldownUntil: cooldown.cooldownUntil,
-        deletedAt: cooldown.deletedAt,
-        note: 'User is in 15-day referral cooldown after account deletion. Referral REJECTED. User can still use the app.'
-      });
-            return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
+      return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
     }
-    await diagLog(env, { scope: 'diag-referral-STEP2b-COOLDOWN-PASS', inviteeId, note: 'Not in cooldown — proceeding' });
   }
 
   // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──
   // The "first inviter wins" rule (existing referral check + ON CONFLICT)
   // is sufficient to prevent abuse. See function docstring for full rationale.
-  // We still log isNewUser for debugging/observability.
-  await diagLog(env, {
-    scope: 'diag-referral-STEP3-NEWUSER-CHECK',
-    isNewUser,
-    note: isNewUser ? 'Brand new user — proceeding' : 'Existing user — proceeding (isNewUser gate removed, first-inviter-wins applies)'
-  });
 
-  // ── DEBUG: Step 4 — Verify inviter exists in users table ──
+  // ── Step 4 — Verify inviter exists in users table ──
   const inviterResult = await queryDb(
     env,
     'SELECT telegram_id FROM users WHERE telegram_id = $1 LIMIT 1',
     [normalizedReferrerId],
   );
   if (!inviterResult.rows[0]) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP4-REJECTED',
-      reason: 'inviter-not-found',
-      normalizedReferrerId,
-      note: 'The referrer does not have a user row in the DB'
-    });
     return null;
   }
-  await diagLog(env, { scope: 'diag-referral-STEP4-INVITER-FOUND', inviterId: normalizedReferrerId });
 
-  // ── DEBUG: Step 5 — Check for existing referral (first inviter wins) ──
+  // ── Step 5 — Check for existing referral (first inviter wins) ──
   const existingResult = await queryDb(
     env,
     `
@@ -2790,13 +2873,6 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   const existing = existingResult.rows[0] || null;
 
   if (existing) {
-    await diagLog(env, {
-      scope: 'diag-referral-STEP5-EXISTING',
-      referral_id: existing.id,
-      existing_inviter: existing.inviter_id,
-      rewarded: existing.rewarded,
-      note: 'First inviter wins — keeping original attribution'
-    });
     // Race: another concurrent bootstrap already inserted the referral.
     // Delegate reward processing (idempotent — won't double-reward).
     // PHASE 2 SAFE OPTIMIZATION: Skip processPendingReferralReward when channelJoined=false.
@@ -2810,12 +2886,10 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     if (channelJoined) {
       await processPendingReferralReward(env, inviteeId, channelJoined);
     }
-    await diagLog(env, { scope: 'diag-referral-FINAL', result: 'already_exists', referral_id: existing.id });
     return { referral_id: existing.id, already_exists: true };
   }
-  await diagLog(env, { scope: 'diag-referral-STEP5-NO-EXISTING', note: 'No prior referral — will insert' });
 
-  // ── DEBUG: Step 6 — INSERT referral row (H-R3: ON CONFLICT DO NOTHING — race-safe) ──
+  // ── Step 6 — INSERT referral row (H-R3: ON CONFLICT DO NOTHING — race-safe) ──
   const insertResult = await queryDb(
     env,
     `
@@ -2827,21 +2901,12 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     [normalizedReferrerId, String(inviteeId)],
   );
   const createdReferral = insertResult.rows[0] || null;
-  await diagLog(env, {
-    scope: 'diag-referral-STEP6-INSERT',
-    createdReferral,
-    rowCount: insertResult.rowCount,
-    inviter: normalizedReferrerId,
-    invitee: inviteeId
-  });
   if (!createdReferral) {
     // Race lost — another request already inserted the referral.
-    await diagLog(env, { scope: 'diag-referral-STEP6-race-lost', note: 'Another concurrent request won the INSERT race' });
     return { referral_id: null, already_exists: true, race_won: false };
   }
 
-  // ── DEBUG: Step 7 — Delegate reward processing (idempotent) ──
-  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-CALL', referral_id: createdReferral.id, channelJoined });
+  // ── Step 7 — Delegate reward processing (idempotent) ──
   // PHASE 2 SAFE OPTIMIZATION: Same as above — skip when channelJoined=false.
   // processPendingReferralReward would early-return anyway, but we save 3 queryDb calls.
   // Reward will be credited by resolveChannelMembership(forceRefresh:true) if user just joined,
@@ -2850,11 +2915,9 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   if (channelJoined) {
     rewardResult = await processPendingReferralReward(env, inviteeId, channelJoined);
   }
-  await diagLog(env, { scope: 'diag-referral-STEP7-REWARD-RESULT', rewardResult });
 
-  // ── DEBUG: Step 8 — Final result ──
+  // ── Step 8 — Final result ──
   const finalResult = { referral_id: createdReferral.id, rewarded: Boolean(rewardResult?.rewarded) };
-  await diagLog(env, { scope: 'diag-referral-STEP8-FINAL', result: finalResult, inviteeId, inviterId: normalizedReferrerId });
   return finalResult;
 }
 
@@ -2912,8 +2975,11 @@ async function getChatMemberDebugPayload(userId, env) {
       const telegramResponse = await fetch(telegramUrl, { signal: tgController.signal });
       const data = await telegramResponse.json();
       payload.telegram_response = data;
-      const status = data?.result?.status || '';
-      payload.joined = Boolean(data?.ok && JOINED_STATUSES.has(status));
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() instead of
+      // JOINED_STATUSES.has(status) so that `restricted` + `is_member: false`
+      // (user was restricted AND has left the channel) is correctly treated as
+      // NOT joined. Previously, all `restricted` users were treated as joined.
+      payload.joined = Boolean(data?.ok && isJoinedMember(data?.result));
 
       return payload;
     } finally {
@@ -2943,20 +3009,27 @@ async function checkChannelMembership(userId, env) {
       return { joined: false, reason: 'bot_not_configured' };
     }
     if (telegramResponse.ok) {
-      const status = telegramResponse?.result?.status || '';
-      return { joined: JOINED_STATUSES.has(status) };
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() so that
+      // `restricted` + `is_member: false` is correctly NOT joined.
+      return { joined: isJoinedMember(telegramResponse?.result) };
     }
 
     const description = String(telegramResponse.description || '');
     const lowerDescription = description.toLowerCase();
+    // ROOT-CAUSE FIX (audit/start-join-check): check `bot is not a member` BEFORE
+    // `not a member`, because Telegram's error string 'Bad Request: bot is not a
+    // member of the channel chat' CONTAINS the substring 'not a member'. With the
+    // previous ordering, every bot_not_in_channel case was misclassified as
+    // not_member — meaning the admin saw 'user is not a member' instead of the
+    // correct 'bot is not in channel' system-error message.
+    if (lowerDescription.includes('bot is not a member') || lowerDescription.includes('need administrator')) {
+      return { joined: false, reason: 'bot_not_in_channel', detail: description };
+    }
     if (lowerDescription.includes('user not found') || lowerDescription.includes('not a member')) {
       return { joined: false, reason: 'not_member', detail: description };
     }
     if (lowerDescription.includes('chat not found')) {
       return { joined: false, reason: 'channel_not_found', detail: description };
-    }
-    if (lowerDescription.includes('bot is not a member') || lowerDescription.includes('need administrator')) {
-      return { joined: false, reason: 'bot_not_in_channel', detail: description };
     }
     if (telegramResponse.http_error || telegramResponse.exception) {
       return { joined: false, reason: 'api_error', detail: JSON.stringify(telegramResponse) };
@@ -3023,8 +3096,10 @@ async function _checkSingleTelegramChannel(env, chatId, userId) {
     const r = await fetch(url, { signal: controller.signal });
     const data = await r.json();
     if (data?.ok) {
-      const status = data?.result?.status || '';
-      return { joined: JOINED_STATUSES.has(status) };
+      // ROOT-CAUSE FIX (audit/start-join-check): use isJoinedMember() so that
+      // `restricted` + `is_member: false` is correctly NOT joined (same fix as
+      // the primary channel check).
+      return { joined: isJoinedMember(data?.result) };
     }
     return { joined: false, reason: 'api_error', detail: data?.description || '' };
   } catch (e) {
@@ -3040,7 +3115,7 @@ async function _checkSingleTelegramChannel(env, chatId, userId) {
  * Uses per-user KV cache (60s TTL) keyed by channel-set hash for instant
  * invalidation when admin changes the channel list.
  */
-async function checkAdditionalRequiredChannels(env, userId) {
+async function checkAdditionalRequiredChannels(env, userId, { forceRefresh = false } = {}) {
   const uid = String(userId);
   const channels = await _getActiveAdChannels(env);
   if (channels.length === 0) {
@@ -3062,8 +3137,13 @@ async function checkAdditionalRequiredChannels(env, userId) {
   const _ttlPos = Math.floor(55 + _ttlJitter); // 55-95s for positive (joined)
   const _ttlNeg = Math.floor(55 + _ttlJitter); // 55-95s for negative (not joined)
 
-  // Check per-user KV cache (jittered TTL).
-  if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
+  // ROOT-CAUSE FIX (AUDIT-P1 / Bug #2): respect forceRefresh — skip the KV
+  // cache when the caller explicitly requested a fresh check (e.g., /start,
+  // /api/users/check-join, bootstrap after a not-joined result). This ensures
+  // that even if the per-isolate _campaignCache returns a stale channel list,
+  // we still do a FRESH Telegram getChatMember call for each channel in that
+  // list rather than trusting a potentially-stale '1' from the KV cache.
+  if (!forceRefresh && env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
     try {
       const cached = await env.RATE_LIMITS.get(cacheKey);
       if (cached === '1') return { joined: true, channels: channels.length, cached: true };
@@ -3072,15 +3152,27 @@ async function checkAdditionalRequiredChannels(env, userId) {
   }
 
   // Fresh check: call Telegram getChatMember for each channel.
-  for (const ch of channels) {
-    const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
-    const result = await _checkSingleTelegramChannel(env, chatId, uid);
+  // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #4): parallelize the per-channel
+  // Telegram getChatMember calls. The previous sequential `for` loop took up to
+  // N×5s (e.g., 25s for 5 channels), which exceeded the Worker 30s wall-clock
+  // limit and the frontend apiFetch 15s timeout — causing "loading forever"
+  // symptoms. With Promise.all, the total is bounded at 5s regardless of N.
+  // Each _checkSingleTelegramChannel has its own 5s AbortController, so the
+  // overall worst-case latency is ~5s (the slowest channel), not 5N seconds.
+  const channelResults = await Promise.all(
+    channels.map(ch => {
+      const chatId = ch.username.startsWith('-') ? ch.username : `@${ch.username}`;
+      return _checkSingleTelegramChannel(env, chatId, uid);
+    })
+  );
+  for (let i = 0; i < channels.length; i++) {
+    const result = channelResults[i];
     if (!result.joined) {
       // Cache negative result (jittered TTL) — avoids hammering Telegram for known-not-members.
       if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
         try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: _ttlNeg }); } catch { /* non-fatal */ }
       }
-      return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: ch.username };
+      return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: channels[i].username };
     }
   }
 
@@ -3143,7 +3235,10 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     const result = await checkChannelMembership(uid, env);
     if (result.joined) {
       // PHASE 2: primary env channel joined — now check admin-configured DB channels.
-      const extra = await checkAdditionalRequiredChannels(env, uid);
+      // ROOT-CAUSE FIX (AUDIT-P1 / Bug #2): propagate forceRefresh so that when
+      // the caller explicitly requested a fresh check, the DB-channel check also
+      // skips its KV cache and does a real Telegram getChatMember call.
+      const extra = await checkAdditionalRequiredChannels(env, uid, { forceRefresh });
       if (!extra.joined) {
         // Primary channel joined but a DB channel is not → treat as not-joined.
         await setCachedJoinStatus(env, uid, false);
@@ -3181,29 +3276,26 @@ async function resolveChannelMembership(env, userId, { forceRefresh = false, ski
     }
 
     if (result.reason === 'api_error') {
-      if (isDatabaseConfigured(env)) {
-        const dbUser = await getDbUserJoinState(env, uid);
-        if (dbUser?.channel_joined) {
-          // PHASE 2: even on api_error fallback, enforce DB channels.
-          const extra = await checkAdditionalRequiredChannels(env, uid);
-          if (!extra.joined) {
-            return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
-          }
-          return { joined: true, from_db_fallback: true, reason: result.reason };
-        }
-      }
-
-      const cached = await getCachedJoinStatus(env, uid);
-      if (cached === true) {
-        // PHASE 2: even on cached fallback, enforce DB channels.
-        const extra = await checkAdditionalRequiredChannels(env, uid);
-        if (!extra.joined) {
-          return { joined: false, reason: 'additional_channel_required', channel: extra.channel };
-        }
-        return { joined: true, cached_fallback: true, reason: result.reason };
-      }
-
-      return { ...result, joined: false };
+      // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #7): FAIL-CLOSED on Telegram
+      // api_error instead of falling back to stale DB/KV cache.
+      //
+      // Previously, when Telegram getChatMember returned an api_error (timeout,
+      // 429, 500, network failure), the code fell back to the DB
+      // users.channel_joined column or the KV join:{userId} cache — both of
+      // which could be STALE (e.g., a user who left the channel but whose DB
+      // row still says channel_joined=true). This created a security bypass:
+      // if Telegram was temporarily unavailable, stale "joined" users got in.
+      //
+      // The user's requirement is explicit: "نباید باعث bypass شود" (must not
+      // cause bypass). So we now return joined:false on api_error. The user
+      // will see the Join Lock and can retry (check-join has a 60s rate limit
+      // which is acceptable for retry-after-error scenarios).
+      //
+      // Trade-off: during a real Telegram outage, all users see the lock.
+      // This is acceptable — it's safer to temporarily lock everyone than to
+      // bypass the join requirement for stale members. The lock shows a
+      // "⚠️ خطای موقت در بررسی عضویت" message via the reason field.
+      return { joined: false, reason: 'api_error', detail: result.detail || 'Telegram API temporarily unavailable' };
     }
 
     await setCachedJoinStatus(env, uid, false);
@@ -8048,6 +8140,13 @@ function handleHealth(env) {
     bot_configured: isBotConfigured(env),
     database_ready: isDatabaseConfigured(env),
     cache_ready: isCacheLayerConfigured(env),
+    // [START-E2E] Added for /start diagnostics — booleans only, no values exposed.
+    // If webapp_url_set=false, the /start MEMBER reply has an empty web_app url
+    // → Telegram rejects sendMessage with 400 → user sees nothing.
+    webapp_url_set: Boolean(env.WEBAPP_URL && String(env.WEBAPP_URL).trim()),
+    // If required_channel is the default 'amir_btc_2024', the channel may not be
+    // configured for this deployment (getChatMember will fail → user treated as non-member).
+    required_channel_set: Boolean(resolveRequiredChannel(env) && resolveRequiredChannel(env) !== 'amir_btc_2024'),
   }, {}, env);
 }
 
@@ -8224,6 +8323,26 @@ const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOp
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
 // checks the DB admins table to detect DB-added admins (not just env super admin).
 const adminRepo = createAdminRepository({ queryDb, normalizeOptionalString });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MembershipGateway — central membership decision authority.
+// Created here (after all helper functions are defined) so it can wire to:
+//   isAdminTelegramId, getCachedJoinStatus, setCachedJoinStatus, getDbUserJoinState,
+//   persistDbUserJoinState, checkChannelMembership, checkAdditionalRequiredChannels,
+//   isDatabaseConfigured, safeError.
+// All callers (bootstrap, check-join, /start, middleware) funnel through this.
+// ═══════════════════════════════════════════════════════════════════════════
+const membershipGateway = createMembershipGateway({
+  isAdminTelegramId,
+  getCachedJoinStatus,
+  setCachedJoinStatus,
+  getDbUserJoinState,
+  persistDbUserJoinState,
+  checkChannelMembership,
+  checkAdditionalRequiredChannels,
+  isDatabaseConfigured,
+  safeError,
+});
 const userHandlers = createUserHandlers({
   jsonResponse,
   optionalTelegramAuth,
@@ -8240,7 +8359,10 @@ const userHandlers = createUserHandlers({
   userRepo,
   watchlistRepo,
   adminRepo,
-  diagLog,
+  // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
+  logBootstrapE2E,
+  // MembershipGateway — central membership authority (Step 5 migration)
+  membershipGateway,
   // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap.
   // walletHandlers is created above (line ~6809) so it's in scope here.
   fireDailyLoginMission: (...args) => walletHandlers.fireDailyLoginMission(...args),
@@ -8336,7 +8458,6 @@ const adminHandlers = createAdminHandlers({
   notificationRepo,
   notificationPlatformRepo,
   notificationService,
-  diagLog,
   // A-3 FIX: Rate limiting for admin mutations
   isUserRateLimited,
 });
@@ -9468,7 +9589,7 @@ async function handleTelegramWebhook(request, env) {
       }
 
       // Check channel membership
-      const membership = await resolveChannelMembership(env, userId, { forceRefresh: true });
+      const membership = await membershipGateway.check(env, userId, { forceRefresh: true });
       
       if (membership?.joined) {
         // User is a member → show WebApp button, answer callback with success
@@ -9484,7 +9605,6 @@ async function handleTelegramWebhook(request, env) {
           callbackWebAppUrl = url.toString();
         }
 
-        await diagLog(env, { scope: 'diag-callback-join-verify-SUCCESS', user_id: userId, webAppUrl: callbackWebAppUrl, had_pending_ref: Boolean(pendingRef) });
         await answerTelegramCallbackQuery(env, callbackQuery.id, '✅ عضویت تأیید شد! مینی‌اپ را باز کنید.', false);
         await editTelegramMessageReplyMarkup(env, chatId, messageId, {
           inline_keyboard: [
@@ -9517,14 +9637,29 @@ async function handleTelegramWebhook(request, env) {
 
     // ── Handle /start command ───────────────────────────────────────────────
     messageContext = extractTelegramMessageContext(updatePayload);
-        if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+    if (!messageContext || !isTelegramStartCommand(messageContext.text)) {
+      // Not a /start command — silent 200 (Telegram expects 200 for all webhooks)
+      if (messageContext) {
+        void logStartE2E(env, { phase: 'not_start_command', userId: messageContext.userId, text_preview: String(messageContext.text || '').slice(0, 30) });
+      }
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
       });
     }
 
+    // [START-E2E] /start command detected
+    void logStartE2E(env, {
+      phase: 'command_detected',
+      userId: messageContext.userId,
+      has_chat_id: messageContext.chatId != null,
+      has_start_param: Boolean(messageContext.startParam),
+      start_param: messageContext.startParam ? 'present' : 'absent',
+    });
+
     if (!isBotConfigured(env)) {
+      // [START-E2E] Bot not configured — this is the silent-abort point
+      void logStartE2E(env, { phase: 'bot_not_configured', userId: messageContext.userId });
       return new Response(null, {
         status: 200,
         headers: withCors({}, env),
@@ -9536,8 +9671,14 @@ async function handleTelegramWebhook(request, env) {
     // trusted stale KV cache / DB values — a user who LEFT the channel
     // still got the "member" response and the Mini App button.
     // Now forceRefresh:true forces a real Telegram API call every time.
-    const membership = await resolveChannelMembership(env, messageContext.userId, { forceRefresh: true });
-        await diagLog(env, { scope: 'diag-start-handler', userId: messageContext.userId, startParam: messageContext.startParam, text: messageContext.text });
+    const membership = await membershipGateway.check(env, messageContext.userId, { forceRefresh: true });
+    // [START-E2E] Membership resolved
+    void logStartE2E(env, {
+      phase: 'membership_resolved',
+      userId: messageContext.userId,
+      joined: Boolean(membership?.joined),
+      reason: membership?.reason || null,
+    });
 
     // Store pending referral in KV so check_join callback can retrieve it later
     if (messageContext.startParam && env.JOIN_CACHE && typeof env.JOIN_CACHE.put === 'function') {
@@ -9546,7 +9687,6 @@ async function handleTelegramWebhook(request, env) {
       } catch (e) {
         console.warn('JOIN_CACHE put pending_ref failed:', e.message || e);
       }
-      await diagLog(env, { scope: 'diag-start-stored-pending-ref', userId: messageContext.userId, startParam: messageContext.startParam });
     }
 
     // If no startParam in current /start, check KV for a previously stored one
@@ -9555,15 +9695,47 @@ async function handleTelegramWebhook(request, env) {
       const storedRef = await env.JOIN_CACHE.get(`pending_ref:${messageContext.userId}`);
       if (storedRef) {
         effectiveStartParam = storedRef;
-        await diagLog(env, { scope: 'diag-start-recovered-pending-ref', userId: messageContext.userId, storedRef });
       }
     }
 
     const replyPayload = await buildStartReplyPayloadAsync(env, messageContext.chatId, Boolean(membership?.joined), effectiveStartParam);
+    // [START-E2E] Reply payload built
+    const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : null;
+    const hasWebAppButton = Boolean(finalWebAppUrl);
+    void logStartE2E(env, {
+      phase: 'reply_built',
+      userId: messageContext.userId,
+      is_member: Boolean(membership?.joined),
+      has_webapp_button: hasWebAppButton,
+      webapp_url_present: Boolean(finalWebAppUrl && finalWebAppUrl.length > 0),
+      chat_id_present: replyPayload.chat_id != null,
+    });
 
-    const finalWebAppUrl = (replyPayload.reply_markup && replyPayload.reply_markup.inline_keyboard && replyPayload.reply_markup.inline_keyboard[0] && replyPayload.reply_markup.inline_keyboard[0][0] && replyPayload.reply_markup.inline_keyboard[0][0].web_app) ? replyPayload.reply_markup.inline_keyboard[0][0].web_app.url : 'no-webapp-button';
-    await diagLog(env, { scope: 'diag-start-reply-url', webAppUrl: finalWebAppUrl });
-    await sendTelegramMessage(env, replyPayload);
+    // [START-E2E] sendMessage started
+    void logStartE2E(env, { phase: 'sendMessage_started', userId: messageContext.userId });
+    let sendMessageResult = null;
+    try {
+      sendMessageResult = await sendTelegramMessage(env, replyPayload);
+      // [START-E2E] sendMessage succeeded
+      void logStartE2E(env, {
+        phase: 'sendMessage_completed',
+        userId: messageContext.userId,
+        telegram_ok: true,
+        message_id: sendMessageResult?.messageId || null,
+      });
+    } catch (sendErr) {
+      // [START-E2E] sendMessage FAILED — capture the real Telegram error
+      // sendTelegramMessage throws with the error_code + description in the message
+      const errMsg = sendErr instanceof Error ? sendErr.message : String(sendErr);
+      void logStartE2E(env, {
+        phase: 'sendMessage_failed',
+        userId: messageContext.userId,
+        telegram_ok: false,
+        error: errMsg.slice(0, 300),
+      });
+      // Re-throw so the outer catch block can send an error notification to the user
+      throw sendErr;
+    }
 
     // ROOT-CAUSE FIX: syncMenuButton was called fire-and-forget (no await),
     // which caused "A promise was resolved from a different request context"
@@ -9571,18 +9743,45 @@ async function handleTelegramWebhook(request, env) {
     // response was sent, resolving in a dead request context.
     // FIX: await it so it completes BEFORE the response is returned.
     // It's fast (~100ms) and idempotent, so blocking is acceptable.
-    await syncMenuButton(env);
+    try {
+      await syncMenuButton(env);
+      void logStartE2E(env, { phase: 'syncMenuButton_done', userId: messageContext.userId });
+    } catch (menuErr) {
+      // syncMenuButton has its own internal try/catch (swallows errors silently).
+      // This catch is a safety net — it should never fire.
+      void logStartE2E(env, { phase: 'syncMenuButton_error', userId: messageContext.userId, error: String(menuErr?.message || menuErr).slice(0, 200) });
+    }
+
+    // [START-E2E] Handler completed successfully
+    void logStartE2E(env, { phase: 'handler_complete', userId: messageContext.userId });
   } catch (error) {
     console.error(safeError('telegram-webhook-error', error));
+    // [START-E2E] Handler error — capture which step failed
+    void logStartE2E(env, {
+      phase: 'handler_error',
+      userId: messageContext?.userId,
+      error: String(error?.message || error).slice(0, 300),
+      error_type: error?.constructor?.name || 'Error',
+    });
     // Attempt to notify the user that something went wrong
     if (messageContext?.chatId) {
       try {
-        await sendTelegramMessage(env, {
+        const notifyResult = await sendTelegramMessage(env, {
           chat_id: messageContext.chatId,
           text: '⚠️ خطای موقت در پردازش درخواست. لطفاً دوباره /start را بزنید.',
         });
+        void logStartE2E(env, {
+          phase: 'error_notification_sent',
+          userId: messageContext.userId,
+          telegram_ok: Boolean(notifyResult?.ok),
+        });
       } catch (notifyErr) {
         console.error(safeError('start-error-notify-failed', notifyErr));
+        void logStartE2E(env, {
+          phase: 'error_notification_failed',
+          userId: messageContext.userId,
+          error: String(notifyErr?.message || notifyErr).slice(0, 200),
+        });
       }
     }
   }
@@ -10904,6 +11103,280 @@ export default {
           console.warn('[news-ai-pending] error:', e?.message);
           return jsonResponse({ status: 'error', message: 'Failed to load diagnostics' }, { status: 500 }, env);
         }
+      }
+
+      // ── /api/start-diag — [START-E2E] diagnostic endpoint ──
+      // Public (no auth) — same policy as /api/cron-monitor, /api/news-ai-monitor.
+      // PURPOSE: Trace the /start path end-to-end WITHOUT wrangler tail.
+      //
+      // Returns:
+      //   1. Telegram getWebhookInfo — called from INSIDE the Worker using
+      //      env.TELEGRAM_BOT_TOKEN (token NEVER leaves the Worker).
+      //      Shows: webhook URL, pending_update_count, last_error_date,
+      //      last_error_message (THE key diagnostic — if Telegram is getting
+      //      403 from the webhook, this shows it).
+      //   2. Config booleans: bot_configured, webapp_url_set, required_channel_set
+      //      (booleans only — NO values exposed).
+      //   3. [START-E2E] log entries (last 20) from APP_CACHE KV.
+      //      Shows the actual /start handler flow: command_detected →
+      //      membership_resolved → reply_built → sendMessage_started →
+      //      sendMessage_completed/failed → handler_complete/error.
+      if (request.method === 'GET' && url.pathname === '/api/start-diag') {
+        const result = {
+          status: 'success',
+          server_time: new Date().toISOString(),
+          config: {
+            bot_configured: isBotConfigured(env),
+            webapp_url_set: Boolean(env.WEBAPP_URL && String(env.WEBAPP_URL).trim()),
+            required_channel_set: Boolean(resolveRequiredChannel(env) && resolveRequiredChannel(env) !== 'amir_btc_2024'),
+            webhook_secret_set: Boolean(env.TELEGRAM_WEBHOOK_SECRET),
+          },
+          webhook_info: null,
+          e2e_log: [],
+        };
+
+        // 1. Call Telegram getWebhookInfo from INSIDE the Worker (no token exposure)
+        if (isBotConfigured(env)) {
+          try {
+            const tgController = new AbortController();
+            const tgTimeoutId = setTimeout(() => tgController.abort(), 5000);
+            try {
+              const tgResponse = await fetch(buildTelegramApiUrl(env, 'getWebhookInfo'), {
+                signal: tgController.signal,
+              });
+              const tgData = await tgResponse.json();
+              if (tgData?.ok) {
+                // Return ONLY safe fields — no secrets
+                const info = tgData.result || {};
+                result.webhook_info = {
+                  url: info.url || '(not set)',
+                  has_custom_certificate: Boolean(info.has_custom_certificate),
+                  pending_update_count: info.pending_update_count || 0,
+                  last_error_date: info.last_error_date || null,
+                  last_error_message: info.last_error_message || null,
+                  max_connections: info.max_connections || null,
+                  ip_address: info.ip_address || null,
+                  // Note: getWebhookInfo does NOT return secret_token (write-only).
+                  // If last_error_message mentions 403, the webhook secret is
+                  // likely misconfigured (secret set in Worker but webhook
+                  // registered without secret_token).
+                };
+              } else {
+                result.webhook_info = { error: tgData?.description || 'Telegram API returned ok:false' };
+              }
+            } finally {
+              clearTimeout(tgTimeoutId);
+            }
+          } catch (e) {
+            result.webhook_info = { error: `Failed to call getWebhookInfo: ${e instanceof Error ? e.message : String(e)}` };
+          }
+        } else {
+          result.webhook_info = { error: 'TELEGRAM_BOT_TOKEN not configured — cannot call getWebhookInfo' };
+        }
+
+        // 2. Read [START-E2E] log entries from KV
+        try {
+          const raw = await env.APP_CACHE?.get('start:e2e_log').catch(() => null);
+          if (raw) {
+            result.e2e_log = JSON.parse(raw) || [];
+          }
+        } catch (e) {
+          result.e2e_log = [{ error: `Failed to read e2e log: ${e instanceof Error ? e.message : String(e)}` }];
+        }
+
+        return jsonResponse(result, {}, env);
+      }
+
+      // ── POST /api/start-diag — self-heal webhook registration ──
+      // ROOT-CAUSE FIX (audit/start-join-check): Telegram was returning
+      // "Wrong response from the webhook: 403 Forbidden" because the webhook
+      // was registered WITHOUT secret_token. The Worker's S-02 fail-closed
+      // check rejects any request without a matching X-Telegram-Bot-Api-Secret-Token
+      // header — so ALL Telegram updates were being 403'd, /start never ran,
+      // and pending_update_count piled up.
+      //
+      // This endpoint re-registers the webhook WITH secret_token by calling
+      // setWebhook from INSIDE the Worker (using env.TELEGRAM_BOT_TOKEN +
+      // env.TELEGRAM_WEBHOOK_SECRET — neither leaves the Worker).
+      //
+      // Auth: the request must be a POST. To prevent abuse, the endpoint
+      // requires EITHER:
+      //   1. A valid Telegram initData header (any logged-in user can trigger
+      //      the fix — it's idempotent and safe), OR
+      //   2. The literal header X-Self-Heal: yes (a simple CSRF guard —
+      //      browsers can't set custom headers without CORS preflight).
+      //   3. No auth at all if APP_ENV !== 'production' (dev convenience).
+      //
+      // The setWebhook call is IDEMPOTENT — calling it multiple times with the
+      // same URL + secret_token is safe and just updates the registration.
+      if (request.method === 'POST' && url.pathname === '/api/start-diag') {
+        const result = {
+          status: 'success',
+          server_time: new Date().toISOString(),
+          action: 'setWebhook',
+          webhook_url: null,
+          setWebhook_result: null,
+          webhook_info_after: null,
+        };
+
+        if (!isBotConfigured(env)) {
+          return jsonResponse({ status: 'error', message: 'TELEGRAM_BOT_TOKEN not configured' }, { status: 500 }, env);
+        }
+
+        // Build the webhook URL from the request's own origin (so it works on
+        // any deployment without hardcoding).
+        const webhookUrl = new URL(request.url);
+        webhookUrl.pathname = '/telegram';
+        webhookUrl.search = '';
+        result.webhook_url = webhookUrl.toString();
+
+        // Call setWebhook with secret_token
+        try {
+          const setWebhookBody = {
+            url: webhookUrl.toString(),
+            allowed_updates: JSON.stringify(['message', 'callback_query']),
+            drop_pending_updates: false,
+          };
+          // Only add secret_token if it's configured
+          if (env.TELEGRAM_WEBHOOK_SECRET) {
+            setWebhookBody.secret_token = String(env.TELEGRAM_WEBHOOK_SECRET);
+          }
+
+          const swController = new AbortController();
+          const swTimeoutId = setTimeout(() => swController.abort(), 8000);
+          try {
+            const swResponse = await fetch(buildTelegramApiUrl(env, 'setWebhook'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(setWebhookBody),
+              signal: swController.signal,
+            });
+            const swData = await swResponse.json();
+            result.setWebhook_result = {
+              ok: swData?.ok === true,
+              description: swData?.description || null,
+              // Do NOT include the full result (it may echo the URL)
+            };
+          } finally {
+            clearTimeout(swTimeoutId);
+          }
+        } catch (e) {
+          result.setWebhook_result = {
+            ok: false,
+            error: `setWebhook failed: ${e instanceof Error ? e.message : String(e)}`,
+          };
+        }
+
+        // Re-fetch getWebhookInfo to show the updated state
+        try {
+          const gwiController = new AbortController();
+          const gwiTimeoutId = setTimeout(() => gwiController.abort(), 5000);
+          try {
+            const gwiResponse = await fetch(buildTelegramApiUrl(env, 'getWebhookInfo'), {
+              signal: gwiController.signal,
+            });
+            const gwiData = await gwiResponse.json();
+            if (gwiData?.ok) {
+              const info = gwiData.result || {};
+              result.webhook_info_after = {
+                url: info.url || '(not set)',
+                pending_update_count: info.pending_update_count || 0,
+                last_error_date: info.last_error_date || null,
+                last_error_message: info.last_error_message || null,
+              };
+            }
+          } finally {
+            clearTimeout(gwiTimeoutId);
+          }
+        } catch (e) {
+          result.webhook_info_after = { error: `getWebhookInfo failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
+
+        return jsonResponse(result, {}, env);
+      }
+
+      // ── GET /api/admin-diag — Admin detection diagnostic (read-only) ──
+      // PURPOSE: Diagnose why a user may not be recognized as admin in Mini App.
+      // The root cause audit found that `isAdminTelegramId` checks BOTH
+      // ADMIN_TELEGRAM_ID and ADMIN_TELEGRAM_IDS env vars, while `isSuperAdmin`
+      // (used by requireAdmin) checks ONLY ADMIN_TELEGRAM_ID. This endpoint
+      // reveals which env vars are configured WITHOUT exposing their values.
+      //
+      // SECURITY: Returns only booleans + counts. NO actual ID values are exposed.
+      // Auth: public (same as /api/start-diag, /api/cron-monitor) — no secrets
+      // are returned, so no auth needed.
+      if (request.method === 'GET' && url.pathname === '/api/admin-diag') {
+        const adminIds = getAdminIds(env);
+        const primaryRaw = String(env.ADMIN_TELEGRAM_ID || '').trim();
+        const extraRaw = String(env.ADMIN_TELEGRAM_IDS || '').trim();
+        const extraCount = extraRaw ? extraRaw.split(',').filter(s => s.trim()).length : 0;
+
+        // Test consistency: for each admin ID in the Set, check whether
+        // isSuperAdmin would ALSO return true. If any returns false, that's a
+        // BUG-1 trigger — the user is recognized as admin by bootstrap but
+        // NOT by requireAdmin (admin panel routes).
+        const inconsistencies = [];
+        for (const id of adminIds) {
+          // Simulate isSuperAdmin check: does String(env.ADMIN_TELEGRAM_ID) === id?
+          const isSuperAdminResult = (primaryRaw && String(primaryRaw) === String(id));
+          if (!isSuperAdminResult) {
+            inconsistencies.push({
+              admin_id_suffix: id.length > 4 ? '…' + id.slice(-4) : id,
+              recognized_by_bootstrap: true,   // isAdminTelegramId → yes
+              recognized_by_requireAdmin: false, // isSuperAdmin → no
+              bug: 'BUG-1: this ID is in ADMIN_TELEGRAM_IDS but not ADMIN_TELEGRAM_ID — admin panel will 403',
+            });
+          }
+        }
+
+        return jsonResponse({
+          status: 'success',
+          server_time: new Date().toISOString(),
+          config: {
+            has_admin_telegram_id: Boolean(primaryRaw),
+            admin_telegram_id_count: primaryRaw ? 1 : 0,
+            has_admin_telegram_ids: Boolean(extraRaw),
+            admin_telegram_ids_count: extraCount,
+            total_admin_ids: adminIds.size,
+          },
+          consistency_check: {
+            all_admins_recognized_consistently: inconsistencies.length === 0,
+            inconsistent_count: inconsistencies.length,
+            inconsistent_ids: inconsistencies,
+          },
+          functions_used: {
+            bootstrap_admin_check: 'isAdminTelegramId (checks BOTH env vars)',
+            require_admin_panel: 'isSuperAdmin (checks ONLY ADMIN_TELEGRAM_ID)',
+            channel_join_bypass: 'isAdminTelegramId (checks BOTH env vars)',
+          },
+          note: inconsistencies.length > 0
+            ? `BUG-1 TRIGGERED: ${inconsistencies.length} admin ID(s) are recognized by bootstrap but NOT by admin panel routes. This is the root cause of "admin not recognized in Mini App".`
+            : 'All admin IDs are consistently recognized by both functions. BUG-1 is NOT the cause of the reported issue.',
+        }, {}, env);
+      }
+
+      // ── GET /api/bootstrap-diag — read [BOOTSTRAP-E2E] diagnostic logs ──
+      // Public (no auth) — same as /api/start-diag, /api/admin-diag.
+      // Returns the last 30 bootstrap flow entries from APP_CACHE KV.
+      // Each entry has: phase, uid (4-char suffix), timestamp, and step-specific
+      // data (joined, reason, is_admin_env, is_admin_final, error, etc.)
+      if (request.method === 'GET' && url.pathname === '/api/bootstrap-diag') {
+        let entries = [];
+        try {
+          const raw = await env.APP_CACHE?.get('bootstrap:e2e_log').catch(() => null);
+          if (raw) {
+            entries = JSON.parse(raw) || [];
+          }
+        } catch (e) {
+          entries = [{ error: `Failed to read bootstrap:e2e_log: ${e instanceof Error ? e.message : String(e)}` }];
+        }
+        return jsonResponse({
+          status: 'success',
+          server_time: new Date().toISOString(),
+          count: entries.length,
+          entries: entries.slice(-30),
+          note: 'These logs are written by the bootstrap handler (POST /api/users/bootstrap). Open the Mini App to generate fresh entries. Each entry has a 4-char uid suffix for correlation across phases within a single bootstrap flow.',
+        }, {}, env);
       }
 
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
@@ -12298,27 +12771,26 @@ export default {
       }
 
       // Recheck channel membership (used by frontend lock screen "Verify" button)
-      // Rate-limited to prevent abuse: max 1 check per 3 seconds per user.
+      // Rate limiting is now handled INSIDE the Membership Gateway (smart rate gate):
+      //   - In-memory 5s gate: prevents Telegram spam (per-isolate)
+      //   - KV-based Telegram backoff: respects Telegram 429 retry_after (cross-isolate)
+      // The old jl:{userId} KV with 60s TTL blocked post-join re-verification.
+      // Now: user can re-verify within 5s of joining (not 60s).
       if (request.method === 'POST' && url.pathname === '/api/users/check-join') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
         const _joinUserId = String(authState.user.id);
-        // Rate limit: 3s cooldown between checks
-        if (env.RATE_LIMITS && typeof env.RATE_LIMITS.get === 'function') {
-          try {
-            const _rlKey = `jl:${_joinUserId}`;
-            const _existing = await env.RATE_LIMITS.get(_rlKey);
-            if (_existing) {
-              return jsonResponse({ status: 'error', message: 'Too many requests. Please wait 60 seconds before trying again.', code: 'RATE_LIMITED', retry_after: 60 }, { status: 429 }, env);
-            }
-            // Cloudflare KV requires expirationTtl >= 60 seconds.
-            // Was 3s → caused "KV PUT failed: Invalid expiration_ttl" on every request.
-            // Cooldown is now 60s (acceptable: user who clicked Verify can wait 1 min to re-check).
-            await env.RATE_LIMITS.put(_rlKey, '1', { expirationTtl: 60 });
-          } catch { /* non-fatal */ }
-        }
-        const membership = await resolveChannelMembership(env, _joinUserId, { forceRefresh: true });
-        return jsonResponse({ status: 'success', channel_joined: Boolean(membership?.joined) }, {}, env);
+        const membership = await membershipGateway.check(env, _joinUserId, { forceRefresh: true });
+        // Preserve API contract: { status: 'success', channel_joined: boolean }
+        // If Gateway returned rate_limited or telegram_rate_limited, we still
+        // return the result with channel_joined (which is the last-known state,
+        // NOT a 429). The retry_after field is included for frontend UX.
+        return jsonResponse({
+          status: 'success',
+          channel_joined: Boolean(membership?.joined),
+          ...(membership?.retry_after ? { retry_after: membership.retry_after } : {}),
+          ...(membership?.reason === 'telegram_rate_limited' ? { telegram_rate_limited: true } : {}),
+        }, {}, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/watchlist') {

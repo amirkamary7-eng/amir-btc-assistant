@@ -3051,7 +3051,10 @@ strong.down { color: var(--red); }
 }
 
 .ai-speech-bubble {
-    position: relative;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    inset-inline-end: 0;
+    width: min(260px, calc(100vw - 88px));
     max-width: min(260px, calc(100vw - 88px));
     padding: 12px 14px 12px 12px;
     border-radius: 18px;
@@ -3145,6 +3148,7 @@ strong.down { color: var(--red); }
     user-select: none;
     -webkit-user-select: none;
     will-change: transform;
+    animation: ai-fab-float 4s ease-in-out infinite;
 }
 .ai-fab:active { cursor: grabbing; transform: scale(0.92); }
 .ai-fab:active .ai-fab-surface { transform: scale(0.95); }
@@ -3208,8 +3212,13 @@ strong.down { color: var(--red); }
 }
 
 @keyframes ai-halo-pulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.65; }
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.75; transform: scale(1.04); }
+}
+
+@keyframes ai-fab-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
 }
 
 @keyframes ai-bubble-in {
@@ -3584,7 +3593,7 @@ strong.down { color: var(--red); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .ai-fab-halo, .ai-status-dot, .ai-empty-icon, .ai-typing-dot { animation: none !important; }
+    .ai-fab-halo, .ai-status-dot, .ai-empty-icon, .ai-typing-dot, .ai-fab { animation: none !important; }
     .ai-msg-row, .ai-empty-state { animation: none !important; }
 }
 
@@ -15339,4 +15348,249 @@ body.jl-locked .cd-fullscreen {
         animation-duration: 0.01ms !important;
         transition: none !important;
     }
+}
+
+/* ═══ Welcome Message (deterministic, no API call) ═══ */
+.ai-welcome-row { animation: ai-msg-in 0.3s ease both; }
+.ai-welcome-bubble {
+    background: rgba(245, 166, 35, 0.04);
+    border-inline-start: 2px solid rgba(245, 166, 35, 0.3);
+    color: #C5D0E0;
+    font-size: 13px; line-height: 1.6;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 2 UI FIX — Advertisement Admin: Compact card-based layout.
+   Replaces the old 5-6 column table layout that had:
+   - Status badge floating alone in a tall row
+   - Text falling below each other (3 stacked divs)
+   - Excessive whitespace
+   - No visual hierarchy
+
+   New layout: each campaign is a self-contained card with:
+   - Header: title (left) + status badge (right)
+   - Meta row: secondary info (destination, audience, cooldown, etc.)
+   - Action row: unified buttons + status pill
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Spinner for loading states */
+.ads-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(245, 166, 35, 0.8);
+    border-radius: 50%;
+    animation: ads-spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-inline-end: 6px;
+}
+@keyframes ads-spin { to { transform: rotate(360deg); } }
+
+/* Card list container — vertical stack with consistent gap */
+.ads-item-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Card head row: title + add button on same line (space-between) */
+.ads-card-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.ads-card-head-row .rc-card-title {
+    margin: 0;
+}
+
+/* Individual item card */
+.ads-item-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 12px 14px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.ads-item-card:hover {
+    border-color: rgba(245, 166, 35, 0.2);
+    background: rgba(255, 255, 255, 0.035);
+}
+
+/* Card header: title (left) + status badge (right) */
+.ads-item-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+.ads-item-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+.ads-item-thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+.ads-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(245, 166, 35, 0.08);
+    flex-shrink: 0;
+}
+.ads-item-svg {
+    width: 15px;
+    height: 15px;
+    color: rgba(245, 166, 35, 0.7);
+}
+.ads-item-title-group {
+    min-width: 0;
+    flex: 1;
+}
+.ads-item-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: #fff;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ads-item-subtitle {
+    font-size: 11px;
+    color: #7a8499;
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ads-item-status {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+}
+
+/* Meta row: secondary info tags */
+.ads-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #7a8499;
+}
+.ads-meta-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 11px;
+    color: #8a95ab;
+    white-space: nowrap;
+}
+.ads-meta-tag.muted { color: #5a6378; }
+.ads-meta-tag.ltr { direction: ltr; text-align: left; }
+.ads-meta-sep {
+    color: rgba(255, 255, 255, 0.15);
+    margin: 0 2px;
+}
+
+/* Divider + actions row */
+.ads-item-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.05);
+    margin: 8px 0;
+}
+.ads-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.ads-item-actions .adm-btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+.ads-item-actions .adm-btn-icon {
+    width: 12px;
+    height: 12px;
+    margin-inline-end: 3px;
+    vertical-align: middle;
+}
+
+/* Status pill — compact dropdown styled as a badge */
+.ads-status-pill {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 20px 4px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.05);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238a95ab' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 10px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    margin-inline-start: auto;
+}
+.ads-status-pill:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+.ads-status-pill.ads-status-green { border-color: rgba(74, 222, 128, 0.3); color: #4ADE80; }
+.ads-status-pill.ads-status-orange { border-color: rgba(255, 169, 64, 0.3); color: #FFA940; }
+.ads-status-pill.ads-status-gray { border-color: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.5); }
+.ads-status-pill option {
+    background: #1a1f2e;
+    color: #fff;
+}
+
+/* Admin badge height fix — remove fixed 20px that caused floating in tall rows */
+.admin-badge {
+    height: auto;
+    min-height: 20px;
+    line-height: 1.4;
+}
+
+/* Responsive: 2-col grid on tablet+, 1-col on mobile */
+@media (min-width: 768px) {
+    .ads-item-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+}
+@media (min-width: 1100px) {
+    .ads-item-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Mobile: actions wrap, status pill goes full width */
+@media (max-width: 480px) {
+    .ads-item-card { padding: 10px; }
+    .ads-item-head { flex-direction: column; align-items: flex-start; }
+    .ads-item-status { margin-inline-start: 0; }
+    .ads-status-pill { margin-inline-start: 0; width: 100%; text-align: center; }
+    .ads-item-actions { flex-direction: column; align-items: stretch; }
+    .ads-item-actions .adm-btn-sm { width: 100%; justify-content: center; }
 }

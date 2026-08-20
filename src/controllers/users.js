@@ -25,7 +25,10 @@ export function createUserHandlers(deps) {
     userRepo,
     watchlistRepo,
     adminRepo,
-    diagLog,
+    // [BOOTSTRAP-E2E] diagnostic logging — traces admin detection + join check
+    logBootstrapE2E,
+    // MembershipGateway — central membership decision authority (Step 5 migration)
+    membershipGateway,
     // MISSION-ABUSE FIX: auto-fire daily_login mission on bootstrap
     fireDailyLoginMission,
   } = deps;
@@ -77,9 +80,13 @@ export function createUserHandlers(deps) {
         }
       }
       if (!userId) {
+        void logBootstrapE2E(env, { phase: 'auth_failed', userId: payload.user_id, authError: auth.error ? 'present' : 'absent' });
         return auth.error;
       }
     }
+
+    // [BOOTSTRAP-E2E] Log auth success
+    void logBootstrapE2E(env, { phase: 'auth_ok', userId, authMethod: auth.authMethod || 'initData', has_tg_user: Boolean(tgUser) });
 
     payload.user_id = userId;
     try {
@@ -140,45 +147,51 @@ export function createUserHandlers(deps) {
       let channelJoined = false;
       if (tgUser?.id) {
         try {
-          let membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: false });
-          if (membership?.joined) {
-            channelJoined = true;
-          } else {
-            // PHASE 2 SAFE OPTIMIZATION: Only call resolveChannelMembership(forceRefresh:true)
-            // if the DB row doesn't already say channel_joined=true. If the user already
-            // joined (per bootstrap() RETURNING), there's no need to re-check Telegram API
-            // — the user is joined, we just have a stale KV/DB cache.
-            //
-            // Side effects of 2nd call that we SKIP when freshUserRow.channel_joined=true:
-            //   - Telegram API fetch (unnecessary — we know user joined)
-            //   - persistDbUserJoinState (unnecessary — already set)
-            //   - processPendingReferralReward (already handled by processReferralOnBootstrap
-            //     at line 103, OR will be caught by retryFailedReferralRewards cron)
-            //
-            // When freshUserRow.channel_joined=false, we MUST do the 2nd call — the user
-            // may have just joined the channel and the DB hasn't been updated yet.
-            if (freshUserRow?.channel_joined) {
-              channelJoined = true;
-            } else {
-              membership = await resolveChannelMembership(env, String(tgUser?.id || userId), { forceRefresh: true });
-              channelJoined = Boolean(membership?.joined);
-            }
-          }
+          // [BOOTSTRAP-E2E] Log membership check start
+          void logBootstrapE2E(env, { phase: 'membership_check_start', userId });
+          // STEP 5: single Gateway call replaces TWO sequential resolveChannelMembership calls.
+          const membership = await membershipGateway.check(env, String(tgUser?.id || userId), { forceRefresh: false });
+          channelJoined = Boolean(membership?.joined);
+          void logBootstrapE2E(env, { phase: 'membership_check_1', userId, joined: channelJoined, reason: membership?.reason || null, admin: Boolean(membership?.admin) });
         } catch (e) {
+          // On error, fall back to the DB row (best-effort). This is safe because
+          // requireChannelJoin middleware will re-check on every protected API call.
           channelJoined = Boolean(freshUserRow?.channel_joined);
+          void logBootstrapE2E(env, { phase: 'membership_error', userId, error: String(e?.message || e).slice(0, 200), fallback_channel_joined: channelJoined });
         }
       } else {
         channelJoined = Boolean(freshUserRow?.channel_joined);
+            // ROOT-CAUSE FIX (AUDIT-P1 / Bug #1):
+            // The previous "PHASE 2 SAFE OPTIMIZATION" trusted freshUserRow.channel_joined
+            // (a DB column from bootstrap() RETURNING) to skip the forceRefresh:true call.
+            // This was WRONG: freshUserRow.channel_joined reflects the user's join state
+            // AT SOME POINT IN THE PAST — it does NOT reflect channels that were added by
+            // an admin AFTER the user last joined. When admin adds a new required channel,
+            // the user's users.channel_joined column is still 'true' (stale), so bootstrap
+            // incorrectly returned channel_joined=true → frontend skipped Join Lock → user
+            // entered Mini App → API calls 403'd.
+            //
+            // FIX: Always do a forceRefresh:true check when forceRefresh:false returns
+            // joined:false. The cost is +1 Telegram getChatMember call per bootstrap when
+            // the cache says not-joined (rare — only when KV '0' or DB channel_joined=false).
+            // This is acceptable: bootstrap runs once per Mini App open, not per API call.
+
+        void logBootstrapE2E(env, { phase: 'no_tg_user_id', userId, fallback_channel_joined: channelJoined });
       }
 
+      // [BOOTSTRAP-E2E] Log admin check start
       let isUserAdmin = isAdminTelegramId(env, userId);
+      void logBootstrapE2E(env, { phase: 'admin_env_check', userId, is_admin_env: isUserAdmin });
       if (!isUserAdmin && isDatabaseConfigured(env) && adminRepo) {
         try {
           await adminRepo.ensureSchema(env).catch(() => {});
           const dbAdmin = await adminRepo.getAdminByTelegramId(env, userId);
           if (dbAdmin && dbAdmin.active) isUserAdmin = true;
+          // [BOOTSTRAP-E2E] Log admin DB check result
+          void logBootstrapE2E(env, { phase: 'admin_db_check', userId, db_admin_found: Boolean(dbAdmin), db_admin_active: Boolean(dbAdmin?.active), is_admin_final: isUserAdmin });
         } catch (e) {
           console.warn('[BOOTSTRAP] Admin DB check failed:', e?.message);
+          void logBootstrapE2E(env, { phase: 'admin_db_error', userId, error: String(e?.message || e).slice(0, 200) });
         }
       }
 
@@ -197,6 +210,8 @@ export function createUserHandlers(deps) {
         }
       }
 
+      // [BOOTSTRAP-E2E] Log final response
+      void logBootstrapE2E(env, { phase: 'response', userId, channel_joined: channelJoined, is_admin: isUserAdmin });
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(freshUserRow || userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
@@ -204,6 +219,8 @@ export function createUserHandlers(deps) {
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));
+      // [BOOTSTRAP-E2E] Log bootstrap failure
+      void logBootstrapE2E(env, { phase: 'handler_error', userId, error: String(error?.message || error).slice(0, 300), error_type: error?.constructor?.name || 'Error' });
       return safeDbErrorResponse(error, { statusValue: 'DB_ERROR' }, env);
     }
   }

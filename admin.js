@@ -212,6 +212,17 @@ function adminFormatNumber(n) {
     return Number(n).toLocaleString('en-US');
 }
 
+function _formatCooldownHuman(seconds) {
+    seconds = Number(seconds) || 0;
+    if (seconds <= 0) return 'بدون کوپل‌داون';
+    var hours = Math.floor(seconds / 3600);
+    var days = Math.floor(hours / 24);
+    if (days >= 7) return (days / 7) + ' هفته';
+    if (days >= 1) return days + ' روز';
+    if (hours >= 1) return hours + ' ساعت';
+    return seconds + ' ثانیه';
+}
+
 /**
  * @deprecated Use adminToast() instead. Kept as a thin alias so legacy call
  *   sites (admin settings, tickets, broadcasts) keep working without edits.
@@ -307,11 +318,16 @@ async function adminApiFetch(path, options = {}) {
                 let detail = '';
                 try { detail = await res.text(); } catch (_) {}
                 let errMsg = detail || `HTTP ${res.status}`;
-                try { const j = JSON.parse(detail); if (j.detail) errMsg = j.detail; } catch (_) {}
+                let errorBody = null;
+                try { const j = JSON.parse(detail); errorBody = j; if (j.detail) errMsg = j.detail; if (j.message) errMsg = j.message; } catch (_) {}
                 const err = new Error(errMsg);
                 err.status = res.status;
-                // Don't retry on 401/403/422 — these are auth/validation errors
-                if (res.status === 401 || res.status === 403 || res.status === 422) {
+                err.body = errorBody;
+                // Don't retry on 401/403/422 — auth/validation errors
+                // Don't retry on 404 — resource already deleted (double-click)
+                // Don't retry on 409 — conflict (CAMPAIGN_RECENTLY_SENT, already exists)
+                // These are permanent client errors — retrying won't help.
+                if (res.status === 401 || res.status === 403 || res.status === 422 || res.status === 404 || res.status === 409) {
                     throw err;
                 }
                 // Retry on 500/502/503/504 and network errors
@@ -326,8 +342,8 @@ async function adminApiFetch(path, options = {}) {
             }
         } catch (e) {
             lastError = e;
-            // Don't retry on auth errors
-            if (e.status === 401 || e.status === 403 || e.status === 422) {
+            // Don't retry on auth/validation/client errors
+            if (e.status === 401 || e.status === 403 || e.status === 422 || e.status === 404 || e.status === 409) {
                 throw e;
             }
             // Last attempt — throw
@@ -2218,7 +2234,7 @@ async function loadRcWheelConfig() {
                         <div class="rc-field"><label>نسخه</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
                         <div class="rc-field"><label>تم</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
                         <div class="rc-field"><label>حداکثر اسپین/کاربر</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
-                        <div class="rc-field"><label>کوپل‌داون (ثانیه)</label><input type="number" id="rc-wc-cooldown" value="${c.cooldown_seconds||0}" min="0"></div>
+                        <div class="rc-field"><label>کوپل‌داون</label><select id="rc-wc-cooldown" onchange="document.getElementById('rc-wc-cooldown-custom').style.display = this.value === 'custom' ? '' : 'none'"><option value="0">بدون کوپل‌داون</option><option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option></select><input type="number" id="rc-wc-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>
                         <div class="rc-field"><label>حداکثر پاداش/روز</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
                     </div>
                     <button class="adm-btn adm-btn-primary" onclick="saveRcWheelConfig()" style="margin-top:12px;">ذخیره تنظیمات</button>
@@ -2247,7 +2263,11 @@ async function saveRcWheelConfig() {
         version: document.getElementById('rc-wc-version')?.value,
         theme: document.getElementById('rc-wc-theme')?.value,
         max_spins_per_user: Number(document.getElementById('rc-wc-maxspins')?.value || 1),
-        cooldown_seconds: Number(document.getElementById('rc-wc-cooldown')?.value || 0),
+        cooldown_seconds: (() => {
+            const sel = document.getElementById('rc-wc-cooldown')?.value || '0';
+            if (sel === 'custom') return Number(document.getElementById('rc-wc-cooldown-custom')?.value || 0);
+            return Number(sel);
+        })(),
         max_reward_per_day: Number(document.getElementById('rc-wc-maxreward')?.value || 1000),
     };
     try {
@@ -3181,6 +3201,67 @@ function _adsErrorState(message, retryFn) {
     '</div>';
 }
 
+// ════════════════════════════════════════════════════════════════════
+// PHASE 2 UI FIX — Compact card-based layout for advertisement items.
+// Replaces the old table layout (status badge in own column, text falling
+// below each other, excessive whitespace, no hierarchy).
+//
+// Card structure:
+//   ┌───────────────────────────────────────────────────────┐
+//   │ [icon] Title                    [STATUS BADGE]         │  ← header
+//   │ @username · destination · cooldown                    │  ← meta
+//   │ ───────────────────────────────────────────────────── │  ← divider
+//   │ [Edit] [Send] [Status▾] [Delete]                      │  ← actions
+//   └───────────────────────────────────────────────────────┘
+//
+// CSS classes: .ads-item-card, .ads-item-head, .ads-item-title,
+// .ads-item-meta, .ads-item-divider, .ads-item-actions
+// ════════════════════════════════════════════════════════════════════
+function _adsItemCard(opts) {
+    // opts: { icon, title, titleIcon, statusBadge, metaParts (array), actions (html), thumbnail }
+    var metaHtml = (opts.metaParts && opts.metaParts.filter(Boolean).length > 0)
+        ? '<div class="ads-item-meta">' + opts.metaParts.filter(Boolean).join(' <span class="ads-meta-sep">·</span> ') + '</div>'
+        : '';
+    var thumbHtml = opts.thumbnail
+        ? '<img class="ads-item-thumb" src="' + adminEscapeHtml(opts.thumbnail) + '" alt="">'
+        : '';
+    var iconHtml = opts.titleIcon
+        ? '<span class="ads-item-icon">' + _adsIcon(opts.titleIcon, 'ads-item-svg') + '</span>'
+        : '';
+    return '<div class="ads-item-card">' +
+        '<div class="ads-item-head">' +
+            '<div class="ads-item-title-wrap">' +
+                thumbHtml + iconHtml +
+                '<div class="ads-item-title-group">' +
+                    '<div class="ads-item-title">' + (opts.title || '—') + '</div>' +
+                    (opts.subtitle ? '<div class="ads-item-subtitle">' + opts.subtitle + '</div>' : '') +
+                '</div>' +
+            '</div>' +
+            (opts.statusBadge ? '<div class="ads-item-status">' + opts.statusBadge + '</div>' : '') +
+        '</div>' +
+        metaHtml +
+        (opts.actions ? '<div class="ads-item-divider"></div><div class="ads-item-actions">' + opts.actions + '</div>' : '') +
+    '</div>';
+}
+
+// Build a compact status dropdown styled as a small pill button (not a raw select)
+function _adsStatusPill(setterFnName, id, currentStatus) {
+    var meta = _adStatusMeta(currentStatus);
+    var opts = [
+        { value: 'draft', label: 'پیش‌نویس' },
+        { value: 'active', label: 'فعال' },
+        { value: 'paused', label: 'متوقف' },
+        { value: 'archived', label: 'بایگانی' },
+    ];
+    var html = '<select class="ads-status-pill ads-status-' + meta.color + '" onchange="' + adminEscapeHtml(setterFnName) +
+        '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" title="تغییر وضعیت">';
+    opts.forEach(function (o) {
+        html += '<option value="' + adminEscapeHtml(o.value) + '"' + (currentStatus === o.value ? ' selected' : '') + '>' + adminEscapeHtml(o.label) + '</option>';
+    });
+    html += '</select>';
+    return html;
+}
+
 // FIX (audit H3): Submit button loading state to prevent double-clicks.
 // Disables the button + shows "..." text during the API call. Re-enables on
 // completion (success or error). Used by saveAdChannel/saveAdPopup/saveAdMessage.
@@ -3339,34 +3420,34 @@ window.uploadAdImage = uploadAdImage;
 async function loadAdChannels() {
     var section = document.getElementById('ads-channels-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/channels');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.channels)) {
             _adsChannelCache = data.channels;
-            var rows = data.channels.map(function (c) {
+            var cards = data.channels.map(function (c) {
                 var username = c.channel_username ? '@' + adminEscapeHtml(c.channel_username) : '—';
                 var title = c.channel_title ? adminEscapeHtml(c.channel_title) : '—';
-                var statusBadge = _adStatusBadge(c.campaign_status || c.status || 'draft');
-                var activeBadge = c.is_active
-                    ? '<span class="admin-badge admin-badge-green">بله</span>'
-                    : '<span class="admin-badge admin-badge-gray">خیر</span>';
-                var statusSelect = _adStatusSelect('setAdChannelStatus', c.id, c.campaign_status || c.status || 'draft');
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:11px;color:#7a8499;margin-top:2px;">' + username + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;direction:ltr;text-align:right;">' + adminEscapeHtml(c.join_url || '') + '</div></td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + activeBadge + '</td>' +
-                    '<td>' + adminFormatNumber(c.display_order || 0) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        '<button class="adm-btn-sm" onclick="showAdChannelForm(\'' + adminEscapeJsId(String(c.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdChannel(\'' + adminEscapeJsId(String(c.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var status = c.campaign_status || c.status || 'draft';
+                var statusBadge = _adStatusBadge(status);
+                var isActive = c.is_active ? '<span class="ads-meta-tag">نمایش: بله</span>' : '<span class="ads-meta-tag muted">نمایش: خیر</span>';
+                var order = '<span class="ads-meta-tag">ترتیب: ' + adminFormatNumber(c.display_order || 0) + '</span>';
+                var joinUrl = c.join_url ? '<span class="ads-meta-tag ltr">' + adminEscapeHtml(c.join_url) + '</span>' : '';
+                var statusPill = _adsStatusPill('setAdChannelStatus', c.id, status);
+                var actions =
+                    '<button class="adm-btn-sm" onclick="showAdChannelForm(\'' + adminEscapeJsId(String(c.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdChannel(\'' + adminEscapeJsId(String(c.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'link',
+                    title: title,
+                    subtitle: username,
+                    statusBadge: statusBadge,
+                    metaParts: [isActive, order, joinUrl],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3374,14 +3455,13 @@ async function loadAdChannels() {
                     '<span>این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('link', 'rc-card-icon') + 'کانال‌های عضویت</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن کانال</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('link', 'rc-card-icon') + 'کانال‌های عضویت</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdChannelForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن کانال</button>' +
+                    '</div>' +
                     '<div id="ads-channel-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>کانال</th><th>وضعیت</th><th>نمایش</th><th>ترتیب</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('link', 'هنوز کانالی اضافه نشده است', 'showAdChannelForm(null)', 'افزودن اولین کانال') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('link', 'هنوز کانالی اضافه نشده است', 'showAdChannelForm(null)', 'افزودن اولین کانال')) +
                     '</div>' +
                 '</div>';
         } else {
@@ -3487,17 +3567,26 @@ window.saveAdChannel = saveAdChannel;
 
 async function deleteAdChannel(channelId) {
     if (!confirm('از حذف این کانال مطمئن هستید؟')) return;
+    var delBtn = document.querySelector('button[onclick*="deleteAdChannel(\'' + channelId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/channels/' + encodeURIComponent(channelId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('کانال حذف شد', 'success');
-            loadAdChannels();
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            if (typeof _adsChannelCache !== 'undefined' && Array.isArray(_adsChannelCache)) {
+                _adsChannelCache = _adsChannelCache.filter(function(c) { return String(c.id) !== String(channelId); });
+            }
+            loadAdChannels().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdChannel:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdChannel = deleteAdChannel;
@@ -3528,33 +3617,36 @@ window.setAdChannelStatus = setAdChannelStatus;
 async function loadAdPopups() {
     var section = document.getElementById('ads-popups-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/popups');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.popups)) {
             _adsPopupCache = data.popups;
-            var rows = data.popups.map(function (p) {
+            var cards = data.popups.map(function (p) {
                 var title = p.title ? adminEscapeHtml(p.title) : '—';
-                var statusBadge = _adStatusBadge(p.campaign_status || p.status || 'draft');
-                var cooldown = p.cooldown_seconds ? adminFormatNumber(p.cooldown_seconds) + 's' : '—';
+                var status = p.campaign_status || p.status || 'draft';
+                var statusBadge = _adStatusBadge(status);
+                var cooldown = p.cooldown_seconds ? _formatCooldownHuman(p.cooldown_seconds) : '—';
                 var updated = p.updated_at ? adminFormatDate(p.updated_at) : '—';
-                var statusSelect = _adStatusSelect('setAdPopupStatus', p.id, p.campaign_status || p.status || 'draft');
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(p.id) + '</div>' +
-                        (p.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(p.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
-                    '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + cooldown + '</td>' +
-                    '<td>' + adminEscapeHtml(updated) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        '<button class="adm-btn-sm" onclick="showAdPopupForm(\'' + adminEscapeJsId(String(p.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdPopup(\'' + adminEscapeJsId(String(p.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var statusPill = _adsStatusPill('setAdPopupStatus', p.id, status);
+                var cooldownTag = '<span class="ads-meta-tag">کوئل‌داون: ' + adminEscapeHtml(cooldown) + '</span>';
+                var updatedTag = '<span class="ads-meta-tag muted">آخرین تغییر: ' + adminEscapeHtml(updated) + '</span>';
+                var idTag = '<span class="ads-meta-tag muted ltr">#' + adminEscapeHtml(p.id) + '</span>';
+                var actions =
+                    '<button class="adm-btn-sm" onclick="showAdPopupForm(\'' + adminEscapeJsId(String(p.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdPopup(\'' + adminEscapeJsId(String(p.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'layout',
+                    title: title,
+                    subtitle: idTag,
+                    statusBadge: statusBadge,
+                    thumbnail: p.image_url || null,
+                    metaParts: [cooldownTag, updatedTag],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3562,14 +3654,13 @@ async function loadAdPopups() {
                     '<span>قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('layout', 'rc-card-icon') + 'پاپ‌آپ مینی‌اپ</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پاپ‌آپ</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('layout', 'rc-card-icon') + 'پاپ‌آپ مینی‌اپ</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdPopupForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پاپ‌آپ</button>' +
+                    '</div>' +
                     '<div id="ads-popup-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>عنوان</th><th>وضعیت</th><th>کوئل‌داون (۲۴ ساعت)</th><th>آخرین تغییر</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="5">' + _adsEmptyState('layout', 'هنوز پاپ‌آپی ساخته نشده است', 'showAdPopupForm(null)', 'افزودن اولین پاپ‌آپ') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('layout', 'هنوز پاپ‌آپی ساخته نشده است', 'showAdPopupForm(null)', 'افزودن اولین پاپ‌آپ')) +
                     '</div>' +
                 '</div>';
         } else {
@@ -3596,7 +3687,16 @@ function _adsPopupFormHtml(p) {
     var btnLabel   = isEdit ? adminEscapeHtml(p.button_label || '') : '';
     var btnUrl     = isEdit ? adminEscapeHtml(p.button_url || '') : '';
     var orderVal   = isEdit ? adminFormatNumber(p.display_order || 0) : '0';
-    var cooldown   = isEdit ? adminFormatNumber(p.cooldown_seconds || 86400) : '86400';
+    var cooldown   = isEdit ? (p.cooldown_seconds || 86400) : 86400;
+    var cooldownOpts = '<option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option>';
+    var cooldownMatch = false;
+    var cooldownOptsHtml = cooldownOpts.replace(/value="(\d+)"/g, function(m, val) {
+        if (Number(val) === Number(cooldown)) { cooldownMatch = true; return m + ' selected'; }
+        return m;
+    });
+    if (!cooldownMatch && cooldown > 0) {
+        cooldownOptsHtml = '<option value="' + cooldown + '" selected>' + _formatCooldownHuman(cooldown) + '</option>' + cooldownOptsHtml;
+    }
     var activeChk  = isEdit ? (p.is_active ? 'checked' : '') : 'checked';
     var imgUrl     = isEdit ? (p.image_url || '') : '';
     // Image preview — show if URL exists
@@ -3611,7 +3711,7 @@ function _adsPopupFormHtml(p) {
             '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-pp-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
             '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-pp-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
             '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-pp-order" value="' + orderVal + '" min="0"></div>' +
-            '<div class="rc-field"><label>کوئل‌داون (ثانیه)</label><input type="number" id="ads-pp-cooldown" value="' + cooldown + '" min="0"></div>' +
+            '<div class="rc-field"><label>کوپل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
             '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-pp-status">' +
                 '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
                 '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
@@ -3656,7 +3756,11 @@ async function saveAdPopup(popupId) {
         button_url:       (document.getElementById('ads-pp-btnurl') ? document.getElementById('ads-pp-btnurl').value : '').trim(),
         image_url:        (document.getElementById('ads-pp-imgurl') ? document.getElementById('ads-pp-imgurl').value : '').trim(),
         display_order:    Number(document.getElementById('ads-pp-order') ? document.getElementById('ads-pp-order').value : 0) || 0,
-        cooldown_seconds: Number(document.getElementById('ads-pp-cooldown') ? document.getElementById('ads-pp-cooldown').value : 86400) || 0,
+        cooldown_seconds: (() => {
+            const sel = document.getElementById('ads-pp-cooldown')?.value || '86400';
+            if (sel === 'custom') return Number(document.getElementById('ads-pp-cooldown-custom')?.value || 86400);
+            return Number(sel);
+        })(),
         is_active:        document.getElementById('ads-pp-active') ? document.getElementById('ads-pp-active').checked : false,
         status:           document.getElementById('ads-pp-status') ? document.getElementById('ads-pp-status').value : 'draft',
     };
@@ -3687,17 +3791,30 @@ window.saveAdPopup = saveAdPopup;
 
 async function deleteAdPopup(popupId) {
     if (!confirm('از حذف این پاپ‌آپ مطمئن هستید؟')) return;
+    // Find the card element to remove optimistically after API success
+    var delBtn = document.querySelector('button[onclick*="deleteAdPopup(\'' + popupId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/popups/' + encodeURIComponent(popupId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('پاپ‌آپ حذف شد', 'success');
-            loadAdPopups();
+            // Optimistic removal: remove the card from DOM immediately
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            // Also remove from in-memory cache
+            if (typeof _adsPopupCache !== 'undefined' && Array.isArray(_adsPopupCache)) {
+                _adsPopupCache = _adsPopupCache.filter(function(p) { return String(p.id) !== String(popupId); });
+            }
+            // Background refresh for synchronization (non-blocking)
+            loadAdPopups().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdPopup:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdPopup = deleteAdPopup;
@@ -3744,39 +3861,42 @@ function _adsAudienceBadge(aud) {
 async function loadAdMessages() {
     var section = document.getElementById('ads-messages-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty"><span class="ads-spinner"></span> در حال بارگذاری...</div>';
     var token = _adminLoadToken;
     try {
         var data = await adminApiFetch('/api/admin/advertisements/messages');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.messages)) {
             _adsMessageCache = data.messages;
-            var rows = data.messages.map(function (m) {
+            var cards = data.messages.map(function (m) {
                 var title = m.title ? adminEscapeHtml(m.title) : '—';
+                var status = m.campaign_status || m.status || 'draft';
                 var destBadge = _adsDestinationBadge(m.destinations);
                 var audBadge = _adsAudienceBadge(m.target_audience);
-                var statusBadge = _adStatusBadge(m.campaign_status || m.status || 'draft');
+                var statusBadge = _adStatusBadge(status);
                 var createdAt = m.created_at ? adminFormatDate(m.created_at) : '—';
-                var statusSelect = _adStatusSelect('setAdMessageStatus', m.id, m.campaign_status || m.status || 'draft');
-                var sendBtn = (m.campaign_status === 'active' || m.status === 'active')
-                    ? '<button class="adm-btn-sm" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('send', 'adm-btn-icon') + 'ارسال</button>'
+                var statusPill = _adsStatusPill('setAdMessageStatus', m.id, status);
+                var sendBtn = (status === 'active')
+                    ? '<button class="adm-btn-sm adm-btn-primary" onclick="sendAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('send', 'adm-btn-icon') + 'ارسال</button>'
                     : '';
-                return '<tr>' +
-                    '<td><div style="font-weight:700;color:#fff;">' + title + '</div>' +
-                        '<div style="font-size:10px;color:#5a6378;margin-top:2px;">#' + adminEscapeHtml(m.id) + '</div>' +
-                        (m.image_url ? '<div style="margin-top:4px;"><img src="' + adminEscapeHtml(m.image_url) + '" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" alt=""></div>' : '') +
-                    '</td>' +
-                    '<td>' + destBadge + '</td>' +
-                    '<td>' + audBadge + '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + adminEscapeHtml(createdAt) + '</td>' +
-                    '<td style="white-space:normal;">' +
-                        sendBtn + ' ' +
-                        '<button class="adm-btn-sm" onclick="showAdMessageForm(\'' + adminEscapeJsId(String(m.id)) + '\')">ویرایش</button> ' +
-                        statusSelect + ' ' +
-                        '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">حذف</button>' +
-                    '</td>' +
-                '</tr>';
+                var destTag = '<span class="ads-meta-tag">' + destBadge + '</span>';
+                var audTag = '<span class="ads-meta-tag">' + audBadge + '</span>';
+                var dateTag = '<span class="ads-meta-tag muted">' + adminEscapeHtml(createdAt) + '</span>';
+                var idTag = '<span class="ads-meta-tag muted ltr">#' + adminEscapeHtml(m.id) + '</span>';
+                var actions =
+                    sendBtn +
+                    '<button class="adm-btn-sm" onclick="showAdMessageForm(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('edit', 'adm-btn-icon') + 'ویرایش</button>' +
+                    statusPill +
+                    '<button class="adm-btn-sm adm-btn-danger" onclick="deleteAdMessage(\'' + adminEscapeJsId(String(m.id)) + '\')">' + _adsIcon('trash', 'adm-btn-icon') + 'حذف</button>';
+                return _adsItemCard({
+                    titleIcon: 'mail',
+                    title: title,
+                    subtitle: idTag,
+                    statusBadge: statusBadge,
+                    thumbnail: m.image_url || null,
+                    metaParts: [destTag, audTag, dateTag],
+                    actions: actions
+                });
             }).join('');
             section.innerHTML =
                 '<div class="ads-help-banner">' +
@@ -3784,14 +3904,13 @@ async function loadAdMessages() {
                     '<span>فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
-                    '<h4 class="rc-card-title">' + _adsIcon('mail', 'rc-card-icon') + 'پیام‌های تبلیغاتی</h4>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)" style="margin-bottom:12px;">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پیام</button>' +
+                    '<div class="ads-card-head-row">' +
+                        '<h4 class="rc-card-title">' + _adsIcon('mail', 'rc-card-icon') + 'پیام‌های تبلیغاتی</h4>' +
+                        '<button class="adm-btn adm-btn-primary" onclick="showAdMessageForm(null)">' + _adsIcon('plus', 'adm-btn-icon') + 'افزودن پیام</button>' +
+                    '</div>' +
                     '<div id="ads-message-form" style="display:none;margin-bottom:14px;"></div>' +
-                    '<div class="adm-table-wrap">' +
-                        '<table class="adm-table">' +
-                            '<thead><tr><th>کمپین</th><th>مقصد</th><th>مخاطب</th><th>وضعیت</th><th>تاریخ</th><th>عملیات</th></tr></thead>' +
-                            '<tbody>' + (rows || '<tr><td colspan="6">' + _adsEmptyState('mail', 'هنوز پیامی ساخته نشده است', 'showAdMessageForm(null)', 'افزودن اولین پیام') + '</td></tr>') + '</tbody>' +
-                        '</table>' +
+                    '<div class="ads-item-list">' +
+                        (cards || _adsEmptyState('mail', 'هنوز پیامی ساخته نشده است', 'showAdMessageForm(null)', 'افزودن اولین پیام')) +
                     '</div>' +
                 '</div>';
         } else {
@@ -3919,17 +4038,26 @@ window.saveAdMessage = saveAdMessage;
 
 async function deleteAdMessage(messageId) {
     if (!confirm('از حذف این پیام مطمئن هستید؟')) return;
+    var delBtn = document.querySelector('button[onclick*="deleteAdMessage(\'' + messageId + '\')"]');
+    var cardEl = delBtn ? delBtn.closest('.ads-item-card') : null;
+    if (delBtn) { delBtn.disabled = true; }
     try {
         var data = await adminApiFetch('/api/admin/advertisements/messages/' + encodeURIComponent(messageId), { method: 'DELETE' });
         if (data && data.status === 'success') {
             adminToast('پیام حذف شد', 'success');
-            loadAdMessages();
+            if (cardEl && cardEl.parentNode) { cardEl.parentNode.removeChild(cardEl); }
+            if (typeof _adsMessageCache !== 'undefined' && Array.isArray(_adsMessageCache)) {
+                _adsMessageCache = _adsMessageCache.filter(function(m) { return String(m.id) !== String(messageId); });
+            }
+            loadAdMessages().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
+            if (delBtn) { delBtn.disabled = false; }
         }
     } catch (e) {
         console.error('deleteAdMessage:', e);
         adminToast('خطا در حذف', 'error');
+        if (delBtn) { delBtn.disabled = false; }
     }
 }
 window.deleteAdMessage = deleteAdMessage;
@@ -3973,14 +4101,27 @@ async function sendAdMessage(messageId) {
         if (data && data.status === 'success') {
             var delivered = adminFormatNumber(data.delivered || 0);
             var skipped = adminFormatNumber(data.skipped || 0);
-            adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            if (Number(delivered) === 0) {
+                adminToast('هیچ کاربری پیام را دریافت نکرد. تحویل: 0 / رد شده: ' + skipped + '. ممکن است تنظیمات اعلان کاربران مانع ارسال باشد.', 'error');
+            } else {
+                adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
+            }
             loadAdMessages();
         } else {
             adminToast((data && data.message) || 'خطا در ارسال', 'error');
         }
     } catch (e) {
         console.error('sendAdMessage:', e);
-        adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+        // Read retry_after from 409 error body if available
+        var retryAfter = e.body && e.body.retry_after_seconds ? e.body.retry_after_seconds : null;
+        var errorCode = e.body && e.body.code ? e.body.code : null;
+        if (errorCode === 'CAMPAIGN_RECENTLY_SENT' && retryAfter) {
+            adminToast('این کمپین اخیراً ارسال شده. ' + retryAfter + ' ثانیه صبر کنید.', 'error');
+        } else if (e.status === 409 && retryAfter) {
+            adminToast('عملیات تکراری. ' + retryAfter + ' ثانیه صبر کنید.', 'error');
+        } else {
+            adminToast('خطا در ارسال: ' + (e.message || ''), 'error');
+        }
     } finally {
         // Re-enable the send button (only if campaign is still active — loadAdMessages may re-render)
         if (sendBtn && sendBtn.dataset._origText) {

@@ -26,7 +26,6 @@ export function createAdminHandlers(deps) {
     notificationRepo,
     notificationPlatformRepo,
     notificationService,
-    diagLog,
     // A-3 FIX: Rate limiting for admin mutations
     isUserRateLimited,
   } = deps;

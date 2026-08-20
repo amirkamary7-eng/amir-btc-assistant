@@ -26,7 +26,7 @@ const AssistantUI = {
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
-                <p class="ai-speech-text">چطور می‌تونم کمکتون کنم؟ سوالی دارید بپرسید</p>
+                <p class="ai-speech-text" data-i18n-fa="سلام، خوش اومدی! سوالی داری؟" data-i18n-en="Welcome! Got a question?">سلام، خوش اومدی! سوالی داری؟</p>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
@@ -156,17 +156,48 @@ const AssistantUI = {
         const bubble = document.getElementById('ai-speech-bubble');
         const closeBtn = document.getElementById('ai-bubble-close');
         if (!bubble) return;
-        if (localStorage.getItem('ai_speech_dismissed') === '1') {
+        if (sessionStorage.getItem('ai_welcome_shown') === '1') {
             bubble.classList.add('ai-speech-hidden');
             return;
         }
+        // Update text based on language
+        const lang = (typeof currentLang !== 'undefined' ? currentLang : 'fa');
+        const textEl = bubble.querySelector('.ai-speech-text');
+        if (textEl) {
+            textEl.textContent = lang === 'en' ? 'Welcome! Got a question?' : 'سلام، خوش اومدی! سوالی داری؟';
+        }
+        // Play subtle notification sound
+        this.playWelcomeSound();
         const dismiss = () => {
             if (bubble.classList.contains('ai-speech-hidden')) return;
             bubble.classList.add('ai-speech-hidden');
-            localStorage.setItem('ai_speech_dismissed', '1');
+            sessionStorage.setItem('ai_welcome_shown', '1');
         };
         closeBtn?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); dismiss(); });
-        window.setTimeout(dismiss, 8000);
+        const timer = window.setTimeout(dismiss, 5000);
+        // Store timer so we can cancel if user closes early
+        bubble._dismissTimer = timer;
+    },
+
+    // PHASE 1: Subtle notification sound for welcome bubble
+    // Uses Web Audio API to generate a short, premium notification tone.
+    // Fails silently if browser autoplay policy blocks it.
+    playWelcomeSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            if (ctx.state === 'suspended') ctx.resume();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.08);
+            gain.gain.setValueAtTime(0, ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.3);
+        } catch(e) { /* Silent fail — autoplay policy or unsupported */ }
     },
 
     bindEvents() {
@@ -249,8 +280,16 @@ const AssistantUI = {
         if (panel) panel.style.display = this.open ? 'flex' : 'none';
         if (fab) fab.classList.toggle('ai-fab-hidden', this.open);
         if (bubble && this.open) { bubble.classList.add('ai-speech-hidden'); localStorage.setItem('ai_speech_dismissed', '1'); }
-        if (this.open) { this.refreshLimits(); document.getElementById('ai-input')?.focus(); }
+        if (this.open) {
+            this.refreshLimits();
+            // Welcome bubble is OUTSIDE chat — it's a UI notification, not a conversation message
+            document.getElementById('ai-input')?.focus();
+        }
     },
+
+    // Welcome is now a floating UI bubble (ai-speech-bubble) that appears
+    // next to the FAB, NOT inside chat history. See initSpeechBubble().
+    // This ensures: (1) no AI API call, (2) not in conversation, (3) auto-dismiss 5s.
 
     getContext() {
         const ctx = {};
@@ -949,7 +988,12 @@ const AssistantUI = {
         }
 
         const userMsg = message || '[تصویر]';
-        if (message) this.appendBubble('user', message);
+        // PHASE 5: Show image + text in user message bubble BEFORE sending
+        if (imageData) {
+            this.appendBubble('user', message || '', imageData);
+        } else if (message) {
+            this.appendBubble('user', message);
+        }
         if (input) input.value = '';
         this.sending = true;
 
@@ -984,9 +1028,8 @@ const AssistantUI = {
                 imageCompressed: attachment?.compressed || false,
                 attachmentStatus: attachment?.status || 'none',
             });
-            // Clear attachment AFTER payload is built (quota only consumed on success)
-            // NOTE: We do NOT clear here — only after successful send (backend quota accounting)
-            this.pendingImage = null;
+            // PHASE 6: Do NOT clear pendingImage here — only after success
+            // Old code cleared pendingImage before API call, breaking retry on failure
 
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
@@ -1000,7 +1043,7 @@ const AssistantUI = {
                 this.history.push({ role: 'user', content: userMsg });
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
-                // PHASE 15: Quota consumed on success — clear attachment
+                // PHASE 6: Quota consumed on success — clear attachment + composer
                 this.clearAttachment();
             } else {
                 // ITEM 5: Better error messages for rate limiting

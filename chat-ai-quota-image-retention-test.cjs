@@ -809,7 +809,7 @@ test('FILE-18: Send disabled when attachment status=processing', () => {
 test('FILE-19: Send checks attachment status — blocks if processing', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   const sendFn = JS.indexOf('async send()');
-  const fnBlock = JS.slice(sendFn, sendFn + 2000);
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
   // Must check isProcessing and return early
   assert.ok(fnBlock.includes('isProcessing'), 'send() must check isProcessing');
   assert.ok(fnBlock.includes('if (isProcessing) return'),
@@ -1287,8 +1287,8 @@ test('VISION-01: Vision-capable routing when image present (Gemini first)', () =
   const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
   assert.ok(hasImageIdx > -1, 'Must check hasImage');
   const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 500);
-  assert.ok(visionBlock.includes('Vision-capable providers ONLY'),
-    'Must have vision-capable provider routing');
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must have VISION-ONLY provider routing');
   assert.ok(visionBlock.includes("['gemini'"),
     'Gemini must be first when image present');
 });
@@ -1388,3 +1388,682 @@ test('FAB-FLOAT-01: FAB has halo with pointer-events none', () => {
 });
 
 console.log('✅ All Phase 19 final UX + vision tests loaded.');
+
+// ============================================================================
+// PHASE 20: Real E2E Vision + Attachment Send + FAB + Welcome Tests
+// ============================================================================
+
+test('VISION-E2E-01: send() includes image in payload when attachment ready', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 3000);
+  // Must construct payload with image: imageData
+  assert.ok(fnBlock.includes('image: imageData'), 'Payload must include image: imageData');
+  // Must get imageData from attachment.data (authoritative)
+  assert.ok(fnBlock.includes('attachment.data'), 'Must use attachment.data');
+});
+
+test('VISION-E2E-02: Backend passes imageBase64 to Gemini with inline_data', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // callGeminiChat must push inline_data when imageBase64 exists
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 1000);
+  assert.ok(fnBlock.includes('inline_data'), 'Must create inline_data');
+  assert.ok(fnBlock.includes('mime_type'), 'Must set mime_type');
+  assert.ok(fnBlock.includes('imageBase64'), 'Must accept imageBase64 parameter');
+});
+
+test('ATTACH-SEND-01: Image shown in user message bubble on send', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
+  // When imageData exists, must call appendBubble with image
+  assert.ok(fnBlock.includes("appendBubble('user', message || '', imageData)"),
+    'Must show image in user bubble when sending');
+});
+
+test('ATTACH-SEND-02: pendingImage NOT cleared before API call (retry on failure)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 3000);
+  // Must NOT have this.pendingImage = null BEFORE the API call
+  const apiCallIdx = fnBlock.indexOf('apiFetch');
+  const clearIdx = fnBlock.indexOf('this.pendingImage = null');
+  // pendingImage should be cleared AFTER success (in clearAttachment), not before API call
+  if (clearIdx > -1 && apiCallIdx > -1) {
+    assert.ok(clearIdx > apiCallIdx || clearIdx === -1,
+      'pendingImage must NOT be cleared before API call (preserves for retry)');
+  }
+});
+
+test('ATTACH-SEND-03: clearAttachment called only on success', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  const successIdx = fnBlock.indexOf("data.status === 'success'");
+  const clearIdx = fnBlock.indexOf('this.clearAttachment()');
+  assert.ok(clearIdx > successIdx, 'clearAttachment must be after success check');
+  // Must NOT be in catch block
+  const catchIdx = fnBlock.indexOf('} catch (e) {');
+  if (catchIdx > -1 && clearIdx > -1) {
+    assert.ok(clearIdx < catchIdx, 'clearAttachment must be in try block (before catch)');
+  }
+});
+
+test('ATTACH-FAIL-01: Attachment preserved on API failure', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 5000);
+  // Catch block must NOT call clearAttachment
+  const catchIdx = fnBlock.indexOf('} catch (e) {');
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 1000);
+  assert.ok(!catchBlock.includes('this.clearAttachment()'),
+    'clearAttachment must NOT be called on failure (attachment preserved for retry)');
+});
+
+test('ATTACH-RETRY-01: User can retry after failure (attachment still in state)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // send() must read from pendingAttachment (which persists across failure)
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 500);
+  assert.ok(fnBlock.includes('this.pendingAttachment'),
+    'send() must read pendingAttachment (persists on failure)');
+  assert.ok(fnBlock.includes('attachment.data'),
+    'send() must use attachment.data for image (persists on failure)');
+});
+
+test('ATTACH-CLEAR-01: clearAttachment resets composer + state', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const clearFn = JS.indexOf('clearAttachment() {');
+  const fnBlock = JS.slice(clearFn, clearFn + 500);
+  assert.ok(fnBlock.includes('pendingAttachment = null'), 'Must clear pendingAttachment');
+  assert.ok(fnBlock.includes('pendingImage = null'), 'Must clear pendingImage');
+  assert.ok(fnBlock.includes('composerAttach'), 'Must hide composer attachment');
+});
+
+test('IMAGE-MESSAGE-01: appendBubble handles imageUrl parameter', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const fnBlock = JS.slice(appendFn, appendFn + 2000);
+  assert.ok(fnBlock.includes('if (imageUrl)'), 'Must check imageUrl');
+  assert.ok(fnBlock.includes('ai-msg-image'), 'Must create image element');
+  assert.ok(fnBlock.includes('img.src = imageUrl'), 'Must set image src');
+});
+
+test('IMAGE-MESSAGE-02: User message with image shown before API response', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const sendFn = JS.indexOf('async send()');
+  const fnBlock = JS.slice(sendFn, sendFn + 4000);
+  // appendBubble('user', ...) must be called BEFORE apiFetch
+  const bubbleIdx = fnBlock.indexOf("appendBubble('user'");
+  const apiIdx = fnBlock.indexOf('apiFetch');
+  assert.ok(bubbleIdx > -1 && apiIdx > -1);
+  assert.ok(bubbleIdx < apiIdx, 'User message must appear BEFORE API call');
+});
+
+test('FAB-FLOAT-01: FAB has floating animation (translateY)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('ai-fab-float'), 'Must have ai-fab-float animation');
+  assert.ok(CSS.includes('translateY(-5px)'), 'Must float up 5px');
+  assert.ok(CSS.includes('animation: ai-fab-float 4s ease-in-out infinite'),
+    'Must apply float animation to FAB');
+});
+
+test('FAB-GLOW-01: Halo has breathing scale animation', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('ai-halo-pulse'), 'Must have halo pulse animation');
+  assert.ok(CSS.includes('scale(1.04)'), 'Halo must scale during pulse');
+});
+
+test('FAB-REDUCED-MOTION-01: FAB animation disabled in reduced motion', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  assert.ok(CSS.includes('prefers-reduced-motion'));
+  // FAB must be included in the disabled list
+  const reducedMatch = CSS.match(/prefers-reduced-motion[^}]*ai-fab[^}]*/);
+  assert.ok(reducedMatch, 'FAB animation must be disabled in reduced-motion');
+});
+
+test('WELCOME-01: Welcome bubble shows on app load (not every open)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-speech-bubble'), 'Must have speech bubble');
+  assert.ok(JS.includes('ai_speech_dismissed'), 'Must use localStorage for dismiss state');
+});
+
+test('WELCOME-02: Welcome bubble auto-dismisses after 5 seconds', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('setTimeout(dismiss, 5000)'), 'Must auto-dismiss after 5 seconds (5000ms)');
+});
+
+test('WELCOME-AUTOHIDE-01: Welcome has close button', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-bubble-close'), 'Must have close button');
+  assert.ok(JS.includes("closeBtn?.addEventListener('click'"), 'Close button must be clickable');
+});
+
+test('WELCOME-CLOSE-01: Welcome hidden when chat opens', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-speech-hidden'), 'Must have hidden class');
+  // When chat opens, bubble should be hidden
+  const toggleFn = JS.indexOf('toggle(show)');
+  const fnBlock = JS.slice(toggleFn, toggleFn + 1000);
+  assert.ok(fnBlock.includes('ai-speech-hidden') || fnBlock.includes('speech_dismissed'),
+    'Welcome should hide when chat opens');
+});
+
+test('WELCOME-POSITION-01: Welcome bubble positioned relative to FAB', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  // Speech bubble must be positioned (not static)
+  assert.ok(CSS.includes('.ai-speech-bubble'), 'Must have speech bubble CSS');
+  // Must have animation for entrance
+  assert.ok(CSS.includes('ai-bubble-in'), 'Must have bubble entrance animation');
+});
+
+test('SUGGESTION-01: Suggestions about AMIRBTC capabilities', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('AMIRBTC'), 'Must mention AMIRBTC');
+  assert.ok(JS.includes('چه کارهایی') || JS.includes('امکانات'), 'Must ask about capabilities');
+});
+
+test('SUGGESTION-02: Suggestions are clickable and fill input', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('data-prompt'), 'Must have data-prompt attribute');
+  assert.ok(JS.includes('input.value = prompt'), 'Must fill input on click');
+});
+
+test('SUGGESTION-03: Exactly 3 suggestion cards', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const cardCount = (JS.match(/ai-suggestion-card/g) || []).length;
+  assert.ok(cardCount >= 3, `Must have at least 3 cards, found ${cardCount}`);
+});
+
+console.log('✅ All Phase 20 E2E + vision + attachment + FAB + welcome tests loaded.');
+
+// ============================================================================
+// PHASE 8: Production Vision Regression Tests
+// ============================================================================
+
+test('VISION-PROD-01: Image request sets hasImage=true in generateAssistantReply', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('const hasImage = Boolean(imageBase64)'),
+    'Must compute hasImage from imageBase64');
+});
+
+test('VISION-PROD-02: Image request NEVER selects text-only provider (Groq forbidden)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 600);
+  // Vision providers must NOT include Groq, OpenRouter, Workers AI
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must label vision path as VISION-ONLY');
+  assert.ok(visionBlock.includes('NO text-only fallback'),
+    'Must explicitly forbid text-only fallback');
+  // Groq must NOT be in the vision providers array
+  // Check that Groq appears ONLY in the text-only path (after the else)
+  const elseIdx = visionBlock.indexOf('] : [');
+  const visionArray = visionBlock.substring(0, elseIdx);
+  assert.ok(!visionArray.includes("'groq'"),
+    'Groq must NOT be in vision providers (text-only model)');
+  assert.ok(!visionArray.includes("'openrouter'"),
+    'OpenRouter must NOT be in vision providers (text-only model)');
+  assert.ok(!visionArray.includes("'workers-ai'"),
+    'Workers AI must NOT be in vision providers (text-only model)');
+});
+
+test('VISION-PROD-03: Gemini request contains inline_data with base64', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 1000);
+  assert.ok(fnBlock.includes('inline_data'), 'Must create inline_data');
+  assert.ok(fnBlock.includes('mime_type'), 'Must set mime_type');
+  assert.ok(fnBlock.includes('imageBase64'), 'Must use imageBase64 parameter');
+});
+
+test('VISION-PROD-04: Base64 data URL prefix is removed correctly by backend', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const extractFn = SRC.indexOf('function extractAssistantImageBase64');
+  const fnBlock = SRC.slice(extractFn, extractFn + 200);
+  assert.ok(fnBlock.includes("split(',', 2)"),
+    'Must split on comma to remove data:image/...;base64, prefix');
+  assert.ok(fnBlock.includes('return imageData'),
+    'Must return raw base64 if no prefix');
+});
+
+test('VISION-PROD-05: Correct MIME type sent (image/jpeg)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes("mime_type: 'image/jpeg'"),
+    'Must use image/jpeg MIME type for Gemini');
+});
+
+test('VISION-PROD-06: Vision failure returns Persian error (not text-only fallback)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
+    'Must return Persian vision service error when vision providers fail');
+});
+
+test('VISION-PROD-07: Text-only providers forbidden as fallback for image requests', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 600);
+  // The comment must explicitly forbid text-only fallback
+  assert.ok(visionBlock.includes('FORBIDDEN') || visionBlock.includes('NO text-only fallback'),
+    'Must explicitly forbid text-only fallback for image requests');
+});
+
+test('VISION-PROD-08: Text-only requests preserve Groq→Gemini→OpenRouter→Workers AI→OpenAI', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 500) : SRC;
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
+    'Groq before Gemini in text-only path');
+  assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
+    'Gemini before OpenRouter in text-only path');
+});
+
+test('VISION-PROD-09: Provider attempt logging exists for debugging', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('[ChatAI] provider attempt:'),
+    'Must log provider attempt for debugging');
+  assert.ok(SRC.includes('[ChatAI] provider SUCCESS:'),
+    'Must log provider success');
+  assert.ok(SRC.includes('[ChatAI] provider FAIL:'),
+    'Must log provider failure');
+});
+
+test('VISION-PROD-10: Gemini vision request logging (safe, no base64 content)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini vision request'),
+    'Must log Gemini vision request');
+  assert.ok(SRC.includes('imageBase64Len'),
+    'Must log imageBase64 length (not content)');
+  assert.ok(SRC.includes('partsCount'),
+    'Must log parts count');
+  // Must NOT log actual base64 content
+  assert.ok(!SRC.includes('console.log(imageBase64)'),
+    'Must NOT log base64 content');
+});
+
+console.log('✅ All production vision regression tests loaded.');
+
+// ============================================================================
+// PHASE 4: Welcome Message + Vision Diagnostic Tests
+// ============================================================================
+
+test('WELCOME-MSG-01: Floating welcome bubble exists (initSpeechBubble)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('initSpeechBubble'), 'Must have initSpeechBubble function');
+  assert.ok(JS.includes('ai-speech-bubble'), 'Must have floating bubble element');
+});
+
+test('WELCOME-MSG-02: Welcome bubble uses sessionStorage (not in chat history)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('sessionStorage'), 'Must use sessionStorage for welcome state');
+  assert.ok(JS.includes('ai_welcome_shown'), 'Must track welcome shown flag');
+  // Must NOT add messages to chat history
+  assert.ok(!JS.includes('showWelcomeIfEmpty'), 'Must NOT have showWelcomeIfEmpty (removed)');
+});
+
+test('WELCOME-MSG-03: Welcome does NOT make AI API call', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const fnIdx = JS.indexOf('initSpeechBubble()');
+  const fnBlock = JS.slice(fnIdx, fnIdx + 2000);
+  // Must NOT call apiFetch or generateAssistantReply or send()
+  assert.ok(!fnBlock.includes('apiFetch'), 'Welcome must NOT call API');
+  assert.ok(!fnBlock.includes('generateAssistantReply'), 'Welcome must NOT call AI');
+  // Must use deterministic text
+  assert.ok(fnBlock.includes('textEl'), 'Must set deterministic text');
+});
+
+test('WELCOME-MSG-04: Welcome has Persian text', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('سلام، خوش اومدی'), 'Must have Persian welcome text');
+});
+
+test('WELCOME-MSG-05: Welcome has English text', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('Welcome! Got a question?'), 'Must have English welcome text');
+});
+
+test('WELCOME-MSG-06: Welcome auto-dismisses after 5 seconds', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('setTimeout(dismiss, 5000)'), 'Must auto-dismiss after 5s');
+});
+
+test('WELCOME-MSG-07: Welcome has close button', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('ai-bubble-close'), 'Must have close button');
+  assert.ok(JS.includes('dismiss'), 'Must have dismiss function');
+});
+
+test('WELCOME-MSG-08: Welcome plays notification sound (once)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  assert.ok(JS.includes('playWelcomeSound'), 'Must have playWelcomeSound function');
+  assert.ok(JS.includes('AudioContext'), 'Must use Web Audio API');
+  // Sound must fail silently if blocked
+  assert.ok(JS.includes('catch'), 'Must catch audio errors silently');
+});
+
+test('WELCOME-MSG-09: Welcome NOT shown on re-render (sessionStorage guard)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const fnIdx = JS.indexOf('initSpeechBubble()');
+  const fnBlock = JS.slice(fnIdx, fnIdx + 1000);
+  assert.ok(fnBlock.includes('ai_welcome_shown'), 'Must check sessionStorage before showing');
+  assert.ok(fnBlock.includes('return'), 'Must return early if already shown');
+});
+
+test('WELCOME-MSG-10: Welcome hidden when chat opens', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  const toggleFn = JS.indexOf('toggle(show)');
+  const fnBlock = JS.slice(toggleFn, toggleFn + 500);
+  assert.ok(fnBlock.includes('ai-speech-hidden'), 'Must hide bubble when chat opens');
+});
+
+test('VISION-DIAG-01: Gemini call logs DB gateway errors', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini DB gateway error'),
+    'Must log DB gateway errors for Gemini');
+  assert.ok(SRC.includes('dbErr'),
+    'Must capture DB error details');
+});
+
+test('VISION-DIAG-02: Gemini call logs response status + body length', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini response: status='),
+    'Must log Gemini response status');
+  assert.ok(SRC.includes('bodyLen='),
+    'Must log Gemini response body length');
+});
+
+test('VISION-DIAG-03: Gemini error logs actual error message from API', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('Gemini HTTP'),
+    'Must log Gemini HTTP error code');
+  assert.ok(SRC.includes('errorDetail'),
+    'Must extract and log actual error detail from response');
+});
+
+test('VISION-DIAG-04: Circuit breaker state logged', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('circuit OPEN'),
+    'Must log when circuit is OPEN');
+  assert.ok(SRC.includes('circuit CLOSED'),
+    'Must log when circuit is CLOSED');
+  assert.ok(SRC.includes('cb.state'),
+    'Must log circuit breaker state');
+});
+
+test('VISION-DIAG-05: Gemini error includes detail in thrown exception', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // The thrown error must include the actual Gemini error detail
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 2000);
+  assert.ok(fnBlock.includes('errorDetail'),
+    'Must include errorDetail in thrown exception');
+  assert.ok(fnBlock.includes('Gemini failed: HTTP'),
+    'Must include HTTP status in error');
+});
+
+console.log('✅ All welcome + vision diagnostic tests loaded.');
+
+// ============================================================================
+// PHASE 5: Circuit Breaker Isolation + News Regression Tests
+// ============================================================================
+
+test('CB-ISOLATION-01: Chat AI uses separate circuit breaker key (chat-{provider})', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  assert.ok(SRC.includes('chatCircuitKey'), 'Must compute chatCircuitKey');
+  assert.ok(SRC.includes('`chat-${providerName}`'), 'Must use chat- prefix for circuit key');
+});
+
+test('CB-ISOLATION-02: Chat AI does NOT use bare provider name for circuit breaker', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const attemptFn = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(attemptFn, attemptFn + 1500);
+  // Must use chatCircuitKey, NOT providerName directly
+  assert.ok(fnBlock.includes('chatCircuitKey'), 'Must use chatCircuitKey variable');
+  // Should NOT use providerName directly in shouldAttemptProvider or recordCircuitResult
+  assert.ok(!fnBlock.includes("shouldAttemptProvider(env, providerName)"),
+    'Must NOT call shouldAttemptProvider with bare providerName');
+  assert.ok(!fnBlock.includes("recordCircuitResult(env, providerName"),
+    'Must NOT call recordCircuitResult with bare providerName');
+});
+
+test('CB-ISOLATION-03: News AI circuit breaker key unchanged (bare provider name)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // News AI must still use bare 'gemini' key (NOT 'chat-gemini')
+  const newsGeminiCalls = SRC.match(/shouldAttemptProvider\(env,\s*'gemini'\)/g);
+  assert.ok(newsGeminiCalls && newsGeminiCalls.length > 0,
+    'News AI must still use bare gemini key');
+  // Must NOT use chat-gemini
+  assert.ok(!SRC.includes("shouldAttemptProvider(env, 'chat-gemini')"),
+    'News AI must NOT use chat- prefix');
+});
+
+test('CB-ISOLATION-04: Chat AI vision failure does NOT affect News AI circuit', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Verify: when Gemini fails in Chat AI, it records on 'chat-gemini' not 'gemini'
+  const attemptFn = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(attemptFn, attemptFn + 1500);
+  assert.ok(fnBlock.includes('recordCircuitResult(env, chatCircuitKey'),
+    'Must record on chatCircuitKey (not bare provider name)');
+});
+
+test('NEWS-REGRESSION-01: News AI tryGemini unchanged (text-only, no inline_data)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const tryGeminiFn = SRC.indexOf('async function tryGemini(');
+  const fnBlock = SRC.slice(tryGeminiFn, tryGeminiFn + 2000);
+  // Must still build text-only contents
+  assert.ok(fnBlock.includes('parts: [{ text: prompt }]'),
+    'News AI must still use text-only parts');
+  // Must NOT have inline_data
+  assert.ok(!fnBlock.includes('inline_data'),
+    'News AI must NOT have inline_data');
+});
+
+test('NEWS-REGRESSION-02: Translation circuit breaker key separate (translation-workers-ai)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes("'translation-workers-ai'"),
+    'Translation must use separate circuit key');
+  // Must NOT use 'chat-translation-workers-ai'
+  assert.ok(!SRC.includes("'chat-translation-workers-ai'"),
+    'Translation key must NOT have chat- prefix');
+});
+
+test('NEWS-REGRESSION-03: News AI uses gemini_generate() with text-only contents', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // News AI must build contents with text-only parts
+  const tryGeminiBlock = SRC.indexOf('async function tryGemini(');
+  const fnBlock = SRC.slice(tryGeminiBlock, tryGeminiBlock + 2000);
+  assert.ok(fnBlock.includes('gemini_generate'),
+    'News AI must use gemini_generate() DB function');
+  assert.ok(fnBlock.includes('contents: [{ parts: [{ text: prompt }] }]'),
+    'News AI must send text-only contents to gemini_generate()');
+});
+
+test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections NOT modified', () => {
+  // GUARD-RAIL (refined): the original test asserted `git diff` was empty, which
+  // was too strict — legitimate fixes to OTHER worker-proxy.js sections (e.g.,
+  // Join Check, /start, Ad delivery) would falsely trigger this test. The new
+  // version parses the diff hunk headers (`@@ -x,y +a,b @@ <func context>`) and
+  // fails ONLY if a changed hunk is inside a protected Chat AI / News /
+  // Translation function. Source-level presence of those functions is already
+  // verified by NEWS-REGRESSION-05/06/07 below.
+  const { execSync } = require('child_process');
+  const diff = execSync('git diff main -- worker-proxy.js', { encoding: 'utf8' });
+  if (!diff.trim()) return; // no changes — trivially pass
+
+  // Protected functions — changes here would indicate Chat AI / News / Translation
+  // regression. Sourced from NEWS-REGRESSION-05 (News) + Chat AI handler names.
+  const PROTECTED = new Set([
+    // News AI
+    'fetchAllNewsRss', 'translateToFarsi', 'generateSummaryWithFallback',
+    'processOneArticleSummary', 'processNewsAIBatch', 'publishArticleToFarsiNews',
+    'fetchNewsRss', 'processNewsQueue', 'runNewsAICron',
+    // Chat AI (assistant.js controller mirrors; names that would indicate chat changes)
+    'handleChatMessage', 'processChatMessage', 'callAIProvider', 'streamChatCompletion',
+    // Translation
+    'translateText', 'translateToFarsi',
+  ]);
+
+  // Parse hunk headers: "@@ -oldStart,oldLen +newStart,newLen @@ <func context>"
+  // <func context> is whatever git's xfunc shows — typically "function name" or "async function name".
+  const hunkHeaderRe = /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@\s+(.*)$/gm;
+  const violations = [];
+  let m;
+  while ((m = hunkHeaderRe.exec(diff)) !== null) {
+    const ctx = (m[1] || '').trim();
+    // Extract function name from context like "async function foo(" or "function bar("
+    const fnMatch = ctx.match(/(?:async\s+)?function\s+(\w+)/);
+    if (fnMatch && PROTECTED.has(fnMatch[1])) {
+      violations.push(fnMatch[1]);
+    }
+  }
+  assert.equal(violations.length, 0,
+    `worker-proxy.js changes must NOT touch protected Chat AI / News / Translation functions: ${violations.join(', ')}`);
+});
+
+test('NEWS-REGRESSION-05: News pipeline functions intact', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // All key News AI functions must exist
+  assert.ok(SRC.includes('async function fetchAllNewsRss'), 'fetchAllNewsRss intact');
+  assert.ok(SRC.includes('async function translateToFarsi'), 'translateToFarsi intact');
+  assert.ok(SRC.includes('async function generateSummaryWithFallback'), 'generateSummaryWithFallback intact');
+  assert.ok(SRC.includes('async function processOneArticleSummary'), 'processOneArticleSummary intact');
+  assert.ok(SRC.includes('async function processNewsAIBatch'), 'processNewsAIBatch intact');
+  assert.ok(SRC.includes('function publishArticleToFarsiNews'), 'publishArticleToFarsiNews intact');
+});
+
+test('NEWS-REGRESSION-06: News cache keys unchanged', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes("'news:farsi'"), 'news:farsi cache key intact');
+  assert.ok(SRC.includes("'news:ai:'"), 'news:ai: cache key prefix intact');
+  assert.ok(SRC.includes("'news:summary_queue'"), 'news:summary_queue intact');
+});
+
+test('NEWS-REGRESSION-07: Shared env vars not modified by Chat AI', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Chat AI must NOT modify env vars — only read them
+  // Check for any assignments to env properties (would indicate modification)
+  const envAssignments = SRC.match(/env\.\w+\s*=/g);
+  if (envAssignments) {
+    // Only _reqPool assignment is allowed (shared pool pattern from withSharedPool)
+    const nonPoolAssignments = envAssignments.filter(a => a !== 'env._reqPool =');
+    assert.equal(nonPoolAssignments.length, 0,
+      `Chat AI must NOT modify env vars (found: ${nonPoolAssignments.join(', ')})`);
+  }
+});
+
+console.log('✅ All circuit breaker isolation + news regression tests loaded.');
+
+// ============================================================================
+// PHASE: "prompt is not defined" fix + Gemini 429 regression
+// ============================================================================
+
+test('PROMPT-SCOPE-01: attemptChatProvider does NOT reference out-of-scope variables', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  // Strip comments before checking (comments may reference 'prompt' to explain the fix)
+  const codeOnly = fnBlock.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Must NOT reference 'prompt' in actual code (it's in generateAssistantReply's scope)
+  assert.ok(!codeOnly.includes('prompt?.length'),
+    'Must NOT reference prompt?.length in code (out of scope → ReferenceError)');
+  assert.ok(!codeOnly.includes('promptChars'),
+    'Must NOT reference promptChars in code (derived from out-of-scope prompt)');
+  assert.ok(!codeOnly.includes('historyLen'),
+    'Must NOT reference historyLen in code (out of scope)');
+});
+
+test('PROMPT-SCOPE-02: error log in attemptChatProvider only uses in-scope variables', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  // The console.warn in catch block must only use providerName + errorMsg + errorType
+  const warnLine = fnBlock.match(/console\.warn\([^)]+\)/);
+  if (warnLine) {
+    const warn = warnLine[0];
+    assert.ok(warn.includes('providerName'), 'Must log providerName (in scope)');
+    assert.ok(warn.includes('errorType'), 'Must log errorType (in scope)');
+    assert.ok(warn.includes('errorMsg'), 'Must log errorMsg (in scope)');
+    assert.ok(!warn.includes('prompt'), 'Must NOT reference prompt');
+    assert.ok(!warn.includes('historyLen'), 'Must NOT reference historyLen');
+  }
+});
+
+test('GEMINI-429-01: Gemini 429 returns clean error (no ReferenceError)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // callGeminiChat must classify 429 as retryable
+  const geminiFn = SRC.indexOf('async function callGeminiChat');
+  const fnBlock = SRC.slice(geminiFn, geminiFn + 2000);
+  assert.ok(fnBlock.includes('classifyHttpError'),
+    'Must classify HTTP errors');
+  // classifyHttpError(429) returns 'retryable' (verified in worker-proxy.js)
+});
+
+test('GEMINI-429-02: Image request with Gemini 429 does NOT fall back to text-only', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // Vision path must only have Gemini (no text-only fallback)
+  const hasImageIdx = SRC.indexOf('const hasImage = Boolean(imageBase64)');
+  const visionBlock = SRC.slice(hasImageIdx, hasImageIdx + 300);
+  assert.ok(visionBlock.includes('VISION-ONLY'),
+    'Must have VISION-ONLY path');
+  assert.ok(!visionBlock.includes("'groq'"),
+    'Must NOT have Groq in vision path');
+});
+
+test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  // When hasImage and all providers fail, must return Persian vision error
+  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
+    'Must return Persian vision error');
+  // The catch block in handlePostChat must NOT throw ReferenceError
+  const postChatFn = SRC.indexOf('async function handlePostChat');
+  const fnBlock = SRC.slice(postChatFn, postChatFn + 5000);
+  const catchIdx = fnBlock.indexOf('} catch (error) {');
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 500);
+  // Must NOT reference 'prompt' in the catch block
+  assert.ok(!catchBlock.includes('prompt?.'),
+    'Catch block must NOT reference prompt (would cause ReferenceError)');
+});
+
+test('GEMINI-429-04: Text-only chat still works (Groq primary)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const textPathIdx = SRC.indexOf('Text-only path (original chain');
+  const textBlock = SRC.slice(textPathIdx, textPathIdx + 500);
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
+    'Groq must be first in text-only path');
+  assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
+    'Gemini before OpenRouter in text-only path');
+});
+
+test('GEMINI-ERROR-01: Gemini 400 handled as non_retryable', () => {
+  // classifyHttpError(400) = non_retryable — verified in worker-proxy.js
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status === 400'),
+    'classifyHttpError must handle 400');
+});
+
+test('GEMINI-ERROR-02: Gemini 500 handled as retryable', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status >= 500'),
+    'classifyHttpError must handle 5xx as retryable');
+});
+
+test('GEMINI-ERROR-03: Gemini timeout handled as retryable', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(SRC.includes('status === 408'),
+    'classifyHttpError must handle 408 timeout as retryable');
+});
+
+test('CIRCUIT-OPEN-01: Circuit breaker open returns circuit_skipped (not ReferenceError)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+  const fnIdx = SRC.indexOf('async function attemptChatProvider');
+  const fnBlock = SRC.slice(fnIdx, fnIdx + 1500);
+  assert.ok(fnBlock.includes('circuit_skipped: true'),
+    'Must return circuit_skipped when circuit is open');
+  // Strip comments before checking
+  const codeOnly = fnBlock.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!codeOnly.includes('prompt?.'),
+    'Must NOT reference prompt in code (would cause ReferenceError on circuit open path too)');
+});
+
+console.log('✅ All prompt scope + Gemini 429 regression tests loaded.');

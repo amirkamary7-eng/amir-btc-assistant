@@ -101,14 +101,25 @@ test('ADS-CH-02: checkAdditionalRequiredChannels function exists in worker-proxy
     'checkAdditionalRequiredChannels must be defined');
 });
 
-test('ADS-CH-03: resolveChannelMembership calls checkAdditionalRequiredChannels at every joined:true path (>=4 calls)', () => {
+test('ADS-CH-03: resolveChannelMembership calls checkAdditionalRequiredChannels at every joined:true path (>=3 calls)', () => {
+  // ROOT-CAUSE FIX (AUDIT-P1-JOINCHECK / Bug #7): the api_error fallback
+  // path was removed (fail-closed instead of fail-open via DB/KV fallback).
+  // This reduced the call count from 4 to 3. The 3 remaining call sites are:
+  //   1. KV cache hit joined:true → enforce DB channels
+  //   2. DB cache hit channel_joined=true → enforce DB channels
+  //   3. Fresh check joined:true → enforce DB channels
+  // The api_error path now returns joined:false immediately (fail-closed),
+  // so it no longer needs to call checkAdditionalRequiredChannels.
   const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
   assert.ok(fnStart >= 0, 'resolveChannelMembership must exist');
-  // Slice a generous block to capture the whole function.
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 5000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 fix comments were added.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 5000);
   const calls = fnBlock.match(/checkAdditionalRequiredChannels\s*\(/g) || [];
-  assert.ok(calls.length >= 4,
-    `resolveChannelMembership must call checkAdditionalRequiredChannels >=4 times (got ${calls.length})`);
+  assert.ok(calls.length >= 3,
+    `resolveChannelMembership must call checkAdditionalRequiredChannels >=3 times (got ${calls.length}). ` +
+    `The api_error path was removed (fail-closed fix), reducing from 4 to 3.`);
 });
 
 test('ADS-CH-04: buildStartReplyPayloadAsync exists and merges DB channels', () => {
@@ -357,18 +368,22 @@ test('ADS-MSG-06: Free audience filter (no membership row OR FREE OR not approve
     'Free audience must include expired members');
 });
 
-test('ADS-MSG-07: Delivery uses notificationPlatformRepo.dispatch with category=promotions', () => {
+test('ADS-MSG-07: Delivery enqueues into notification_queue for async delivery', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 3500);
-  assert.ok(fnBlock.includes('notificationPlatformRepo') && fnBlock.includes('.dispatch'),
-    '_deliverMessageCampaign must call notificationPlatformRepo.dispatch');
-  assert.ok(/category:\s*'promotions'/.test(fnBlock),
-    'dispatch call must use category=promotions');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 6000);
+  // PHASE 2 FIX: delivery now enqueues into notification_queue instead of
+  // sequential sendTelegramMessage. The processQueue cron handles actual sends.
+  assert.ok(fnBlock.includes('notification_queue'),
+    '_deliverMessageCampaign must enqueue into notification_queue');
+  assert.ok(/INSERT\s+INTO\s+notification_queue/.test(fnBlock),
+    '_deliverMessageCampaign must INSERT into notification_queue');
+  assert.ok(/ON CONFLICT.*DO NOTHING/.test(fnBlock),
+    'enqueue must be idempotent (ON CONFLICT DO NOTHING)');
 });
 
 test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → skipped)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 3500);
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
   // Bulk fetch ch_promotions preference
   assert.ok(/SELECT\s+user_id,\s+ch_promotions\s+AS\s+pref\s+FROM\s+notification_settings/i.test(fnBlock),
     '_deliverMessageCampaign must bulk-fetch ch_promotions preference from notification_settings');
@@ -378,25 +393,29 @@ test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → 
     '_deliverMessageCampaign must increment skipped counter for none-pref users');
 });
 
-test('ADS-MSG-09: Telegram delivery uses sendTelegramMessage (not a parallel system)', () => {
+test('ADS-MSG-09: Telegram delivery is queue-based (not sequential sendTelegramMessage)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  // Slice generously to capture the entire function (it spans ~125 lines).
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
-  assert.ok(fnBlock.includes('deliverTelegram') && fnBlock.includes('sendTelegramMessage'),
-    '_deliverMessageCampaign must use sendTelegramMessage for telegram delivery');
-  assert.ok(/sendTelegramMessage\s*\(\s*env/i.test(fnBlock),
-    'sendTelegramMessage must be called with env as first arg');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  // PHASE 2 FIX: delivery now enqueues into notification_queue with channel='telegram'
+  // instead of sequential sendTelegramMessage. The processQueue cron handles actual sends.
+  assert.ok(/channel.*telegram/.test(fnBlock) || fnBlock.includes("'telegram'"),
+    '_deliverMessageCampaign must enqueue with channel=telegram');
+  // Must NOT have sequential sendTelegramMessage in the delivery loop anymore
+  assert.ok(!/await\s+sendTelegramMessage\s*\(\s*env/i.test(fnBlock),
+    '_deliverMessageCampaign must NOT call sendTelegramMessage directly (uses queue instead)');
 });
 
-test('ADS-MSG-10: Safety cap: max 1000 users per send invocation (audit H2 fix)', () => {
+test('ADS-MSG-10: No per-request user cap (queue-based, unlimited recipients)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  // Slice generously — the safety cap appears near the end of the function (~line 612).
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
-  // FIX (audit H2): safety cap lowered from 5000 → 1000 to fit Workers CPU limit
-  assert.ok(/delivered\s*\+\s*skipped\s*>=\s*1000/.test(fnBlock),
-    '_deliverMessageCampaign must enforce 1000-user safety cap (was 5000, exceeded Workers CPU)');
-  assert.ok(fnBlock.includes('break'),
-    'safety cap must break out of the delivery loop');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  // PHASE 2 FIX: no 1000-user safety cap needed — queue-based delivery is
+  // independent of recipient count. Admin request is fast (only DB inserts).
+  // The old safety cap (delivered + skipped >= 1000) is REMOVED.
+  assert.ok(!/delivered\s*\+\s*skipped\s*>=\s*1000/.test(fnBlock),
+    'old 1000-user safety cap must be removed (queue-based delivery has no CPU limit)');
+  // BATCH_SIZE for DB queries should be reasonable (500 for batch fetch)
+  assert.ok(/BATCH_SIZE\s*=\s*500/.test(fnBlock),
+    'BATCH_SIZE for DB fetch should be 500 (batch query, not per-user send)');
 });
 
 test('ADS-MSG-11: Route POST /api/admin/advertisements/messages/:id/send is wired', () => {
@@ -458,7 +477,11 @@ test('ADS-NS-05: Message campaigns use category=promotions which maps to ch_prom
 
 test('ADS-SEP-01: Channel Join (ad_channels) does NOT go through ch_promotions (uses checkAdditionalRequiredChannels + Telegram getChatMember)', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 forceRefresh-propagation fix, so a 2000-char window
+  // no longer captures the whole function. Extract until the next `async function`.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   // Must use Telegram getChatMember (via _checkSingleTelegramChannel)
   assert.ok(fnBlock.includes('_checkSingleTelegramChannel'),
     'checkAdditionalRequiredChannels must use Telegram getChatMember via _checkSingleTelegramChannel');
@@ -469,13 +492,13 @@ test('ADS-SEP-01: Channel Join (ad_channels) does NOT go through ch_promotions (
     'checkAdditionalRequiredChannels must NOT reference ch_promotions (channel-join is a separate domain)');
 });
 
-test('ADS-SEP-02: Message campaigns (ad_messages) DO go through ch_promotions (via dispatch category=promotions)', () => {
+test('ADS-SEP-02: Message campaigns enqueue into notification_queue with promotions category', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 3500);
-  assert.ok(fnBlock.includes('notificationPlatformRepo') && fnBlock.includes('.dispatch'),
-    'message campaigns must use notificationPlatformRepo.dispatch');
-  assert.ok(/category:\s*'promotions'/.test(fnBlock),
-    "dispatch call must use category='promotions'");
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  assert.ok(fnBlock.includes('notification_queue'),
+    'message campaigns must enqueue into notification_queue');
+  assert.ok(/category.*promotions/.test(fnBlock),
+    "enqueue payload must use category='promotions'");
   assert.ok(/ch_promotions\s+AS\s+pref/i.test(fnBlock),
     'message campaigns must read ch_promotions preference per user');
 });
@@ -698,7 +721,10 @@ test('ADS-PERF-05: getUserChannelPreference (notification_platform) has per-user
 
 test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jittered TTL 55-95s, audit H3 fix) to avoid repeated Telegram calls', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 3000);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 Promise.all fix comments were added.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   // KV cache read
   assert.ok(fnBlock.includes('env.RATE_LIMITS.get(cacheKey)'),
     'checkAdditionalRequiredChannels must read per-user KV cache');
@@ -869,19 +895,27 @@ test('ADS-FIX-H1b: claimMessageForDelivery uses atomic UPDATE...RETURNING', () =
 });
 
 // FIX H2: Safety cap lowered to 1000
-test('ADS-FIX-H2: Safety cap is 1000 (not 5000) to fit Workers CPU limit', () => {
+test('ADS-FIX-H2: Queue-based delivery (no per-request CPU cap needed)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
-  assert.ok(/>= 1000/.test(fnBlock),
-    'safety cap must be 1000 (was 5000 which exceeded Workers 30s CPU limit)');
+  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  // PHASE 2 FIX: sequential Telegram send replaced with queue-based delivery.
+  // No 1000-user cap needed — admin request only does DB inserts.
+  assert.ok(fnBlock.includes('notification_queue'),
+    'delivery must use notification_queue (queue-based)');
+  assert.ok(!/>=\s*1000/.test(fnBlock),
+    'old 1000-user safety cap must be removed (queue-based delivery has no CPU limit)');
   assert.ok(!/>=\s*5000/.test(fnBlock),
-    'old 5000 cap must be removed');
+    'old 5000-user cap must also be removed');
 });
 
 // FIX H3: Jittered TTL for cache stampede prevention
 test('ADS-FIX-H3: checkAdditionalRequiredChannels uses jittered TTL (55-95s)', () => {
   const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2500);
+  // Use the full function body (not a fixed-size slice) — the function grew
+  // after the AUDIT-P1 forceRefresh-propagation fix, so a 2500-char window
+  // no longer captures the jitter logic. Extract until the next `async function`.
+  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
   assert.ok(fnBlock.includes('_jitterSeed'),
     'must use a jitter seed (per-user + hash) for consistent TTL');
   assert.ok(fnBlock.includes('_ttlJitter'),

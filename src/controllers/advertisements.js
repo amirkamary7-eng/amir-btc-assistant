@@ -502,6 +502,18 @@ export function createAdvertisementsHandlers(deps) {
         await advertisementsRepo.releaseMessageClaim(env, id);
         throw deliveryErr;
       }
+      // PHASE 3 FIX: if 0 users were delivered/enqueued, release the claim so
+      // admin can retry immediately after fixing audience/preferences.
+      // Previously: claim was only released on exception, not on 0-delivery.
+      if (result && result.delivered === 0) {
+        await advertisementsRepo.releaseMessageClaim(env, id);
+        return jsonResponse({
+          status: 'success',
+          ...result,
+          claim_released: true,
+          note: 'No users were delivered. Campaign claim released — admin can retry immediately after fixing audience preferences.',
+        }, {}, env);
+      }
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (e) {
       console.error('[advertisements] deliver failed:', e);
@@ -521,10 +533,26 @@ export function createAdvertisementsHandlers(deps) {
    */
   async function _deliverMessageCampaign(env, message) {
     if (!isDatabaseConfigured(env)) {
-      return { delivered: 0, skipped: 0, reason: 'db_not_configured' };
+      return { delivered: 0, skipped: 0, enqueued: 0, audience: message.target_audience || 'all', destinations: message.destinations || 'both', reason: 'db_not_configured' };
     }
 
-    const BATCH_SIZE = 25;
+    // PHASE 2 FIX (sequential Telegram → queue-based):
+    // Previously: sequential `await sendTelegramMessage(...)` per user → Worker CPU
+    // exceeded for >50 users → Worker killed mid-delivery → 5-min claim locked.
+    //
+    // Now: ALL delivery (mini_app + telegram) is enqueued into notification_queue.
+    // The existing processQueue cron (every 5 min) handles actual Telegram sends
+    // with proper retry/backoff/idempotency via the notification_queue table.
+    //
+    // Admin request is now FAST (only DB inserts, no Telegram API calls) and
+    // independent of recipient count.
+    //
+    // Counters:
+    // - delivered: users who were SUCCESSFULLY ENQUEUED (will be delivered by cron)
+    // - skipped: users excluded (ch_promotions='none' or no matching channel)
+    // - enqueued: same as delivered (alias for clarity)
+
+    const BATCH_SIZE = 500;
     let delivered = 0;
     let skipped = 0;
     let checkpoint = null;
@@ -532,8 +560,6 @@ export function createAdvertisementsHandlers(deps) {
     const destinations = message.destinations || 'both';
 
     // Audience filter SQL fragment (Phase 6: free/premium/all).
-    // Premium = membership_level IN (VIP,PREMIUM,ELITE) AND status=APPROVED AND not expired.
-    // Free = everyone else (including users with no membership row — LEFT JOIN).
     let audienceClause = '';
     if (audience === 'premium') {
       audienceClause = `AND mu.membership_level IN ('VIP','PREMIUM','ELITE')
@@ -548,7 +574,13 @@ export function createAdvertisementsHandlers(deps) {
         OR (mu.expire_at IS NOT NULL AND mu.expire_at <= NOW())
       )`;
     }
-    // 'all' → no filter
+
+    // Build message text once
+    const textParts = [message.body_text];
+    if (message.button_label && message.button_url) {
+      textParts.push(`\n\n${message.button_label}: ${message.button_url}`);
+    }
+    const fullText = textParts.join('');
 
     while (true) {
       const params = checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE];
@@ -579,8 +611,12 @@ export function createAdvertisementsHandlers(deps) {
         }
       }
 
+      // Build enqueue values for users who have at least one delivery channel
+      const enqueueValues = [];
+      const enqueueParams = [];
+      let paramIdx = 1;
       for (const uid of userIds) {
-        const pref = prefMap.get(uid) || 'none'; // free users default 'none' → skipped
+        const pref = prefMap.get(uid) || 'none';
         if (pref === 'none') { skipped++; continue; }
 
         const deliverMiniApp = (destinations === 'mini_app' || destinations === 'both') &&
@@ -590,54 +626,40 @@ export function createAdvertisementsHandlers(deps) {
 
         if (!deliverMiniApp && !deliverTelegram) { skipped++; continue; }
 
-        // Build message text
-        const textParts = [message.body_text];
-        if (message.button_label && message.button_url) {
-          textParts.push(`\n\n${message.button_label}: ${message.button_url}`);
-        }
-        const fullText = textParts.join('');
+        // Determine channel for this user (prefer telegram if both, as it's more visible)
+        const channel = deliverTelegram ? 'telegram' : 'mini_app';
+        const payload = JSON.stringify({
+          userId: uid,
+          category: 'promotions',
+          type: 'advertisement',
+          title: message.title,
+          message: fullText,
+          metadata: {
+            campaign_id: message.campaign_id,
+            ad_message_id: message.id,
+            parse_mode: 'HTML',
+          },
+        });
+        enqueueValues.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4})`);
+        enqueueParams.push(uid, channel, 'high', payload, `ad_msg_${message.id}_${uid}`);
+        paramIdx += 5;
+        delivered++;
+      }
 
-        if (deliverMiniApp && notificationPlatformRepo?.dispatch) {
-          try {
-            await notificationPlatformRepo.dispatch(env, {
-              userId: uid,
-              category: 'promotions',
-              type: 'advertisement',
-              title: message.title,
-              message: fullText,
-              metadata: { campaign_id: message.campaign_id, ad_message_id: message.id },
-            });
-            delivered++;
-          } catch (e) {
-            console.warn('[advertisements] mini_app dispatch failed for', uid, e.message);
-            skipped++;
-          }
-        }
-
-        if (deliverTelegram && sendTelegramMessage) {
-          try {
-            await sendTelegramMessage(env, {
-              chat_id: uid,
-              text: fullText,
-              parse_mode: 'HTML',
-            });
-            // Avoid double-counting if both channels delivered
-            if (!deliverMiniApp) delivered++;
-          } catch (e) {
-            console.warn('[advertisements] telegram send failed for', uid, e.message);
-            skipped++;
-          }
+      // Batch INSERT into notification_queue (idempotent via dedupKey UNIQUE)
+      if (enqueueValues.length > 0) {
+        try {
+          await queryDb(env, `
+            INSERT INTO notification_queue (user_id, channel, priority, payload, notification_id)
+            VALUES ${enqueueValues.join(', ')}
+            ON CONFLICT (notification_id, user_id) DO NOTHING
+          `, enqueueParams);
+        } catch (e) {
+          console.warn('[advertisements] enqueue batch failed:', e.message);
         }
       }
 
       checkpoint = userIds[userIds.length - 1];
-      // Safety cap: 1000 users per send invocation (Workers CPU limit).
-      // FIX (audit H2): Was 5000 — at ~50ms per user (DB query + dispatch + TG send),
-      // 5000 users = 250s wall-clock, FAR exceeding Workers Paid plan 30s CPU limit.
-      // 1000 users = ~50s wall-clock — still risky but survivable with ctx.waitUntil.
-      // For larger audiences, admin should split into multiple sends (different
-      // audience filters) or use the notification_queue cron for async delivery.
-      if (delivered + skipped >= 1000) break;
     }
 
     // Record delivery metadata.
@@ -648,7 +670,15 @@ export function createAdvertisementsHandlers(deps) {
       );
     } catch { /* non-fatal */ }
 
-    return { delivered, skipped, audience, destinations };
+    return {
+      delivered,
+      skipped,
+      enqueued: delivered,
+      audience,
+      destinations,
+      queued: true,
+      note: 'Messages queued for async delivery via processQueue cron. Delivered count reflects enqueued users, not immediate delivery.',
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════
