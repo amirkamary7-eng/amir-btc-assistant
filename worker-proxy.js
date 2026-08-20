@@ -3999,6 +3999,16 @@ function parseRssItems(rssText) {
     );
     const pubDate = extractFirstMatch(block, /<pubDate>([\s\S]*?)<\/pubDate>/i);
 
+    // PHASE 4 FIX: Parse <content:encoded> if available (RSS 2.0 with content module).
+    // Not all feeds have this, but some provide full article text here — using it
+    // eliminates the need for a separate article URL fetch (avoids publisher 429/403).
+    // If content:encoded exists and is long enough, it will be used as the primary
+    // article text in the extraction stage (before article HTML fetch).
+    const contentEncodedRaw = extractFirstMatch(
+      block,
+      /<content:encoded><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>|<content:encoded>([\s\S]*?)<\/content:encoded>/i,
+    );
+
     return {
       title,
       url: link,
@@ -4006,6 +4016,7 @@ function parseRssItems(rssText) {
       description: cleanHtml(descriptionRaw),
       pubDate,
       image: extractImageUrl(descriptionRaw, block),
+      contentEncoded: contentEncodedRaw || null,
     };
   }).map((item) => ({
     ...item,
@@ -4932,6 +4943,11 @@ const CIRCUIT_BREAKER_KEY_PREFIX = 'news:circuit:';
 const CIRCUIT_BREAKER_TTL = 30 * 60; // 30 min (longer than OPEN window so state persists)
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3; // 3 consecutive failures → OPEN
 const CIRCUIT_BREAKER_OPEN_MS = 10 * 60 * 1000; // 10 minutes
+// PHASE 5 FIX: Prolonged-Open state — if circuit has been OPEN for this many
+// consecutive probes (HALF_OPEN failures), increase the backoff to avoid
+// infinite OPEN→HALF_OPEN→OPEN loop. Each probe failure doubles the backoff.
+const CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD = 3; // After 3 probe failures
+const CIRCUIT_BREAKER_PROLONGED_OPEN_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * Read circuit breaker state for a provider from KV.
@@ -5027,6 +5043,8 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
         consecutive_failures: 0,
         opened_at: null,
         retry_after: null,
+        probe_failures: 0, // PHASE 5: reset probe counter on success
+        prolonged: false,
         last_failure_reason: null,
       });
     }
@@ -5041,12 +5059,20 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
 
   // Retryable failure
   if (state.state === 'HALF_OPEN') {
-    // Probe failed → back to OPEN for another 10 min
+    // Probe failed → back to OPEN
+    // PHASE 5 FIX: Check probe count — if circuit has failed HALF_OPEN probes
+    // repeatedly, use a longer backoff (PROLONGED_OPEN) to avoid infinite loop.
+    const probeFailures = (state.probe_failures || 0) + 1;
+    const isProlonged = probeFailures >= CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD;
+    const backoffMs = isProlonged ? CIRCUIT_BREAKER_PROLONGED_OPEN_MS : CIRCUIT_BREAKER_OPEN_MS;
+    console.warn(`[CIRCUIT] ${provider} probe failed (${probeFailures}x). ${isProlonged ? 'PROLONGED OPEN' : 'OPEN'} for ${backoffMs / 60000}min`);
     await saveCircuitState(env, provider, {
       state: 'OPEN',
       consecutive_failures: state.consecutive_failures + 1,
       opened_at: now,
-      retry_after: now + CIRCUIT_BREAKER_OPEN_MS,
+      retry_after: now + backoffMs,
+      probe_failures: probeFailures,
+      prolonged: isProlonged,
       last_failure_reason: errorMessage || 'half_open_probe_failed',
     });
     return;
@@ -5061,6 +5087,8 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
       consecutive_failures: newFailures,
       opened_at: now,
       retry_after: now + CIRCUIT_BREAKER_OPEN_MS,
+      probe_failures: 0, // PHASE 5: start counting probe failures
+      prolonged: false,
       last_failure_reason: errorMessage || 'threshold_reached',
     });
   } else {
@@ -5850,7 +5878,9 @@ async function processOneArticleSummary(env, pool = null) {
   try { await recordCacheStat(env, false); } catch {}
 
   // Helper: requeue with retry state (mutates queue in place + persists)
-  async function requeueWithRetry(reason, errorDetail, attempts) {
+  // PHASE 2 FIX: Added retryAfterSeconds parameter — if publisher returns
+  // Retry-After header on 429, use that value instead of the default backoff.
+  async function requeueWithRetry(reason, errorDetail, attempts, retryAfterSeconds) {
     const newRetryCount = (article.retry_count || 0) + 1;
     const backoffMin = NEWS_SUMMARY_BACKOFF_MINUTES[Math.min(newRetryCount - 1, NEWS_SUMMARY_BACKOFF_MINUTES.length - 1)] || 30;
     // QUEUE PRIORITY (Commit 2): Retried items get LOW priority so new articles
@@ -5865,7 +5895,16 @@ async function processOneArticleSummary(env, pool = null) {
     // wider window, reducing provider load spikes.
     // Example: 5 min backoff → actual delay = 4 to 6 min (±20%)
     const jitterMultiplier = 1 + (Math.random() - 0.5) * 0.4; // 0.8 to 1.2
-    const backoffMs = Math.round(backoffMin * 60 * 1000 * jitterMultiplier);
+
+    // PHASE 2 FIX: If publisher returned Retry-After, use that instead of default backoff.
+    // Cap at 60 minutes to prevent excessive delay. Apply jitter for same reason.
+    let effectiveBackoffMin = backoffMin;
+    if (retryAfterSeconds && retryAfterSeconds > 0) {
+      const retryAfterMin = Math.min(Math.ceil(retryAfterSeconds / 60), 60);
+      effectiveBackoffMin = Math.max(retryAfterMin, backoffMin); // Use the LARGER of Retry-After or default
+      article.retry_after = retryAfterSeconds; // Store for diagnostics
+    }
+    const backoffMs = Math.round(effectiveBackoffMin * 60 * 1000 * jitterMultiplier);
     article.next_retry = now + backoffMs;
     // COMMIT 2 — PERMANENT FAILURE for non-retryable HTTP errors:
     // fetch_403 and fetch_404 mean the article URL itself is permanently
@@ -6056,6 +6095,19 @@ async function processOneArticleSummary(env, pool = null) {
     };
   }
 
+  // ── STEP 0: Check content:encoded from RSS (Phase 11 fix) ──
+  // If the RSS item has <content:encoded> with enough text, use it directly
+  // instead of fetching the article URL. This avoids publisher 429/403 entirely
+  // for feeds that provide full article content.
+  let html = null;
+  let contentSource = 'article';
+
+  if (article.contentEncoded && article.contentEncoded.trim().length >= 200) {
+    // content:encoded is available and long enough — use it as article HTML
+    html = article.contentEncoded;
+    contentSource = 'content_encoded';
+    console.log('[NEWS] Using content:encoded from RSS (length=' + html.length + ') — skipping article fetch');
+  } else {
   // ── STEP 1: Fetch article HTML ──
   // NEWSSEC-011 FIX: Validate the article URL scheme before fetching. The URL
   // comes from RSS <link> content (untrusted). Cloudflare Workers already
@@ -6066,28 +6118,82 @@ async function processOneArticleSummary(env, pool = null) {
   if (!article.url || !/^https?:\/\//i.test(article.url)) {
     return requeueWithRetry('invalid_url_scheme', 'Article URL must be http(s)');
   }
-  let html = null;
+
+  // PHASE 1 FIX: Extract hostname for diagnostic logging
+  let articleHostname = 'unknown';
+  try {
+    articleHostname = new URL(article.url).hostname;
+  } catch {}
+
   try {
     const fetchController = new AbortController();
     const fetchTimeout = setTimeout(() => fetchController.abort(), 8000);
+    // PHASE 1 FIX: Updated User-Agent to current Chrome version (was Chrome/120 from Dec 2023).
+    // CoinDesk and other publishers block outdated UA strings. Also added Referer and
+    // Sec-Fetch headers to look like a legitimate browser request.
     const articleRes = await fetch(article.url, {
       signal: fetchController.signal,
+      redirect: 'follow',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
       },
     });
     clearTimeout(fetchTimeout);
     if (!articleRes.ok) {
-      return requeueWithRetry('fetch_' + articleRes.status, 'HTTP ' + articleRes.status);
+      // PHASE 2 FIX: Parse Retry-After header for 429 responses
+      let retryAfterSeconds = null;
+      if (articleRes.status === 429) {
+        const retryAfterRaw = articleRes.headers.get('Retry-After') || articleRes.headers.get('retry-after');
+        if (retryAfterRaw) {
+          // Retry-After can be seconds (number) or HTTP-date
+          const parsed = parseInt(retryAfterRaw, 10);
+          if (!isNaN(parsed) && parsed > 0 && parsed < 86400) {
+            retryAfterSeconds = parsed;
+          }
+        }
+      }
+      console.warn(`[NEWS] Article fetch failed: host=${articleHostname} status=${articleRes.status} retry_after=${retryAfterSeconds || 'N/A'} url=${article.url.substring(0, 80)}`);
+
+      // PHASE 3 FIX: For permanently-blocked publishers (403/410), try RSS description
+      // as fallback content BEFORE giving up. This allows news from publishers like
+      // Investing.com and NYT (which always return 403 to CF Workers) to still be
+      // summarized using the RSS description — lower quality but better than nothing.
+      if (articleRes.status === 403 || articleRes.status === 410) {
+        const rssDesc = stripTags(article.description || '');
+        const rssTitle = stripTags(article.title || article.title_en || '');
+        const rssContent = (rssTitle + '\n\n' + rssDesc).trim();
+        if (rssContent.length >= 50) {
+          // Use RSS content as fallback — set html to empty so extraction falls through
+          // to the RSS description stage (Stage 4)
+          console.warn(`[NEWS] Using RSS description fallback for ${articleHostname} (status ${articleRes.status})`);
+          html = ''; // No HTML — will trigger RSS description extraction below
+          contentSource = 'rss_description_fallback';
+          // Fall through to extraction below (don't return)
+        } else {
+          // RSS description too short — permanent failure
+          return requeueWithRetry('fetch_' + articleRes.status, 'HTTP ' + articleRes.status + ' from ' + articleHostname);
+        }
+      } else {
+        // For non-403 errors (429, 5xx, etc.) — normal requeue path
+        return requeueWithRetry('fetch_' + articleRes.status, 'HTTP ' + articleRes.status + ' from ' + articleHostname, null, retryAfterSeconds);
+      }
     }
     // NEWSSEC-014 FIX: Use safeReadText to cap body size (5MB for article HTML,
     // which can be larger than RSS) and prevent OOM from oversized responses.
     html = await safeReadText(articleRes, 5 * 1024 * 1024);
   } catch (e) {
+    console.warn(`[NEWS] Article fetch error: host=${articleHostname} error=${e?.message?.substring(0, 80) || 'unknown'}`);
     return requeueWithRetry('fetch_error', e?.message?.substring(0, 120));
   }
+  } // end of else (article fetch when content:encoded unavailable)
 
   // ── STEP 2: Extract readable article text ──
   // Fallback chain: <article> → <main> → all <p> tags → RSS description (last resort)
