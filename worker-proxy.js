@@ -6200,6 +6200,39 @@ async function processOneArticleSummary(env, pool = null) {
     contentSource = 'content_encoded';
     console.log('[NEWS] Using content:encoded from RSS (length=' + html.length + ') — skipping article fetch');
   } else {
+
+  // ── STEP 0.5: Check DEGRADED_PUBLISHERS (Hybrid fix) ──
+  // Publishers in this set consistently return 429 to CF Workers egress IP.
+  // Instead of fetching (which will fail + waste queue slots with retries),
+  // use RSS description as content directly. This produces lower-quality
+  // summaries but prevents the pipeline from stalling on these publishers.
+  let articleHostname = 'unknown';
+  try { articleHostname = new URL(article.url).hostname; } catch {}
+
+  const DEGRADED_PUBLISHERS = new Set([
+    'www.coindesk.com',  // Persistent 429 to CF Workers egress IP
+  ]);
+
+  if (DEGRADED_PUBLISHERS.has(articleHostname)) {
+    const rssDesc = stripTags(article.description || '');
+    const rssTitle = stripTags(article.title || article.title_en || '');
+    const rssContent = (rssTitle + '\n\n' + rssDesc).trim();
+    if (rssContent.length >= 50) {
+      html = rssContent;
+      contentSource = 'rss_description_degraded';
+      console.warn('[NEWS] Degraded publisher ' + articleHostname + ' — using RSS description (length=' + rssContent.length + ') — skipping article fetch');
+    } else {
+      // RSS description too short for degraded publisher — skip article entirely
+      console.warn('[NEWS] Degraded publisher ' + articleHostname + ' — RSS description too short, skipping article');
+      article.status = 'failed';
+      article.fail_reason = 'degraded_publisher_rss_too_short';
+      article.priority = 'low';
+      queue.splice(idx, 1);
+      queue.push(article);
+      await saveSummaryQueue(env, queue);
+      return { processed: true, success: false, reason: 'degraded_publisher_rss_too_short', url: article.url, duration_ms: Date.now() - t0 };
+    }
+  } else {
   // ── STEP 1: Fetch article HTML ──
   // NEWSSEC-011 FIX: Validate the article URL scheme before fetching. The URL
   // comes from RSS <link> content (untrusted). Cloudflare Workers already
@@ -6285,6 +6318,7 @@ async function processOneArticleSummary(env, pool = null) {
     console.warn(`[NEWS] Article fetch error: host=${articleHostname} error=${e?.message?.substring(0, 80) || 'unknown'}`);
     return requeueWithRetry('fetch_error', e?.message?.substring(0, 120));
   }
+  } // end of else (non-degraded publisher article fetch)
   } // end of else (article fetch when content:encoded unavailable)
 
   // ── STEP 2: Extract readable article text ──
