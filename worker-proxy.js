@@ -490,41 +490,34 @@ function diagLogSync(env, entry) { /* no-op */ }
 // without exposing the real Telegram ID. Telegram error descriptions are
 // passed through as-is (they contain no secrets).
 //
-// COST: 1 KV read + 1 KV write per /start invocation = 2 subrequests.
-// At ~10-50 /start invocations/day → 20-100 KV ops/day (well under 1,000/day).
+// P0-B OPTIMIZATION: KV persistence REMOVED. Previously each call did 1 KV read
+// (APP_CACHE 'start:e2e_log') + 1 KV write (rolling 20-entry array, TTL 1800s) —
+// ~2,500-9,500 KV writes/day, the 2nd-largest KV Write consumer. Diagnostic
+// E2E traces are now emitted as structured console.log entries captured by
+// Cloudflare Observability (wrangler tail / Cloudflare dashboard Logs panel —
+// observability.enabled is set in wrangler.jsonc). No business logic depends on
+// the KV value: only the /api/start-diag diagnostic endpoint reads it, and that
+// endpoint now reports the migration (live traces are in observability).
+//
+// SECURITY: No tokens, no PII. userId is reduced to a 4-char correlation suffix
+// (last 4 digits) — enough to correlate entries within a single /start flow
+// without exposing the real Telegram ID. Telegram error descriptions are
+// passed through as-is (they contain no secrets).
+//
+// The function remains async + fire-and-forget (`void logStartE2E(...)`) so
+// all existing callers are unchanged. It is non-fatal (try/catch) so a
+// console.log failure can never break /start.
 async function logStartE2E(env, entry) {
-  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
-  // ROOT-CAUSE FIX (bootstrap-hang): wrap KV operations in a timeout race so
-  // they can NEVER hang the request. Previously, `await env.APP_CACHE.get/put`
-  // could hang indefinitely if KV had a transient issue, causing the entire
-  // /start handler to hang → "code had hung" 500 error.
-  // Now: max 500ms per log call. If KV is slow, we drop the log entry (acceptable
-  // for diagnostics — losing a log is better than hanging the request).
   try {
-    const key = 'start:e2e_log';
-    const work = (async () => {
-      const raw = await env.APP_CACHE.get(key).catch(() => null);
-      let arr = [];
-      if (raw) {
-        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
-      }
-      const sanitized = { ts: new Date().toISOString(), ...entry };
-      // Reduce userId to a 4-char correlation suffix (no PII)
-      if (sanitized.userId) {
-        const uid = String(sanitized.userId);
-        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
-        delete sanitized.userId;
-      }
-      arr.push(sanitized);
-      if (arr.length > 20) arr = arr.slice(-20);
-      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
-    })();
-    // Race against 500ms timeout — if KV hangs, we abandon the log write
-    await Promise.race([
-      work,
-      new Promise(resolve => setTimeout(resolve, 500)),
-    ]).catch(() => {});
-  } catch { /* non-fatal */ }
+    const sanitized = { ts: new Date().toISOString(), ...entry };
+    // Reduce userId to a 4-char correlation suffix (no PII)
+    if (sanitized.userId) {
+      const uid = String(sanitized.userId);
+      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+      delete sanitized.userId;
+    }
+    console.log(JSON.stringify({ event: 'start_e2e', ...sanitized }));
+  } catch { /* non-fatal — diagnostics must never break /start */ }
 }
 
 // ============================================================================
@@ -543,31 +536,20 @@ async function logStartE2E(env, entry) {
 // "code had hung" 500 error. Fire-and-forget + internal 500ms timeout race
 // ensures diagnostics can NEVER block the request path.
 async function logBootstrapE2E(env, entry) {
-  if (!env?.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
+  // P0-B OPTIMIZATION: KV persistence REMOVED (same rationale as logStartE2E).
+  // Previously each call did 1 KV read + 1 KV write on 'bootstrap:e2e_log'
+  // (rolling 30-entry array, TTL 1800s). Now emits a structured console.log
+  // entry captured by Cloudflare Observability. The function remains async +
+  // fire-and-forget (`void logBootstrapE2E(...)`) and non-fatal (try/catch).
   try {
-    const key = 'bootstrap:e2e_log';
-    const work = (async () => {
-      const raw = await env.APP_CACHE.get(key).catch(() => null);
-      let arr = [];
-      if (raw) {
-        try { arr = JSON.parse(raw) || []; } catch { arr = []; }
-      }
-      const sanitized = { ts: new Date().toISOString(), ...entry };
-      // Reduce userId to a 4-char correlation suffix (no PII)
-      if (sanitized.userId) {
-        const uid = String(sanitized.userId);
-        sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
-        delete sanitized.userId;
-      }
-      arr.push(sanitized);
-      if (arr.length > 30) arr = arr.slice(-30);
-      await env.APP_CACHE.put(key, JSON.stringify(arr), { expirationTtl: 1800 }).catch(() => {});
-    })();
-    // Race against 500ms timeout — if KV hangs, we abandon the log write
-    await Promise.race([
-      work,
-      new Promise(resolve => setTimeout(resolve, 500)),
-    ]).catch(() => {});
+    const sanitized = { ts: new Date().toISOString(), ...entry };
+    // Reduce userId to a 4-char correlation suffix (no PII)
+    if (sanitized.userId) {
+      const uid = String(sanitized.userId);
+      sanitized.uid = uid.length > 4 ? '…' + uid.slice(-4) : uid;
+      delete sanitized.userId;
+    }
+    console.log(JSON.stringify({ event: 'bootstrap_e2e', ...sanitized }));
   } catch { /* non-fatal — diagnostics must never break bootstrap */ }
 }
 
@@ -1662,15 +1644,7 @@ async function isCallbackRateLimited(env, userId) {
 async function isMarketRateLimited(env, ip, userId) {
   const uid = userId ? String(userId) : 'anon';
   const key = `${MARKET_RATE_LIMIT_KEY_PREFIX}${uid}:${ip}`;
-  const existing = await readRateLimitCache(env, key);
-  if (existing) {
-    const count = parseInt(existing, 10) || 0;
-    if (count >= MARKET_RATE_LIMIT_MAX) return true;
-    await writeRateLimitCache(env, key, String(count + 1), MARKET_RATE_LIMIT_WINDOW);
-    return false;
-  }
-  await writeRateLimitCache(env, key, '1', MARKET_RATE_LIMIT_WINDOW);
-  return false;
+  return _checkRateLimitCoalesced(env, key, MARKET_RATE_LIMIT_MAX, MARKET_RATE_LIMIT_WINDOW);
 }
 
 // ── Reusable user-based rate limiter for mutation endpoints ──────────────
@@ -1692,18 +1666,182 @@ async function isMarketRateLimited(env, ip, userId) {
 const USER_RATE_LIMIT_KEY_PREFIX = 'url:';
 
 async function isUserRateLimited(env, userId, category, maxRequests, windowSeconds) {
-  if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') return false;
   const uid = String(userId || 'anon');
-  const ttl = Math.max(windowSeconds, 60); // KV requires TTL >= 60s
   const key = `${USER_RATE_LIMIT_KEY_PREFIX}${category}:${uid}`;
-  const existing = await readRateLimitCache(env, key);
-  if (existing) {
-    const count = parseInt(existing, 10) || 0;
-    if (count >= maxRequests) return true;
-    await writeRateLimitCache(env, key, String(count + 1), ttl);
+  return _checkRateLimitCoalesced(env, key, maxRequests, windowSeconds);
+}
+
+// ============================================================================
+// KV-WRITE-OPTIMIZED RATE LIMITING (P0-A — controlled optimization)
+// ============================================================================
+// PROBLEM: The previous isMarketRateLimited/isUserRateLimited did ONE
+// env.RATE_LIMITS.put() per ALLOWED request (read counter → write counter+1).
+// At ~5,910 writes/day this was the single largest KV Write consumer and a
+// primary driver of the production "KV put() limit exceeded for the day"
+// exhaustion on APP_CACHE / RATE_LIMITS.
+//
+// OPTIMIZATION (this helper): KV is READ on every request (reads are NOT the
+// quota bottleneck — only writes are). Writes are COALESCED:
+//   - Normal traffic (well under limit): a per-isolate in-memory delta
+//     accumulates; a single KV write is made every FLUSH_SIZE requests OR
+//     every FLUSH_INTERVAL_MS (whichever first). A user making 1-4 requests
+//     per window now costs 0-1 KV writes instead of 1-4.
+//   - Near the limit (within NEAR_LIMIT_MARGIN): every request forces a
+//     read-modify-write flush so KV holds the authoritative, fresh count.
+//     The limit is enforced accurately across isolates (no bypass at the
+//     boundary).
+//   - Over the limit (BLOCKED): NO KV write — the block decision is read-only
+//     (the counter is already at/over the limit in KV from the near-limit
+//     flushes).
+//
+// CROSS-ISOLATE CORRECTNESS (Cloudflare isolates share no memory):
+//   - KV is the only shared state. The in-memory delta is PER-ISOLATE and is
+//     NOT trusted for the block decision at the boundary: once the effective
+//     count reaches (limit - NEAR_LIMIT_MARGIN), every request does a
+//     read-modify-write flush so KV holds the authoritative count. Other
+//     isolates reading KV at that point see an accurate count and block
+//     correctly.
+//   - The maximum cross-isolate drift is bounded by NEAR_LIMIT_MARGIN: the
+//     worst case is a few extra ALLOWED requests in the mid-range (where the
+//     decision is "allow" regardless). The BLOCK decision is preserved. This
+//     matches the read-modify-write race already present in the previous
+//     implementation (two isolates reading the same count and both writing
+//     count+1 lose one update). No NEW bypass is introduced.
+//
+// KV-FAILURE SAFETY (Phase 5 — fixes the previous fail-open bypass):
+//   - env.RATE_LIMITS absent → fail-open (allow), SAME as before.
+//   - KV read fails → kvCount treated as 0, but the per-isolate delta STILL
+//     tracks this isolate's requests → the isolate STILL self-limits at the
+//     limit. Cross-isolate is weakened (other isolates' counts unknown) but
+//     NOT bypassed within this isolate.
+//   - KV write fails (quota exhausted / transient) → delta is NOT reset, so
+//     the next flush retries. The isolate continues to self-limit via delta.
+//     This FIXES the previous fail-open bypass where a failed write left the
+//     counter stuck at its old value and every subsequent request was
+//     allowed (total bypass). Failures are logged for observability.
+//
+// FORMAT: stored as JSON {"c":<count>,"w":<windowIndex>}. The windowIndex
+// lets us detect a stale (previous-window) entry on read and reset cleanly —
+// an ACCURACY improvement over the previous plain-string counter which relied
+// solely on KV TTL expiry. Legacy plain-string entries are parsed
+// conservatively (treated as current-window → may over-count slightly →
+// safe/blocking direction) for backward compatibility during rollout.
+
+// Per-isolate write-coalescing state: Map<key, { delta, windowIndex, lastFlushMs }>
+const _rlCoalesceState = new Map();
+const _RL_COALESCE_MAX_KEYS = 5000; // bound memory growth (rare edge case)
+const _RL_FLUSH_INTERVAL_MS = 5000;
+
+function _getRlCoalesceState(key, windowIndex) {
+  let st = _rlCoalesceState.get(key);
+  if (!st || st.windowIndex !== windowIndex) {
+    // Window rolled over (or first request for this key in this isolate):
+    // reset the delta — the previous window's unflushed delta is irrelevant.
+    if (_rlCoalesceState.size > _RL_COALESCE_MAX_KEYS) {
+      _rlCoalesceState.clear();
+    }
+    st = { delta: 0, windowIndex, lastFlushMs: 0 };
+    _rlCoalesceState.set(key, st);
+  }
+  return st;
+}
+
+function _parseRlValue(raw, currentWindowIndex) {
+  // Backward-compatible parse: new JSON {c, w} format OR legacy plain-string count.
+  if (!raw) return { count: 0, winIdx: currentWindowIndex };
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch { parsed = null; }
+  if (parsed && typeof parsed === 'object' && parsed !== null && Number.isFinite(parsed.c)) {
+    return { count: (parsed.c | 0), winIdx: (parsed.w | 0) };
+  }
+  // Legacy plain-string count (no windowIndex). Since the KV TTL == window,
+  // a legacy entry is at most one window old. Treat conservatively as
+  // current-window (may over-count slightly → safe / blocking direction).
+  const n = parseInt(raw, 10);
+  return { count: Number.isFinite(n) ? n : 0, winIdx: currentWindowIndex };
+}
+
+async function _checkRateLimitCoalesced(env, key, limit, windowSeconds) {
+  // Fail-open when KV binding is absent (preserves existing behavior).
+  if (!env || !env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') {
     return false;
   }
-  await writeRateLimitCache(env, key, '1', ttl);
+  const limitNum = Math.max(1, (limit | 0) || 1);
+  const ttlSec = Math.max(windowSeconds | 0, 60); // KV requires TTL >= 60s
+  const winMs = ttlSec * 1000;
+  const now = Date.now();
+  const windowIndex = Math.floor(now / winMs);
+
+  const st = _getRlCoalesceState(key, windowIndex);
+
+  // Read KV (cheap — reads are not the quota bottleneck).
+  let kvCount = 0;
+  try {
+    const raw = await env.RATE_LIMITS.get(key);
+    const p = _parseRlValue(raw, windowIndex);
+    if (p.winIdx === windowIndex) {
+      kvCount = p.count;
+    }
+    // else: stale window → treat as 0 (window rolled over).
+  } catch (e) {
+    // KV read failure — kvCount stays 0; rely on in-memory delta for this isolate.
+    console.warn('rate-limit KV read failed (using in-memory delta):', e && e.message ? e.message : e);
+  }
+
+  const effective = kvCount + st.delta;
+  if (effective >= limitNum) {
+    // BLOCKED — no KV write. The block decision is read-only.
+    return true;
+  }
+
+  // ALLOWED — increment local delta.
+  st.delta++;
+
+  // Decide whether to flush the coalesced delta to KV now.
+  const NEAR_LIMIT_MARGIN = Math.max(1, Math.ceil(limitNum * 0.5));
+  const FLUSH_SIZE = Math.max(2, Math.ceil(limitNum * 0.15));
+  const newEffective = effective + 1;
+  const nearLimit = newEffective >= (limitNum - NEAR_LIMIT_MARGIN);
+  const sizeFlush = st.delta >= FLUSH_SIZE;
+  // lastFlushMs starts at 0 on first state creation; only enforce the time
+  // interval AFTER a real flush has occurred (otherwise the very first request
+  // of a key would always trigger a timeFlush and defeat coalescing).
+  const timeFlush = st.lastFlushMs > 0 && (now - st.lastFlushMs) >= _RL_FLUSH_INTERVAL_MS;
+
+  if (nearLimit || sizeFlush || timeFlush) {
+    // Read-modify-write: re-read to incorporate concurrent deltas flushed by
+    // other isolates since our first read, then merge our local delta. This
+    // avoids the lost-update problem (last-write-wins would discard other
+    // isolates' increments).
+    let freshCount = 0;
+    try {
+      const freshRaw = await env.RATE_LIMITS.get(key);
+      const fp = _parseRlValue(freshRaw, windowIndex);
+      if (fp.winIdx === windowIndex) freshCount = fp.count;
+    } catch (e) {
+      // KV read failed on re-read — best effort: use the first kvCount.
+      freshCount = kvCount;
+    }
+    const merged = freshCount + st.delta;
+    let writeOk = false;
+    if (typeof env.RATE_LIMITS.put === 'function') {
+      try {
+        await env.RATE_LIMITS.put(key, JSON.stringify({ c: merged, w: windowIndex }), { expirationTtl: ttlSec });
+        writeOk = true;
+        _trackKvWrite('RATE_LIMITS:' + key);
+      } catch (e) {
+        // KV write failure (quota exhausted / transient). Delta is NOT reset
+        // so the next flush retries. The isolate still self-limits via delta.
+        // This fixes the previous fail-open bypass.
+        console.warn('rate-limit KV write failed (in-memory delta retained):', e && e.message ? e.message : e);
+      }
+    }
+    if (writeOk) {
+      st.delta = 0;
+      st.lastFlushMs = now;
+    }
+  }
+
   return false;
 }
 
@@ -11208,7 +11346,15 @@ export default {
           result.webhook_info = { error: 'TELEGRAM_BOT_TOKEN not configured — cannot call getWebhookInfo' };
         }
 
-        // 2. Read [START-E2E] log entries from KV
+        // 2. [START-E2E] log entries — P0-B migration: KV persistence REMOVED.
+        //    Live E2E traces are now emitted as structured console.log
+        //    (event: 'start_e2e') captured by Cloudflare Observability
+        //    (observability.enabled in wrangler.jsonc). This read returns any
+        //    RESIDUAL legacy entries still in KV (TTL 1800s, will expire) for
+        //    backward compatibility. For fresh traces, use wrangler tail or
+        //    the Cloudflare dashboard Logs panel.
+        result.e2e_log_migrated = true;
+        result.e2e_log_source = 'cloudflare_observability';
         try {
           const raw = await env.APP_CACHE?.get('start:e2e_log').catch(() => null);
           if (raw) {
@@ -11395,6 +11541,12 @@ export default {
       // Each entry has: phase, uid (4-char suffix), timestamp, and step-specific
       // data (joined, reason, is_admin_env, is_admin_final, error, etc.)
       if (request.method === 'GET' && url.pathname === '/api/bootstrap-diag') {
+        // P0-B migration: KV persistence for [BOOTSTRAP-E2E] REMOVED. Live
+        // traces are now emitted as structured console.log (event:
+        // 'bootstrap_e2e') captured by Cloudflare Observability. This read
+        // returns any RESIDUAL legacy entries still in KV (TTL 1800s, will
+        // expire) for backward compatibility. For fresh traces, use wrangler
+        // tail or the Cloudflare dashboard Logs panel.
         let entries = [];
         try {
           const raw = await env.APP_CACHE?.get('bootstrap:e2e_log').catch(() => null);
@@ -11409,7 +11561,9 @@ export default {
           server_time: new Date().toISOString(),
           count: entries.length,
           entries: entries.slice(-30),
-          note: 'These logs are written by the bootstrap handler (POST /api/users/bootstrap). Open the Mini App to generate fresh entries. Each entry has a 4-char uid suffix for correlation across phases within a single bootstrap flow.',
+          migrated: true,
+          live_source: 'cloudflare_observability',
+          note: 'P0-B: KV persistence removed to reduce KV Write consumption. Live [BOOTSTRAP-E2E] traces are now structured console.log (event: "bootstrap_e2e") captured by Cloudflare Observability (wrangler tail / dashboard Logs). These residual KV entries are legacy and will expire (TTL 1800s). Each entry has a 4-char uid suffix for correlation across phases within a single bootstrap flow.',
         }, {}, env);
       }
 

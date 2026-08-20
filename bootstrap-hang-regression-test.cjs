@@ -5,9 +5,17 @@
  * (read + write). With 12 calls per bootstrap, that's 24 KV operations that
  * could hang the request if KV had a transient issue.
  *
- * FIX: All log calls are now fire-and-forget (`void logBootstrapE2E(...)`)
- * AND each has an internal 500ms timeout race so even the background promise
- * can't hang indefinitely.
+ * ORIGINAL FIX: All log calls were made fire-and-forget (`void logBootstrapE2E(...)`)
+ * AND each had an internal 500ms timeout race so even the background promise
+ * couldn't hang indefinitely.
+ *
+ * P0-B KV-WRITE OPTIMIZATION (current): logStartE2E / logBootstrapE2E no longer
+ * touch APP_CACHE KV at all — they emit structured console.log entries (captured
+ * by Cloudflare Observability). The 500ms timeout race is therefore REMOVED
+ * (there is no I/O to hang). HANG-003 / HANG-004 now assert the NEW no-KV
+ * contract. HANG-005..007 still pass trivially (no KV → instant completion).
+ * HANG-001/002/009/010/011/SUMMARY still guard the fire-and-forget `void`
+ * pattern, which is unchanged.
  *
  * Tests:
  * 1. bootstrap success (normal flow completes)
@@ -15,8 +23,9 @@
  * 3. bootstrap concurrent requests x5 (dedup + no deadlock)
  * 4. failed bootstrap can recover on next request (no stuck state)
  * 5. logBootstrapE2E is fire-and-forget (doesn't block)
- * 6. logBootstrapE2E has internal timeout (can't hang)
+ * 6. logBootstrapE2E does NOT perform KV operations (P0-B)
  * 7. logStartE2E is fire-and-forget (doesn't block)
+ * 8. logStartE2E does NOT perform KV operations (P0-B)
  *
  * Run: node --test bootstrap-hang-regression-test.cjs
  */
@@ -49,11 +58,13 @@ test('HANG-002: ALL logStartE2E calls in worker-proxy.js use void (fire-and-forg
   assert.equal(awaitCount, 0, `Expected 0 await logStartE2E calls (all must be void), got ${awaitCount}`);
 });
 
-test('HANG-003: logBootstrapE2E has internal 500ms timeout race', () => {
-  // The function must use Promise.race with a setTimeout(500) to bound KV hang
+test('HANG-003: logBootstrapE2E does NOT perform KV operations (P0-B: KV removed)', () => {
+  // P0-B KV-WRITE OPTIMIZATION: logBootstrapE2E no longer reads/writes APP_CACHE.
+  // The internal 500ms Promise.race timeout was ONLY needed to bound the now-
+  // removed KV read+write. With KV gone, there is no I/O to hang — the function
+  // emits a structured console.log (event: 'bootstrap_e2e') and returns.
   const fnStart = WORKER_SRC.indexOf('async function logBootstrapE2E');
-  const fnEnd = WORKER_SRC.indexOf('}', fnStart + 50);
-  // Get full function (it's small, ~25 lines)
+  assert.notStrictEqual(fnStart, -1, 'logBootstrapE2E must be defined');
   let depth = 0, inStr = false, strCh = '';
   let i = fnStart;
   while (WORKER_SRC[i] !== '{') i++;
@@ -69,12 +80,19 @@ test('HANG-003: logBootstrapE2E has internal 500ms timeout race', () => {
     }
   }
   const fnBlock = WORKER_SRC.slice(fnStart, i + 1);
-  assert.ok(fnBlock.includes('Promise.race'), 'logBootstrapE2E must use Promise.race for timeout');
-  assert.ok(fnBlock.includes('setTimeout(resolve, 500)'), 'logBootstrapE2E must race against 500ms timeout');
+  assert.ok(!fnBlock.includes('APP_CACHE.get'), 'logBootstrapE2E must NOT read APP_CACHE (KV read removed)');
+  assert.ok(!fnBlock.includes('APP_CACHE.put'), 'logBootstrapE2E must NOT write APP_CACHE (KV write removed)');
+  assert.ok(fnBlock.includes('console.log'), 'logBootstrapE2E must emit structured console.log');
+  assert.ok(fnBlock.includes("'bootstrap_e2e'"), 'logBootstrapE2E console.log must tag event: bootstrap_e2e');
 });
 
-test('HANG-004: logStartE2E has internal 500ms timeout race', () => {
+test('HANG-004: logStartE2E does NOT perform KV operations (P0-B: KV removed)', () => {
+  // P0-B KV-WRITE OPTIMIZATION: logStartE2E no longer reads/writes APP_CACHE.
+  // The internal 500ms Promise.race timeout was ONLY needed to bound the now-
+  // removed KV read+write. With KV gone, there is no I/O to hang — the function
+  // emits a structured console.log (event: 'start_e2e') and returns.
   const fnStart = WORKER_SRC.indexOf('async function logStartE2E');
+  assert.notStrictEqual(fnStart, -1, 'logStartE2E must be defined');
   let depth = 0, inStr = false, strCh = '';
   let i = fnStart;
   while (WORKER_SRC[i] !== '{') i++;
@@ -90,8 +108,10 @@ test('HANG-004: logStartE2E has internal 500ms timeout race', () => {
     }
   }
   const fnBlock = WORKER_SRC.slice(fnStart, i + 1);
-  assert.ok(fnBlock.includes('Promise.race'), 'logStartE2E must use Promise.race for timeout');
-  assert.ok(fnBlock.includes('setTimeout(resolve, 500)'), 'logStartE2E must race against 500ms timeout');
+  assert.ok(!fnBlock.includes('APP_CACHE.get'), 'logStartE2E must NOT read APP_CACHE (KV read removed)');
+  assert.ok(!fnBlock.includes('APP_CACHE.put'), 'logStartE2E must NOT write APP_CACHE (KV write removed)');
+  assert.ok(fnBlock.includes('console.log'), 'logStartE2E must emit structured console.log');
+  assert.ok(fnBlock.includes("'start_e2e'"), 'logStartE2E console.log must tag event: start_e2e');
 });
 
 // ============================================================================
