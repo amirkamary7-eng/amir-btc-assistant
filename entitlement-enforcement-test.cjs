@@ -206,9 +206,28 @@ test('NOCHANGE-03: Daily claim now tier-based (Phase 4: Normal 10, Premium 20)',
   assert.ok(!w.includes('const DAILY_REWARD = 10;'), 'no hard-coded 10');
 });
 
-test('NOCHANGE-04: Watchlist frontend still MAX_WATCHLIST=7 (frontend limit)', () => {
+test('NOCHANGE-04: Watchlist frontend uses dynamic getMaxWatchlist() (premium-aware)', () => {
+  // UPDATED: previously this test pinned `MAX_WATCHLIST = 7` as a hard-coded
+  // const — which was the ROOT CAUSE of the "premium user hits limit 7" bug
+  // (the frontend gate at toggleWatchlist blocked the PUT before the backend,
+  // which correctly supports 20 for premium, was ever reached).
+  //
+  // Now the frontend uses getMaxWatchlist() which returns 7 (Free) or 20
+  // (Premium) based on MembershipApp.isPremiumCached(). MAX_WATCHLIST=7 is
+  // kept ONLY as a backward-compat constant (the Free limit) — the dynamic
+  // value is via getMaxWatchlist(). The backend remains authoritative.
   const a = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  assert.ok(a.includes('MAX_WATCHLIST = 7'), 'frontend MAX_WATCHLIST unchanged');
+  assert.ok(a.includes('function getMaxWatchlist()'),
+    'frontend must define getMaxWatchlist() (dynamic premium-aware limit)');
+  assert.ok(a.includes('window.MembershipApp.isPremiumCached()'),
+    'getMaxWatchlist must consult MembershipApp.isPremiumCached()');
+  assert.ok(a.includes('return 20'),
+    'getMaxWatchlist must return 20 for premium (entitlement_config.premium_max)');
+  assert.ok(a.includes('return 7'),
+    'getMaxWatchlist must return 7 for Free (entitlement_config.normal_max)');
+  // toggleWatchlist must use the dynamic function, not the hard-coded const
+  assert.ok(a.includes('watchlist.length >= getMaxWatchlist()'),
+    'toggleWatchlist gate must use getMaxWatchlist() (dynamic, premium-aware)');
 });
 
 // ─── Tests: Wiring ──────────────────────────────────────────────────────────
