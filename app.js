@@ -9440,8 +9440,19 @@ function closeNotifModal() {
 async function markAllRead() {
     const reqId = 'MARK_ALL_' + Date.now();
     _logNotifEvent('MARK_ALL_READ_START', { reqId, notifCount: notifications.length });
+    // ROOT-CAUSE FIX (notification return bug): previously the catch block
+    // fell through to the "Fallback for guests" block below, which marked all
+    // notifications as read locally as if the mutation had succeeded. On ANY
+    // API failure for an AUTHENTICATED user, this falsely marked all as read.
+    // The next poll (≤60s) fetched server truth and reverted them.
+    //
+    // FIX: the guest fallback now ONLY runs when the user is actually a guest.
+    // For authenticated users, an API failure shows an error toast and bumps
+    // _notifReqSeq so any in-flight poll is discarded. Local state is NOT
+    // mutated on failure.
+    const isGuest = UserContext.isGuest();
     try {
-        if (API_BASE && !UserContext.isGuest()) {
+        if (API_BASE && !isGuest) {
             const res = await apiFetch('/api/notifications/read-all', { method: 'POST' });
             // Only update local state if API succeeded
             if (res && res.status === 'success') {
@@ -9457,6 +9468,8 @@ async function markAllRead() {
             } else {
                 console.warn('markAllRead: API returned non-success', res);
                 _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: 'non-success' });
+                // Bump seq so any in-flight poll is discarded; do NOT mutate local state.
+                _notifReqSeq++;
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
@@ -9464,9 +9477,15 @@ async function markAllRead() {
     } catch (e) {
         console.warn('markAllRead API failed:', e);
         _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: e?.message });
-        showMiniToast(t('error_generic') || 'Error');
+        // Do NOT fall through to the guest fallback for an authenticated user.
+        if (!isGuest) {
+            _notifReqSeq++;
+            showMiniToast(t('error_generic') || 'Error');
+            return;
+        }
     }
-    // Fallback for guests: update local state only
+    // Fallback for guests ONLY: update local state (no backend to call).
+    if (!isGuest) return;
     notifications.forEach(n => n.read = true);
     _updateBadgeFromLocal();
     renderNotifications();
@@ -9481,8 +9500,19 @@ async function clearAllNotifications() {
     if(!confirm(t('confirm_clear_notif'))) return;
     const reqId = 'DELETE_ALL_' + Date.now();
     _logNotifEvent('DELETE_ALL_START', { reqId, notifCount: notifications.length });
+    // ROOT-CAUSE FIX (notification return bug): previously the catch block
+    // fell through to the "Fallback for guests" block below, which cleared the
+    // local notifications array as if the delete had succeeded. On ANY API
+    // failure for an AUTHENTICATED user, this falsely cleared the list. The
+    // next poll (≤60s) fetched server truth and re-added them all.
+    //
+    // FIX: the guest fallback now ONLY runs when the user is actually a guest.
+    // For authenticated users, an API failure shows an error toast and bumps
+    // _notifReqSeq so any in-flight poll is discarded. Local state is NOT
+    // mutated on failure.
+    const isGuest = UserContext.isGuest();
     try {
-        if (API_BASE && !UserContext.isGuest()) {
+        if (API_BASE && !isGuest) {
             const res = await apiFetch('/api/notifications', { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = [];
@@ -9500,6 +9530,8 @@ async function clearAllNotifications() {
             } else {
                 console.warn('clearAllNotifications: API returned non-success', res);
                 _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: 'non-success' });
+                // Bump seq so any in-flight poll is discarded; do NOT mutate local state.
+                _notifReqSeq++;
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
@@ -9507,9 +9539,15 @@ async function clearAllNotifications() {
     } catch (e) {
         console.warn('clearAllNotifications API failed:', e);
         _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: e?.message });
-        showMiniToast(t('error_generic') || 'Error');
+        // Do NOT fall through to the guest fallback for an authenticated user.
+        if (!isGuest) {
+            _notifReqSeq++;
+            showMiniToast(t('error_generic') || 'Error');
+            return;
+        }
     }
-    // Fallback for guests: clear local state only
+    // Fallback for guests ONLY: clear local state (no backend to call).
+    if (!isGuest) return;
     notifications = [];
     _updateBadgeFromLocal();
     renderNotifications();
@@ -9523,8 +9561,20 @@ async function clearAllNotifications() {
 async function deleteNotification(id) {
     const reqId = 'DELETE_ONE_' + Date.now();
     _logNotifEvent('DELETE_ONE_START', { reqId, notifId: id, notifCount: notifications.length });
+    // ROOT-CAUSE FIX (notification return bug): previously the catch block
+    // fell through to the "Fallback for guests" block below, which filtered
+    // the notification out of local state as if the delete had succeeded. On
+    // ANY API failure for an AUTHENTICATED user, this falsely removed the
+    // notification locally. The next poll (≤60s) fetched server truth (still
+    // present) and re-added it → notification "reappeared".
+    //
+    // FIX: the guest fallback now ONLY runs when the user is actually a guest.
+    // For authenticated users, an API failure shows an error toast and bumps
+    // _notifReqSeq so any in-flight poll is discarded. Local state is NOT
+    // mutated on failure.
+    const isGuest = UserContext.isGuest();
     try {
-        if (API_BASE && !UserContext.isGuest()) {
+        if (API_BASE && !isGuest) {
             const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = notifications.filter(n => n.id !== id);
@@ -9534,14 +9584,28 @@ async function deleteNotification(id) {
                 // Bump sequence so in-flight poll doesn't overwrite
                 _notifReqSeq++;
                 _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: true, newSeq: _notifReqSeq });
+            } else {
+                // Non-success response (e.g. 404 not-found). Do NOT mutate local
+                // state. Bump seq so any in-flight poll is discarded.
+                _notifReqSeq++;
+                _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: false, error: 'non-success' });
+                showMiniToast(t('error_generic') || 'Error');
             }
             return;
         }
     } catch (e) {
         console.warn('deleteNotification:', e);
         _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: false, error: e?.message });
+        // Do NOT fall through to the guest fallback for an authenticated user.
+        if (!isGuest) {
+            _notifReqSeq++;
+            showMiniToast(t('error_generic') || 'Error');
+            return;
+        }
+        // For guests, fall through to the local-state fallback below.
     }
-    // Fallback for guests
+    // Fallback for guests ONLY
+    if (!isGuest) return;
     notifications = notifications.filter(n => n.id !== id);
     _updateBadgeFromLocal();
     renderNotifications();
@@ -9708,8 +9772,22 @@ function renderNotifications() {
  * notification "reverted" to unread. Now we only update local state on success.
  */
 async function markNotifRead(id) {
+    // ROOT-CAUSE FIX (notification return bug): previously the catch block
+    // fell through to the "Fallback for guests" block below, which mutated
+    // local state as if the mutation had succeeded. On ANY API failure
+    // (network error, 15s timeout, 5xx, 401, JSON parse error) for an
+    // AUTHENTICATED user, this falsely marked the notification as read locally.
+    // The next poll (≤60s) then fetched server truth (still unread) and
+    // overwrote the false state → notification "reverted" to unread.
+    //
+    // FIX: the guest fallback now ONLY runs when the user is actually a guest
+    // (i.e. the API branch was skipped). For authenticated users, an API
+    // failure shows an error toast and bumps _notifReqSeq so any in-flight
+    // poll with stale data is discarded (and the next poll fetches fresh
+    // truth). Local state is NOT mutated on failure.
+    const isGuest = UserContext.isGuest();
     try {
-        if (API_BASE && !UserContext.isGuest()) {
+        if (API_BASE && !isGuest) {
             const res = await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
             if (res && res.status === 'success') {
                 const n = notifications.find(x => x.id === id);
@@ -9722,11 +9800,30 @@ async function markNotifRead(id) {
                 _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
+            } else {
+                // Non-success response (e.g. 404 not-found, {status:'error'}).
+                // Do NOT mutate local state — the server did not confirm the
+                // mutation. Bump seq so any in-flight poll is discarded; the
+                // next poll will fetch server truth.
+                _notifReqSeq++;
+                showMiniToast(t('error_generic') || 'Error');
             }
             return;
         }
-    } catch (e) { console.warn('markNotifRead API failed:', e); }
-    // Fallback for guests: update local state only
+    } catch (e) {
+        console.warn('markNotifRead API failed:', e);
+        // Do NOT fall through to the guest fallback for an authenticated user.
+        // Bump seq so any in-flight poll (with stale data) is discarded, and
+        // let the next poll fetch fresh truth. Show an error toast.
+        if (!isGuest) {
+            _notifReqSeq++;
+            showMiniToast(t('error_generic') || 'Error');
+            return;
+        }
+        // For guests, fall through to the local-state fallback below.
+    }
+    // Fallback for guests ONLY: update local state (no backend to call).
+    if (!isGuest) return;
     const n = notifications.find(x => x.id === id);
     if (n) n.read = true;
     _updateBadgeFromLocal();
