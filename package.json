@@ -4,7 +4,7 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "node --test worker-proxy.test.cjs worker-proxy.alerts.test.mjs worker-proxy.btc-pairs.test.mjs advertisements-system-test.cjs premium-ad-control-test.cjs chat-ai-quota-image-retention-test.cjs start-join-check-regression-test.cjs start-e2e-diagnostic-test.cjs miniapp-joincheck-regression-test.cjs bootstrap-hang-regression-test.cjs membership-gateway-test.cjs join-rate-limit-test.cjs news-publisher-429-test.cjs news-behavioral-test.cjs news-degraded-publisher-test.cjs news-article-fetch-mock-test.cjs",
+    "test": "node --test worker-proxy.test.cjs worker-proxy.alerts.test.mjs worker-proxy.btc-pairs.test.mjs advertisements-system-test.cjs premium-ad-control-test.cjs chat-ai-quota-image-retention-test.cjs start-join-check-regression-test.cjs start-e2e-diagnostic-test.cjs miniapp-joincheck-regression-test.cjs bootstrap-hang-regression-test.cjs membership-gateway-test.cjs join-rate-limit-test.cjs news-publisher-429-test.cjs news-behavioral-test.cjs news-degraded-publisher-test.cjs news-article-fetch-mock-test.cjs groq-rate-limit-test.cjs",
     "cf:dev": "wrangler dev",
     "cf:deploy:staging": "wrangler deploy --env staging",
     "cf:deploy:production": "node -e \"console.error('\\n⚠️  PRODUCTION DEPLOY — MANUAL ONLY\\n    This deploys to amir-btc-assistant-api-production\\n    Make sure tests pass first: npm test\\n    Press Ctrl+C to cancel, or Enter to continue...');require('readline').createInterface({input:process.stdin,output:process.stdout}).question('',()=>{require('child_process').execSync('npx wrangler deploy --env production',{stdio:'inherit'})})\"",
