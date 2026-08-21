@@ -2110,21 +2110,21 @@ test('CA-20: checkRateLimits compares timestamp with Date.now()', () => {
     'checkRateLimits must parse stored value as Number');
 });
 
-// CA-21: History limited to 4 messages (not 6)
-test('CA-21: History limited to last 4 messages (reduced from 6)', () => {
+// CA-21: History limited to 8 messages (increased from 4 for better context)
+test('CA-21: History limited to last 8 messages (increased from 4 for context)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes('history.slice(-4)'),
-    'Backend must slice history to last 4 messages');
+  assert.ok(ASSISTANT_SRC.includes('history.slice(-8)'),
+    'Backend must slice history to last 8 messages');
   const ASSISTANT_JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_JS.includes('this.history.slice(-4)'),
-    'Frontend must slice history to last 4 messages');
+  assert.ok(ASSISTANT_JS.includes('this.history.slice(-8)'),
+    'Frontend must slice history to last 8 messages');
 });
 
-// CA-22: MAX_HISTORY_CONTENT_LENGTH reduced to 2000
-test('CA-22: MAX_HISTORY_CONTENT_LENGTH is 2000 (reduced from 4000)', () => {
+// CA-22: MAX_HISTORY_CONTENT_LENGTH increased to 4000 (from 2000 for richer context)
+test('CA-22: MAX_HISTORY_CONTENT_LENGTH is 4000 (increased from 2000)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes('MAX_HISTORY_CONTENT_LENGTH = 2000'),
-    'MAX_HISTORY_CONTENT_LENGTH must be 2000');
+  assert.ok(ASSISTANT_SRC.includes('MAX_HISTORY_CONTENT_LENGTH = 4000'),
+    'MAX_HISTORY_CONTENT_LENGTH must be 4000');
 });
 
 // CA-23: Frontend catch block handles 429 with cooldown message

@@ -22,11 +22,30 @@ const AssistantUI = {
         root.innerHTML = `
             <div id="ai-speech-bubble" class="ai-speech-bubble" role="status" aria-live="polite">
                 <button id="ai-bubble-close" class="ai-bubble-close" type="button" aria-label="بستن">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
                 </button>
+                <div class="ai-bubble-header">
+                    <div class="ai-bubble-avatar">
+                        <svg width="16" height="16" viewBox="0 0 56 56" fill="none">
+                            <defs>
+                                <radialGradient id="aiBubbleGrad" cx="50%" cy="50%" r="50%">
+                                    <stop offset="0%" stop-color="#FFD9A0"/>
+                                    <stop offset="100%" stop-color="#F5A623"/>
+                                </radialGradient>
+                            </defs>
+                            <circle cx="28" cy="28" r="7" fill="url(#aiBubbleGrad)"/>
+                            <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623" opacity="0.8"/>
+                            <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623" opacity="0.8"/>
+                            <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623" opacity="0.8"/>
+                            <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623" opacity="0.8"/>
+                        </svg>
+                    </div>
+                    <span class="ai-bubble-title">سلام! 👋</span>
+                </div>
                 <p class="ai-speech-text" data-i18n-fa="سلام، خوش اومدی! سوالی داری؟" data-i18n-en="Welcome! Got a question?">سلام، خوش اومدی! سوالی داری؟</p>
+                <button class="ai-bubble-cta" type="button" onclick="document.getElementById('ai-fab').click()">شروع چت</button>
                 <span class="ai-bubble-tail"></span>
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
@@ -500,7 +519,10 @@ const AssistantUI = {
         if (content) {
             const text = document.createElement('div');
             text.className = 'ai-msg-text';
-            text.textContent = content;
+            // MARKDOWN FIX: convert basic markdown to HTML for rendering.
+            // Previously used textContent → no markdown → user saw raw * ** - chars.
+            // Now: safe inline conversion of **bold**, *italic*, bullet points, paragraphs.
+            text.innerHTML = AssistantUI.renderMarkdown(content);
             bubble.appendChild(text);
         }
         wrapper.appendChild(bubble);
@@ -510,6 +532,38 @@ const AssistantUI = {
         requestAnimationFrame(() => {
             box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
         });
+    },
+
+    // MARKDOWN FIX: safe markdown-to-HTML renderer for AI chat messages.
+    // Converts **bold**, *italic*, bullet points (- ), and paragraphs.
+    // Escapes HTML first to prevent XSS, then applies markdown transforms.
+    renderMarkdown(text) {
+        if (!text) return '';
+        // 1. Escape HTML to prevent XSS
+        let html = text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        // 2. Convert **bold** → <strong>
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // 3. Convert *italic* → <em> (but not inside <strong>)
+        html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        // 4. Convert bullet points (lines starting with - or •) → <ul><li>
+        const lines = html.split('\n');
+        let result = [];
+        let inList = false;
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
+                if (!inList) { result.push('<ul>'); inList = true; }
+                result.push('<li>' + trimmed.slice(2) + '</li>');
+            } else {
+                if (inList) { result.push('</ul>'); inList = false; }
+                if (trimmed) result.push('<p>' + trimmed + '</p>');
+            }
+        }
+        if (inList) result.push('</ul>');
+        return result.join('');
     },
 
     // PHASE 7: Empty state management
@@ -1012,7 +1066,7 @@ const AssistantUI = {
                 message: fullMessage,
                 // PHASE FIX: Reduced from 6 → 4 messages (last 2 exchanges).
                 // With 4 × 2000 chars = 8000 chars max — well within all provider context windows.
-                history: this.history.slice(-4),
+                history: this.history.slice(-8),
                 image: imageData || null,
                 context: this.getContext ? this.getContext() : null
             };
