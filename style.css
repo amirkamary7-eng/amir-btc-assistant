@@ -3054,22 +3054,23 @@ strong.down { color: var(--red); }
     position: absolute;
     bottom: calc(100% + 10px);
     inset-inline-end: 0;
-    width: min(280px, calc(100vw - 88px));
-    max-width: min(280px, calc(100vw - 88px));
-    padding: 10px 12px 12px;
-    border-radius: 14px;
-    background: linear-gradient(145deg, rgba(8, 21, 38, 0.92), rgba(2, 6, 17, 0.88));
-    backdrop-filter: blur(16px) saturate(1.3);
-    -webkit-backdrop-filter: blur(16px) saturate(1.3);
-    border: 1px solid rgba(245, 166, 35, 0.15);
+    width: min(240px, calc(100vw - 88px));
+    max-width: min(240px, calc(100vw - 88px));
+    padding: 8px 10px 10px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, rgba(8, 21, 38, 0.94), rgba(2, 6, 17, 0.90));
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    border: 1px solid rgba(245, 166, 35, 0.12);
     box-shadow:
-        0 6px 24px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(245, 166, 35, 0.04),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        0 4px 18px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
     opacity: 1;
     transform: translateY(0) scale(1);
-    transition: opacity 0.35s ease, transform 0.35s ease;
-    animation: ai-bubble-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    /* FIX: use 'forwards' NOT 'both' — 'both' permanently overrides opacity
+       via fill-mode, preventing .ai-speech-hidden from hiding the bubble. */
+    animation: ai-bubble-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     flex-shrink: 0;
 }
 
@@ -3077,21 +3078,24 @@ strong.down { color: var(--red); }
     opacity: 0;
     transform: translateY(6px) scale(0.97);
     pointer-events: none;
+    /* FIX: clear the entrance animation so it doesn't override opacity:0.
+       Without this, animation fill-mode:forwards keeps opacity:1 applied. */
+    animation: none;
 }
 
 .ai-bubble-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
+    gap: 5px;
+    margin-bottom: 3px;
 }
 
 .ai-bubble-avatar {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    background: linear-gradient(135deg, rgba(245, 166, 35, 0.15), rgba(245, 166, 35, 0.05));
-    border: 1px solid rgba(245, 166, 35, 0.12);
+    background: linear-gradient(135deg, rgba(245, 166, 35, 0.12), rgba(245, 166, 35, 0.04));
+    border: 1px solid rgba(245, 166, 35, 0.10);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3099,18 +3103,18 @@ strong.down { color: var(--red); }
 }
 
 .ai-bubble-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    color: rgba(245, 166, 35, 0.9);
-    letter-spacing: 0.2px;
+    color: rgba(245, 166, 35, 0.85);
+    letter-spacing: 0.1px;
 }
 
 .ai-speech-bubble .ai-speech-text {
-    margin: 0 0 8px 0;
-    padding: 0 0 0 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.85);
+    margin: 0 0 6px 0;
+    padding: 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.82);
     font-weight: 400;
 }
 
@@ -3118,12 +3122,12 @@ strong.down { color: var(--red); }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 5px 14px;
-    border-radius: 8px;
-    border: 1px solid rgba(245, 166, 35, 0.25);
-    background: linear-gradient(135deg, rgba(245, 166, 35, 0.12), rgba(245, 166, 35, 0.06));
+    padding: 4px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(245, 166, 35, 0.22);
+    background: linear-gradient(135deg, rgba(245, 166, 35, 0.10), rgba(245, 166, 35, 0.04));
     color: #f5a623;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -3131,30 +3135,30 @@ strong.down { color: var(--red); }
 }
 
 .ai-bubble-cta:hover {
-    background: linear-gradient(135deg, rgba(245, 166, 35, 0.2), rgba(245, 166, 35, 0.1));
-    border-color: rgba(245, 166, 35, 0.4);
+    background: linear-gradient(135deg, rgba(245, 166, 35, 0.18), rgba(245, 166, 35, 0.08));
+    border-color: rgba(245, 166, 35, 0.35);
 }
 
 .ai-bubble-cta:active {
-    transform: scale(0.97);
+    transform: scale(0.96);
 }
 
 .ai-bubble-close {
     position: absolute;
-    top: 5px;
-    inset-inline-start: 5px;
-    width: 18px;
-    height: 18px;
+    top: 4px;
+    inset-inline-start: 4px;
+    width: 16px;
+    height: 16px;
     border: none;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.45);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: background 0.2s, color 0.2s, transform 0.15s;
-    z-index: 2;
+    z-index: 3;
 }
 
 .ai-bubble-close:hover {

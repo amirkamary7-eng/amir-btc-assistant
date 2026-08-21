@@ -187,15 +187,38 @@ const AssistantUI = {
         }
         // Play subtle notification sound
         this.playWelcomeSound();
-        const dismiss = () => {
+
+        // FIX: unified dismiss function — clears timer, hides bubble, sets state.
+        // Both auto-dismiss AND close button use this SAME path.
+        const dismissWelcomeBubble = () => {
+            // Clear any existing timer (prevents duplicate timer firing)
+            if (bubble._dismissTimer) {
+                clearTimeout(bubble._dismissTimer);
+                bubble._dismissTimer = null;
+            }
+            // Guard: if already hidden, do nothing (prevents double-dismiss)
             if (bubble.classList.contains('ai-speech-hidden')) return;
             bubble.classList.add('ai-speech-hidden');
             sessionStorage.setItem('ai_welcome_shown', '1');
         };
-        closeBtn?.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); dismiss(); });
-        const timer = window.setTimeout(dismiss, 5000);
-        // Store timer so we can cancel if user closes early
-        bubble._dismissTimer = timer;
+
+        // Close button — single click dismisses
+        closeBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dismissWelcomeBubble();
+        });
+
+        // Auto-dismiss after 5 seconds
+        bubble._dismissTimer = window.setTimeout(dismissWelcomeBubble, 5000);
+
+        // FIX: also dismiss when user clicks the FAB (opens chat) — prevents
+        // the bubble from lingering after the chat panel opens.
+        document.getElementById('ai-fab')?.addEventListener('click', () => {
+            if (!bubble.classList.contains('ai-speech-hidden')) {
+                dismissWelcomeBubble();
+            }
+        }, { once: false });
     },
 
     // PHASE 1: Subtle notification sound for welcome bubble

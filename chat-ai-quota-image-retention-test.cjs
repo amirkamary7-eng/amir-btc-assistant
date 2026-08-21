@@ -1372,9 +1372,8 @@ test('WELCOME-01: No emoji in speech bubble text', () => {
 
 test('WELCOME-02: Speech bubble auto-dismisses', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('setTimeout(dismiss'), 'Must auto-dismiss speech bubble');
-  assert.ok(JS.includes('8000') || JS.includes('7000'),
-    'Must auto-dismiss after 7-8 seconds');
+  assert.ok(JS.includes('setTimeout(dismissWelcomeBubble'), 'Must auto-dismiss speech bubble');
+  assert.ok(JS.includes('5000'), 'Must auto-dismiss after 5 seconds');
 });
 
 test('WELCOME-03: Speech bubble has close button', () => {
@@ -1531,7 +1530,7 @@ test('WELCOME-01: Welcome bubble shows on app load (not every open)', () => {
 
 test('WELCOME-02: Welcome bubble auto-dismisses after 5 seconds', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('setTimeout(dismiss, 5000)'), 'Must auto-dismiss after 5 seconds (5000ms)');
+  assert.ok(JS.includes('setTimeout(dismissWelcomeBubble, 5000)'), 'Must auto-dismiss after 5 seconds (5000ms)');
 });
 
 test('WELCOME-AUTOHIDE-01: Welcome has close button', () => {
@@ -1725,7 +1724,7 @@ test('WELCOME-MSG-05: Welcome has English text', () => {
 
 test('WELCOME-MSG-06: Welcome auto-dismisses after 5 seconds', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('setTimeout(dismiss, 5000)'), 'Must auto-dismiss after 5s');
+  assert.ok(JS.includes('setTimeout(dismissWelcomeBubble, 5000)'), 'Must auto-dismiss after 5s');
 });
 
 test('WELCOME-MSG-07: Welcome has close button', () => {
