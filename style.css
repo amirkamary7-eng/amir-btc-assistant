@@ -12273,6 +12273,32 @@ body.jl-locked .cd-fullscreen {
     max-width: 100%;
 }
 
+/* FIX #4 (date display clipping): date cells need to show the full date+time
+   without being clipped by the parent .adm-meta-val overflow:hidden. The
+   adminFormatDate() produces "Aug 21, 2026, 08:35 AM" (22 chars, ~158px)
+   which overflows the ~98px 3-col grid cell on mobile. This class relaxes
+   the clipping for date cells specifically — other .adm-meta-val cells
+   (token count, etc.) keep the ellipsis behavior. The date uses a slightly
+   smaller font + negative letter-spacing + visible overflow to fit, and
+   falls back to wrapping (white-space: normal) on very narrow screens so
+   the full date+time is always readable (responsive). */
+.adm-meta-val.adm-meta-val-date {
+    font-size: 10.5px;
+    letter-spacing: -0.2px;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+@media (max-width: 420px) {
+    .adm-meta-val.adm-meta-val-date {
+        /* On very narrow screens, allow wrapping to 2 lines instead of clipping.
+           The full date+time is preserved (no truncation). */
+        white-space: normal;
+        overflow: visible;
+        line-height: 1.3;
+    }
+}
+
 /* Row 3: permission badges */
 .adm-card-perms {
     display: flex;

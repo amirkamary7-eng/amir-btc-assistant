@@ -378,9 +378,11 @@ export function createAdminRepository(deps) {
           u.telegram_id, u.username, u.first_name, u.last_name,
           u.lang, u.channel_joined, u.created_at,
           u.last_active_at, u.bot_joined_at, u.mini_app_opened_at, u.is_premium,
-          tb.balance
+          tb.balance,
+          mu.membership_level, mu.membership_status, mu.expire_at
         FROM users u
         LEFT JOIN token_balances tb ON tb.user_id = u.telegram_id
+        LEFT JOIN membership_users mu ON mu.telegram_id = u.telegram_id
         ${whereClause}
         ORDER BY u.created_at DESC
         LIMIT ${lim} OFFSET ${offset}
@@ -393,21 +395,37 @@ export function createAdminRepository(deps) {
       page: pg,
       limit: lim,
       has_more: offset + lim < total,
-      users: dataResult.rows.map((r) => ({
-        telegram_id: String(r.telegram_id),
-        username: normalizeOptionalString(r.username),
-        first_name: normalizeOptionalString(r.first_name),
-        last_name: normalizeOptionalString(r.last_name),
-        language: normalizeOptionalString(r.lang),
-        channel_joined: Boolean(r.channel_joined),
-        is_premium: Boolean(r.is_premium),
-        is_active: r.last_active_at != null && (Date.now() - new Date(r.last_active_at).getTime()) < 24 * 60 * 60 * 1000,
-        last_active: r.last_active_at ? new Date(r.last_active_at).toISOString() : null,
-        bot_joined_at: r.bot_joined_at ? new Date(r.bot_joined_at).toISOString() : null,
-        mini_app_opened_at: r.mini_app_opened_at ? new Date(r.mini_app_opened_at).toISOString() : null,
-        token_balance: Number(r.balance || 0),
-        created_at: isoDate(r.created_at),
-      })),
+      users: dataResult.rows.map((r) => {
+        const expireAt = r.expire_at ? new Date(r.expire_at).getTime() : null;
+        const notExpired = expireAt === null || expireAt > Date.now();
+        // App Membership Premium: the authoritative definition (matches
+        // membershipAuthority.isPremium() — APPROVED + premium level + not expired).
+        // This is DISTINCT from users.is_premium (Telegram messenger Premium).
+        const level = r.membership_level || 'FREE';
+        const status = r.membership_status || 'INACTIVE';
+        const isAppPremium = status === 'APPROVED'
+          && ['VIP', 'PREMIUM', 'ELITE'].includes(level)
+          && notExpired;
+        return {
+          telegram_id: String(r.telegram_id),
+          username: normalizeOptionalString(r.username),
+          first_name: normalizeOptionalString(r.first_name),
+          last_name: normalizeOptionalString(r.last_name),
+          language: normalizeOptionalString(r.lang),
+          channel_joined: Boolean(r.channel_joined),
+          is_premium: Boolean(r.is_premium),  // Telegram messenger Premium (unchanged)
+          is_app_premium: isAppPremium,        // App Membership Premium (authoritative)
+          membership_level: level,
+          membership_status: status,
+          membership_expire_at: r.expire_at ? new Date(r.expire_at).toISOString() : null,
+          is_active: r.last_active_at != null && (Date.now() - new Date(r.last_active_at).getTime()) < 24 * 60 * 60 * 1000,
+          last_active: r.last_active_at ? new Date(r.last_active_at).toISOString() : null,
+          bot_joined_at: r.bot_joined_at ? new Date(r.bot_joined_at).toISOString() : null,
+          mini_app_opened_at: r.mini_app_opened_at ? new Date(r.mini_app_opened_at).toISOString() : null,
+          token_balance: Number(r.balance || 0),
+          created_at: isoDate(r.created_at),
+        };
+      }),
     };
   }
 

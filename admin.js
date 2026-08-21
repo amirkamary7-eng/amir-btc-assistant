@@ -1062,8 +1062,9 @@ async function loadAdminList() {
 
             // Role badge color: super=red, administrator=orange, others=blue
             const roleBadgeColor = isSuper ? 'red' : (role === 'administrator' ? 'orange' : 'blue');
-            // Status badge
-            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('BLOCKED', 'red');
+            // Status badge — FIX #2: "INACTIVE" (gray) instead of "BLOCKED" (red).
+            // is_active=false means "no activity in 24h", NOT a ban/suspension.
+            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('INACTIVE', 'gray');
 
             // Permission summary: show count + up to 3 badges, then "+N"
             let permBadgesHtml = '';
@@ -1098,8 +1099,8 @@ async function loadAdminList() {
                 '</div>' +
                 // Row 2: meta info (joined, last active, perm count)
                 '<div class="adm-card-meta">' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val">' + adminFormatDate(admin.created_at) + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین ورود</span><span class="adm-meta-val">' + (admin.last_active ? adminFormatDate(admin.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(admin.created_at) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین ورود</span><span class="adm-meta-val adm-meta-val-date">' + (admin.last_active ? adminFormatDate(admin.last_active) : '—') + '</span></span>' +
                     '<span class="adm-meta-item"><span class="adm-meta-label">دسترسی‌ها</span><span class="adm-meta-val">' + permCount + '</span></span>' +
                 '</div>' +
                 // Row 3: permission badges
@@ -1278,24 +1279,43 @@ async function loadAdminUsers(page) {
         users.forEach(function (u) {
             // Build a modern, uniform user card with aligned badges + meta grid.
             const isActive = u.is_active !== false;
-            const isPremium = u.is_premium;
+            const isTelegramPremium = u.is_premium;       // Telegram messenger Premium ($5/mo Telegram subscription)
+            const isAppPremium = u.is_app_premium;        // App Membership Premium (authoritative: membershipAuthority.isPremium logic)
+            const membershipLevel = u.membership_level || 'FREE';
+            const membershipStatus = u.membership_status || 'INACTIVE';
             const channelJoined = u.channel_joined;
             const displayName = (u.first_name || u.name || 'کاربر') + (u.last_name ? ' ' + u.last_name : '');
             const tgId = String(u.telegram_id || u.id || '');
             const username = u.username ? '@' + u.username : null;
             const tokens = (u.token_balance !== undefined && u.token_balance !== null) ? u.token_balance : (u.tokens || 0);
-            const roleLabel = u.role || null; // if user has an admin role
 
-            // Badges — all same size, aligned in one row
-            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('BLOCKED', 'red');
+            // Badges — all same size, aligned in one row.
+            //
+            // FIX #2 (BLOCKED → INACTIVE): the previous "BLOCKED" label implied
+            // the user was banned/suspended/deleted, but is_active=false actually
+            // only means "no activity in the last 24h". Renamed to "INACTIVE" to
+            // reflect the true meaning without implying a ban.
+            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('INACTIVE', 'gray');
             const channelBadge = channelJoined ? adminBadge('JOINED', 'green') : adminBadge('NOT JOINED', 'gray');
-            const premiumBadge = isPremium ? adminBadge('PREMIUM', 'orange') : '';
-            const roleBadge = roleLabel ? adminBadge(roleLabel.toUpperCase(), 'blue') : '';
+            // FIX #1 (Premium badge disambiguation): previously the badge showed
+            // just "PREMIUM" for users.is_premium (Telegram messenger Premium),
+            // which admins misread as App Membership Premium. Now:
+            //   - Telegram Premium → "TG PREMIUM" (gray, distinct from App Premium)
+            //   - App Membership Premium → "APP PREMIUM" (orange + gold avatar)
+            // App Premium is the authoritative entitlement (membershipAuthority.isPremium
+            // logic: APPROVED + VIP/PREMIUM/ELITE + not expired).
+            const tgPremiumBadge = isTelegramPremium ? adminBadge('TG PREMIUM', 'gray') : '';
+            const appPremiumBadge = isAppPremium ? adminBadge('APP PREMIUM', 'orange') : '';
+            // FIX #3 (Role badge removed): the previous role badge read u.role,
+            // but the API never returned a `role` field — it was dead code that
+            // always rendered as an empty string. Removed to avoid confusion.
 
+            // Avatar gold gradient only for APP Premium (the real entitlement),
+            // NOT for Telegram messenger Premium.
             html += '<div class="admin-list-item adm-user-card">' +
                 // Row 1: avatar + name + badges
                 '<div class="adm-card-top">' +
-                    '<div class="adm-card-avatar' + (isPremium ? ' adm-card-avatar--premium' : '') + '">' + adminEscapeHtml((displayName || 'ک').charAt(0)) + '</div>' +
+                    '<div class="adm-card-avatar' + (isAppPremium ? ' adm-card-avatar--premium' : '') + '">' + adminEscapeHtml((displayName || 'ک').charAt(0)) + '</div>' +
                     '<div class="adm-card-id">' +
                         '<div class="adm-card-name">' + adminEscapeHtml(displayName) + '</div>' +
                         '<div class="adm-card-sub">' +
@@ -1304,13 +1324,13 @@ async function loadAdminUsers(page) {
                         '</div>' +
                     '</div>' +
                     '<div class="adm-card-badges">' +
-                        statusBadge + channelBadge + premiumBadge + roleBadge +
+                        statusBadge + channelBadge + tgPremiumBadge + appPremiumBadge +
                     '</div>' +
                 '</div>' +
                 // Row 2: meta grid — uniform columns
                 '<div class="adm-card-meta">' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val">' + adminFormatDate(u.created_at || u.join_date) + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین فعالیت</span><span class="adm-meta-val">' + (u.last_active ? adminFormatDate(u.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(u.created_at || u.join_date) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین فعالیت</span><span class="adm-meta-val adm-meta-val-date">' + (u.last_active ? adminFormatDate(u.last_active) : '—') + '</span></span>' +
                     '<span class="adm-meta-item"><span class="adm-meta-label">توکن</span><span class="adm-meta-val">' + adminEscapeHtml(String(tokens)) + '</span></span>' +
                 '</div>' +
                 '</div>';

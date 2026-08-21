@@ -369,8 +369,19 @@ export function createMembershipRepository(deps) {
   }
 
   async function levelDistribution(env) {
+    // SECURITY/REPORTING FIX: previously counted by membership_level ALONE,
+    // which over-counted SUSPENDED/EXPIRED/PENDING/REJECTED users with retained
+    // premium levels. Now filters to APPROVED + not-expired (matching
+    // isPremium() and counts() vipUsers) so the distribution chart shows only
+    // ACTUAL premium users per level. The "FREE" bucket is also restricted to
+    // APPROVED + not-expired for consistency (a FREE-level user who is
+    // PENDING/REJECTED is not an active member).
     const rows = await queryDb(env,
-      'SELECT membership_level AS level, COUNT(*)::int AS count FROM membership_users GROUP BY membership_level'
+      `SELECT membership_level AS level, COUNT(*)::int AS count
+       FROM membership_users
+       WHERE membership_status = 'APPROVED'
+         AND (expire_at IS NULL OR expire_at > NOW())
+       GROUP BY membership_level`
     ).then(r => r.rows);
     const total = rows.reduce((s, r) => s + r.count, 0);
     return rows.map(r => ({ ...r, percent: total > 0 ? Math.round((r.count / total) * 1000) / 10 : 0 }));
