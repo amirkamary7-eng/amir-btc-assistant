@@ -13147,13 +13147,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let _maintenanceBlocked = false;
 
-    // Start maintenance check (non-blocking)
-    checkMaintenanceMode().then(_maintOk => {
+    // MAINTENANCE FIX: check maintenance BEFORE any other init.
+    // Previously this ran in parallel with bootstrapUser, which meant the
+    // app UI rendered BEFORE the maintenance response arrived → user saw
+    // the full app briefly, then maintenance popup appeared on refresh.
+    // Now: we AWAIT the maintenance check first. If maintenance is ON,
+    // we block all further init (bootstrap, data loading, rendering).
+    // If maintenance is OFF (or network fails → fail open), we continue.
+    checkMaintenanceMode().then(async (_maintOk) => {
         if (!_maintOk) {
             _maintenanceBlocked = true;
             console.log('[MAINT] App load blocked — maintenance mode active');
+            return; // Stop here — don't bootstrap or load data
         }
-    }).catch(() => { /* fail open */ });
 
     // Start bootstrap (non-blocking — membership check runs in parallel)
     bootstrapUser().then(() => {
@@ -13197,9 +13203,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // bootstrap to complete, adding 200-500ms to the critical path.
     // Now apiFetch's waitForApiReady handles the auth wait naturally.
     // Cached data is already rendered above — these calls just refresh.
-    if (API_BASE) {
+    // FIX: gate data loading on maintenance check — don't load if blocked.
+    if (API_BASE && !_maintenanceBlocked) {
         _startDataLoading();
     }
+
+    }).catch(() => { /* maintenance check failed — fail open */ });
 
     // If user is pending (cold open), set up retry mechanism
     if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
