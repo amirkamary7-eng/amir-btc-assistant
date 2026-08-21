@@ -58,6 +58,23 @@ test('COUNT-STATIC-04: counts() still returns totalUsers/approvedUsers/vipUsers/
   assert.ok(MEMBERSHIP_REPO_SRC.includes('suspendedUsers: row.suspended'));
 });
 
+// PHASE 1 FIX test: approvedUsers now also filters by not-expired
+test('COUNT-STATIC-05: counts() approvedUsers filter includes expire_at check (Phase 1 fix)', () => {
+  // The approved FILTER must now include the expire_at conjunct (previously it didn't)
+  // The SQL spans multiple lines, so we check the full counts() function block.
+  const fnMatch = MEMBERSHIP_REPO_SRC.match(/async function counts[\s\S]*?FROM membership_users/);
+  assert.ok(fnMatch, 'counts() function must exist');
+  const fnBlock = fnMatch[0];
+  // Find the approved FILTER clause (between "AS approved" and the next FILTER/end)
+  const approvedMatch = fnBlock.match(/FILTER\s*\(\s*WHERE\s*membership_status\s*=\s*'APPROVED'[\s\S]*?AS\s+approved/);
+  assert.ok(approvedMatch, 'must have an approved FILTER clause');
+  const approvedClause = approvedMatch[0];
+  assert.ok(approvedClause.includes("membership_status = 'APPROVED'"),
+    'approved filter must include membership_status = APPROVED');
+  assert.ok(approvedClause.includes('(expire_at IS NULL OR expire_at > NOW())'),
+    'approved filter must include (expire_at IS NULL OR expire_at > NOW()) — Phase 1 fix');
+});
+
 // ============================================================================
 // BEHAVIORAL: the predicate logic matches isPremium() for 9 scenarios
 // ============================================================================
@@ -68,12 +85,24 @@ function oldVipPredicate(user) {
   return ['VIP', 'PREMIUM', 'ELITE'].includes(user.membership_level);
 }
 
-// The NEW (fixed) predicate — the SQL FILTER clause in counts().
+// The NEW (fixed) predicate — the SQL FILTER clause in counts() for VIP.
 function newVipPredicate(user, now) {
   const refNow = now instanceof Date ? now.getTime() : (now || Date.now());
   return ['VIP', 'PREMIUM', 'ELITE'].includes(user.membership_level)
     && user.membership_status === 'APPROVED'
     && (!user.expire_at || new Date(user.expire_at).getTime() > refNow);
+}
+
+// The NEW (fixed) approvedUsers predicate — Phase 1 fix: now also filters by not-expired.
+function newApprovedPredicate(user, now) {
+  const refNow = now instanceof Date ? now.getTime() : (now || Date.now());
+  return user.membership_status === 'APPROVED'
+    && (!user.expire_at || new Date(user.expire_at).getTime() > refNow);
+}
+
+// The OLD (buggy) approvedUsers predicate — did NOT filter by expire_at.
+function oldApprovedPredicate(user) {
+  return user.membership_status === 'APPROVED';
 }
 
 // The membershipAuthority.isPremium() logic (src/services/membership_authority.js:125-128).
@@ -151,6 +180,64 @@ for (const sc of scenarios) {
       `new predicate (${newResult}) must match isPremium() (${authorityResult})`);
   });
 }
+
+// ============================================================================
+// PHASE 1 FIX: approvedUsers now filters by not-expired (the "6" bug)
+// ============================================================================
+// The "تأیید شده" (Approved) card reads s.approvedUsers. Previously this
+// counted ALL users with membership_status='APPROVED' (including expired).
+// If 6 users had APPROVED status (4 expired), the card showed 6 while only
+// 2 were truly active. Now it also filters by not-expired.
+
+const approvedScenarios = [
+  { name: 'APPROVED + not expired → counted as approved',
+    user: { membership_status: 'APPROVED', expire_at: FUTURE }, expected: true },
+  { name: 'APPROVED + expire NULL → counted as approved',
+    user: { membership_status: 'APPROVED', expire_at: null }, expected: true },
+  { name: 'APPROVED + expired → NOT counted (Phase 1 fix)',
+    user: { membership_status: 'APPROVED', expire_at: PAST }, expected: false },
+  { name: 'PENDING → NOT counted as approved',
+    user: { membership_status: 'PENDING', expire_at: null }, expected: false },
+  { name: 'SUSPENDED → NOT counted as approved',
+    user: { membership_status: 'SUSPENDED', expire_at: null }, expected: false },
+  { name: 'REJECTED → NOT counted as approved',
+    user: { membership_status: 'REJECTED', expire_at: null }, expected: false },
+  { name: 'INACTIVE → NOT counted as approved',
+    user: { membership_status: 'INACTIVE', expire_at: null }, expected: false },
+];
+
+for (const sc of approvedScenarios) {
+  test(`APPROVED-BEHAV-NEW: ${sc.name}`, () => {
+    const result = newApprovedPredicate(sc.user, NOW);
+    assert.equal(result, sc.expected,
+      `approved predicate: expected ${sc.expected}, got ${result}`);
+  });
+}
+
+test('APPROVED-BEHAV-OLD: old approved predicate over-counted expired APPROVED (proves the 6 bug)', () => {
+  // The old predicate counted APPROVED+expired as approved → the "6" bug
+  const expiredApproved = { membership_status: 'APPROVED', expire_at: PAST };
+  assert.equal(oldApprovedPredicate(expiredApproved), true,
+    'OLD predicate counted expired APPROVED (the bug)');
+  assert.equal(newApprovedPredicate(expiredApproved, NOW), false,
+    'NEW predicate does NOT count expired APPROVED (the fix)');
+});
+
+test('APPROVED-CONSISTENCY: approvedUsers >= vipUsers (approved includes FREE-level approved too)', () => {
+  // approvedUsers counts ALL approved+not-expired (any level)
+  // vipUsers counts only approved+not-expired+premium-level
+  // So approvedUsers >= vipUsers always
+  const users = [
+    { membership_level: 'FREE', membership_status: 'APPROVED', expire_at: null },
+    { membership_level: 'PREMIUM', membership_status: 'APPROVED', expire_at: null },
+    { membership_level: 'VIP', membership_status: 'APPROVED', expire_at: FUTURE },
+  ];
+  const approvedCount = users.filter(u => newApprovedPredicate(u, NOW)).length;
+  const vipCount = users.filter(u => newVipPredicate(u, NOW)).length;
+  assert.equal(approvedCount, 3, 'all 3 approved (1 FREE + 2 premium)');
+  assert.equal(vipCount, 2, 'only 2 VIP (PREMIUM + VIP, not FREE)');
+  assert.ok(approvedCount >= vipCount, 'approvedUsers >= vipUsers');
+});
 
 // Sanity: the OLD buggy predicate would have OVER-COUNTED scenarios 4-7.
 // This proves the fix actually changes behavior for those scenarios.

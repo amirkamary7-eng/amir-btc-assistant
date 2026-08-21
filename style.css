@@ -3690,14 +3690,15 @@ strong.down { color: var(--red); }
 .admin-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .admin-subtitle { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin: 20px 0 12px; }
 
-/* Admin Stats Grid */
-.admin-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* Admin Stats Grid — COMPACT: less padding, smaller gap, slightly smaller
+   numbers but still readable. More cards visible per screen on mobile. */
+.admin-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .admin-stat-card {
-    background: var(--bg-card); border-radius: 14px; padding: 14px;
+    background: var(--bg-card); border-radius: 12px; padding: 10px 12px;
     border: 1px solid var(--border);
 }
-.admin-stat-value { font-size: 22px; font-weight: 800; color: var(--accent); }
-.admin-stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.admin-stat-value { font-size: 20px; font-weight: 800; color: var(--accent); line-height: 1.2; }
+.admin-stat-label { font-size: 10.5px; color: var(--text-secondary); margin-top: 2px; }
 
 /* Admin List Items */
 .admin-list { display: flex; flex-direction: column; gap: 8px; }
@@ -12168,16 +12169,18 @@ body.jl-locked .cd-fullscreen {
    ============================================================================ */
 
 /* ── Modern admin card (users + admins) ── */
+/* COMPACT FIX: reduced gap, padding, min-height, and avatar size so cards
+   take less vertical space and more are visible per screen. Premium dark
+   fintech look preserved. */
 .adm-user-card {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 16px;
-    border-radius: 14px;
+    gap: 7px;
+    padding: 10px 12px;
+    border-radius: 12px;
     background: linear-gradient(165deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
     border: 1px solid var(--border);
     transition: border-color 0.2s, transform 0.15s;
-    min-height: 140px;
 }
 .adm-user-card:hover { border-color: rgba(255,138,0,0.25); }
 .adm-user-card:active { transform: scale(0.995); }
@@ -12186,17 +12189,17 @@ body.jl-locked .cd-fullscreen {
 .adm-card-top {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 .adm-card-avatar {
     flex-shrink: 0;
-    width: 38px; height: 38px;
+    width: 32px; height: 32px;
     border-radius: 50%;
     background: linear-gradient(135deg, #FF8A00 0%, #FFB347 100%);
     color: #fff;
     display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 800;
-    box-shadow: 0 2px 8px rgba(255,138,0,0.3);
+    font-size: 14px; font-weight: 800;
+    box-shadow: 0 2px 6px rgba(255,138,0,0.25);
 }
 .adm-card-avatar--premium {
     background: linear-gradient(135deg, #F59E0B 0%, #FCD34D 100%);
@@ -12228,21 +12231,23 @@ body.jl-locked .cd-fullscreen {
     font-variant-numeric: tabular-nums;
     color: rgba(255,255,255,0.7);
 }
+/* COMPACT: tighter badge gap + more width to fit 4 badges (status, channel,
+   TG PREMIUM, APP PREMIUM) without wrapping on most screens. */
 .adm-card-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 3px;
     justify-content: flex-end;
     flex-shrink: 0;
-    max-width: 45%;
+    max-width: 52%;
 }
 
-/* Row 2: meta grid — uniform columns */
+/* Row 2: meta grid — uniform columns. COMPACT: tighter gap + padding. */
 .adm-card-meta {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    padding: 8px 10px;
+    gap: 4px;
+    padding: 6px 8px;
     background: rgba(0,0,0,0.18);
     border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.04);
@@ -12323,15 +12328,17 @@ body.jl-locked .cd-fullscreen {
 }
 
 /* ── Standardized badges (all same height/size) ── */
+/* COMPACT: smaller badge height + padding + font so 4 badges fit in one row
+   on the user card. Still readable (9.5px bold uppercase on colored bg). */
 .admin-badge {
     display: inline-flex;
     align-items: center;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: 6px;
-    font-size: 10px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 5px;
+    font-size: 9.5px;
     font-weight: 700;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     text-transform: uppercase;
     white-space: nowrap;
     line-height: 1;

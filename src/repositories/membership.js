@@ -337,10 +337,19 @@ export function createMembershipRepository(deps) {
     // APPROVED + premium level + not-expired; this count must match that logic
     // so the admin dashboard stat ("کاربران VIP") reflects ACTUAL premium
     // users, not just users with a premium-level label.
+    //
+    // PHASE 1 FIX (the "6" bug): the `approved` count previously used only
+    // `membership_status = 'APPROVED'` WITHOUT filtering by expire_at. This
+    // over-counted users whose membership was APPROVED in the past but has
+    // since expired (expire_at in the past). The admin saw "تأیید شده" = 6
+    // while only 2 were truly active premium. Now `approved` also filters by
+    // not-expired, matching isPremium() semantics: an expired APPROVED user
+    // is NOT an active approved member.
     const row = await queryDb(env,
       `SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE membership_status = 'APPROVED')::int AS approved,
+        COUNT(*) FILTER (WHERE membership_status = 'APPROVED'
+                          AND (expire_at IS NULL OR expire_at > NOW()))::int AS approved,
         COUNT(*) FILTER (WHERE membership_level IN ('VIP','PREMIUM','ELITE')
                           AND membership_status = 'APPROVED'
                           AND (expire_at IS NULL OR expire_at > NOW()))::int AS vip,
