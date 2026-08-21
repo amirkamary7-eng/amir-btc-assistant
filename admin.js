@@ -1604,9 +1604,12 @@ async function adminDeleteTicket(ticketId) {
 function filterAdminTickets(status, btn) {
     _adminTicketsFilter = status;
     // Update active filter button
+    // FIX: the HTML uses class "adm-filter-btn" (not "admin-filter-btn").
+    // Previously querySelectorAll('.admin-filter-btn') found 0 elements →
+    // active was never removed from siblings → ALL tabs appeared selected.
     const parent = btn ? btn.parentElement : null;
     if (parent) {
-        parent.querySelectorAll('.admin-filter-btn').forEach(function (b) { b.classList.remove('active'); });
+        parent.querySelectorAll('.adm-filter-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
     }
     loadAdminTickets(1);
@@ -1789,7 +1792,8 @@ function filterAdminRewards(status, btn) {
     _adminRewardsFilter = status;
     const parent = btn ? btn.parentElement : null;
     if (parent) {
-        parent.querySelectorAll('.admin-filter-btn').forEach(function (b) { b.classList.remove('active'); });
+        // FIX: same class name mismatch as filterAdminTickets — HTML uses "adm-filter-btn".
+        parent.querySelectorAll('.adm-filter-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
     }
     loadAdminRewards();
