@@ -3987,3 +3987,481 @@ Stage Summary:
 - DIFF SCOPE: app.js +21 lines, test file +267 lines, worklog.md +109 lines. worker-proxy.js, src/controllers/users.js, package.json, miniapp-joincheck-regression-test.cjs all UNMODIFIED.
 - PRE-COMMIT SMOKE TEST: All production endpoints healthy.
 - READY FOR COMMIT + PUSH + DEPLOY.
+
+---
+Task ID: DEPLOY-BYPASS-BLACK-SCREEN
+Agent: Main Orchestrator
+Task: PHASE 6 — Commit, Push, Deploy, Verify production
+
+Work Log:
+- Committed: 7e63be8 "fix: remove boot-loader-overlay on all checkMaintenanceMode early-return paths"
+- Pushed to origin/main: fa04fed..7e63be8
+- GitHub Actions auto-deploy triggered (test → deploy-worker → deploy-pages → verify)
+- Verified production endpoints:
+  - /api/health → 200 OK (bot_configured=true, database_ready=true, cache_ready=true)
+  - /api/system/status → 200 OK (maintenance ON, progress 97%, set by admin 831704732)
+  - /api/users/bootstrap → 401 "Missing Telegram init data" (route exists, auth required)
+  - Pages index.html → 200 OK
+- Verified Pages deployment (app.cbc6dfb3.js): contains 5 AUDIT-BYPASS-BLACK-SCREEN fix markers
+- Verified all 4 fix paths in production app.js (app.cbc6dfb3.js):
+  1. _maintenanceBypassed path: _removeBootLoader(); before return true ✓
+  2. sessionStorage.maint_bypassed path (CRITICAL): _removeBootLoader(); before return true ✓
+  3. no-API_BASE path: _removeBootLoader(); before return true ✓
+  4. HTTP error path: _removeBootLoader(); before return true ✓
+- Total _removeBootLoader() calls in production checkMaintenanceMode: 11 (7 actual calls + 4 comment mentions — matches local source)
+
+Stage Summary:
+- COMMIT: 7e63be8 pushed to origin/main
+- DEPLOY: GitHub Actions auto-deploy. Both Worker + Pages deployed successfully.
+- PRODUCTION VERIFICATION:
+  - Worker endpoints all healthy (200/200/401)
+  - Pages app.cbc6dfb3.js contains the fix
+  - All 4 early-return paths in checkMaintenanceMode call _removeBootLoader() before return true
+  - CRITICAL sessionStorage bypass path now removes the boot-loader-overlay
+- CRITERION MET: Maintenance ON → Admin → Bypass → Reload will now directly show the main app — no black boot-loader/spinner remaining.
+
+FINAL SUMMARY:
+- ROOT CAUSE: checkMaintenanceMode() had 4 early-return paths that returned true WITHOUT calling _removeBootLoader(). After admin bypass + reload, sessionStorage had maint_bypassed='1', checkMaintenanceMode hit the early return, _removeBootLoader() was never called, and the boot-loader-overlay (black screen with infinite spinner, z-index 999998) stayed visible forever.
+- FIX: Added _removeBootLoader() calls to all 4 early-return paths. Scope exactly limited to checkMaintenanceMode — no other code, logic, or security changes.
+- TESTS: 11 new regression tests (BOOT-LOADER-001..010 + SUMMARY-UPDATED). Full suite: 1045 tests / 1043 pass / 0 fail / 2 skipped. No regressions.
+- BUILD/LINT: node -c OK, bun build OK.
+- DIFF/SCOPE: app.js +21 lines (only checkMaintenanceMode), test file +267 lines, worklog.md +109 lines. worker-proxy.js, src/controllers/users.js, package.json, miniapp-joincheck-regression-test.cjs all UNMODIFIED.
+- DEPLOY: 7e63be8 deployed to production. All endpoints healthy.
+- PRODUCTION VERIFICATION: All 4 fix paths confirmed live in production app.cbc6dfb3.js.
+
+---
+Task ID: AUDIT-RAPID-OPEN-CLOSE
+Agent: Main Orchestrator
+Task: PHASE 1 — READ-ONLY Deep Root-Cause Audit — Join Check/Admin Detection failure after rapid Open/Close
+
+Work Log:
+- Traced all startup/bootstrap paths in app.js:
+  - DOMContentLoaded (line 12798): UserContext.init() fires async, cache hydration synchronous, _parallelBootstrapPromise = bootstrapUser() (line 13199), cold-start boot poll (line 13203-13250), checkMaintenanceMode().then() (line 13263)
+  - bootstrapUser() (line 1051): deduped via _bootstrapUserInFlight (cleared in finally, line 1060)
+  - _bootstrapUserImpl() (line 1064): actual API call, sets bootstrapComplete, isCurrentUserAdmin, calls updateAdminEntryButton/updateMaintenanceAdminBypass
+  - tryLateBootstrap() (line 1269): deduped via _bootstrapPromise (cleared in finally, line 1274)
+  - _doBootstrap() (line 1280): checks conditions, calls bootstrapUser, sets _bootstrapFailedAt only if loadUser/initAdminPanel throw
+- Traced lifecycle event handlers:
+  - visibilitychange (line 12454): _stopAllPolling when hidden, _startAllPolling + tryLateBootstrap when visible
+  - beforeunload (line 12481): _stopAllPolling + clear _bootstrapLongTimer
+  - pageshow (line 12487): tryLateBootstrap only if !bootstrapComplete && isTelegramAuthReady && event.persisted
+  - hashchange (line 310): tryLateBootstrap when hash updates after SDK init
+  - viewportChanged (line 274): tryLateBootstrap when user becomes available (registered inside initTelegramWebApp)
+  - NO pagehide handler exists (only beforeunload/pageshow)
+- Traced all state variables preserved in bfcache (module-level):
+  - telegramInitDone, telegramAuthWaitPromise, _authWaitAttempted (lines 20-22)
+  - bootstrapComplete (line 23)
+  - _bootstrapPromise, _bootstrapLongTimer (lines 27-28)
+  - _adminPanelInitialized (line 29)
+  - _bootstrapUserInFlight (line 1050)
+  - _bootstrapFailedAt (line 1278)
+  - _requestInFlight (line 3894, GET dedup map)
+  - UserContext.user, UserContext.ready (lines 863-864)
+  - isCurrentUserAdmin (line 332)
+  - _maintenanceBypassed, _maintenanceActive (lines 12523-12524)
+  - _joinLockShown, _joinVerifying, _joinLockSafetyTimer, _bootstrapMembershipInFlight (lines 13657-13662)
+- Compared fa04fed (my PHASE 1 fix) vs prior behavior: my fix made bootstrapUser() fire in PARALLEL with checkMaintenanceMode() (line 13199) instead of only inside the maintenance .then block. This means bootstrapUser() now ALWAYS fires on DOMContentLoaded, regardless of maintenance state.
+- Traced Admin Detection path: _bootstrapUserImpl (line 1123-1125) sets isCurrentUserAdmin from server response, sets bootstrapComplete=true (line 1194), calls updateAdminEntryButton (line 1208), updateAnalysisFabVisibility (line 1206), updateMaintenanceAdminBypass (line 1210). All called INSIDE _bootstrapUserImpl after bootstrapComplete is set.
+
+Stage Summary — KEY FINDINGS:
+
+CONFIRMED:
+1. NO pagehide handler exists. When the page goes to bfcache, only beforeunload fires (which clears _bootstrapLongTimer). When restored, only pageshow (with event.persisted=true) and visibilitychange fire. DOMContentLoaded does NOT fire on bfcache restore.
+
+2. All module-level state variables are preserved in bfcache. If state is inconsistent at bfcache time, the inconsistency persists after restore.
+
+3. The pageshow recovery path (line 12487) only calls tryLateBootstrap if BOTH !bootstrapComplete AND isTelegramAuthReady(). If bootstrapComplete=true (from a successful background bootstrap), the recovery path is skipped — which is correct IF state is consistent.
+
+4. The visibilitychange recovery path (line 12454-12478) only calls tryLateBootstrap if !bootstrapComplete. Same behavior as pageshow.
+
+5. _bootstrapUserImpl catches ALL errors (line 1250-1262), so _doBootstrap's catch block (line 1302-1305) never fires for bootstrap API failures — meaning _bootstrapFailedAt is NEVER set by bootstrap failures (only by loadUser/initAdminPanel throwing). The 5-second cooldown (line 1272) is effectively dead code for the common failure case.
+
+LIKELY:
+6. **_bootstrapUserInFlight stuck promise**: If the page closes to bfcache while a bootstrap fetch is in-flight, the fetch is suspended. When restored, AbortSignal.timeout(15000) should eventually fire (timers are suspended in bfcache, resume on restore). But if the browser kills the timeout when entering bfcache (rare but possible), _bootstrapUserInFlight points to a never-resolving promise → new bootstrapUser() calls return the stuck promise → bootstrap never re-runs. This would explain "Join Check not running" — bootstrapUser returns the stuck promise without making a new API call.
+
+7. **telegramInitDone=true + UserContext.user=null**: If the page closes before getTelegramUser() resolves (8s timeout), telegramInitDone becomes true (line 302) but UserContext.user stays null. On restore, initTelegramWebApp's fast path (line 266) requires BOTH telegramInitDone AND getTelegramUser()?.id — the user check fails, so it re-registers tg.onEvent('viewportChanged', ...) (handler accumulation). If the SDK still has valid initData, getTelegramUser() should work. But if the SDK cleared/refreshed initData, user stays null → isTelegramAuthReady() returns false → tryLateBootstrap never fires → bootstrap never re-runs. Only a page refresh (which resets all state + re-inits SDK) would fix this.
+
+8. **_requestInFlight stuck GET promises**: Same pattern as #6 but for GET requests. If a GET request (e.g., /api/analyses, /api/market) is in-flight when the page goes to bfcache and the fetch gets suspended, _requestInFlight[dedupeKey] points to a stuck promise. New calls return the stuck promise. Only affects GET requests, not bootstrap (POST).
+
+9. **beforeunload clearing _bootstrapLongTimer**: beforeunload (line 12481) clears _bootstrapLongTimer. If beforeunload fires when entering bfcache (browser-dependent), _bootstrapLongTimer is cleared. On restore, visibilitychange re-creates it (line 12465-12471) if !bootstrapComplete. But if visibilitychange doesn't fire (rare), _bootstrapLongTimer never re-starts → no 15s bootstrap retry.
+
+POSSIBLE:
+10. **Admin UI not refreshed after background bootstrap**: If bootstrap completes in the background while page is hidden (bfcache), _bootstrapUserImpl calls updateAdminEntryButton/updateAnalysisFabVisibility. These update the DOM. If the browser doesn't render while hidden, the DOM may not visually reflect admin state. On restore, the DOM should be in the last-set state. But if any CSS class or inline style was set conditionally (e.g., display:none based on isAdmin() at the time of update), it may not re-evaluate on restore.
+
+11. **Admin detection depends on server response**: If the bootstrap API call fails (network error, timeout), isCurrentUserAdmin is never updated from its previous value. If previous value was false (first load) and bootstrap fails, admin is not detected. If previous value was true (from a prior session in bfcache) and bootstrap fails, admin IS still detected (correct behavior — admin stays admin).
+
+12. **sessionStorage.maint_bypassed**: If an admin bypassed maintenance in a previous session, sessionStorage has maint_bypassed='1'. On the next open, checkMaintenanceMode returns true early (line 12555). This is correct. But if the admin logs out / re-opens, sessionStorage persists across page reloads but NOT across Mini App close (depends on platform). If sessionStorage is cleared on Mini App close (some platforms do this), the bypass flag is lost — admin sees maintenance popup again. This is a UX issue, not a bug.
+
+REGRESSION CHECK (fa04fed):
+- My fa04fed fix made bootstrapUser() fire on EVERY DOMContentLoaded (parallel with maintenance check), instead of only when maintenance is OFF.
+- Before fa04fed: bootstrapUser only fired when maintenance OFF. During maintenance, bootstrap never fired → admin never detected (5-20s delay).
+- After fa04fed: bootstrapUser always fires → admin detection works during maintenance.
+- IMPACT on this bug: fa04fed made the bootstrapUser() call path fire more often, which means _bootstrapUserInFlight is more likely to be in-flight when the page goes to bfcache. This could INCREASE the frequency of the "stuck promise" scenario (#6). But the underlying bug (no bfcache recovery for stuck promises) existed before fa04fed.
+
+AFFECTED FLOWS:
+- A) Normal open (first time): All paths work correctly. bootstrapUser fires, completes, sets state. ✓
+- B) Rapid Open/Close (multiple times): If bootstrap is in-flight when page closes to bfcache, _bootstrapUserInFlight may stay stuck. On restore, pageshow/visibilitychange check bootstrapComplete (false) and isTelegramAuthReady (maybe false if user not resolved). If auth not ready, tryLateBootstrap never fires. Bootstrap never re-runs. Join Check (which is part of bootstrap response) never executes. Admin Detection (part of bootstrap) never executes. Only a page refresh (which resets all state + re-inits SDK) fixes this. ✗
+- C) Refresh (page reload): All state is reset. SDK is re-initialized. bootstrapUser fires fresh. Everything works. ✓
+
+ROOT CAUSE (most likely):
+The recovery paths (pageshow, visibilitychange) only call tryLateBootstrap if isTelegramAuthReady() is true. If the Telegram SDK didn't resolve the user before the page went to bfcache (or if the SDK cleared initData on restore), isTelegramAuthReady() returns false → tryLateBootstrap never fires → bootstrap never re-runs. The state stays stuck until a page refresh.
+
+Additionally, _bootstrapUserInFlight can point to a stuck promise if the fetch was suspended in bfcache and the timeout didn't fire. This is a secondary cause.
+
+LOW-RISK FIX PLAN (NOT applied — for review):
+1. Add a pagehide handler that records the close time. On pageshow with event.persisted=true, if the close was >2s ago, reset _bootstrapUserInFlight = null and _bootstrapPromise = null (force fresh bootstrap). This handles the "stuck promise" scenario.
+2. In the pageshow handler, if !bootstrapComplete, call tryLateBootstrap() UNCONDITIONALLY (not just when isTelegramAuthReady()). _doBootstrap() already has its own conditions check (line 1282) and will return early if auth isn't ready — but at least it will attempt when auth IS ready.
+3. In the visibilitychange handler (when visible), same as #2 — call tryLateBootstrap() unconditionally if !bootstrapComplete.
+4. Add a safety net: if _bootstrapUserInFlight has been set for >20s (longer than the 15s fetch timeout + 5s margin), clear it. This handles the "stuck promise" scenario for any path.
+
+SECURITY: The fix should not weaken security. Resetting _bootstrapUserInFlight/_bootstrapPromise just allows a new bootstrap attempt. Bootstrap itself is HMAC-validated on the backend. Admin detection is server-confirmed. No security impact.
+
+VERIFICATION PLAN (after fix):
+- Manual test: rapid Open/Close 5 times, verify Join Check + Admin Detection still work on the 5th open
+- Manual test: Open, wait 2s, Close, wait 5s, Open — verify bootstrap re-runs
+- Run full test suite (no regressions)
+- Add regression test for pagehide/pageshow recovery
+
+---
+Task ID: FIX-WELCOME-BUBBLE
+Agent: Main Orchestrator
+Task: PHASE 2 — Fix Welcome Bubble (remove duplicate سلام + شروع چت button)
+
+Work Log:
+- Located Welcome Bubble markup in assistant.js (lines 22-51, inside AssistantUI.injectHTML):
+  - Line 45: `<span class="ai-bubble-title">سلام! 👋</span>` — first سلام in header (DUPLICATE)
+  - Line 47: `<p class="ai-speech-text" ...>سلام 👋🏻 خوش اومدی...</p>` — body text with سلام (KEEP — this is the welcome message)
+  - Line 49: `<button class="ai-bubble-cta" ...>شروع چت</button>` — "شروع چت" button (REMOVE)
+- Applied minimal change: removed 2 lines (line 45 title span + line 49 CTA button). No other changes.
+- Verified CSS dependencies: .ai-bubble-header (flex layout) still works with just the avatar (no title). .ai-bubble-cta CSS remains in style.css but is unused (no visual impact). All other bubble CSS unchanged.
+- Verified logic: initSpeechBubble (line 173) uses #ai-bubble-close (kept), .ai-speech-text (kept), #ai-fab (kept). The removed CTA button had an inline onclick referencing #ai-fab, but FAB's own click handler (line 216-222) already dismisses the bubble. No logic dependency on the removed elements.
+- Verified syntax: node -c assistant.js OK, bun build assistant.js OK (52.58KB).
+- Ran welcome bubble tests: all 10 WELCOME-MSG tests pass (WELCOME-MSG-01 through WELCOME-MSG-10).
+- Ran full test suite: 1045 tests / 1043 pass / 0 fail / 2 skipped (no regressions).
+- Reviewed diff: assistant.js -2 lines (only 2 deletions, no additions). No other files changed (except worklog.md).
+
+Stage Summary:
+- FIX APPLIED: Removed duplicate `<span class="ai-bubble-title">سلام! 👋</span>` (header title) and `<button class="ai-bubble-cta">شروع چت</button>` (CTA button) from Welcome Bubble markup in assistant.js.
+- RESULT: Only one سلام remains (in the body text "سلام 👋🏻 خوش اومدی..."). No "شروع چت" button. Bubble appearance preserved (header still has avatar, body text unchanged, close button kept, tail kept).
+- SCOPE: Exactly 2 lines removed, 0 lines added. No logic, bootstrap, join-check, or admin-detection changes.
+- TESTS: 10 WELCOME-MSG tests pass. Full suite: 1043/1045 pass (2 pre-existing skipped). No regressions.
+- NOT COMMITTED YET (per instructions — Phase 2 fix is applied but waiting for user review of Phase 1 audit before commit decision).
+
+---
+Task ID: VERIFY-BFCACHE-STUCK-PROMISE
+Agent: Main Orchestrator
+Task: READ-ONLY verification of _bootstrapUserInFlight stuck-in-bfcache hypothesis with evidence + reproducible test
+
+Work Log:
+- Created bfcache-stuck-promise-verify.cjs with 19 verification tests (all pass):
+  - VERIFY-001..006: Static analysis of the dedup pattern, pagehide absence, pageshow gating
+  - VERIFY-007..010: Dynamic simulation of scenarios A (normal), B (bfcache timeout fires), B (bfcache timeout doesn't fire), C (refresh fixes)
+  - VERIFY-011..013: Recovery path analysis (pageshow/visibilitychange require isTelegramAuthReady)
+  - VERIFY-014..015: Dedup guard verification (concurrent calls don't duplicate API calls)
+  - VERIFY-016..018: Telegram SDK lifecycle (synchronous load, defer re-run on refresh, version-check can force reload)
+  - SUMMARY: hypothesis verification complete
+- All 19 tests pass — the dedup pattern CAN cause stuck state IF AbortSignal.timeout doesn't fire.
+- Researched bfcache + AbortSignal.timeout + fetch behavior across iOS WebKit and Android Chromium:
+  - iOS WebKit: fetch is ABORTED by browser when entering bfcache, but page CAN still enter bfcache. The fetch promise may stay PENDING forever (aborted-but-stuck quirk, apollo-client#10365). AbortSignal.timeout resumes from frozen point and fires later, but it's MOOT for a fetch that's already been terminated by the bfcache abort.
+  - Android Chromium: page is BLOCKED from bfcache when fetch is in-flight. On back-navigation, page reloads fresh (old fetch/signal discarded). No stuck promise.
+  - KEY: The hypothesis is plausible on iOS WebKit (Telegram iOS) but not on Android Chromium (Telegram Android).
+- Verified backend rate limits:
+  - /api/users/bootstrap: 10 req/60s per user (worker-proxy.js:12959). A fix that causes extra bootstrap calls must respect this.
+  - /api/users/check-join: no explicit rate limit at route level, but membershipGateway.check has Telegram 429 backoff in KV (cappedRetryAfter 1-300s). Repeated calls could hit Telegram rate limit.
+- Verified _doBootstrap has its own isTelegramAuthReady check (line 1282) — calling tryLateBootstrap unconditionally is SAFE (it's a no-op if auth not ready).
+- Verified beforeunload (line 12481) clears _bootstrapLongTimer. No pagehide handler exists.
+
+Stage Summary — VERIFICATION RESULTS:
+
+CONFIRMED:
+1. The dedup pattern (_bootstrapUserInFlight returning existing promise) is real and module-level (persists in bfcache). [VERIFY-001, VERIFY-002]
+2. _bootstrapUserInFlight is ONLY cleared in .finally() — if the fetch never settles, the finally never fires, and _bootstrapUserInFlight stays set forever. [VERIFY-003]
+3. NO pagehide handler exists — nothing aborts the in-flight fetch when the page goes to bfcache. [VERIFY-005]
+4. The recovery paths (pageshow, visibilitychange) only call tryLateBootstrap if isTelegramAuthReady() is true. If auth was never resolved (or SDK cleared it on restore), no recovery. [VERIFY-006, VERIFY-011, VERIFY-012]
+5. _doBootstrap has its own isTelegramAuthReady check (defense in depth) — calling tryLateBootstrap unconditionally is SAFE. [VERIFY-013]
+6. The simulation shows: if AbortSignal.timeout fires after restore → recovery works. If it doesn't fire → stuck promise, no new API call, Join Check + Admin Detection never run. [VERIFY-008, VERIFY-009]
+7. Page refresh resets all module-level state → fresh bootstrap → everything works. [VERIFY-010, VERIFY-017]
+
+LIKELY (iOS WebKit / Telegram iOS):
+8. On iOS WebKit, the in-flight fetch is aborted by the browser when entering bfcache, but the fetch promise may stay pending (aborted-but-stuck quirk). The AbortSignal.timeout fires later but is moot.
+9. This means on Telegram iOS, rapid Open/Close while bootstrap is in-flight CAN cause the stuck-promise scenario.
+
+NOT APPLICABLE (Android Chromium / Telegram Android):
+10. On Android Chromium, bfcache is BLOCKED when fetch is in-flight. The page reloads fresh on back-navigation. No stuck promise.
+
+ROOT CAUSE CONFIRMED (with caveats):
+The "_bootstrapUserInFlight stuck in bfcache" hypothesis is CONFIRMED as plausible on iOS WebKit (Telegram iOS). On Android Chromium (Telegram Android), bfcache is blocked when fetch is in-flight, so the bug wouldn't manifest there.
+
+The exact failure mode on iOS:
+- Page opens, bootstrapUser() fires, fetch starts.
+- User closes Mini App (swipe back on iOS).
+- iOS WebKit aborts the fetch (browser-initiated, not AbortSignal).
+- The fetch promise may stay PENDING (aborted-but-stuck quirk).
+- _bootstrapUserInFlight points to the stuck promise (finally never fires).
+- Page enters bfcache (state preserved).
+- User re-opens Mini App → page restored from bfcache.
+- pageshow fires with event.persisted=true.
+- pageshow checks: !bootstrapComplete (true) && isTelegramAuthReady() (maybe false if SDK didn't resolve user).
+- If isTelegramAuthReady() is false → tryLateBootstrap never fires → bootstrap never re-runs.
+- If isTelegramAuthReady() is true → tryLateBootstrap fires → calls bootstrapUser() → returns stuck promise (dedup) → no new API call.
+- Either way, Join Check + Admin Detection never run.
+- User does a manual refresh → page fully reloads → all state resets → fresh bootstrap → works.
+
+LOW-RISK FIX PLAN (NOT applied — for review):
+The fix must:
+- NOT cause duplicate bootstrap (rate limit: 10 req/60s)
+- NOT cause duplicate Join Check (Telegram rate limit with KV backoff)
+- NOT reset state blindly (could cause double API calls if state was actually fine)
+- Handle both the "stuck promise" AND the "auth not ready on restore" scenarios
+
+Proposed fix (3 parts, all low-risk):
+
+PART 1 — Add pagehide handler that records close time + aborts the in-flight bootstrap fetch:
+```javascript
+let _pageHiddenAt = 0;
+window.addEventListener('pagehide', (event) => {
+    _pageHiddenAt = Date.now();
+    // Don't abort _bootstrapUserInFlight here — let it settle naturally.
+    // Just record the time so we can detect "long bfcache" on restore.
+});
+```
+
+PART 2 — In pageshow handler, detect "stuck promise" and reset ONLY if stuck:
+```javascript
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+        // Page restored from bfcache.
+        // Detect stuck promise: if _bootstrapUserInFlight has been set for >20s
+        // (longer than the 15s fetch timeout + 5s margin), it's stuck.
+        if (_bootstrapUserInFlight && _pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+            // Stuck promise detected — clear it so the next bootstrapUser() makes a fresh call.
+            // The finally block will NEVER fire for the stuck promise, so this is safe.
+            _bootstrapUserInFlight = null;
+        }
+        // Same for _bootstrapPromise (tryLateBootstrap dedup):
+        if (_bootstrapPromise && _pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+            _bootstrapPromise = null;
+        }
+        // Now try bootstrap if not complete (unconditionally — _doBootstrap has its own auth check).
+        if (!bootstrapComplete) {
+            tryLateBootstrap();
+        }
+    }
+    _pageHiddenAt = 0;
+});
+```
+
+PART 3 — In visibilitychange handler (when visible), same stuck-promise detection:
+```javascript
+document.addEventListener('visibilitychange', () => {
+    _appVisible = !document.hidden;
+    if (document.hidden) {
+        _stopAllPolling();
+        if (!_pageHiddenAt) _pageHiddenAt = Date.now();
+    } else {
+        _startAllPolling();
+        if (!bootstrapComplete) {
+            // Detect stuck promise (same as pageshow)
+            if (_bootstrapUserInFlight && _pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+                _bootstrapUserInFlight = null;
+            }
+            if (_bootstrapPromise && _pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+                _bootstrapPromise = null;
+            }
+            // Call tryLateBootstrap unconditionally — _doBootstrap has its own auth check.
+            tryLateBootstrap();
+        }
+    }
+});
+```
+
+WHY THIS FIX IS LOW-RISK:
+1. NO duplicate bootstrap: we only reset _bootstrapUserInFlight if it's been stuck >20s. If the bootstrap completed normally before bfcache, _bootstrapUserInFlight is already null (finally fired). No reset, no duplicate call.
+2. NO duplicate Join Check: Join Check is part of bootstrap. Same dedup applies.
+3. NO blind reset: we use a 20s threshold (15s fetch timeout + 5s margin). If the page was hidden <20s, we don't reset (the fetch may still be settling normally).
+4. NO rate limit risk: the 20s threshold means we only make a NEW bootstrap call after the previous one was stuck for >20s. This is well within the 10 req/60s rate limit.
+5. Security preserved: bootstrap is still server-side HMAC-validated. Admin detection is still server-confirmed. No bypass.
+6. The fix handles BOTH failure modes:
+   - Stuck promise (iOS WebKit): reset _bootstrapUserInFlight, fresh call.
+   - Auth not ready on restore: call tryLateBootstrap unconditionally (it no-ops if auth not ready via _doBootstrap check).
+
+SECURITY: Fix does not weaken security. Resetting _bootstrapUserInFlight just allows a new bootstrap attempt. Bootstrap is HMAC-validated on backend. Admin detection is server-confirmed. No security impact.
+
+VERIFICATION PLAN (after fix):
+- Add regression test for stuck-promise recovery (pageshow after >20s bfcache).
+- Add test that confirms NO reset if bfcache was <20s (no duplicate).
+- Add test that confirms tryLateBootstrap is called unconditionally on restore.
+- Run full test suite (no regressions).
+- Manual test: rapid Open/Close on iOS Telegram, verify Join Check + Admin Detection work.
+
+---
+Task ID: FIX-LIFECYCLE-BFCACHE-RECOVERY
+Agent: Main Orchestrator
+Task: PHASE 1 — Apply minimal lifecycle/bfcache recovery fix on separate branch (NO commit, NO push, NO deploy)
+
+Work Log:
+- Created branch: fix/lifecycle-bfcache-recovery (forked from main at 7e63be8)
+- Re-verified exact locations of all relevant functions/variables in app.js:
+  - _pageHiddenAt: NEW — added at line 37 (module-level state)
+  - bootstrapComplete: line 23 (module-level)
+  - _bootstrapPromise: line 27 (module-level — tryLateBootstrap dedup, truly in-flight state)
+  - _bootstrapLongTimer: line 28 (module-level)
+  - _bootstrapUserInFlight: line 1058 (module-level — bootstrapUser dedup, truly in-flight state)
+  - bootstrapUser(): line 1059 (dedup via _bootstrapUserInFlight)
+  - _bootstrapUserImpl(): line 1072
+  - tryLateBootstrap(): line 1277 (dedup via _bootstrapPromise)
+  - _doBootstrap(): line 1288 (has its own isTelegramAuthReady check — defense in depth)
+  - visibilitychange handler: line 12462
+  - pageshow handler: line 12524
+  - pagehide handler: NEW — added at line 12515
+- Determined _bootstrapPromise role: it IS the real in-flight state for tryLateBootstrap.
+  When tryLateBootstrap fires, it calls _doBootstrap which calls bootstrapUser (which sets
+  _bootstrapUserInFlight). So both can get stuck together via the await chain. Clearing
+  _bootstrapPromise when stuck is essential — without it, tryLateBootstrap returns the
+  stuck _bootstrapPromise instead of firing a fresh _doBootstrap.
+- Applied minimal lifecycle fix to app.js:
+  - Added module-level state: `let _pageHiddenAt = 0;` (line 37)
+  - visibilitychange hidden path: `if (!_pageHiddenAt) _pageHiddenAt = Date.now();` (line 12469)
+  - visibilitychange visible path: stuck-promise detection + reset (lines 12475-12491):
+    - Only runs if !bootstrapComplete
+    - Only resets if _pageHiddenAt > 20000 (15s fetch timeout + 5s margin)
+    - Clears _bootstrapUserInFlight (if set) and _bootstrapPromise (if set)
+    - Then calls existing tryLateBootstrap() (unchanged)
+  - NEW pagehide handler (lines 12515-12522): only records _pageHiddenAt timestamp
+  - pageshow handler (lines 12524-12550): same stuck-promise detection + reset, then
+    preserves existing isTelegramAuthReady() check + tryLateBootstrap() call
+- Created lifecycle-bfcache-recovery-test.cjs with 19 regression tests (all pass):
+  - LIFECYCLE-001..005: Static verification of fix code in app.js
+  - LIFECYCLE-006..007: Normal bootstrap + already-complete (no extra calls)
+  - LIFECYCLE-008..009: Rapid Open/Close < 20s (no false reset, no duplicates)
+  - LIFECYCLE-010..011: Hidden > 20s + stuck (fresh bootstrap) vs not-stuck (no reset)
+  - LIFECYCLE-012: Page refresh resets all state (existing behavior preserved)
+  - LIFECYCLE-013..014: isAdmin() and adminBypassMaintenance() unchanged (security preserved)
+  - LIFECYCLE-015: Join Check still via bootstrap (no independent trigger added)
+  - LIFECYCLE-016: Fix does not weaken maintenance check (no security bypass)
+  - LIFECYCLE-017: Fix does not touch rate-limit or backend membership logic
+  - LIFECYCLE-018: 20s threshold is exactly 20000ms
+  - SUMMARY: all fix markers present
+- Added lifecycle-bfcache-recovery-test.cjs to package.json test command.
+- Ran full test suite: 1064 tests / 1062 pass / 0 fail / 2 skipped (19 new tests, no regressions).
+- Ran syntax/build verification: node -c app.js OK, bun build app.js OK (460KB).
+- Diff audit:
+  - app.js: +59 lines (only in lifecycle handlers: _pageHiddenAt state, visibilitychange hidden/visible paths, NEW pagehide handler, pageshow handler)
+  - assistant.js: -2 lines (Phase 2 from prior session — duplicate سلام + شروع چت removal, NOT part of this fix)
+  - package.json: +1/-1 (added lifecycle-bfcache-recovery-test.cjs to test command)
+  - worklog.md: +306 lines (audit + verification + fix reports)
+  - worker-proxy.js, src/controllers/users.js, src/services/membershipGateway.js, src/controllers/membership.js, src/controllers/admin.js: ALL UNCHANGED (0 changes)
+- Security verification:
+  - isAdmin() (line 1501): UNCHANGED — still gates on bootstrapComplete + isCurrentUserAdmin
+  - adminBypassMaintenance() (line 12799): UNCHANGED — still gates on isAdmin()
+  - checkMaintenanceMode() (line 12603): UNCHANGED — fix does NOT touch maintenance logic
+  - updateMaintenanceAdminBypass() (line 12783): UNCHANGED
+  - Fix code does NOT reference _maintenanceBypassed, sessionStorage.maint_bypassed, or any security state
+  - Fix code does NOT directly call check-join or membershipGateway (Join Check via bootstrap only)
+  - Fix code does NOT appear in any backend file (frontend-only fix)
+
+Stage Summary:
+- FIX APPLIED on branch fix/lifecycle-bfcache-recovery (NOT committed, NOT pushed, NOT deployed)
+- SCOPE: app.js +59 lines (lifecycle handlers only), package.json +1 line (test command), test file +new
+- NO backend changes, NO security changes, NO Join Check logic changes, NO rate-limit changes
+- TESTS: 19 new regression tests (all pass) + 1045 existing tests (all pass) = 1064 total, 1062 pass, 2 skipped
+- BUILD/LINT: syntax OK, bun build OK
+- READY FOR REVIEW — awaiting user decision on commit/push/deploy
+
+---
+Task ID: REVIEW-LIFECYCLE-FIX
+Agent: Main Orchestrator
+Task: Final READ-ONLY review of LIFECYCLE/BFCACHE fix — race conditions, edge cases, safety
+
+Work Log:
+- Reviewed the fix code in app.js (lifecycle handlers only):
+  - _pageHiddenAt state variable (line 37)
+  - visibilitychange hidden path (line 12469): records timestamp with guard `if (!_pageHiddenAt)`
+  - visibilitychange visible path (lines 12475-12491): stuck detection + reset, gated on !bootstrapComplete AND >20s
+  - pagehide handler (lines 12515-12522): only records timestamp
+  - pageshow handler (lines 12524-12550): same stuck detection + reset, gated on event.persisted AND !bootstrapComplete AND >20s
+
+- Created lifecycle-race-condition-test.cjs (16 tests) to verify race conditions:
+  - RACE-001/002: pagehide + visibilitychange(hidden) both fire — no double timestamp (guard prevents overwrite)
+  - RACE-003/004: pageshow + visibilitychange(visible) both fire — only ONE tryLateBootstrap (dedup via _bootstrapPromise)
+  - RACE-005: Healthy in-flight (<20s) NOT reset — no false positive
+  - RACE-006: Bootstrap completed before hide — no reset (bootstrapComplete=true skips recovery)
+  - RACE-007: 5 rapid Open/Close cycles (<20s each) — NO extra API calls, no rate limit bypass
+  - RACE-008: 3 cycles with ONE >20s — only the long one triggers fresh bootstrap
+  - RACE-009/010: After recovery, bootstrap re-runs → Admin Detection + Join Check re-execute (no false negative)
+  - RACE-011: Fix does NOT touch maintenance state or maintenance functions
+  - RACE-012: Fix does NOT touch isAdmin() or adminBypassMaintenance()
+  - RACE-013: Fix does NOT touch authentication (Telegram SDK, initData, auth helpers)
+  - RACE-014: Fix does NOT touch rate-limit or backend membership logic (frontend-only)
+  - RACE-015: Resetting _bootstrapPromise is NECESSARY (not redundant — breaks await chain)
+  - All 16 tests PASS
+
+- Created lifecycle-edge-case-test.cjs (12 tests) to verify edge cases:
+  - EDGE-001: pageshow with event.persisted=false — no recovery, but _pageHiddenAt cleared
+  - EDGE-002: pagehide fires, visibilitychange(hidden) doesn't — timestamp still recorded
+  - EDGE-003: visibilitychange(visible) fires, pageshow doesn't — recovery still works
+  - EDGE-004/005: _pageHiddenAt cleared after recovery (no stale state)
+  - EDGE-006: Recovery when auth NOT ready — state reset happens, but no tryLateBootstrap (later when auth ready, fresh bootstrap fires)
+  - EDGE-007: bootstrapComplete=true — recovery path skipped entirely
+  - EDGE-008: Exactly 20000ms — NOT reset (threshold is > 20000, not >=)
+  - EDGE-009: 19999ms — NOT reset (just below threshold)
+  - EDGE-010: 20001ms — IS reset (just above threshold)
+  - EDGE-011: pageshow without prior pagehide — _pageHiddenAt=0, no reset (no false positive)
+  - All 12 tests PASS
+
+- Total lifecycle tests: 47 (19 existing + 16 race + 12 edge) — ALL PASS
+- Full test suite still PASS: 1064 tests / 1062 pass / 2 skipped (no regressions)
+
+Review Findings:
+
+R1 — Resetting both _bootstrapUserInFlight AND _bootstrapPromise: SAFE
+  - NECESSARY: _bootstrapPromise is tryLateBootstrap's dedup state. If only _bootstrapUserInFlight
+    is reset, tryLateBootstrap returns the stuck _bootstrapPromise instead of firing fresh
+    _doBootstrap. Clearing both breaks the await chain.
+  - NO RACE: JavaScript is single-threaded. Events process sequentially. The first recovery
+    call sets _bootstrapPromise (via tryLateBootstrap → _doBootstrap), the second call returns
+    the existing _bootstrapPromise (dedup). No duplicate API call.
+
+R2 — 20s threshold: SAFE
+  - Below 20s: no reset (in-flight promise may still be settling normally — no false positive)
+  - Above 20s: reset (15s fetch timeout + 5s margin — stuck detection)
+  - EDGE-008/009/010 confirm threshold boundary behavior (exactly 20000 = no reset, 20001 = reset)
+  - Rapid Open/Close (<20s each) creates NO extra API calls (RACE-007: 5 cycles, 0 extra calls)
+
+R3 — pagehide→pageshow and visibilitychange→visible race conditions: NONE
+  - pagehide + visibilitychange(hidden) on close: both record timestamp, guard `if (!_pageHiddenAt)`
+    prevents double-set. No race.
+  - pageshow + visibilitychange(visible) on restore: both call tryLateBootstrap, but dedup via
+    _bootstrapPromise ensures only ONE API call. Order doesn't matter (RACE-003/004).
+
+R4 — Normal bootstrap (<20s): SAFE
+  - If bootstrap completes before hide, bootstrapComplete=true → recovery path skipped (RACE-006)
+  - If bootstrap is still in-flight at hide time but <20s in bfcache, no reset (EDGE-008/009)
+  - Healthy state is NOT reset (RACE-005)
+
+R5 — Rate limit: SAFE
+  - 5 rapid Open/Close cycles (<20s each) = 0 extra API calls (RACE-007)
+  - Only >20s bfcache with stuck promise triggers ONE fresh bootstrap (RACE-008)
+  - Bootstrap rate limit is 10 req/60s — well within bounds
+
+R6 — Admin Detection + Join Check after recovery: SAFE
+  - Recovery clears stuck promise, calls tryLateBootstrap → _doBootstrap → bootstrapUser
+  - bootstrapUser makes fresh API call → server returns is_admin + channel_joined
+  - _bootstrapUserImpl sets isCurrentUserAdmin from server, processes channel_joined
+  - No false negative — server is single source of truth (RACE-009/010)
+  - EDGE-006: even if auth not ready at restore time, stuck promise is cleared. When auth
+    becomes ready later, tryLateBootstrap fires fresh bootstrap.
+
+R7 — Side effects: NONE
+  - Fix does NOT touch maintenance state/functions (RACE-011)
+  - Fix does NOT touch isAdmin() or adminBypassMaintenance() (RACE-012)
+  - Fix does NOT touch authentication (RACE-013)
+  - Fix does NOT touch rate-limit or backend membership logic (RACE-014)
+  - Fix is frontend-only (app.js), no backend files modified
+
+Stage Summary — FINAL VERDICT:
+- Fix is TECHNICALLY SAFE: all 47 lifecycle tests pass, full suite 1062/1064 pass (no regressions)
+- NO implementation changes needed: the fix as-is handles all race conditions and edge cases correctly
+- READY FOR COMMIT/DEPLOY: the fix is minimal, scoped to lifecycle handlers only, and has comprehensive test coverage
+- Production code NOT modified during this review (only added test files: lifecycle-race-condition-test.cjs, lifecycle-edge-case-test.cjs)
+- NO commit, NO push, NO deploy performed (read-only review as requested)
