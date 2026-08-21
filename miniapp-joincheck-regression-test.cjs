@@ -168,13 +168,29 @@ test('BUG1-002: users.js bootstrap makes a SINGLE membership call (no duplicate 
     'bootstrap must NOT have a second resolveChannelMembership(forceRefresh:true) call');
 });
 
-test('BUG1-003: error fallback still uses freshUserRow.channel_joined (safe best-effort)', () => {
-  // On error, the catch block falls back to the DB row — this is intentional
-  // (best-effort, requireChannelJoin middleware will re-check on every API call).
-  const catchSection = USERS_CTRL_SRC.match(/catch\s*\(e\)\s*\{[^}]*channelJoined[^}]*\}/s);
-  assert.ok(catchSection, 'catch block must fall back to freshUserRow.channel_joined');
-  assert.ok(catchSection[0].includes('freshUserRow?.channel_joined'),
-    'catch block must use freshUserRow?.channel_joined as fallback');
+test('BUG1-003: error fallback still uses DB row channel_joined (safe best-effort)', () => {
+  // On error, the membership chainC returns null. The main code then falls
+  // back to userRow.channel_joined (from the bootstrap() RETURNING clause).
+  // This is intentional (best-effort, requireChannelJoin middleware will
+  // re-check on every API call).
+  //
+  // PHASE 2 PARALLEL FIX: Previously the fallback was inline in the catch
+  // block as `channelJoined = Boolean(freshUserRow?.channel_joined)`. After
+  // parallelization, chainC returns null on error and the main code resolves
+  // null → `Boolean(userRow?.channel_joined)` after chainA completes.
+  // Behavior is identical (same DB row, same fallback value) — only the
+  // code location moved.
+  const USERS_SRC_LOCAL = USERS_CTRL_SRC;
+  // chainC must return null on membership check failure (signal fallback)
+  assert.ok(USERS_SRC_LOCAL.includes('return null; // signal: main code should fall back to userRow.channel_joined'),
+    'chainC catch block must return null to signal fallback (not throw)');
+  // Main code must fall back to userRow.channel_joined when chainC returns null
+  assert.ok(USERS_SRC_LOCAL.includes('channelJoined = Boolean(userRow?.channel_joined)'),
+    'main code must fall back to Boolean(userRow?.channel_joined) when chainC returns null');
+  // The fallback must be gated on chainCResult === null (covers both
+  // tgUser.id missing AND membership check failure)
+  assert.ok(USERS_SRC_LOCAL.includes('if (chainCResult === null)'),
+    'main code must check chainCResult === null to trigger fallback');
 });
 
 // ============================================================================

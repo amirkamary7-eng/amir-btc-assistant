@@ -3718,3 +3718,131 @@ Replace `CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'` (assi
 - `/home/z/my-project/amir-btc-assistant/style.css` — possibly styling for new markdown elements (`.ai-msg-text ul`, `.ai-msg-text strong`, `.ai-msg-text h3`)
 - No changes needed to `worker-proxy.js` (route + auth are fine).
 
+
+---
+Task ID: P0-STARTUP-AUDIT
+Agent: Main Orchestrator
+Task: Deep Startup / Admin Bypass / Join Check Performance Audit (PHASE 0 — Baseline & Scope, read-only)
+
+Work Log:
+- Verified git state: branch=main, last commit=f11117a (immediate notification delivery + Telegram 429 retry_after respect), no tracked changes, only untracked file=kv-rl-security-verify.cjs (old review file)
+- Traced full Startup path: HTML head (Telegram SDK at index.html:91 — blocking, not defer) → defer scripts (notifications, assistant, wallet, referral, membership-user, membership-admin, cosmetics, app.js) → DOMContentLoaded (app.js:12753)
+- Traced DOMContentLoaded handler (app.js:12753-13405): UserContext.init() fires async → cache hydration synchronous → loadMarketData/loadForexData fire async → checkMaintenanceMode().then() gates all further init
+- Traced checkMaintenanceMode (app.js:12548-12607): 4s fetch timeout, public /api/system/status endpoint, _maintenanceBypassed sessionStorage short-circuit
+- Traced _bootstrapUserImpl (app.js:1064-1262): apiFetch('/api/users/bootstrap') → sets bootstrapComplete=true, isCurrentUserAdmin from server response → calls updateMaintenanceAdminBypass() at line 1210-1212
+- Traced updateMaintenanceAdminBypass (app.js:12709-12718): shows bypass button only if isAdmin() returns true
+- Traced isAdmin (app.js:1493-1500): returns false if !bootstrapComplete (line 1498)
+- Traced tryLateBootstrap triggers: viewportChanged (line 280), hashchange (line 319), visibilitychange (line 12474), pageshow (line 12492), _bootstrapLongTimer 15s (line 13288) — ALL inside maintenance .then OR event-dependent
+- Traced backend handleBootstrap (src/controllers/users.js:48-243): 6 sequential DB queries + 1 Telegram API call: getById → bootstrap → processReferral → watchlist.getSymbols → membershipGateway.check → adminRepo.getAdminByTelegramId → fireDailyLoginMission → membershipAuthority.isPremium
+- Verified /api/users/bootstrap is NOT blocked by maintenance on backend (worker-proxy.js:12945-12972) — bootstrap succeeds even when maintenance is ON
+- Verified /api/system/status is public (worker-proxy.js:11023-11032) — no auth required, only maintenance display fields returned
+- Verified _bootstrapUserInFlight (line 1050-1063), _bootstrapPromise (line 1273-1275), bootstrapComplete (line 1194), _bootstrapFailedAt cooldown (line 1272) all properly guard against duplicate bootstrap
+
+Stage Summary:
+- ROOT CAUSE CONFIRMED: When maintenance is ON, the maintenance .then early-returns (app.js:13174-13178), so bootstrapUser() is NEVER called. bootstrapComplete stays false, isAdmin() returns false, updateMaintenanceAdminBypass() keeps the bypass button hidden. Admin is forced to wait for the viewportChanged event (or visibilitychange/pageshow/hashchange) to trigger tryLateBootstrap(). On platforms where the viewport is already expanded at app open, viewportChanged doesn't fire until user interaction — this is the source of the 5-20+ second admin bypass delay.
+- SECONDARY: Backend handleBootstrap has 6 sequential DB queries + 1 Telegram API call. Steps 4,5,6,8 (watchlist.getSymbols, membershipGateway.check, adminRepo.getAdminByTelegramId, membershipAuthority.isPremium) are independent and could run in parallel with the getById→bootstrap→processReferral chain (steps 1-3), reducing cold-start bootstrap latency by ~1-1.5s.
+- SECURITY: /api/users/bootstrap is public (not maintenance-gated) on backend. isAdmin() only returns true when both bootstrapComplete=true AND isCurrentUserAdmin=true (server-confirmed). Server is the single source of truth for admin status.
+- SCOPE: Frontend fix — fire bootstrapUser() in parallel with checkMaintenanceMode() so admin detection happens within bootstrap round-trip (~1-2s) instead of waiting for viewportChanged (5-20s+). Backend fix — parallelize 4 independent operations with the getById→bootstrap→processReferral chain.
+- No code changes performed in this phase (PHASE 0 is read-only audit).
+
+---
+Task ID: P1-P2-STARTUP-FIX
+Agent: Main Orchestrator
+Task: PHASE 1 + PHASE 2 — Apply Startup/Admin Bypass/Join Check Performance Fix
+
+Work Log:
+- PHASE 1 (Frontend): Modified app.js DOMContentLoaded handler (lines 13165-13270). Moved bootstrapUser() call BEFORE checkMaintenanceMode() so it runs in parallel. Stored the promise in _parallelBootstrapPromise. Inside the maintenance .then block:
+  - If maintenance ON: set _maintenanceBlocked=true, return early. bootstrapUser() continues in background and calls updateMaintenanceAdminBypass() from _bootstrapUserImpl (line 1210-1212) when it completes — bypass button appears for admins within bootstrap round-trip (~1-2s) instead of waiting for viewportChanged (5-20s+). For non-admins, the maintenance popup stays (no bypass).
+  - If maintenance OFF: chain post-bootstrap tasks (loadUser, loadForexData retry, mission loading) off _parallelBootstrapPromise. If bootstrap already completed (likely, since it started before maintenance check), the .then runs immediately. All other init code (data loading, polling, _bootstrapLongTimer, ticket polling, scroll-to-top, hero slider) remains INSIDE the maintenance .then block, only running when maintenance is OFF.
+- PHASE 2 (Backend): Refactored handleBootstrap in src/controllers/users.js to parallelize independent operations. Split the sequential flow into 5 chains:
+  - chainA: getById → bootstrap → processReferral (sequential, side effects — preserved order)
+  - chainB: watchlist.getSymbols (independent, fatal on failure)
+  - chainC: membershipGateway.check (independent, non-fatal — returns null on error/no-tg-user to signal fallback)
+  - chainD: adminRepo.ensureSchema + getAdminByTelegramId (independent, non-fatal)
+  - chainE: membershipAuthority.isPremium (independent, non-fatal)
+  - All 5 chains fire concurrently after auth. Promise.all([chainA, chainB]) for fatal chains; await chainC separately for null-fallback resolution; Promise.all([chainD, chainE]) for non-fatal chains. fireDailyLoginMission still runs after chainC completes (needs channelJoined). Response shape unchanged.
+- Updated BUG1-003 test in miniapp-joincheck-regression-test.cjs to reflect the new parallel structure. The old test asserted `freshUserRow?.channel_joined` in the catch block (implementation detail). The new test asserts the BEHAVIOR: chainC returns null on error, main code falls back to Boolean(userRow?.channel_joined) when chainCResult === null. Behavior is identical, only the code location moved.
+- Verified syntax: bun build succeeds for src/controllers/users.js. node --check succeeds for app.js.
+- Verified guards preserved: _bootstrapUserInFlight (line 1050-1063), _bootstrapPromise (line 1273-1275), bootstrapComplete (line 1194), _bootstrapFailedAt cooldown (line 1272) — all unchanged.
+
+Stage Summary:
+- ROOT CAUSE FIXED (Frontend): bootstrapUser() now runs in parallel with checkMaintenanceMode(). Admin detection happens within bootstrap round-trip (~1-2s) instead of waiting for viewportChanged (5-20s+). For non-admins, maintenance popup stays visible — security fully preserved.
+- BOOTSTRAP PERFORMANCE IMPROVED (Backend): 4 independent operations now run in parallel with the getById→bootstrap→processReferral chain. Estimated cold-start savings: ~600-1500ms (from ~2-3s sequential to ~1-1.5s max-parallel). No new subrequests — same DB queries + same Telegram API call, just overlapped in time.
+- SECURITY PRESERVED: /api/users/bootstrap is NOT maintenance-gated on backend. isAdmin() only returns true with both bootstrapComplete=true AND server-confirmed isCurrentUserAdmin. updateMaintenanceAdminBypass() only shows bypass button for server-confirmed admins. Non-admin users cannot bypass maintenance.
+- NO REGRESSIONS: All 31 bootstrap-hang + miniapp-joincheck tests pass. All 98 startup + join-check + membership-gateway tests pass. Pre-existing DIAG-A1 failure (test bug — asserts !includes('bootstrap-diag') but route /api/bootstrap-diag itself contains the string) is unrelated to my changes (verified via git stash).
+- FILES changed: app.js (PHASE 1), src/controllers/users.js (PHASE 2), miniapp-joincheck-regression-test.cjs (test updated for new structure)
+
+---
+Task ID: P3-P4-VERIFICATION
+Agent: Main Orchestrator
+Task: PHASE 3 + PHASE 4 — Regression & Security Verification + Full Test Suite
+
+Work Log:
+- PHASE 3: Created new regression test file startup-admin-bypass-regression-test.cjs with 30 targeted tests covering:
+  - Frontend admin bypass during maintenance (STARTUP-001 through STARTUP-009): verifies bootstrapUser() fires in parallel with checkMaintenanceMode(), maintenance ON does NOT block bootstrap, post-bootstrap tasks chain off parallel promise, updateMaintenanceAdminBypass still called from _bootstrapUserImpl, isAdmin() still gates on bootstrapComplete (no security regression), adminBypassMaintenance double-checks isAdmin(), maintenance ON early-return skips ALL other init.
+  - Backend bootstrap parallelization (BOOT-PARALLEL-001 through BOOT-PARALLEL-015): verifies chainA-E structure, chainA preserves sequential order, chains B/C/D/E are independent, Promise.all([A,B]) for fatal chains, chainC resolved separately for null-fallback, Promise.all([D,E]) for non-fatal chains, fireDailyLoginMission still runs after chainC, response shape preserved, no new subrequests (same DB queries + Telegram API call count), error handling preserved.
+  - Security (BOOT-SECURITY-001, BOOT-SECURITY-002): /api/users/bootstrap NOT maintenance-gated, /api/system/status IS the maintenance check endpoint.
+  - Dynamic timing test (BOOT-PARALLEL-014): proves chains fire concurrently (200ms parallel vs 580ms sequential).
+  - Null-fallback test (BOOT-PARALLEL-015): proves chainC-null fallback to userRow.channel_joined matches old behavior.
+  - Dedup guards (BOOT-DEDUP-001 through BOOT-DEDUP-003): _bootstrapUserInFlight, _bootstrapPromise, bootstrapComplete flag ordering all preserved.
+- Added startup-admin-bypass-regression-test.cjs to package.json test command (28 test files → 29 test files).
+- PHASE 4: Ran full test suite (npm test).
+
+Stage Summary:
+- FULL TEST SUITE RESULTS: 1032 tests / 1030 pass / 0 fail / 2 skipped
+  - 30 NEW tests added (all pass): startup-admin-bypass-regression-test.cjs
+  - 1002 baseline tests still pass (no regressions)
+  - 2 pre-existing skipped tests (unchanged)
+- SECURITY VERIFIED:
+  - bootstrapUser() runs in parallel with maintenance check but does NOT bypass maintenance for non-admins.
+  - updateMaintenanceAdminBypass() only shows bypass button for server-confirmed admins (isAdmin() gates on bootstrapComplete AND isCurrentUserAdmin from server response).
+  - adminBypassMaintenance() double-checks isAdmin() before allowing bypass.
+  - /api/users/bootstrap is NOT maintenance-gated on backend (confirmed via source inspection).
+  - No new subrequests — same DB queries + Telegram API call, just parallelized.
+- NO REGRESSIONS:
+  - All existing tests pass (bootstrap-hang, miniapp-joincheck, start-join-check, etc.)
+  - Updated BUG1-003 test to reflect new parallel structure (behavior preserved, code location changed).
+- PRE-EXISTING DIAG-A1 failure (in bootstrap-diag-instrumentation-test.cjs, NOT in npm test command): asserts !WORKER_SRC.includes('bootstrap-diag') but the route /api/bootstrap-diag itself contains the string. Unrelated to my changes (verified via git stash on baseline).
+
+---
+Task ID: P5-FINAL-REAUDIT
+Agent: Main Orchestrator
+Task: PHASE 5 — Final Re-audit (before commit/deploy)
+
+Work Log:
+- Reviewed full git diff: 5 files modified (app.js, miniapp-joincheck-regression-test.cjs, package.json, src/controllers/users.js, worklog.md) + 1 new file (startup-admin-bypass-regression-test.cjs). worker-proxy.js UNMODIFIED.
+- Re-audited all PHASE 3 scenarios (A through J) from the task description:
+  A) Maintenance ON + Admin: bootstrapUser() fires in parallel (line 13199), _bootstrapUserImpl completes within ~1-2s, sets bootstrapComplete=true + isCurrentUserAdmin=true, calls updateMaintenanceAdminBypass() at line 1210-1212 → bypass button appears. ✓
+  B) Maintenance ON + Normal User: maintenance popup shown by showMaintenancePopup(), updateMaintenanceAdminBypass() keeps bypass button hidden (isAdmin()=false because isCurrentUserAdmin=false). User cannot bypass. Join Lock/authorization untouched on backend. ✓
+  C) Maintenance OFF + Admin: bootstrap runs in parallel, maintenance check returns OK, post-bootstrap tasks chain off _parallelBootstrapPromise, admin correctly detected. ✓
+  D) Maintenance OFF + Normal User: Join Check runs via chainC on backend, user only enters if authorized. ✓
+  E) Telegram SDK cold start + Maintenance ON: PHASE 1 EXTENSION — cold-start boot poll (500ms interval) is now set up BEFORE the maintenance check (line 13203-13250), so it runs even when maintenance is ON. When auth becomes ready, boot poll fires tryLateBootstrap() → bootstrapUser() → admin detection → bypass button. No waiting for viewportChanged. ✓
+  F) Telegram SDK warm start: bootstrapUser() fires immediately (auth ready), completes within round-trip. ✓
+  G) Telegram API slow/timeout: apiFetch has 15s HTTP timeout (preserved), waitForApiReady has 8s timeout (preserved), chainC catch returns null → fallback to userRow.channel_joined. ✓
+  H) Backend cold start: parallel chains reduce latency from sum to max (estimated ~600-1500ms savings). ✓
+  I) Refresh/reopen: _bootstrapUserInFlight cleared in finally (preserved), tryLateBootstrap called on pageshow/visibilitychange (preserved). ✓
+  J) Concurrent bootstrap attempts: _bootstrapUserInFlight + _bootstrapPromise dedup (preserved), no duplicate API calls. ✓
+- Additional checks:
+  - No duplicate /api/users/bootstrap — bootstrapUser() deduplicated via _bootstrapUserInFlight. ✓
+  - No duplicate Join Check — only one membershipGateway.check per bootstrap (chainC). ✓
+  - No polling/retry storm — _bootstrapLongTimer still 15s, _bootstrapFailedAt 5s cooldown, boot poll max 20s. ✓
+  - No new API timeout — all existing timeouts preserved. ✓
+  - CPU/DB/subrequest usage not worse — same operations, just parallelized. ✓
+  - No Maintenance bypass security regression — non-admins still see maintenance popup. ✓
+- Re-ran full test suite: 1034 tests / 1032 pass / 0 fail / 2 skipped (2 new tests added for boot poll move).
+- Verified bun build succeeds for both app.js and src/controllers/users.js (syntax validation).
+- Verified worker-proxy.js is unmodified (git diff --stat shows no worker-proxy.js changes).
+
+Stage Summary:
+- ROOT CAUSE FIXED: bootstrapUser() now runs in parallel with checkMaintenanceMode(). Admin bypass appears within bootstrap round-trip (~1-2s warm, ~auth-ready + 1-2s cold) instead of waiting for viewportChanged (5-20s+).
+- COLD-START CASE ALSO FIXED: PHASE 1 EXTENSION moved the cold-start boot poll (500ms interval) to BEFORE the maintenance check, so admin detection works on Telegram SDK cold start even when maintenance is ON.
+- JOIN CHECK PERFORMANCE IMPROVED: Backend handleBootstrap parallelizes 4 independent operations (watchlist, membership, admin, premium) with the getById→bootstrap→processReferral chain. Estimated cold-start savings: ~600-1500ms.
+- SECURITY FULLY PRESERVED:
+  - /api/users/bootstrap is NOT maintenance-gated on backend (admin detection works during maintenance).
+  - isAdmin() only returns true with both bootstrapComplete=true AND server-confirmed isCurrentUserAdmin.
+  - updateMaintenanceAdminBypass() only shows bypass button for server-confirmed admins.
+  - adminBypassMaintenance() double-checks isAdmin() before allowing bypass.
+  - Non-admin users cannot bypass maintenance (popup stays visible).
+  - No new subrequests — same DB queries + same Telegram API call, just parallelized in time.
+- NO REGRESSIONS: 1032/1034 tests pass (2 pre-existing skipped). All bootstrap, join-check, startup, and admin tests pass.
+- READY FOR PHASE 6 (commit + deploy).

@@ -13164,22 +13164,117 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     let _maintenanceBlocked = false;
 
-    // MAINTENANCE FIX: check maintenance BEFORE any other init.
-    // Previously this ran in parallel with bootstrapUser, which meant the
-    // app UI rendered BEFORE the maintenance response arrived → user saw
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 1 FIX: Fire bootstrapUser() in PARALLEL with checkMaintenanceMode()
+    // ═══════════════════════════════════════════════════════════════════════
+    // ROOT CAUSE: Previously bootstrapUser() was only called INSIDE the
+    // maintenance .then() block (when maintenance is OFF). When maintenance
+    // was ON, bootstrap was NEVER called → bootstrapComplete stayed false →
+    // isAdmin() returned false (gates on bootstrapComplete) → admin bypass
+    // button stayed hidden. Admin was forced to wait for the viewportChanged
+    // event (or visibilitychange/pageshow/hashchange) to fire tryLateBootstrap,
+    // which on some platforms takes 5-20+ seconds (the viewport is already
+    // expanded at app open, so viewportChanged doesn't fire until user
+    // interaction).
+    //
+    // FIX: Start bootstrapUser() IMMEDIATELY (in parallel with maintenance
+    // check). bootstrapUser() is deduplicated via _bootstrapUserInFlight, so
+    // it's safe to start it here and also reference the promise later. When
+    // bootstrap completes:
+    //   - bootstrapComplete = true
+    //   - isCurrentUserAdmin = server-confirmed admin status
+    //   - _bootstrapUserImpl calls updateMaintenanceAdminBypass() at line ~1210
+    //     → shows bypass button for admins (the maintenance popup is already
+    //     visible from showMaintenancePopup if maintenance is ON)
+    //   - For non-admins, the bypass button stays hidden. Maintenance popup
+    //     remains visible — security is fully preserved.
+    //
+    // SECURITY: This does NOT bypass maintenance for non-admin users. The
+    // maintenance popup is shown by showMaintenancePopup() regardless of
+    // bootstrap. The bypass button is ONLY shown by updateMaintenanceAdminBypass()
+    // when isAdmin() returns true (which requires server-confirmed admin status).
+    // /api/users/bootstrap is NOT maintenance-gated on the backend, so the
+    // bootstrap call succeeds even during maintenance.
+    // ═══════════════════════════════════════════════════════════════════════
+    const _parallelBootstrapPromise = bootstrapUser().catch(e => {
+        console.error('[BOOT] bootstrapUser FAILED:', e.message);
+    });
+
+    // ── COLD-START BOOT POLL (runs regardless of maintenance state) ──
+    // PHASE 1 EXTENSION: This boot poll MUST be set up BEFORE the maintenance
+    // check (not inside the maintenance .then block) so that cold-start admin
+    // detection works even when maintenance is ON.
+    //
+    // ROOT CAUSE (cold start + maintenance ON): On Telegram SDK cold start,
+    // auth isn't ready immediately. _bootstrapUserImpl() returns early when
+    // !isTelegramAuthReady() (no API call made). Without the boot poll, the
+    // admin would have to wait for the viewportChanged event (5-20+ seconds)
+    // to fire tryLateBootstrap → bootstrap → admin detection.
+    //
+    // FIX: Set up the boot poll (500ms interval) BEFORE the maintenance check.
+    // When auth becomes ready, the boot poll fires tryLateBootstrap() which
+    // calls bootstrapUser() (deduped). The bootstrap completes, sets
+    // bootstrapComplete=true + isCurrentUserAdmin (from server), and calls
+    // updateMaintenanceAdminBypass() to show the bypass button for admins.
+    //
+    // SAFETY: The boot poll ONLY calls tryLateBootstrap() — it doesn't start
+    // any other init (data loading, polling, etc.). Those are still gated by
+    // the maintenance check. The boot poll clears itself when bootstrapComplete
+    // becomes true OR after 20s max.
+    if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
+        const _bootPollMax = 20000;
+        const _bootPollStart = Date.now();
+        const _bootPollInterval = setInterval(() => {
+            if (bootstrapComplete || Date.now() - _bootPollStart > _bootPollMax) {
+                clearInterval(_bootPollInterval);
+                return;
+            }
+            _notifyAuthStateChange();
+            if (isTelegramAuthReady()) {
+                clearInterval(_bootPollInterval);
+                tryLateBootstrap();
+            }
+        }, 500);
+
+        const _bootObserver = new MutationObserver(() => {
+            _notifyAuthStateChange();
+            if (isTelegramAuthReady() && !bootstrapComplete) {
+                _bootObserver.disconnect();
+                clearInterval(_bootPollInterval);
+                tryLateBootstrap();
+            }
+        });
+        const pn = $('profile-name');
+        if (pn) _bootObserver.observe(pn, { childList: true });
+        setTimeout(() => { _bootObserver.disconnect(); clearInterval(_bootPollInterval); }, 30000);
+    }
+
+    // MAINTENANCE FIX: check maintenance BEFORE any other init (except
+    // bootstrap, which now runs in parallel for admin detection).
+    // Previously bootstrap ran in parallel with maintenance, causing the
+    // app UI to render before the maintenance response arrived → user saw
     // the full app briefly, then maintenance popup appeared on refresh.
     // Now: we AWAIT the maintenance check first. If maintenance is ON,
-    // we block all further init (bootstrap, data loading, rendering).
+    // we block all further init (data loading, polling, rendering). The
+    // parallel bootstrap continues in the background — for admins, the
+    // bypass button appears once bootstrap completes. For non-admins,
+    // the maintenance popup stays (no bypass).
     // If maintenance is OFF (or network fails → fail open), we continue.
     checkMaintenanceMode().then(async (_maintOk) => {
         if (!_maintOk) {
             _maintenanceBlocked = true;
             console.log('[MAINT] App load blocked — maintenance mode active');
-            return; // Stop here — don't bootstrap or load data
+            // Don't await or chain off the parallel bootstrap — it continues
+            // in the background and will call updateMaintenanceAdminBypass()
+            // when it completes (showing the bypass button for admins).
+            // Return here to skip all other init (data loading, polling, etc.).
+            return; // Stop here — don't load data or start polling
         }
 
-    // Start bootstrap (non-blocking — membership check runs in parallel)
-    bootstrapUser().then(() => {
+    // Maintenance is OFF — chain post-bootstrap tasks off the parallel
+    // bootstrap promise. If bootstrap already completed (likely, since
+    // it started before the maintenance check), the .then runs immediately.
+    _parallelBootstrapPromise.then(() => {
         loadUser();
         // ROOT CAUSE FIX: Retry forex data load after bootstrap completes.
         // On startup, loadForexData fires in parallel but may fail because
@@ -13211,8 +13306,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             }
         }
-    }).catch(e => {
-        console.error('[BOOT] bootstrapUser FAILED:', e.message);
     });
 
     // ROOT CAUSE FIX (warm-start speed): Fire data loading IMMEDIATELY —
@@ -13231,35 +13324,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // the return at line above skips this entirely — no polling, no
     // timers, no observer, no slider — nothing starts until maintenance
     // is confirmed OFF.
-
-    // If user is pending (cold open), set up retry mechanism
-    if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
-        const _bootPollMax = 20000;
-        const _bootPollStart = Date.now();
-        const _bootPollInterval = setInterval(() => {
-            if (bootstrapComplete || Date.now() - _bootPollStart > _bootPollMax) {
-                clearInterval(_bootPollInterval);
-                return;
-            }
-            _notifyAuthStateChange();
-            if (isTelegramAuthReady()) {
-                clearInterval(_bootPollInterval);
-                tryLateBootstrap();
-            }
-        }, 500);
-
-        const _bootObserver = new MutationObserver(() => {
-            _notifyAuthStateChange();
-            if (isTelegramAuthReady() && !bootstrapComplete) {
-                _bootObserver.disconnect();
-                clearInterval(_bootPollInterval);
-                tryLateBootstrap();
-            }
-        });
-        const pn = $('profile-name');
-        if (pn) _bootObserver.observe(pn, { childList: true });
-        setTimeout(() => { _bootObserver.disconnect(); clearInterval(_bootPollInterval); }, 30000);
-    }
+    //
+    // NOTE: The cold-start boot poll (_bootPollInterval + _bootObserver)
+    // is set up BEFORE the maintenance check (see above) so that admin
+    // detection works even when maintenance is ON. It ONLY calls
+    // tryLateBootstrap() — it doesn't start any other init.
 
     // ── Phase 3: Authenticated data loads ──
     // Alerts load on first successful heartbeat (after bootstrap) — no race, no polling
