@@ -12524,6 +12524,19 @@ let _maintenanceBypassed = false;
 let _maintenanceActive = false;
 
 /**
+ * Remove the boot loader overlay (fades out smoothly).
+ * Called when maintenance check completes — whether ON or OFF.
+ * Prevents UI flash by keeping the overlay until the maintenance
+ * verdict is known.
+ */
+function _removeBootLoader() {
+    const overlay = document.getElementById('boot-loader-overlay');
+    if (!overlay) return;
+    overlay.style.opacity = '0';
+    setTimeout(() => { overlay.remove(); }, 300);
+}
+
+/**
  * Check maintenance mode status. Shows the popup if enabled.
  * Returns true if app should continue loading, false if blocked.
  *
@@ -12579,11 +12592,15 @@ async function checkMaintenanceMode() {
             console.log('[MAINT] Maintenance is ON — blocking app load');
             showMaintenancePopup(maint);
             _maintenanceActive = true;
+            _removeBootLoader();
             return false;  // <-- caller MUST check this and STOP
         }
+        // Maintenance is OFF — remove boot loader so app is visible
+        _removeBootLoader();
     } catch (e) {
         // Network error or timeout — fail open
         console.log('[MAINT] check skipped (network):', e.message || e);
+        _removeBootLoader();
         return true;
     }
     return true;
@@ -13208,7 +13225,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         _startDataLoading();
     }
 
-    }).catch(() => { /* maintenance check failed — fail open */ });
+    // ── Phase 3: All post-maintenance-check initialization ──
+    // MAINTENANCE FIX: ALL polling, timers, and UI initialization now
+    // run INSIDE the maintenance .then() block. If maintenance is ON,
+    // the return at line above skips this entirely — no polling, no
+    // timers, no observer, no slider — nothing starts until maintenance
+    // is confirmed OFF.
 
     // If user is pending (cold open), set up retry mechanism
     if (!bootstrapComplete && (UserContext.isPending() || (isInTelegram() && !isTelegramAuthReady()))) {
@@ -13375,6 +13397,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             else startAuto();
         });
     })();
+
+    }).catch(() => { /* maintenance check failed — fail open */
+        // Even on fail-open, remove boot loader so user sees the app
+        _removeBootLoader();
+    });
 });
 
 //#endregion

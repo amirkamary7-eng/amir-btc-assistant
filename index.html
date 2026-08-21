@@ -108,6 +108,18 @@
 </head>
 <!-- #endregion -->
 <body>
+    <!-- ═══ BOOT LOADER OVERLAY ═════════════════════════════════════════════
+         Covers the entire screen until maintenance check completes.
+         If maintenance is ON → this hides, maintenance overlay shows.
+         If maintenance is OFF → this fades out, app is revealed.
+         Prevents UI flash: "cache-rendered app → then maintenance popup".
+         z-index: 999998 (just below maintenance-overlay 999999).
+         ═══════════════════════════════════════════════════════════════════ -->
+    <div id="boot-loader-overlay" style="position:fixed;inset:0;z-index:999998;background:#03060d;display:flex;align-items:center;justify-content:center;transition:opacity 0.3s ease;">
+        <div style="width:32px;height:32px;border:3px solid rgba(245,166,35,0.2);border-top-color:#f5a623;border-radius:50%;animation:bootSpin 0.8s linear infinite;"></div>
+    </div>
+    <style>@keyframes bootSpin{to{transform:rotate(360deg)}}</style>
+
     <!-- #region Body -->
     <!-- ==================== ساختار اصلی رابط کاربری ==================== -->
 
