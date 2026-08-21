@@ -515,7 +515,7 @@ const i18n = {
         section_analysis: 'تحلیل‌های جدید', section_watchlist: 'واچ‌لیست من', section_news: 'اخبار مهم و فوری',
         view_all: 'مشاهده همه', watchlist_empty: 'واچ‌لیست خالی است',
         watchlist_empty_desc: 'ارزهای مورد علاقه خود را اضافه کنید', watchlist_add_btn: 'افزودن ارز',
-        watchlist_limit: 'حداکثر ۷ ارز می‌توانید به واچ‌لیست اضافه کنید.', no_analysis: 'تحلیلی موجود نیست',
+        watchlist_limit: 'حداکثر ۷ ارز می‌توانید به واچ‌لیست اضافه کنید.', watchlist_limit_premium: 'حداکثر ۲۰ ارز می‌توانید به واچ‌لیست اضافه کنید.', no_analysis: 'تحلیلی موجود نیست',
         no_analysis_list: 'هیچ تحلیلی ثبت نشده است.', no_news: 'خبری وجود ندارد', news_error: 'خطا در دریافت اخبار',
         news_unavailable: 'متن کامل خبر در دسترس نیست.', notif_center: 'مرکز اعلانات', clear_all_notif: 'پاک کردن همه اعلانات',
         no_notif: 'هیچ اعلانی وجود ندارد.', confirm_clear_notif: 'آیا از پاک کردن تمامی اعلانات مطمئن هستید؟',
@@ -657,7 +657,7 @@ const i18n = {
         section_analysis: 'Latest Analysis', section_watchlist: 'My Watchlist', section_news: 'Breaking News',
         view_all: 'View all', watchlist_empty: 'Watchlist is empty',
         watchlist_empty_desc: 'Add your favorite coins to track them', watchlist_add_btn: 'Add Coin',
-        watchlist_limit: 'You can add up to 7 coins to your watchlist.', no_analysis: 'No analysis available',
+        watchlist_limit: 'You can add up to 7 coins to your watchlist.', watchlist_limit_premium: 'You can add up to 20 coins to your watchlist.', no_analysis: 'No analysis available',
         no_analysis_list: 'No analysis posted yet.', no_news: 'No news available', news_error: 'Failed to load news',
         news_unavailable: 'Full article text is not available.', notif_center: 'Notification Center',
         clear_all_notif: 'Clear all notifications', no_notif: 'No notifications yet.',
@@ -5610,11 +5610,18 @@ function toggleWatchlist(symbol, event) {
                 // Premium upgrade flow
                 window.MembershipApp.open();
             } else {
+                // Watchlist premium message fix: pick the premium variant of the
+                // limit message when the user is premium (hit 20). Free users
+                // (hit 7) still see the existing watchlist_limit message via the
+                // upsell branch above; this ELSE branch is reached by premium
+                // users at 20 OR by free users when MembershipApp.open is
+                // unavailable. The _isPremium flag selects the correct message.
+                const limitMsgKey = _isPremium ? 'watchlist_limit_premium' : 'watchlist_limit';
                 getTg()?.showPopup?.({
                     title: t('watchlist'),
-                    message: t('watchlist_limit'),
+                    message: t(limitMsgKey),
                     buttons: [{ type: 'ok' }]
-                }) || alert(t('watchlist_limit'));
+                }) || alert(t(limitMsgKey));
             }
             return;
         }
@@ -9825,14 +9832,28 @@ function renderNotifications() {
     if (newHash === _lastNotifRenderHash) return; // No changes — skip DOM rebuild
 
     _lastNotifRenderHash = newHash;
-    container.innerHTML = visibleSlice.map(n => `
+    // Notification timestamp fix: show date + time (24-hour, locale-aware).
+    // The backend sends `created_at` as an ISO UTC string with Z suffix
+    // (src/repositories/notifications.js:serializeRow). `new Date(iso)` parses
+    // it as UTC; toLocaleDateString/toLocaleTimeString then convert to the
+    // browser/device timezone (default when no timeZone option is specified).
+    // Locale is selected by currentLang to match the app language (and fixes
+    // the prior i18n bug where EN users saw Persian digits).
+    const _notifLocale = currentLang === 'fa' ? 'fa-IR' : 'en-US';
+    const _notifDateOpts = { dateStyle: 'medium' };
+    const _notifTimeOpts = { timeStyle: 'short', hour12: false };
+    container.innerHTML = visibleSlice.map(n => {
+        const notificationDate = new Date(n.date);
+        const datePart = notificationDate.toLocaleDateString(_notifLocale, _notifDateOpts);
+        const timePart = notificationDate.toLocaleTimeString(_notifLocale, _notifTimeOpts);
+        return `
         <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${escapeHtml(n.id)}')">
             <div class="notif-title">${escapeHtml(n.title)}</div>
             <div class="notif-body">${escapeHtml(n.body)}</div>
-            <div class="notif-date">${new Date(n.date).toLocaleDateString('fa-IR')}</div>
+            <div class="notif-date">${datePart} • ${timePart}</div>
             <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="Delete">×</button>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 /**
  * وضعیت اعلان read را علامت‌گذاری می‌کند — از API استفاده می‌کند.

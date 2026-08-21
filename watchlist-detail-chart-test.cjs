@@ -280,3 +280,75 @@ test('WL-CHART-12: Market and Watchlist routing agree for forex (EURUSD)', () =>
   const marketRoute = 'openForexDetail'; // forex always routes here from Market
   assert.equal(watchlistRoute, marketRoute, 'forex routing must agree (the fix)');
 });
+
+// ============================================================================
+// PROBLEM A (Part 2) — Watchlist Premium Limit MESSAGE (residual bug fix)
+// ============================================================================
+// The gate (getMaxWatchlist) was already premium-aware, but the limit-reached
+// MESSAGE was hard-coded "7" for both Free (hit 7) and Premium (hit 20).
+// Fix: added watchlist_limit_premium i18n key (FA + EN) and the toggleWatchlist
+// ELSE branch now selects the premium variant when _isPremium.
+
+test('WL-MSG-01: watchlist_limit_premium key exists in FA i18n (with "۲۰")', () => {
+  assert.ok(APP_SRC.includes("watchlist_limit_premium: 'حداکثر ۲۰ ارز"),
+    'FA i18n must have watchlist_limit_premium with "۲۰"');
+});
+
+test('WL-MSG-02: watchlist_limit_premium key exists in EN i18n (with "20")', () => {
+  assert.ok(APP_SRC.includes("watchlist_limit_premium: 'You can add up to 20 coins"),
+    'EN i18n must have watchlist_limit_premium with "20"');
+});
+
+test('WL-MSG-03: toggleWatchlist ELSE branch selects premium variant when _isPremium', () => {
+  // The ELSE branch must compute limitMsgKey based on _isPremium and use it
+  // for BOTH the showPopup message and the alert fallback.
+  assert.ok(APP_SRC.includes("const limitMsgKey = _isPremium ? 'watchlist_limit_premium' : 'watchlist_limit'"),
+    'toggleWatchlist must compute limitMsgKey based on _isPremium');
+  assert.ok(APP_SRC.includes('message: t(limitMsgKey)'),
+    'showPopup message must use t(limitMsgKey)');
+  assert.ok(APP_SRC.includes('alert(t(limitMsgKey))'),
+    'alert fallback must use t(limitMsgKey)');
+});
+
+test('WL-MSG-04: original watchlist_limit key still has "7" (Free unchanged)', () => {
+  // The Free message must be untouched.
+  assert.ok(APP_SRC.includes("watchlist_limit: 'حداکثر ۷ ارز"),
+    'FA watchlist_limit must still have "۷" (Free unchanged)');
+  assert.ok(APP_SRC.includes("watchlist_limit: 'You can add up to 7 coins"),
+    'EN watchlist_limit must still have "7" (Free unchanged)');
+});
+
+test('WL-MSG-05: gate logic unchanged — still uses getMaxWatchlist()', () => {
+  // The gate must NOT have changed — still uses the dynamic premium-aware limit.
+  assert.ok(APP_SRC.includes('watchlist.length >= getMaxWatchlist()'),
+    'gate must still use getMaxWatchlist() (unchanged)');
+});
+
+test('WL-MSG-06: upsell flow unchanged — Free branch still calls MembershipApp.open()', () => {
+  // The Free upsell branch (if !_isPremium && MembershipApp.open) must be intact.
+  assert.ok(APP_SRC.includes('if (!_isPremium && window.MembershipApp && typeof window.MembershipApp.open === \'function\')'),
+    'Free upsell branch must be unchanged');
+});
+
+test('WL-MSG-07: no unrelated i18n keys changed', () => {
+  // Sanity: the i18n object structure is intact — a few adjacent keys still present.
+  assert.ok(APP_SRC.includes('watchlist_empty:'), 'watchlist_empty key present');
+  assert.ok(APP_SRC.includes('watchlist_add_btn:'), 'watchlist_add_btn key present');
+  assert.ok(APP_SRC.includes('no_analysis:'), 'no_analysis key present');
+});
+
+test('WL-MSG-08: message selection logic — premium picks premium variant', () => {
+  // Pure-function test of the selection logic.
+  const _isPremium = true;
+  const limitMsgKey = _isPremium ? 'watchlist_limit_premium' : 'watchlist_limit';
+  assert.equal(limitMsgKey, 'watchlist_limit_premium',
+    'premium user must get watchlist_limit_premium');
+});
+
+test('WL-MSG-09: message selection logic — Free picks Free variant', () => {
+  const _isPremium = false;
+  const limitMsgKey = _isPremium ? 'watchlist_limit_premium' : 'watchlist_limit';
+  assert.equal(limitMsgKey, 'watchlist_limit',
+    'Free user must get watchlist_limit');
+});
+
