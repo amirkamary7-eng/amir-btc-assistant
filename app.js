@@ -12548,10 +12548,23 @@ function _removeBootLoader() {
 async function checkMaintenanceMode() {
     // Skip if already bypassed this session (admin) — check both in-memory
     // flag and sessionStorage (so reload after bypass still works)
-    if (_maintenanceBypassed) return true;
+    if (_maintenanceBypassed) {
+        // FIX (AUDIT-BYPASS-BLACK-SCREEN): All early-return paths here MUST
+        // call _removeBootLoader() — otherwise the boot-loader-overlay
+        // (black screen with infinite spinner, z-index 999998) stays
+        // visible forever after an admin bypass + reload, even though the
+        // app loads and functions behind it. See worklog AUDIT-BYPASS-BLACK-SCREEN.
+        _removeBootLoader();
+        return true;
+    }
     try {
         if (sessionStorage.getItem('maint_bypassed') === '1') {
             _maintenanceBypassed = true;
+            // FIX (AUDIT-BYPASS-BLACK-SCREEN): This is the CRITICAL path —
+            // after admin clicks bypass → reload, sessionStorage has
+            // maint_bypassed='1', and this early return used to skip
+            // _removeBootLoader(), leaving the black spinner overlay stuck.
+            _removeBootLoader();
             return true;
         }
     } catch (e) { /* sessionStorage may be blocked */ }
@@ -12561,6 +12574,9 @@ async function checkMaintenanceMode() {
     if (!baseUrl) {
         // No API_BASE configured — can't check, fail open
         console.log('[MAINT] check skipped — no API_BASE');
+        // FIX (AUDIT-BYPASS-BLACK-SCREEN): Remove boot loader on this
+        // fail-open path too — otherwise the black spinner stays stuck.
+        _removeBootLoader();
         return true;
     }
 
@@ -12581,6 +12597,9 @@ async function checkMaintenanceMode() {
         if (!resp.ok) {
             // Server returned an error — fail open
             console.log('[MAINT] check skipped — HTTP', resp.status);
+            // FIX (AUDIT-BYPASS-BLACK-SCREEN): Remove boot loader on this
+            // fail-open path too — otherwise the black spinner stays stuck.
+            _removeBootLoader();
             return true;
         }
 

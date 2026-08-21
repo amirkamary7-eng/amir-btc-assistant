@@ -490,3 +490,270 @@ test('SUMMARY: PHASE 1 + PHASE 2 fixes verified', () => {
     USERS_SRC.includes('chainC') && USERS_SRC.includes('chainD') && USERS_SRC.includes('chainE'),
     'PHASE 2: 5 parallel chains must exist in handleBootstrap');
 });
+
+// ============================================================================
+// Section 6: AUDIT-BYPASS-BLACK-SCREEN — boot-loader-overlay stuck after admin bypass
+// ============================================================================
+// ROOT CAUSE: checkMaintenanceMode() had early-return paths that returned `true`
+// WITHOUT calling _removeBootLoader(). After admin clicks bypass → reload,
+// sessionStorage has maint_bypassed='1', checkMaintenanceMode hits the early
+// return, and _removeBootLoader() was never called → the boot-loader-overlay
+// (black screen with infinite spinner, z-index 999998) stayed visible forever.
+//
+// FIX: All early-return paths in checkMaintenanceMode() now call
+// _removeBootLoader() before returning true. The 4 paths fixed are:
+//   1. _maintenanceBypassed flag (in-memory)
+//   2. sessionStorage.maint_bypassed === '1'
+//   3. No API_BASE configured (fail-open)
+//   4. HTTP error from /api/system/status (fail-open)
+//
+// SECURITY: This fix ONLY removes the visual overlay. It does NOT change
+// admin detection, join check, bootstrap, maintenance security, or bypass
+// authorization. The bypass button is still only shown to server-confirmed
+// admins (isAdmin() requires bootstrapComplete + isCurrentUserAdmin).
+// ============================================================================
+
+// Helper: extract checkMaintenanceMode function block from app.js source.
+// Handles strings, regex literals, and both // and /* */ comments correctly.
+function extractCheckMaintenanceMode(src) {
+  const start = src.indexOf('async function checkMaintenanceMode()');
+  assert.ok(start > -1, 'checkMaintenanceMode must be defined');
+  // Find the opening brace of the function body
+  let i = src.indexOf('{', start);
+  let depth = 0;
+  let inStr = false, strCh = '';
+  let inLineComment = false, inBlockComment = false, inRegex = false;
+  let prev = '';
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (inLineComment) {
+      if (c === '\n') inLineComment = false;
+      prev = c;
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === '*' && src[i + 1] === '/') { i++; inBlockComment = false; }
+      prev = c;
+      continue;
+    }
+    if (inStr) {
+      if (c === '\\') { i++; prev = c; continue; }
+      if (c === strCh) inStr = false;
+      prev = c;
+      continue;
+    }
+    if (inRegex) {
+      if (c === '\\') { i++; prev = c; continue; }
+      if (c === '/' && (prev !== '\\')) inRegex = false;
+      // Handle character classes [...] — braces inside [] don't count
+      if (c === '[') {
+        // Skip to matching ]
+        let clsDepth = 1; i++;
+        while (i < src.length && clsDepth > 0) {
+          if (src[i] === '\\') { i++; continue; }
+          if (src[i] === ']') clsDepth--;
+          if (src[i] === '[') clsDepth++;
+          if (src[i] === '\n') break; // regex can't span newlines
+          i++;
+        }
+      }
+      prev = c;
+      continue;
+    }
+    // Check for comment starts
+    if (c === '/' && src[i + 1] === '/') { inLineComment = true; i++; prev = c; continue; }
+    if (c === '/' && src[i + 1] === '*') { inBlockComment = true; i++; prev = c; continue; }
+    // Check for string starts
+    if (c === '"' || c === "'" || c === '`') { inStr = true; strCh = c; prev = c; continue; }
+    // Check for regex starts — heuristic: / preceded by (,=,:,[,!,&,|,?,;,{,} or start of expr
+    if (c === '/' && !inStr && !inRegex) {
+      // Look back at the last non-whitespace char
+      let j = i - 1;
+      while (j >= 0 && /\s/.test(src[j])) j--;
+      const lastCh = src[j];
+      if (lastCh === undefined || '(,=:[!&|?;{}'.includes(lastCh)) {
+        inRegex = true;
+        prev = c;
+        continue;
+      }
+    }
+    // Track braces
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+    prev = c;
+  }
+  throw new Error('checkMaintenanceMode function block not properly closed');
+}
+
+test('BOOT-LOADER-001: _maintenanceBypassed early-return path calls _removeBootLoader()', () => {
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  // Find the _maintenanceBypassed early return path
+  const bypassFlagIdx = fnBlock.indexOf('if (_maintenanceBypassed)');
+  assert.ok(bypassFlagIdx > -1, '_maintenanceBypassed check must exist in checkMaintenanceMode');
+
+  // Slice from the if to the next 500 chars (includes the FIX comment + call + return)
+  const bypassBlock = fnBlock.slice(bypassFlagIdx, bypassFlagIdx + 500);
+  // Look for the actual CALL (with ;) — not just a comment mention
+  assert.ok(/_removeBootLoader\(\);/.test(bypassBlock),
+    '_maintenanceBypassed early-return MUST call _removeBootLoader() — otherwise black spinner stays stuck after bypass reload');
+  assert.ok(bypassBlock.includes('return true;'),
+    '_maintenanceBypassed path must still return true (fail-open to app)');
+});
+
+test('BOOT-LOADER-002: sessionStorage.maint_bypassed early-return path calls _removeBootLoader() (CRITICAL)', () => {
+  // THIS IS THE CRITICAL PATH that was the actual root cause of the bug:
+  // After admin clicks bypass → reload, sessionStorage has maint_bypassed='1'.
+  // checkMaintenanceMode hits this early return. Before the fix, it returned
+  // true WITHOUT calling _removeBootLoader() → black spinner stuck forever.
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const sessionIdx = fnBlock.indexOf("sessionStorage.getItem('maint_bypassed') === '1'");
+  assert.ok(sessionIdx > -1, 'sessionStorage.maint_bypassed check must exist');
+
+  // Slice from the sessionStorage check to the next 500 chars (includes comment + call)
+  const sessionBlock = fnBlock.slice(sessionIdx, sessionIdx + 500);
+  assert.ok(sessionBlock.includes('_maintenanceBypassed = true;'),
+    'sessionStorage path must set _maintenanceBypassed = true (preserved)');
+  // Look for the actual CALL (with ;) — not just a comment mention
+  assert.ok(/_removeBootLoader\(\);/.test(sessionBlock),
+    'sessionStorage.maint_bypassed early-return MUST call _removeBootLoader() — THIS WAS THE BUG');
+  assert.ok(sessionBlock.includes('return true;'),
+    'sessionStorage path must still return true (bypass confirmed, app continues)');
+});
+
+test('BOOT-LOADER-003: no-API_BASE early-return path calls _removeBootLoader()', () => {
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const noBaseUrlIdx = fnBlock.indexOf('if (!baseUrl)');
+  assert.ok(noBaseUrlIdx > -1, '!baseUrl check must exist');
+
+  // Slice from !baseUrl to the next 500 chars (includes comment + call + return)
+  const noBaseUrlBlock = fnBlock.slice(noBaseUrlIdx, noBaseUrlIdx + 500);
+  assert.ok(noBaseUrlBlock.includes("check skipped — no API_BASE"),
+    'no-API_BASE path must log skip message (preserved)');
+  // Look for the actual CALL (with ;) — not just a comment mention
+  assert.ok(/_removeBootLoader\(\);/.test(noBaseUrlBlock),
+    'no-API_BASE early-return MUST call _removeBootLoader() — otherwise black spinner stays stuck');
+  assert.ok(noBaseUrlBlock.includes('return true;'),
+    'no-API_BASE path must still return true (fail-open)');
+});
+
+test('BOOT-LOADER-004: HTTP error early-return path calls _removeBootLoader()', () => {
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const httpErrIdx = fnBlock.indexOf('if (!resp.ok)');
+  assert.ok(httpErrIdx > -1, '!resp.ok check must exist');
+
+  // Slice from !resp.ok to the next 500 chars (includes comment + call + return)
+  const httpErrBlock = fnBlock.slice(httpErrIdx, httpErrIdx + 500);
+  assert.ok(httpErrBlock.includes("check skipped — HTTP"),
+    'HTTP error path must log skip message (preserved)');
+  // Look for the actual CALL (with ;) — not just a comment mention
+  assert.ok(/_removeBootLoader\(\);/.test(httpErrBlock),
+    'HTTP error early-return MUST call _removeBootLoader() — otherwise black spinner stays stuck');
+  assert.ok(httpErrBlock.includes('return true;'),
+    'HTTP error path must still return true (fail-open)');
+});
+
+test('BOOT-LOADER-005: maintenance-ON path still calls _removeBootLoader() (no regression)', () => {
+  // This path was ALREADY calling _removeBootLoader() before the fix — verify it still does
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const maintOnIdx = fnBlock.indexOf('if (maint.enabled === true)');
+  assert.ok(maintOnIdx > -1, 'maintenance.enabled === true check must exist');
+
+  // Slice from maintenance-ON to the next 400 chars (covers full block)
+  const maintOnBlock = fnBlock.slice(maintOnIdx, maintOnIdx + 400);
+  assert.ok(maintOnBlock.includes('showMaintenancePopup(maint)'),
+    'maintenance-ON path must show popup (preserved)');
+  assert.ok(maintOnBlock.includes('_maintenanceActive = true'),
+    'maintenance-ON path must set _maintenanceActive = true (preserved)');
+  // Look for the actual CALL (with ;)
+  assert.ok(/_removeBootLoader\(\);/.test(maintOnBlock),
+    'maintenance-ON path must still call _removeBootLoader() (no regression)');
+  assert.ok(maintOnBlock.includes('return false;'),
+    'maintenance-ON path must still return false (caller must STOP — preserved)');
+});
+
+test('BOOT-LOADER-006: maintenance-OFF path still calls _removeBootLoader() (no regression)', () => {
+  // This path was ALREADY calling _removeBootLoader() before the fix — verify it still does
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  // Maintenance-OFF path: the comment "Maintenance is OFF" appears right before _removeBootLoader
+  const maintOffIdx = fnBlock.indexOf('// Maintenance is OFF — remove boot loader');
+  assert.ok(maintOffIdx > -1, 'maintenance-OFF path must exist');
+
+  // Slice from the comment to the next 100 chars
+  const maintOffBlock = fnBlock.slice(maintOffIdx, maintOffIdx + 100);
+  assert.ok(maintOffBlock.includes('_removeBootLoader()'),
+    'maintenance-OFF path must still call _removeBootLoader() (no regression)');
+});
+
+test('BOOT-LOADER-007: network-error catch path still calls _removeBootLoader() (no regression)', () => {
+  // This path was ALREADY calling _removeBootLoader() before the fix — verify it still does
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const catchIdx = fnBlock.indexOf('console.log(\'[MAINT] check skipped (network):\'');
+  assert.ok(catchIdx > -1, 'network-error catch path must exist');
+
+  // Slice from the log to the next 150 chars
+  const catchBlock = fnBlock.slice(catchIdx, catchIdx + 150);
+  assert.ok(catchBlock.includes('_removeBootLoader()'),
+    'network-error catch path must still call _removeBootLoader() (no regression)');
+  assert.ok(catchBlock.includes('return true;'),
+    'network-error catch path must still return true (fail-open — preserved)');
+});
+
+test('BOOT-LOADER-008: exactly 4 new _removeBootLoader() CALLS added in early-return paths', () => {
+  // Count all _removeBootLoader() CALLS (with ;) inside checkMaintenanceMode
+  // — excludes comment mentions which don't have ;
+  const fnBlock = extractCheckMaintenanceMode(APP_SRC);
+  const callCount = (fnBlock.match(/_removeBootLoader\(\);/g) || []).length;
+  // Expected: 4 new (early-return paths) + 3 existing (maintenance-ON, maintenance-OFF, network-error)
+  //          = 7 total actual CALLS (with ;)
+  // NOTE: comment mentions of _removeBootLoader() (without ;) are NOT counted.
+  assert.equal(callCount, 7,
+    `checkMaintenanceMode must have 7 _removeBootLoader() CALLS (with ;) — 4 new early-return + 3 existing paths. Got ${callCount}. (Comment mentions without ; are excluded from this count.)`);
+});
+
+test('BOOT-LOADER-009: adminBypassMaintenance() still gates on isAdmin() (security preserved)', () => {
+  // Verify the bypass function still has its security check — the fix doesn't weaken it
+  const bypassFnMatch = APP_SRC.match(/function adminBypassMaintenance\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(bypassFnMatch, 'adminBypassMaintenance function must exist');
+  assert.ok(bypassFnMatch[0].includes('if (!isAdmin())'),
+    'adminBypassMaintenance must still check isAdmin() — SECURITY PRESERVED');
+  assert.ok(bypassFnMatch[0].includes("sessionStorage.setItem('maint_bypassed', '1')"),
+    'adminBypassMaintenance must still set sessionStorage.maint_bypassed (preserved)');
+  assert.ok(bypassFnMatch[0].includes('window.location.reload()'),
+    'adminBypassMaintenance must still reload the page (preserved)');
+});
+
+test('BOOT-LOADER-010: no other code changes outside checkMaintenanceMode (scope check)', () => {
+  // Verify the fix is scoped to checkMaintenanceMode — no other function should
+  // have a new _removeBootLoader() call. We check that adminBypassMaintenance,
+  // showMaintenancePopup, updateMaintenanceAdminBypass, and _bootstrapUserImpl
+  // do NOT contain _removeBootLoader() (they didn't before, they shouldn't now).
+  const bypassFnMatch = APP_SRC.match(/function adminBypassMaintenance\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(bypassFnMatch && !bypassFnMatch[0].includes('_removeBootLoader()'),
+    'adminBypassMaintenance must NOT call _removeBootLoader() (scope preserved)');
+
+  const popupFnMatch = APP_SRC.match(/function showMaintenancePopup\(maint\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(popupFnMatch && !popupFnMatch[0].includes('_removeBootLoader()'),
+    'showMaintenancePopup must NOT call _removeBootLoader() (scope preserved)');
+
+  const updateFnMatch = APP_SRC.match(/function updateMaintenanceAdminBypass\(\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(updateFnMatch && !updateFnMatch[0].includes('_removeBootLoader()'),
+    'updateMaintenanceAdminBypass must NOT call _removeBootLoader() (scope preserved)');
+});
+
+// ============================================================================
+// Summary (updated)
+// ============================================================================
+
+test('SUMMARY-UPDATED: PHASE 1 + PHASE 2 + AUDIT-BYPASS-BLACK-SCREEN fixes verified', () => {
+  // Final sanity check — all critical patterns present
+  assert.ok(APP_SRC.includes('_parallelBootstrapPromise'),
+    'PHASE 1: parallel bootstrap promise must exist');
+  assert.ok(USERS_SRC.includes('chainA') && USERS_SRC.includes('chainB') &&
+    USERS_SRC.includes('chainC') && USERS_SRC.includes('chainD') && USERS_SRC.includes('chainE'),
+    'PHASE 2: 5 parallel chains must exist in handleBootstrap');
+  assert.ok(APP_SRC.includes('AUDIT-BYPASS-BLACK-SCREEN'),
+    'AUDIT-BYPASS-BLACK-SCREEN: fix marker must be present in app.js');
+});
