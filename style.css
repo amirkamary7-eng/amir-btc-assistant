@@ -3112,6 +3112,7 @@ strong.down { color: var(--red); }
     line-height: 1.45;
     color: rgba(255, 255, 255, 0.82);
     font-weight: 400;
+    white-space: pre-line;
 }
 
 .ai-bubble-cta {

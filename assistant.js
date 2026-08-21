@@ -44,7 +44,8 @@ const AssistantUI = {
                     </div>
                     <span class="ai-bubble-title">سلام! 👋</span>
                 </div>
-                <p class="ai-speech-text" data-i18n-fa="سلام، خوش اومدی! سوالی داری؟" data-i18n-en="Welcome! Got a question?">سلام، خوش اومدی! سوالی داری؟</p>
+                <p class="ai-speech-text" data-i18n-fa="سلام 👋🏻 خوش اومدی&#10;اگر سوالی یا چیزی خواستی من اینجام" data-i18n-en="Hello 👋🏻 Welcome&#10;If you have any questions, I'm here">سلام 👋🏻 خوش اومدی
+اگر سوالی یا چیزی خواستی من اینجام</p>
                 <button class="ai-bubble-cta" type="button" onclick="document.getElementById('ai-fab').click()">شروع چت</button>
                 <span class="ai-bubble-tail"></span>
             </div>
@@ -183,7 +184,7 @@ const AssistantUI = {
         const lang = (typeof currentLang !== 'undefined' ? currentLang : 'fa');
         const textEl = bubble.querySelector('.ai-speech-text');
         if (textEl) {
-            textEl.textContent = lang === 'en' ? 'Welcome! Got a question?' : 'سلام، خوش اومدی! سوالی داری؟';
+            textEl.textContent = lang === 'en' ? 'Hello 👋🏻 Welcome\nIf you have any questions, I\'m here' : 'سلام 👋🏻 خوش اومدی\nاگر سوالی یا چیزی خواستی من اینجام';
         }
         // Play subtle notification sound
         this.playWelcomeSound();
