@@ -4005,8 +4005,16 @@ strong.down { color: var(--red); }
 .adm-card-title { font-size: 14px; font-weight: 700; color: #e4e9f2; margin: 0; }
 
 /* ── Stats Grid ── */
-.adm-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* COMPACT: reduced gap from 10px to 6px so more cards fit per screen.
+   On wider screens, 3 columns for the dashboard grid. */
+.adm-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .adm-stats-grid-3 { grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 480px) {
+    .adm-stats-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 768px) {
+    .adm-stats-grid { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+}
 .adm-stat-card {
     background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
     border: 1px solid rgba(255,255,255,0.06);
@@ -4330,38 +4338,45 @@ strong.down { color: var(--red); }
 .adm-quick-btn:active { transform: scale(0.96); }
 
 /* ── Enhanced Stat Cards (with icon + color) ── */
+/* COMPACT FIX: the dashboard + membership stat cards use THIS class
+   (.adm-stat-card-v2), NOT the older .admin-stat-card. Previous compact
+   attempt modified the wrong class — this is the correct one. Reduced
+   padding, gap, border-radius, icon size, and font-size for genuine
+   space savings while keeping the premium dark fintech look. */
 .adm-stat-card-v2 {
     background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
     border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px; padding: 14px;
+    border-radius: 10px; padding: 8px 10px;
     transition: all 0.2s ease;
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex; flex-direction: column; gap: 4px;
     position: relative; overflow: hidden;
 }
 .adm-stat-card-v2::before {
     content: ''; position: absolute; top: 0; right: 0;
-    width: 60px; height: 60px; border-radius: 50%;
+    width: 40px; height: 40px; border-radius: 50%;
     background: var(--stat-glow, rgba(247,147,26,0.08));
-    transform: translate(20px, -20px);
+    transform: translate(15px, -15px);
     transition: transform 0.3s ease;
 }
 .adm-stat-card-v2:hover { border-color: rgba(255,255,255,0.12); transform: translateY(-2px); }
-.adm-stat-card-v2:hover::before { transform: translate(15px, -15px) scale(1.2); }
+.adm-stat-card-v2:hover::before { transform: translate(10px, -10px) scale(1.2); }
 .adm-stat-card-v2-icon {
-    width: 32px; height: 32px; border-radius: 9px;
+    width: 24px; height: 24px; border-radius: 7px;
     display: flex; align-items: center; justify-content: center;
     background: var(--stat-bg, rgba(247,147,26,0.12));
     color: var(--stat-color, #f7b950);
     position: relative; z-index: 1;
 }
+.adm-stat-card-v2-icon svg { width: 14px; height: 14px; }
 .adm-stat-card-v2-value {
-    font-size: 24px; font-weight: 800; color: #fff;
+    font-size: 18px; font-weight: 800; color: #fff;
     line-height: 1.1; position: relative; z-index: 1;
     font-variant-numeric: tabular-nums;
 }
 .adm-stat-card-v2-label {
-    font-size: 11px; color: #7a8499; font-weight: 500;
+    font-size: 10px; color: #7a8499; font-weight: 500;
     position: relative; z-index: 1;
+    line-height: 1.2;
 }
 
 /* ── Quick Presets Card (System Controls) ── */

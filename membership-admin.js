@@ -127,7 +127,7 @@
         statCard(s.totalUsers, 'کل کاربران', 'users', 'orange') +
         statCard(s.pendingRequests, 'در انتظار', 'clock', 'blue') +
         statCard(s.approvedUsers, 'تأیید شده', 'check', 'green') +
-        statCard(s.vipUsers, 'کاربران VIP', 'crown', 'orange') +
+        statCard(s.vipUsers, 'پرمیوم فعال', 'crown', 'orange') +
         statCard(s.suspendedUsers, 'معلق', 'pause', 'gray') +
         statCard(s.rejectedRequests, 'رد شده', 'x', 'red');
     } catch (e) {
@@ -180,7 +180,7 @@
             ' تعلیق</button>';
         }
         html +=
-          '<div class="admin-list-item adm-user-card" style="display:flex;flex-direction:column;gap:10px">' +
+          '<div class="admin-list-item adm-user-card">' +
             '<div class="adm-card-top">' +
               '<div class="adm-card-avatar">' + initial + '</div>' +
               '<div class="adm-card-id">' +
