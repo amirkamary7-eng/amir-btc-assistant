@@ -328,11 +328,22 @@ export function createMembershipRepository(deps) {
 
   async function counts(env) {
     // Single query with conditional aggregation — 1 DB round-trip instead of 4.
+    //
+    // SECURITY/REPORTING FIX: the `vip` count previously used only
+    // `membership_level IN ('VIP','PREMIUM','ELITE')` — which OVER-COUNTED by
+    // including SUSPENDED / EXPIRED / PENDING / REJECTED users who retain a
+    // non-FREE level from a prior approval. The backend `isPremium()` authority
+    // (src/services/membership_authority.js:125-128) correctly requires
+    // APPROVED + premium level + not-expired; this count must match that logic
+    // so the admin dashboard stat ("کاربران VIP") reflects ACTUAL premium
+    // users, not just users with a premium-level label.
     const row = await queryDb(env,
       `SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE membership_status = 'APPROVED')::int AS approved,
-        COUNT(*) FILTER (WHERE membership_level IN ('VIP','PREMIUM','ELITE'))::int AS vip,
+        COUNT(*) FILTER (WHERE membership_level IN ('VIP','PREMIUM','ELITE')
+                          AND membership_status = 'APPROVED'
+                          AND (expire_at IS NULL OR expire_at > NOW()))::int AS vip,
         COUNT(*) FILTER (WHERE membership_status = 'SUSPENDED')::int AS suspended
        FROM membership_users`
     ).then(r => r.rows[0]);
