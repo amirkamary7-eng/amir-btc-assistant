@@ -27,6 +27,14 @@ let _adPopupFetchInFlight = false; // prevents concurrent /api/advertisements/po
 let _bootstrapPromise = null;
 let _bootstrapLongTimer = null; // Long-term bootstrap retry — survives visibility changes (NOT in _pollingIntervals)
 let _adminPanelInitialized = false;
+// LIFECYCLE/BFCACHE FIX: timestamp recorded in 'pagehide' handler. Used by the
+// 'pageshow' (event.persisted) and 'visibilitychange' (visible) recovery paths
+// to detect a "stuck" bootstrap in-flight promise after the page was hidden
+// for more than 20s (15s fetch timeout + 5s margin). When stuck, the in-flight
+// promise is cleared so the next bootstrapUser()/tryLateBootstrap() makes a
+// fresh API call instead of returning the never-resolving stuck promise.
+// See AUDIT-BFCACHE-STUCK-PROMISE in worklog.md for the root-cause analysis.
+let _pageHiddenAt = 0;
 
 function $(id) { return document.getElementById(id); }
 
@@ -12456,11 +12464,32 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         _stopAllPolling();
         // NOTE: Do NOT clear _bootstrapLongTimer here — it must survive background cycles
+        // LIFECYCLE/BFCACHE FIX: record the hide timestamp so the visible-transition
+        // path can detect a "stuck" bootstrap in-flight promise after a long hide.
+        if (!_pageHiddenAt) _pageHiddenAt = Date.now();
     } else {
         _startAllPolling();
         // Retry bootstrap if app returned to foreground and bootstrap hasn't completed
         _notifyAuthStateChange();
         if (!bootstrapComplete) {
+            // LIFECYCLE/BFCACHE FIX: stuck-promise detection.
+            // If the page was hidden for more than 20s AND an in-flight bootstrap
+            // promise still exists, the promise is almost certainly "stuck" — the
+            // underlying fetch was aborted when the page entered bfcache (iOS WebKit)
+            // but the .finally() clearing the in-flight promise never fires. Clear
+            // both _bootstrapUserInFlight (bootstrapUser() dedup) and _bootstrapPromise
+            // (tryLateBootstrap() dedup) so the next call makes a fresh API request.
+            // 20s threshold = 15s apiFetch timeout + 5s margin; below this we assume
+            // any in-flight promise is still settling normally (no reset, no duplicate).
+            if (_pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+                if (_bootstrapUserInFlight) {
+                    _bootstrapUserInFlight = null;
+                }
+                if (_bootstrapPromise) {
+                    _bootstrapPromise = null;
+                }
+            }
+            _pageHiddenAt = 0;
             // Ensure long-term retry is running
             if (!_bootstrapLongTimer) {
                 _bootstrapLongTimer = setInterval(() => {
@@ -12483,15 +12512,41 @@ window.addEventListener('beforeunload', () => {
     if (_bootstrapLongTimer) { clearInterval(_bootstrapLongTimer); _bootstrapLongTimer = null; }
 });
 
+// LIFECYCLE/BFCACHE FIX: record the hide timestamp on pagehide.
+// Used by the pageshow (event.persisted) recovery path to detect a "stuck"
+// bootstrap in-flight promise after a long bfcache stay. We do NOT abort the
+// in-flight fetch here — we just record the time so we can detect stuck state
+// on restore (clearing the promise only if it's still set after 20s).
+window.addEventListener('pagehide', () => {
+    _pageHiddenAt = Date.now();
+});
+
 // pageshow — fires when page is restored from bfcache (Mini App reopen)
 window.addEventListener('pageshow', (event) => {
     if (event.persisted) {
         // Page restored from bfcache — retry bootstrap if needed
         // SECURITY: Do NOT restore admin-ready from localStorage
-        if (!bootstrapComplete && isTelegramAuthReady()) {
-            tryLateBootstrap();
+        if (!bootstrapComplete) {
+            // LIFECYCLE/BFCACHE FIX: stuck-promise detection (same logic as
+            // visibilitychange visible path). If the page was in bfcache for
+            // more than 20s AND an in-flight bootstrap promise still exists,
+            // the promise is almost certainly "stuck" — clear both dedup
+            // promises so the next tryLateBootstrap() makes a fresh API call.
+            if (_pageHiddenAt && (Date.now() - _pageHiddenAt) > 20000) {
+                if (_bootstrapUserInFlight) {
+                    _bootstrapUserInFlight = null;
+                }
+                if (_bootstrapPromise) {
+                    _bootstrapPromise = null;
+                }
+            }
+            // Then try bootstrap if auth is ready (unchanged behavior).
+            if (isTelegramAuthReady()) {
+                tryLateBootstrap();
+            }
         }
     }
+    _pageHiddenAt = 0;
 });
 
 function startPolling() {
