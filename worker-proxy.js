@@ -1519,7 +1519,13 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
           continue;
         }
         clearTimeout(timer);
-        throw new Error(`Telegram sendMessage failed: ${data.error_code} ${data.description}`);
+        // 429 FIX: attach retry_after to the error so processQueue can use it
+        // for next_retry_at instead of the hardcoded 60s fallback.
+        const _err429 = new Error(`Telegram sendMessage failed: ${data.error_code} ${data.description}`);
+        if (data.error_code === 429 && data.parameters?.retry_after) {
+          _err429.retry_after = Math.max(1, Math.min(data.parameters.retry_after, 60));
+        }
+        throw _err429;
       }
 
       // Retry on 429 (rate limit) or 5xx (server error)
@@ -1531,7 +1537,13 @@ async function sendTelegramMessage(env, payload, { retries = 1, timeoutMs = 8000
 
       const responseText = await response.text();
       clearTimeout(timer);
-      throw new Error(`Telegram sendMessage failed: HTTP ${response.status} ${responseText}`);
+      // 429 FIX: attach retry_after from HTTP header for processQueue
+      const _errHttp = new Error(`Telegram sendMessage failed: HTTP ${response.status} ${responseText}`);
+      if (response.status === 429) {
+        const _ra = parseInt(response.headers.get('Retry-After') || '0', 10);
+        if (_ra > 0) _errHttp.retry_after = Math.max(1, Math.min(_ra, 60));
+      }
+      throw _errHttp;
     } catch (err) {
       if (err.name === 'AbortError' && attempt < retries) {
         // Timeout — retry once more

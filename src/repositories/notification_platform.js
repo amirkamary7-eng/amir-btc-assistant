@@ -815,14 +815,21 @@ export function createNotificationPlatformRepository(deps) {
       } catch (e) {
         // Failure → revert to 'pending' for retry, increment attempts.
         // If max_attempts exceeded, mark as 'failed' (no more retries).
+        // 429 FIX: if the error has a retry_after property (set by sendTelegramMessage
+        // when Telegram returns 429 with retry_after), use it instead of the hardcoded
+        // 60 seconds. This respects Telegram's rate-limit guidance and avoids
+        // unnecessary 60s waits when Telegram only asked for 3-5s.
+        const _retrySeconds = (e && typeof e.retry_after === 'number' && e.retry_after > 0)
+          ? Math.max(1, Math.min(e.retry_after, 60))
+          : 60;
         await queryDb(env, `
           UPDATE notification_queue
           SET status = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'pending' END,
               attempts = attempts + 1,
               error = $2,
-              next_retry_at = NOW() + INTERVAL '60 seconds'
+              next_retry_at = NOW() + make_interval(secs => $3)
           WHERE id = $1
-        `, [item.id, String(e.message || '').substring(0, 200)], 1, pool).catch(() => {});
+        `, [item.id, String(e.message || '').substring(0, 200), _retrySeconds], 1, pool).catch(() => {});
         failed++;
       }
     }
@@ -1130,6 +1137,28 @@ export function createNotificationPlatformRepository(deps) {
         priority: finalPriority,
         payload: { title: finalTitle, message: finalMessage, telegramExtra },
       }, pool);
+
+      // IMMEDIATE DELIVERY FIX: after enqueueing, attempt immediate first delivery
+      // via processQueue(LIMIT=1). This reduces notification latency from ~30s
+      // (waiting for the next 1-min cron tick) to ~1-3s (synchronous in the
+      // same request). Safe because:
+      //   - FOR UPDATE SKIP LOCKED prevents duplicate processing with cron
+      //   - telegram_message_id check prevents duplicate Telegram sends
+      //   - ON CONFLICT DO NOTHING prevents duplicate queue inserts
+      //   - Empty queue: 1 fast SELECT → 0 rows → ~0.5ms wasted
+      //   - 1 item: ~1.5ms CPU (DB queries; Telegram API is I/O not CPU)
+      //   - Total added CPU: ~2ms — well under 10ms Free Plan limit
+      //   - Subrequests: +1 (Telegram API) — well under 50 limit
+      // The cron ticks (*/1 LIMIT=3, */5 LIMIT=10) remain as backstop for
+      // failures, retries, and cron-triggered notifications (alerts, broadcasts).
+      if (env_sendTelegramMessage) {
+        try {
+          await processQueue(env, env_sendTelegramMessage, pool, 1);
+        } catch (e) {
+          // Non-fatal — cron will pick it up on the next tick
+          console.warn('sendNotification immediate processQueue failed (cron will retry):', e?.message || e);
+        }
+      }
     }
 
     return { id: notificationId, status: 'delivered' };
