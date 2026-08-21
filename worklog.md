@@ -4465,3 +4465,52 @@ Stage Summary — FINAL VERDICT:
 - READY FOR COMMIT/DEPLOY: the fix is minimal, scoped to lifecycle handlers only, and has comprehensive test coverage
 - Production code NOT modified during this review (only added test files: lifecycle-race-condition-test.cjs, lifecycle-edge-case-test.cjs)
 - NO commit, NO push, NO deploy performed (read-only review as requested)
+
+---
+Task ID: RELEASE-LIFECYCLE-FIX
+Agent: Main Orchestrator
+Task: Release Lifecycle/BFCACHE Fix + Welcome Bubble cleanup to production
+
+Work Log:
+- Deleted temporary verification test files (not part of permanent suite):
+  - bfcache-stuck-promise-verify.cjs (temp verification from prior session)
+  - lifecycle-race-condition-test.cjs (temp race-condition tests from review)
+  - lifecycle-edge-case-test.cjs (temp edge-case tests from review)
+  - Kept: lifecycle-bfcache-recovery-test.cjs (permanent, added to package.json)
+  - Kept: kv-rl-security-verify.cjs (pre-existing file, not created in this session)
+- Verified scope: only Lifecycle/BFCACHE Fix (app.js +59 lines) + Welcome Bubble cleanup (assistant.js -2 lines) + test file + worklog remain
+- Final git diff:
+  - app.js: +59 lines (lifecycle handlers only)
+  - assistant.js: -2 lines (welcome bubble markup only)
+  - package.json: +1 test file in test command
+  - lifecycle-bfcache-recovery-test.cjs: NEW (19 regression tests)
+  - worklog.md: +478 lines (audit + verification + fix + review reports)
+  - worker-proxy.js, src/controllers/users.js, src/services/membershipGateway.js: ALL UNCHANGED
+- Committed on branch fix/lifecycle-bfcache-recovery: 83ea8ac
+  "fix: lifecycle/bfcache recovery + welcome bubble cleanup"
+- Pushed branch to origin: fix/lifecycle-bfcache-recovery
+- Merged into main with --no-ff: 0d3b56e
+  "Merge branch 'fix/lifecycle-bfcache-recovery' into main"
+- Pushed main to origin: 7e63be8..0d3b56e
+- Pre-deploy full test suite on main: 1064 tests / 1062 pass / 0 fail / 2 skipped (no regressions)
+- Syntax/build verification: node -c OK, bun build OK (app.js 460KB, assistant.js 52.58KB)
+- GitHub Actions auto-deploy triggered on push to main (test → deploy-worker → deploy-pages → verify)
+- Post-deploy production verification:
+  - Worker /api/health → 200 OK (bot_configured=true, database_ready=true, cache_ready=true)
+  - Worker /api/system/status → 200 OK (maintenance ON, progress 97%)
+  - Worker /api/users/bootstrap (POST, no auth) → 401 "Missing Telegram init data" (route exists, auth required)
+  - Pages index.html → 200 OK (0.12s)
+  - Pages app.fc4b40ca.js → 200 OK, 707KB, contains LIFECYCLE/BFCACHE FIX markers (12 occurrences)
+  - Pages assistant.js → 200 OK, شروع چت removed (0 occurrences), ai-bubble-title removed (0 occurrences)
+
+Stage Summary:
+- COMMIT: 83ea8ac on branch fix/lifecycle-bfcache-recovery
+- MERGE: 0d3b56e into main (no-ff merge)
+- PUSH: main pushed to origin (7e63be8..0d3b56e)
+- DEPLOY: GitHub Actions auto-deploy. Worker + Pages both deployed successfully.
+- TESTS (pre-deploy on main): 1064 total / 1062 pass / 0 fail / 2 skipped
+- PRODUCTION VERIFICATION:
+  - Worker endpoints all healthy (200/200/401)
+  - Pages app.fc4b40ca.js contains LIFECYCLE/BFCACHE FIX markers (lifecycle fix live)
+  - Pages assistant.js has شروع چت removed and ai-bubble-title removed (welcome bubble fix live)
+- SCOPE: Only Lifecycle/BFCACHE Fix + Welcome Bubble cleanup. No backend, security, rate-limit, authentication, or admin-authorization changes.
