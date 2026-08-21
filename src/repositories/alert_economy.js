@@ -213,18 +213,23 @@ export function createAlertEconomyRepository(deps) {
 
   /**
    * Get quota status for a user (for UI display).
+   * FIX: now accepts isPremium parameter to compute the correct free quota
+   * (premium_free_per_day for premium users, free_per_day for normal).
    */
-  async function getQuotaStatus(env, userId, alertType) {
+  async function getQuotaStatus(env, userId, alertType, isPremium) {
     await ensureSchema(env);
     const config = await getConfig(env, alertType);
-    if (!isDatabaseConfigured(env)) return { usedToday: 0, freeRemaining: config.free_per_day, config };
+    const effectiveFreePerDay = (isPremium === true)
+      ? (config.premium_free_per_day || config.free_per_day)
+      : config.free_per_day;
+    if (!isDatabaseConfigured(env)) return { usedToday: 0, freeRemaining: effectiveFreePerDay, config };
     try {
       const today = new Date().toISOString().slice(0, 10);
       const result = await queryDb(env, `SELECT used_count FROM alert_quota WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3`, [String(userId), String(alertType), today]);
       const usedToday = Number(result.rows[0]?.used_count || 0);
-      return { usedToday, freeRemaining: Math.max(0, config.free_per_day - usedToday), config };
+      return { usedToday, freeRemaining: Math.max(0, effectiveFreePerDay - usedToday), config };
     } catch {
-      return { usedToday: 0, freeRemaining: config.free_per_day, config };
+      return { usedToday: 0, freeRemaining: effectiveFreePerDay, config };
     }
   }
 
@@ -238,7 +243,7 @@ export function createAlertEconomyRepository(deps) {
     try {
       const [activeAlerts, triggeredToday, quotaUsed, paidAlerts, abSpent] = await Promise.all([
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM price_alerts WHERE status = 'active'`),
-        queryDb(env, `SELECT COUNT(*)::int AS cnt FROM price_alerts WHERE status = 'triggered' AND created_at >= CURRENT_DATE`),
+        queryDb(env, `SELECT COUNT(*)::int AS cnt FROM price_alerts WHERE status = 'triggered' AND triggered_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COALESCE(SUM(used_count), 0)::int AS cnt FROM alert_quota WHERE quota_date = CURRENT_DATE`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM token_transactions WHERE tx_type = 'alert_debit' AND created_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COALESCE(SUM(amount), 0)::int AS total FROM token_transactions WHERE tx_type = 'alert_debit' AND created_at >= CURRENT_DATE`),

@@ -8712,6 +8712,7 @@ const alertEconomyHandlers = createAlertEconomyHandlers({
   isDatabaseConfigured,
   alertEconomyRepo,
   economyService,
+  membershipAuthority,
 });
 
 //#endregion

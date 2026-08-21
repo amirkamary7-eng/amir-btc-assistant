@@ -666,7 +666,7 @@ function switchAdminSection(section, btn) {
         case 'referrals': loadAdminReferrals(); break;
         case 'reward-center': loadRewardCenterOverview(); break;
         case 'notification-center': loadNpOverview(); break;
-        case 'alert-economy': loadAlertEconomyDashboard(); break;
+        case 'alert-economy': loadAlertEconomyDashboard(); loadAlertEconomyConfigs(); break;
         case 'advertisements': loadAdvertisementsOverview(); break;
         case 'membership': loadAdminMembership(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
@@ -2166,8 +2166,10 @@ let _rcEmergencyControls = null;
 
 function switchRewardCenterTab(tab, btn) {
     _rcCurrentTab = tab;
-    // Update tab buttons
-    document.querySelectorAll('.rc-tab').forEach(function (t) { t.classList.remove('active'); });
+    // FIX: scope selector to #rc-tabs container so we don't clear active
+    // classes from tabs in other admin sections (Notification Center, Ads).
+    var rcTabsContainer = document.getElementById('rc-tabs');
+    (rcTabsContainer || document).querySelectorAll('.rc-tab').forEach(function (t) { t.classList.remove('active'); });
     if (btn) btn.classList.add('active');
     else {
         const target = document.querySelector('.rc-tab[data-rc-tab="' + tab + '"]');

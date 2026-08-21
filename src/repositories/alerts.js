@@ -148,7 +148,7 @@ export function createAlertRepository(deps) {
         `,
         [String(existingRow.id)],
       );
-      return serializeRow(refreshedResult.rows[0] || existingRow);
+      return { ...serializeRow(refreshedResult.rows[0] || existingRow), reactivated: true };
     }
 
     const insertResult = await queryDb(
@@ -166,7 +166,7 @@ export function createAlertRepository(deps) {
         direction,
       ],
     );
-    return serializeRow(insertResult.rows[0]);
+    return { ...serializeRow(insertResult.rows[0]), reactivated: false };
   }
 
   /**

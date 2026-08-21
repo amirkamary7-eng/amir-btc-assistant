@@ -100,7 +100,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateWheelConfig(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     const payload = bodyResult.payload;
@@ -135,7 +135,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleCreateWheelReward(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     const payload = bodyResult.payload;
@@ -149,7 +149,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateWheelReward(request, env, rewardId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -163,7 +163,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleDeleteWheelReward(request, env, rewardId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     try {
       const ok = await rewardCenterRepo.deleteWheelReward(env, rewardId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Reward not found' }, { status: 404 }, env);
@@ -191,7 +191,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleCreateLibraryItem(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -204,7 +204,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateLibraryItem(request, env, itemId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -218,7 +218,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleDeleteLibraryItem(request, env, itemId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     try {
       const ok = await rewardCenterRepo.deleteLibraryItem(env, itemId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Item not found' }, { status: 404 }, env);
@@ -243,7 +243,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleCreateReferralTier(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -256,7 +256,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateReferralTier(request, env, tierId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -270,7 +270,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleDeleteReferralTier(request, env, tierId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     try {
       const ok = await rewardCenterRepo.deleteReferralTier(env, tierId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Tier not found' }, { status: 404 }, env);
@@ -295,7 +295,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleCreateMissionReward(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -308,7 +308,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateMissionReward(request, env, missionId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -322,7 +322,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleDeleteMissionReward(request, env, missionId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     try {
       const ok = await rewardCenterRepo.deleteMissionReward(env, missionId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Mission not found' }, { status: 404 }, env);
@@ -349,7 +349,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleCreateCampaign(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -362,7 +362,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateCampaign(request, env, campaignId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {
@@ -376,7 +376,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleDeleteCampaign(request, env, campaignId) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     try {
       const ok = await rewardCenterRepo.deleteCampaign(env, campaignId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Campaign not found' }, { status: 404 }, env);
@@ -401,7 +401,7 @@ export function createRewardCenterHandlers(deps) {
   async function handleUpdateEmergencyControls(request, env) {
     const { error: authErr, admin } = await requireAdmin(request, env, 'manage_rewards');
     if (authErr) return authErr;
-    const _rlErr = await checkRcRateLimit(env, (authedAdmin || admin).telegram_id); if (_rlErr) return _rlErr;
+    const _rlErr = await checkRcRateLimit(env, admin.telegram_id); if (_rlErr) return _rlErr;
     const bodyResult = await readJsonBody(request, 102400, env);
     if (bodyResult.error) return bodyResult.error;
     try {

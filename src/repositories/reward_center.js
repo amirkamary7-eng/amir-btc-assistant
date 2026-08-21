@@ -318,7 +318,7 @@ export function createRewardCenterRepository(deps) {
       : "created_at >= NOW() - INTERVAL '7 days'";
 
     try {
-      const [todaySpins, weeklySpins, monthlySpins, avgReward, mostWon, highest, distribution, totalTokens, totalSpins, topWinners, dailyTrend] = await Promise.all([
+      const settled = await Promise.allSettled([
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM wheel_history WHERE created_at >= CURRENT_DATE`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM wheel_history WHERE created_at >= DATE_TRUNC('week', NOW())`),
         queryDb(env, `SELECT COUNT(*)::int AS cnt FROM wheel_history WHERE created_at >= DATE_TRUNC('month', NOW())`),
@@ -331,19 +331,32 @@ export function createRewardCenterRepository(deps) {
         queryDb(env, `SELECT h.user_id, COUNT(*)::int AS spins, SUM(h.reward_amount)::int AS total_won, u.username, u.first_name FROM wheel_history h LEFT JOIN users u ON u.telegram_id = h.user_id WHERE ${rangeCondition} GROUP BY h.user_id, u.username, u.first_name ORDER BY total_won DESC LIMIT 10`),
         queryDb(env, `SELECT DATE(created_at) AS date, COUNT(*)::int AS spins, SUM(reward_amount)::int AS tokens FROM wheel_history WHERE ${rangeCondition} GROUP BY DATE(created_at) ORDER BY date`),
       ]);
+      // Helper: extract result from settled[i], or fallback to empty
+      const r = (i, fallback) => settled[i].status === 'fulfilled' ? settled[i].value : fallback;
+      const todaySpins = r(0, { rows: [] });
+      const weeklySpins = r(1, { rows: [] });
+      const monthlySpins = r(2, { rows: [] });
+      const avgReward = r(3, { rows: [] });
+      const mostWon = r(4, { rows: [] });
+      const highest = r(5, { rows: [] });
+      const distribution = r(6, { rows: [] });
+      const totalTokens = r(7, { rows: [] });
+      const totalSpins = r(8, { rows: [] });
+      const topWinners = r(9, { rows: [] });
+      const dailyTrend = r(10, { rows: [] });
 
       return {
         today_spins: Number(todaySpins.rows[0]?.cnt || 0),
         weekly_spins: Number(weeklySpins.rows[0]?.cnt || 0),
         monthly_spins: Number(monthlySpins.rows[0]?.cnt || 0),
         average_reward: Math.round(Number(avgReward.rows[0]?.avg || 0) * 100) / 100,
-        most_won: mostWon.rows.map(r => ({ label: r.reward_label, count: Number(r.cnt) })),
+        most_won: mostWon.rows.map(row => ({ label: row.reward_label, count: Number(row.cnt) })),
         highest_reward: Number(highest.rows[0]?.highest || 0),
-        reward_distribution: distribution.rows.map(r => ({ type: r.reward_type, label: r.reward_label, count: Number(r.cnt), total: Number(r.total) })),
+        reward_distribution: distribution.rows.map(row => ({ type: row.reward_type, label: row.reward_label, count: Number(row.cnt), total: Number(row.total) })),
         total_tokens: Number(totalTokens.rows[0]?.total || 0),
         total_spins: Number(totalSpins.rows[0]?.cnt || 0),
-        top_winners: topWinners.rows.map(r => ({ user_id: String(r.user_id), username: r.username, first_name: r.first_name, spins: Number(r.spins), total_won: Number(r.total_won) })),
-        spin_trend: dailyTrend.rows.map(r => ({ date: isoDate(r.date), spins: Number(r.spins), tokens: Number(r.tokens) })),
+        top_winners: topWinners.rows.map(row => ({ user_id: String(row.user_id), username: row.username, first_name: row.first_name, spins: Number(row.spins), total_won: Number(row.total_won) })),
+        spin_trend: dailyTrend.rows.map(row => ({ date: isoDate(row.date), spins: Number(row.spins), tokens: Number(row.tokens) })),
       };
     } catch (e) {
       console.warn('reward_center getAnalytics error:', e.message);

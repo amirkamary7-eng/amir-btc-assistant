@@ -111,11 +111,22 @@ export function createAlertHandlers(deps) {
     payload.user_id = String(authState.user.id);
 
     // ── Alert Economy: Quota Check + Token Debit ──
-    // ECON-02 FIX: Use content-based refId (symbol+price+direction+UTC date)
-    // instead of Date.now(). This makes retries/replays idempotent — the
-    // UNIQUE constraint on token_transactions(user_id, tx_type, ref_id)
-    // prevents double-debit for the same logical alert.
-    const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}`;
+    // PAYMENT BYPASS FIX: Use operation-unique refId (content + Date.now())
+    // instead of content-only refId. Previously, the refId was
+    // `alert_{user}_{symbol}_{price}_{dir}_{date}` — content-based only.
+    // This made retries idempotent BUT allowed a bypass: after paying for
+    // alert A, the user could delete A, re-create A (same refId), and the
+    // UNIQUE constraint would skip the debit (idempotent) → free reactivation.
+    //
+    // FIX: append Date.now() to refId so each CREATION attempt is unique.
+    // Retries within the same second (network errors) still use the same
+    // refId → idempotent. But a new activation (delete + re-create) uses a
+    // different Date.now() → new debit → no bypass.
+    //
+    // Additionally: incrementQuota should only run for NEW alerts, not
+    // reactivations. The alertRepo.create return value now includes
+    // `reactivated: true/false` so we can distinguish.
+    const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
 
     if (alertEconomyRepo) {
       // PHASE 3: Determine tier via MembershipAuthority (fail-safe to Normal).
@@ -159,8 +170,10 @@ export function createAlertHandlers(deps) {
     try {
       const alert = await alertRepo.create(env, payload.user_id, payload);
 
-      // Increment quota AFTER successful creation
-      if (alertEconomyRepo) {
+      // Increment quota AFTER successful creation — but ONLY for new alerts.
+      // Reactivated alerts don't need a new quota increment because the quota
+      // was already counted when the alert was first created.
+      if (alertEconomyRepo && !alert.reactivated) {
         await alertEconomyRepo.incrementQuota(env, payload.user_id, 'price_alert').catch(() => {});
       }
 
