@@ -284,9 +284,15 @@ export function createUserHandlers(deps) {
       // Idempotency: mission_progress UNIQUE(user_id, mission_id, daily_date) + rewarded flag
       // + token_transactions UNIQUE(user_id, tx_type, ref_id) ensure no double-reward across
       // multiple bootstrap calls in the same day.
+      //
+      // PHASE 1 FIX (WALLET-REWARDS): capture the result of fireDailyLoginMission so we
+      // can include wallet_balance + wallet_changed in the bootstrap response. Previously
+      // the return value was discarded — frontend had no way to know a daily_login reward
+      // was credited, causing the wallet UI to show a stale balance for up to 30s (cache TTL).
+      let dailyLoginReward = null;
       if (channelJoined && isDatabaseConfigured(env) && typeof fireDailyLoginMission === 'function') {
         try {
-          await fireDailyLoginMission(env, userId);
+          dailyLoginReward = await fireDailyLoginMission(env, userId);
         } catch (e) {
           // Non-fatal — bootstrap must succeed even if mission reward fails.
           console.warn('[BOOTSTRAP] fireDailyLoginMission failed (non-fatal):', e?.message);
@@ -295,6 +301,14 @@ export function createUserHandlers(deps) {
 
       // [BOOTSTRAP-E2E] Log final response
       void logBootstrapE2E(env, { phase: 'response', userId, channel_joined: channelJoined, is_admin: isUserAdmin });
+      // PHASE 1 FIX: surface wallet_balance + wallet_changed to the frontend.
+      // Only included when daily_login actually granted a NEW reward (not idempotent).
+      // Frontend uses `wallet_changed` to invalidate its cache and refresh immediately.
+      // NOTE: isPremiumUser is already resolved above via Promise.all([chainD, chainE]).
+      const walletChanged = Boolean(dailyLoginReward?.rewardGranted);
+      const walletBalance = (dailyLoginReward && typeof dailyLoginReward.newBalance === 'number')
+        ? dailyLoginReward.newBalance
+        : null;
       return jsonResponse({
         status: 'success',
         user: userRepo.normalizeRow(userRow || { telegram_id: userId, lang: 'fa', channel_joined: false }, watchlist),
@@ -302,6 +316,11 @@ export function createUserHandlers(deps) {
         // Watchlist premium fix: frontend reads this to set MembershipApp cache
         // eagerly (no waiting for lazy loadCard() on profile open).
         is_premium: isPremiumUser,
+        // PHASE 1 (WALLET-REWARDS): wallet balance signal for frontend cache invalidation.
+        // `wallet_balance` is null when no reward was granted (normal bootstrap).
+        // `wallet_changed` is true only when a NEW reward was credited this bootstrap.
+        wallet_balance: walletBalance,
+        wallet_changed: walletChanged,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('bootstrap-user', error));

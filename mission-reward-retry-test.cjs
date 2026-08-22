@@ -32,21 +32,24 @@ test('MISSION-RETRY-01: retryFailedMissionRewards function exists', () => {
     'retryFailedMissionRewards must be defined');
 });
 
-test('MISSION-RETRY-02: uses same ref_id format as fireDailyLoginMission', () => {
-  // fireDailyLoginMission constructs: `mission_${userId}_${missionId}_${today}`
-  // Retry must construct the same format from mission_progress row data
+test('MISSION-RETRY-02: uses same ref_id format as fireDailyLoginMission (Tehran date)', () => {
+  // PHASE 1 FIX: fireDailyLoginMission now uses Tehran date (not UTC) for refId.
+  // Retry must use the SAME Tehran date to maintain idempotency.
+  // The retry cron uses sharedGetTehranDateString() (same helper as fireDailyLoginMission).
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
-  assert.ok(retryBlock.includes("`mission_${row.user_id}_${row.mission_id}_${row.date_str}`"),
-    'retry must use same ref_id format: mission_${user_id}_${mission_id}_${date_str}');
+  assert.ok(retryBlock.includes('sharedGetTehranDateString'),
+    'retry must use sharedGetTehranDateString helper (Tehran date, consistent with fireDailyLoginMission)');
+  assert.ok(retryBlock.includes("`mission_${row.user_id}_${row.mission_id}_${tehranToday}`"),
+    'retry must use Tehran date in refId: mission_${user_id}_${mission_id}_${tehranToday}');
 });
 
 test('MISSION-RETRY-03: uses same tx_type as original reward', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes("'mission_reward'"),
     'retry must use tx_type: mission_reward');
@@ -55,7 +58,7 @@ test('MISSION-RETRY-03: uses same tx_type as original reward', () => {
 test('MISSION-RETRY-04: query finds completed+rewarded missions without token_transactions', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes('completed = TRUE'),
     'query must filter completed = TRUE');
@@ -67,19 +70,23 @@ test('MISSION-RETRY-04: query finds completed+rewarded missions without token_tr
     'query must match tx_type = mission_reward');
 });
 
-test('MISSION-RETRY-05: query bounded to today + yesterday', () => {
+test('MISSION-RETRY-05: query bounded to today + yesterday + day before (timezone safety)', () => {
+  // PHASE 1 FIX: query window widened to CURRENT_DATE - 2 to cover timezone edge cases.
+  // Tehran is UTC+3:30, so a mission completed at 00:00 Tehran (20:30 UTC previous day)
+  // would have daily_date = previous UTC day. The retry cron must check 3 candidate
+  // ref_ids (daily_date, daily_date+1, daily_date-1) to find the matching token_transaction.
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
-  assert.ok(retryBlock.includes('CURRENT_DATE - 1'),
-    'query must bound to today + yesterday (CURRENT_DATE - 1)');
+  assert.ok(retryBlock.includes('CURRENT_DATE - 2'),
+    'query must bound to today + yesterday + day before (CURRENT_DATE - 2) for timezone safety');
 });
 
 test('MISSION-RETRY-06: query has LIMIT 20', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes('LIMIT 20'),
     'query must have LIMIT 20 for bounded batch');
@@ -88,7 +95,7 @@ test('MISSION-RETRY-06: query has LIMIT 20', () => {
 test('MISSION-RETRY-07: reward amount from DB (not hardcoded)', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes('getMissionReward'),
     'retry must call getMissionReward to get amount from DB');
@@ -99,7 +106,7 @@ test('MISSION-RETRY-07: reward amount from DB (not hardcoded)', () => {
 test('MISSION-RETRY-08: individual failure does not abort batch', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 3000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   // Each row has its own try/catch
   assert.ok(retryBlock.includes("catch (e)"),
@@ -146,7 +153,7 @@ test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
   // and serves as a regression guard against re-introduction).
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(!retryBlock.includes('_bsDiag'),
     'no _bsDiag added to retry function');
@@ -162,7 +169,7 @@ test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
 test('MISSION-RETRY-13: uses safeError for top-level catch (existing pattern)', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 3000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes("safeError('mission-reward-retry-cron'"),
     'top-level catch must use safeError with mission-reward-retry-cron scope');
@@ -171,7 +178,7 @@ test('MISSION-RETRY-13: uses safeError for top-level catch (existing pattern)', 
 test('MISSION-RETRY-14: checks isDatabaseConfigured + economyService + walletRepo', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
-    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 2000
+    WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
   assert.ok(retryBlock.includes('isDatabaseConfigured(env)'),
     'must check isDatabaseConfigured');

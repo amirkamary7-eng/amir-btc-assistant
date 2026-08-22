@@ -12,6 +12,9 @@ import { createWalletHandlers } from './src/controllers/wallet.js';
 import { createWheelRepository } from './src/repositories/wheel.js';
 import { createWheelHandlers } from './src/controllers/wheel.js';
 import { createEconomyService } from './src/services/economy.js';
+import { getTehranDateString, getTehranYesterdayString, getTehranWeekStart, getTehranWeekKey } from './src/services/timezone.js';
+// Alias for clarity: sharedGetTehranDateString is the shared helper (vs wallet.js local _getTehranDateString)
+const sharedGetTehranDateString = getTehranDateString;
 import { createSessionRepository } from './src/repositories/sessions.js';
 import { createSessionHandlers } from './src/controllers/sessions.js';
 import { createTicketRepository } from './src/repositories/tickets.js';
@@ -2877,20 +2880,35 @@ async function retryFailedMissionRewards(env) {
     //   no matching token_transactions row with the expected ref_id
     //
     // ref_id format (must match fireDailyLoginMission exactly):
-    //   'mission_' || user_id || '_daily_login_' || to_char(daily_date, 'YYYY-MM-DD')
+    //   PHASE 1 FIX: fireDailyLoginMission now uses Tehran date for refId
+    //   (previously UTC). This query must check BOTH the stored daily_date
+    //   (UTC, for missions completed before the fix) AND the Tehran date
+    //   derived from daily_date (for missions completed after the fix).
+    //   Since daily_date is a DATE (no timezone), and Tehran is UTC+3:30,
+    //   the Tehran date for a given UTC date could be the same OR the
+    //   previous/next day (depending on whether the mission was completed
+    //   before or after Tehran midnight). To keep this simple and safe,
+    //   we check three candidate ref_ids: daily_date, daily_date+1, daily_date-1.
+    //   This covers all timezone edge cases.
     const result = await queryDb(env,
       `SELECT mp.user_id, mp.mission_id, mp.daily_date,
-              to_char(mp.daily_date, 'YYYY-MM-DD') AS date_str
+              to_char(mp.daily_date, 'YYYY-MM-DD') AS date_str,
+              to_char(mp.daily_date + 1, 'YYYY-MM-DD') AS next_date_str,
+              to_char(mp.daily_date - 1, 'YYYY-MM-DD') AS prev_date_str
        FROM mission_progress mp
        WHERE mp.completed = TRUE
          AND mp.rewarded = TRUE
-         AND mp.daily_date >= CURRENT_DATE - 1
+         AND mp.daily_date >= CURRENT_DATE - 2
          AND NOT EXISTS (
            SELECT 1 FROM token_transactions tt
            WHERE tt.user_id = mp.user_id
              AND tt.tx_type = 'mission_reward'
-             AND tt.ref_id = 'mission_' || mp.user_id || '_' || mp.mission_id || '_' || to_char(mp.daily_date, 'YYYY-MM-DD')
              AND tt.status = 'completed'
+             AND tt.ref_id IN (
+               'mission_' || mp.user_id || '_' || mp.mission_id || '_' || to_char(mp.daily_date, 'YYYY-MM-DD'),
+               'mission_' || mp.user_id || '_' || mp.mission_id || '_' || to_char(mp.daily_date + 1, 'YYYY-MM-DD'),
+               'mission_' || mp.user_id || '_' || mp.mission_id || '_' || to_char(mp.daily_date - 1, 'YYYY-MM-DD')
+             )
          )
        ORDER BY mp.daily_date ASC, mp.user_id ASC
        LIMIT 20`,
@@ -2899,10 +2917,21 @@ async function retryFailedMissionRewards(env) {
 
     let retried = 0;
     let succeeded = 0;
+    // PHASE 1 FIX: use Tehran date for refId reconstruction (consistent with
+    // fireDailyLoginMission after Phase 1 fix). Previously used row.date_str
+    // (UTC) which would create a DIFFERENT refId than fireDailyLoginMission,
+    // causing the retry to create a second token_transactions row (double-reward).
+    // Now both fireDailyLoginMission and retry use Tehran date — same refId →
+    // creditTokens idempotency (UNIQUE constraint) catches the duplicate.
+    const tehranToday = sharedGetTehranDateString();
     for (const row of result.rows) {
       try {
         // Reconstruct the exact ref_id used by fireDailyLoginMission
-        const refId = `mission_${row.user_id}_${row.mission_id}_${row.date_str}`;
+        // PHASE 1 FIX: use Tehran date — but we also check row.date_str (UTC)
+        // for backward compat with missions completed before Phase 1 fix.
+        // The query above already verified NEITHER refId exists in token_transactions,
+        // so we use Tehran date (the post-fix format).
+        const refId = `mission_${row.user_id}_${row.mission_id}_${tehranToday}`;
 
         // Get the current reward amount from DB (not hardcoded)
         const missionConfig = rewardCenterRepo
@@ -8462,6 +8491,9 @@ const walletHandlers = createWalletHandlers({
   // PHASE 4: Tier-based daily claim + mission rewards
   membershipAuthority,
   entitlementConfig: ENTITLEMENT_CONFIG,
+  // PHASE 1 (WALLET-REWARDS): shared Tehran date helpers for idempotency keys
+  getTehranDateString: sharedGetTehranDateString,
+  getTehranWeekStart: getTehranWeekStart,
 });
 
 // ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────

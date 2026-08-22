@@ -1239,6 +1239,41 @@ async function _bootstrapUserImpl() {
             syncRemindersFromBackend().catch(() => {});
         }
 
+        // PHASE 1 FIX (WALLET-REWARDS): surface wallet changes from bootstrap daily_login reward.
+        // Backend now includes `wallet_balance` + `wallet_changed` when daily_login grants a
+        // NEW reward. Frontend uses this to invalidate the wallet cache and refresh the balance
+        // display immediately — instead of showing a stale balance for up to 30s (WALLET_CACHE_TTL).
+        // `wallet_changed` is true ONLY when a NEW reward was credited (not idempotent).
+        // `wallet_balance` is the new balance number (or null if no reward).
+        if (data.wallet_changed && typeof data.wallet_balance === 'number') {
+            // Invalidate WalletApp cache so next fetch hits the API (no stale data).
+            if (window.WalletApp && typeof window.WalletApp._invalidateCache === 'function') {
+                window.WalletApp._invalidateCache();
+            }
+            // Update profile card balance display (if profile is open).
+            if (typeof window.WalletApp?.loadProfileCard === 'function') {
+                try { window.WalletApp.loadProfileCard(); } catch (_) {}
+            }
+            // If wallet full page is open, refresh the balance display immediately.
+            const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
+            if (balanceEl) {
+                const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+                if (typeof animateBalanceChange === 'function') {
+                    animateBalanceChange(balanceEl, currentBalance, data.wallet_balance);
+                } else {
+                    balanceEl.textContent = data.wallet_balance.toLocaleString('en-US');
+                }
+            }
+            // If wallet full page is open, refresh ALL wallet data in background
+            // (balance + tier + history + summary). No artificial delay — fire immediately.
+            const walletPage = document.getElementById('wallet-full-page');
+            if (walletPage && walletPage.classList.contains('open')) {
+                if (typeof window.WalletApp?._refreshWalletData === 'function') {
+                    try { window.WalletApp._refreshWalletData(); } catch (_) {}
+                }
+            }
+        }
+
         // ── Beta Launch Popup ──
         // Show one-time beta popup for users who haven't seen it yet.
         // Uses server-side `beta_popup_seen` flag (persisted in DB) so it

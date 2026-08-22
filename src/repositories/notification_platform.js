@@ -142,12 +142,21 @@ export function createNotificationPlatformRepository(deps) {
         'announcements', 'promotions', 'challenges', 'tickets',
         'calendar', 'news', 'market', 'wheel', 'mission', 'security', 'system'
       ];
+      // PHASE 1 FIX (WALLET-REWARDS): wallet + mission notifications now default to 'both'
+      // (Telegram + Mini App) instead of 'mini_app' only.
+      // Rationale: users who don't open the Mini App won't see reward notifications
+      // if they're only inserted into the notifications table (mini_app). Delivering
+      // to Telegram as well ensures users see their rewards even when the Mini App
+      // is closed. Users can still override via notification settings UI (app.js:10655).
+      // NOTE: this only changes the COLUMN DEFAULT for new rows — existing users who
+      // already have a notification_settings row keep their current value. Users
+      // without a row will get the new default when a row is created.
       const defaultChannels = {
-        referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
+        referral: 'mini_app', wallet: 'both', price_alert: 'both',
         analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
         promotions: 'none', challenges: 'mini_app', tickets: 'both',
         calendar: 'both', news: 'both', market: 'both',
-        wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
+        wheel: 'mini_app', mission: 'both', security: 'both', system: 'mini_app',
       };
       for (const cat of channelCategories) {
         const colName = `ch_${cat}`;
@@ -310,8 +319,9 @@ export function createNotificationPlatformRepository(deps) {
             ('referral_reward', 'referral', 'پاداش رفرال', 'Referral Reward', 'شما +{amount} AB دریافت کردید.', 'You earned +{amount} AB.', 'gift', 'high', 'mini_app'),
             ('wheel_reward', 'wheel', 'برداشت گردونه!', 'Wheel Reward!', 'شما +{amount} AB بردید!', 'You won +{amount} AB!', 'star', 'high', 'mini_app'),
             ('wheel_spin_available', 'wheel', 'اسپین رایگان آماده است', 'Free Spin Available', 'اسپین روزانه شما آماده است.', 'Your daily spin is ready.', 'zap', 'medium', 'mini_app'),
-            ('mission_completed', 'mission', 'ماموریت تکمیل شد', 'Mission Completed', 'ماموریت "{name}" تکمیل شد. پاداش: +{amount} AB', 'Mission "{name}" completed. Reward: +{amount} AB', 'check-circle', 'medium', 'mini_app'),
-            ('wallet_received', 'wallet', 'دریافت توکن', 'Tokens Received', 'موجودی شما +{amount} AB افزایش یافت.', 'Your balance increased by +{amount} AB.', 'arrow-down-circle', 'low', 'mini_app'),
+            // PHASE 1 FIX: wallet + mission templates now default to 'both' (Telegram + Mini App)
+            ('mission_completed', 'mission', 'ماموریت تکمیل شد', 'Mission Completed', 'ماموریت "{name}" تکمیل شد. پاداش: +{amount} AB', 'Mission "{name}" completed. Reward: +{amount} AB', 'check-circle', 'medium', 'both'),
+            ('wallet_received', 'wallet', 'دریافت توکن', 'Tokens Received', 'موجودی شما +{amount} AB افزایش یافت.', 'Your balance increased by +{amount} AB.', 'arrow-down-circle', 'low', 'both'),
             ('price_alert_hit', 'market', 'هشدار قیمت', 'Price Alert', '{symbol} به {price} رسید.', '{symbol} reached {price}.', 'trending-up', 'high', 'both'),
             ('news_important', 'news', 'خبر مهم', 'Important News', '{title}', '{title}', 'alert-circle', 'high', 'both'),
             ('analysis_published', 'analysis', 'تحلیل جدید', 'New Analysis', 'تحلیل جدید {coin} منتشر شد.', 'New {coin} analysis published.', 'bar-chart', 'medium', 'both'),
@@ -520,12 +530,13 @@ export function createNotificationPlatformRepository(deps) {
         pref = String(result.rows[0].pref);
       } else {
         // Return default based on category
+        // PHASE 1 FIX: wallet + mission default to 'both' (Telegram + Mini App)
         const defaults = {
-          referral: 'mini_app', wallet: 'mini_app', price_alert: 'both',
+          referral: 'mini_app', wallet: 'both', price_alert: 'both',
           analysis: 'both', breaking_news: 'both', announcements: 'mini_app',
           promotions: 'none', challenges: 'mini_app', tickets: 'both',
           calendar: 'both', news: 'both', market: 'both',
-          wheel: 'mini_app', mission: 'mini_app', security: 'both', system: 'mini_app',
+          wheel: 'mini_app', mission: 'both', security: 'both', system: 'mini_app',
         };
         pref = defaults[category] || 'mini_app';
       }
@@ -964,8 +975,9 @@ export function createNotificationPlatformRepository(deps) {
       market: r.market, news: r.news, referral: r.referral,
       reward: r.reward, ticket: r.ticket, system: r.system, marketing: r.marketing,
       // New channel preference fields
+      // PHASE 1 FIX: wallet + mission default to 'both' (matches new column default)
       ch_referral: r.ch_referral || 'mini_app',
-      ch_wallet: r.ch_wallet || 'mini_app',
+      ch_wallet: r.ch_wallet || 'both',
       ch_price_alert: r.ch_price_alert || 'both',
       ch_analysis: r.ch_analysis || 'both',
       ch_breaking_news: r.ch_breaking_news || 'both',
@@ -977,7 +989,7 @@ export function createNotificationPlatformRepository(deps) {
       ch_news: r.ch_news || 'both',
       ch_market: r.ch_market || 'both',
       ch_wheel: r.ch_wheel || 'mini_app',
-      ch_mission: r.ch_mission || 'mini_app',
+      ch_mission: r.ch_mission || 'both',
       ch_security: r.ch_security || 'both',
       ch_system: r.ch_system || 'mini_app',
     };
@@ -986,11 +998,12 @@ export function createNotificationPlatformRepository(deps) {
   function _defaultSettings() {
     return {
       analysis: true, calendar: false, price_alert: false, market: true, news: true, referral: true, reward: true, ticket: true, system: true, marketing: false,
-      ch_referral: 'mini_app', ch_wallet: 'mini_app', ch_price_alert: 'both',
+      // PHASE 1 FIX: wallet + mission default to 'both' (Telegram + Mini App)
+      ch_referral: 'mini_app', ch_wallet: 'both', ch_price_alert: 'both',
       ch_analysis: 'both', ch_breaking_news: 'both', ch_announcements: 'mini_app',
       ch_promotions: 'none', ch_challenges: 'mini_app', ch_tickets: 'both',
       ch_calendar: 'both', ch_news: 'both', ch_market: 'both',
-      ch_wheel: 'mini_app', ch_mission: 'mini_app', ch_security: 'both', ch_system: 'mini_app',
+      ch_wheel: 'mini_app', ch_mission: 'both', ch_security: 'both', ch_system: 'mini_app',
     };
   }
 

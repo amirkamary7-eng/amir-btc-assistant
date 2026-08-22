@@ -26,6 +26,13 @@ export function createWalletHandlers(deps) {
     // PHASE 4: MembershipAuthority + EntitlementConfig for tier-based rewards
     membershipAuthority,
     entitlementConfig,
+    // PHASE 1 (WALLET-REWARDS): shared Tehran date helpers for idempotency keys
+    // Previously wallet.js used `new Date().toISOString().slice(0, 10)` (UTC) for
+    // refId and dedupKey — inconsistent with claimDailyReward which uses Tehran date.
+    // This caused: (1) notification dedupKeys to not be unique per day, (2) refIds
+    // to not match the retry cron's reconstruction. Now uses Tehran date consistently.
+    getTehranDateString: _getTehranDateString = () => new Date().toISOString().slice(0, 10),
+    getTehranWeekStart: _getTehranWeekStart = () => new Date().toISOString().slice(0, 10),
   } = deps;
 
   /**
@@ -215,9 +222,10 @@ export function createWalletHandlers(deps) {
           templateKey: 'wallet_received',
           category: 'wallet',
           priority: 'low',
-          channel: 'mini_app',
+          channel: 'both',
           metadata: { amount: String(DAILY_REWARD), name: 'Daily Reward' },
-          dedupKey: `wallet_daily_${authState.user.id}_${new Date().toISOString().slice(0, 10)}`,
+          // PHASE 1 FIX: use Tehran date (consistent with refId) — previously UTC
+          dedupKey: `wallet_daily_${authState.user.id}_${_getTehranDateString()}`,
         }).catch(() => {});
       }
 
@@ -427,7 +435,9 @@ export function createWalletHandlers(deps) {
 
         if (claimed) {
           // Now grant the reward via economyService
-          const today = new Date().toISOString().slice(0, 10);
+          // PHASE 1 FIX: use Tehran date (consistent with daily claim boundary)
+          // — previously `new Date().toISOString().slice(0, 10)` was UTC.
+          const today = _getTehranDateString();
           const refId = `mission_${userId}_${missionId}_${today}`;
 
           const result = await economyService.grantReward({
@@ -451,11 +461,15 @@ export function createWalletHandlers(deps) {
               userId,
               category: 'wallet',
               priority: 'low',
-              channel: 'mini_app',
+              channel: 'both',
               title: '🎉 ماموریت کامل شد',
               message: `${label} — ${amount} AB دریافت کردید`,
               metadata: { mission_id: missionId, amount },
-              dedupKey: `wallet_mission_${missionId}_${userId}`,
+              // PHASE 1 FIX: include daily_date so notifications are unique per day.
+              // Previously `wallet_mission_${missionId}_${userId}` was date-less —
+              // day 2's notification would ON CONFLICT DO NOTHING with day 1's,
+              // silently dropping the notification. Now day-scoped.
+              dedupKey: `wallet_mission_${missionId}_${userId}_${today}`,
             }).catch(() => {});
           }
         }
@@ -520,7 +534,8 @@ export function createWalletHandlers(deps) {
           ? await rewardCenterRepo.markMissionRewarded(env, userId, missionId)
           : false;
         if (claimed) {
-          const today = new Date().toISOString().slice(0, 10);
+          // PHASE 1 FIX: use Tehran date (consistent with daily claim boundary)
+          const today = _getTehranDateString();
           const refId = `mission_${userId}_${missionId}_${today}`;
           const result = await economyService.grantReward({
             userId,
@@ -540,11 +555,12 @@ export function createWalletHandlers(deps) {
               userId,
               category: 'wallet',
               priority: 'low',
-              channel: 'mini_app',
+              channel: 'both',
               title: '🎉 ماموریت کامل شد',
               message: `${label} — ${amount} AB دریافت کردید`,
               metadata: { mission_id: missionId, amount },
-              dedupKey: `wallet_mission_${missionId}_${userId}`,
+              // PHASE 1 FIX: include daily_date for unique-per-day notification idempotency
+              dedupKey: `wallet_mission_${missionId}_${userId}_${today}`,
             }).catch(() => {});
           }
         }
@@ -571,7 +587,9 @@ export function createWalletHandlers(deps) {
 
     try {
       const userId = String(authState.user.id);
-      const today = new Date().toISOString().slice(0, 10);
+      // PHASE 1 FIX: use Tehran date for `date` field returned to frontend
+      // (consistent with daily claim boundary). Previously UTC.
+      const today = _getTehranDateString();
 
       // Get all active mission definitions from DB
       const activeMissions = rewardCenterRepo
