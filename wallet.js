@@ -618,16 +618,17 @@ const WalletApp = (() => {
       <div class="wallet-section" id="wallet-earn-section">
         <div class="wallet-section-header">
           <h3>${esc(WT('earn_tokens'))}</h3>
+          <span class="weekly-reset-countdown" id="weekly-reset-countdown"></span>
         </div>
         <div class="wallet-earn-grid">
-          <div class="wallet-earn-card daily-checkin" id="daily-checkin-card">
+          <!-- PHASE UX-V2.1: compact Daily Check-in card — opens modal for full 7-day streak view -->
+          <div class="wallet-earn-card daily-checkin" id="daily-checkin-card" onclick="WalletApp.openDailyCheckinModal()">
             <div class="checkin-icon">${ICONS.calendar}</div>
             <div class="checkin-info">
               <div class="checkin-title">${esc(WT('daily_checkin'))}</div>
-              <div class="checkin-reward" id="daily-reward-amount">+${DAILY_REWARD} AB</div>
+              <div class="checkin-reward" id="daily-reward-amount">—</div>
             </div>
-            <button class="checkin-btn" id="daily-claim-btn" onclick="WalletApp.claimDaily()">${esc(WT('claim'))}</button>
-            <div class="streak-days-container" id="streak-days-container"></div>
+            <div class="checkin-arrow">›</div>
           </div>
           <div class="wallet-earn-card" id="mission-analysis-read">
             <div class="earn-reward">+5 AB</div>
@@ -1107,11 +1108,23 @@ const WalletApp = (() => {
     });
 
     // Update claim button when claim status arrives
+    // PHASE UX-V2.1: cache streak state for Daily Check-in modal
     claimPromise.then(claimRes => {
       if (claimRes) {
-        updateClaimButton(claimRes.claimed_today);
+        // Cache state for modal + card rendering
+        _dailyCheckinState = {
+          streak_day: claimRes.streak_day || 0,
+          streak_rewards: claimRes.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+          claimed_today: claimRes.claimed_today || false,
+          last_claim_date: claimRes.last_claim_date || null,
+        };
+        // Update the compact card summary
+        _updateDailyCheckinCard();
       }
     }).catch(() => {});
+
+    // PHASE UX-V2.1: Start weekly countdown timer
+    _startWeeklyCountdown();
 
     // Update summary strip when summary arrives (optional — buildSummaryStrip
     // handles null walletSummary gracefully)
@@ -1136,45 +1149,8 @@ const WalletApp = (() => {
 
   // loadWalletReferralStats removed — referral moved to Referral Center module
 
-  // PHASE UX-V2: Render 7-day streak UI inside the daily check-in card.
-  // Shows Day 1→7 with reward amounts, locked/available/claimed states.
-  // Called from claimDaily (after claim) and loadWalletData (initial render).
-  function _renderStreakUI(currentStreakDay, streakRewards, claimedToday) {
-    const container = document.getElementById('streak-days-container');
-    if (!container || !Array.isArray(streakRewards)) return;
-
-    const days = streakRewards.length >= 7 ? streakRewards.slice(0, 7) : streakRewards;
-    let html = '';
-    for (let i = 0; i < 7; i++) {
-      const day = i + 1;
-      const reward = days[i] || 0;
-      const isClaimed = claimedToday ? day < currentStreakDay : day < currentStreakDay;
-      const isToday = claimedToday ? day === currentStreakDay : day === currentStreakDay;
-      const isFuture = day > currentStreakDay;
-      const isDay7 = day === 7;
-
-      let stateClass = '';
-      let stateIcon = '';
-      if (isClaimed) {
-        stateClass = 'streak-day-claimed';
-        stateIcon = '✓';
-      } else if (isToday) {
-        stateClass = 'streak-day-today';
-        stateIcon = claimedToday ? '✓' : '●';
-      } else if (isFuture) {
-        stateClass = 'streak-day-locked';
-        stateIcon = '🔒';
-      }
-
-      html += `
-        <div class="streak-day ${stateClass} ${isDay7 ? 'streak-day-7' : ''}">
-          <div class="streak-day-num">${day}</div>
-          <div class="streak-day-reward">${reward}</div>
-          <div class="streak-day-state">${stateIcon}</div>
-        </div>`;
-    }
-    container.innerHTML = html;
-  }
+  // PHASE UX-V2.1: Old _renderStreakUI removed — 7-day streak now rendered
+  // inside the Daily Check-in Modal (see _renderStreakDaysHTML below).
 
   function updateClaimButton(claimed) {
     const btn = document.getElementById('daily-claim-btn');
@@ -1198,33 +1174,23 @@ const WalletApp = (() => {
 
   async function claimDaily() {
     const btn = document.getElementById('daily-claim-btn');
-    if (!btn || btn.disabled) return;
-
-    btn.disabled = true;
-    btn.textContent = WT('claiming');
+    // PHASE UX-V2.1: btn may be in modal OR in card. If in modal, disable it.
+    if (btn) { btn.disabled = true; btn.textContent = WT('claiming'); }
 
     const result = await claimDailyRewardAPI();
 
     if (result.status === 'success') {
-      btn.textContent = WT('claimed');
-      const card = document.getElementById('daily-checkin-card');
-      if (card) card.classList.add('wallet-claim-success');
-      setTimeout(() => {
-        if (card) card.classList.remove('wallet-claim-success');
-      }, 500);
-      if (!card?.querySelector('.earn-claimed-badge')) {
-        const badge = document.createElement('span');
-        badge.className = 'earn-claimed-badge';
-        badge.textContent = WT('claimed').toUpperCase();
-        card?.appendChild(badge);
-      }
+      // Update cached state from claim response
+      _dailyCheckinState = {
+        streak_day: result.streak_day || 1,
+        streak_rewards: result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+        claimed_today: true,
+        last_claim_date: _getTehranDateString(),
+      };
 
-      // PHASE UX-V2: Use balance from API response directly — no extra fetchWallet call.
-      // The backend returns newBalance in the claim response. We update the UI
-      // immediately with animateBalanceChange, eliminating one API round-trip (~100-200ms).
+      // PHASE UX-V2.1: Update balance immediately from API response — no extra fetchWallet.
       invalidateWalletCache();
       if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
-        // Update balance display immediately using the value from the claim response
         const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
         if (balanceEl) {
           const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
@@ -1234,29 +1200,47 @@ const WalletApp = (() => {
             balanceEl.textContent = result.newBalance.toLocaleString('en-US');
           }
         }
-        // Update internal walletData so next page open doesn't show stale balance
         if (walletData) {
           walletData.balance = result.newBalance;
           _walletCache.wallet = walletData;
           _walletCache.walletAt = Date.now();
         }
-      } else {
-        // Fallback: if newBalance is null (shouldn't happen with streak), do a full fetch
-        const walletRes = await fetchWallet();
-        if (walletRes) renderWalletPage(walletRes);
       }
 
-      // PHASE UX-V2: Render streak UI with the data from claim response
-      if (result.streak_day && result.streak_rewards) {
-        _renderStreakUI(result.streak_day, result.streak_rewards, true);
+      // PHASE UX-V2.1: Update daily check-in card summary
+      _updateDailyCheckinCard();
+
+      // PHASE UX-V2.1: If modal is open, re-render streak days to show ✓ on today
+      const daysGrid = document.getElementById('dcm-days-grid');
+      if (daysGrid) {
+        daysGrid.innerHTML = _renderStreakDaysHTML(
+          result.streak_day || 1,
+          result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+          true
+        );
+        // Update reward display + hint
+        const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
+        if (rewardDisplay) {
+          rewardDisplay.innerHTML = `<span class="dcm-claimed">✓ ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
+        }
+        const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
+        if (!hintEl) {
+          const hint = document.createElement('div');
+          hint.className = 'dcm-hint';
+          hint.textContent = detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow!';
+          daysGrid.parentElement.appendChild(hint);
+        }
+        // Remove claim button from modal
+        const claimBtn = daysGrid.parentElement.querySelector('.dcm-claim-btn');
+        if (claimBtn) claimBtn.remove();
       }
 
-      // PHASE UX-V2: Update notification badge immediately after claim
+      // PHASE UX-V2.1: Update notification badge immediately
       if (typeof updateNotifBadge === 'function') {
         try { updateNotifBadge(); } catch (_) {}
       }
 
-      // Show success popup — use actual amount from API (not hardcoded)
+      // Show success popup — use actual amount from API
       const tg = window.getTg?.();
       try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
       const rewardAmount = result.amount || result.daily_reward || 0;
@@ -1348,6 +1332,181 @@ const WalletApp = (() => {
     setTimeout(() => popup.remove(), 250);
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // PHASE UX-V2.1: Daily Check-in Modal + Weekly Countdown
+  // ════════════════════════════════════════════════════════════════════
+
+  // State for daily check-in modal (cached from GET /api/wallet/claim)
+  let _dailyCheckinState = null; // { streak_day, streak_rewards, claimed_today, last_claim_date }
+  let _weeklyCountdownTimer = null;
+
+  function openDailyCheckinModal() {
+    // Remove existing modal
+    const existing = document.getElementById('daily-checkin-modal');
+    if (existing) { existing.remove(); return; }
+
+    // Use cached state if available, otherwise show loading
+    const state = _dailyCheckinState;
+    const streakDay = state?.streak_day || 0;
+    const streakRewards = state?.streak_rewards || [1, 3, 6, 10, 18, 30, 50];
+    const claimedToday = state?.claimed_today || false;
+
+    // Build modal
+    const modal = document.createElement('div');
+    modal.id = 'daily-checkin-modal';
+    modal.className = 'daily-checkin-modal';
+    modal.setAttribute('dir', detectLang() === 'fa' ? 'rtl' : 'ltr');
+    modal.innerHTML = `
+      <div class="dcm-overlay" onclick="WalletApp.closeDailyCheckinModal()"></div>
+      <div class="dcm-sheet">
+        <div class="dcm-header">
+          <h3>${esc(WT('daily_checkin'))}</h3>
+          <button class="dcm-close" onclick="WalletApp.closeDailyCheckinModal()" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="dcm-streak-summary">
+          ${streakDay > 0 ? `${streakDay} ${detectLang() === 'fa' ? 'روز پشت سر هم' : 'days in a row'} 🔥` : ''}
+        </div>
+        <div class="dcm-days-grid" id="dcm-days-grid">
+          ${_renderStreakDaysHTML(streakDay, streakRewards, claimedToday)}
+        </div>
+        <div class="dcm-reward-display">
+          ${claimedToday
+            ? `<span class="dcm-claimed">✓ ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`
+            : `<span class="dcm-today-reward">+${streakRewards[Math.max(0, Math.min(6, (streakDay > 0 ? streakDay : 0)))]} AB</span>`
+          }
+        </div>
+        ${claimedToday
+          ? `<div class="dcm-hint">${detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow to continue!'}</div>`
+          : `<button class="dcm-claim-btn" onclick="WalletApp.claimDaily()">
+              ${esc(WT('claim'))}
+            </button>`
+        }
+      </div>
+    `;
+    document.body.appendChild(modal);
+    requestAnimationFrame(() => modal.classList.add('visible'));
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('light'); } catch (_) {}
+  }
+
+  function closeDailyCheckinModal() {
+    const modal = document.getElementById('daily-checkin-modal');
+    if (!modal) return;
+    modal.classList.remove('visible');
+    setTimeout(() => modal.remove(), 250);
+  }
+
+  // Render 7-day streak HTML for modal
+  function _renderStreakDaysHTML(currentStreakDay, streakRewards, claimedToday) {
+    const days = (streakRewards && streakRewards.length >= 7) ? streakRewards.slice(0, 7) : [1, 3, 6, 10, 18, 30, 50];
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const day = i + 1;
+      const reward = days[i] || 0;
+      const isClaimed = day < currentStreakDay || (claimedToday && day === currentStreakDay);
+      const isToday = claimedToday ? day === currentStreakDay : day === currentStreakDay;
+      const isFuture = day > currentStreakDay;
+      const isDay7 = day === 7;
+
+      let stateClass = '';
+      let stateIcon = '';
+      if (isClaimed) { stateClass = 'dcm-day-claimed'; stateIcon = '✓'; }
+      else if (isToday && !claimedToday) { stateClass = 'dcm-day-today'; stateIcon = '●'; }
+      else if (claimedToday && isToday) { stateClass = 'dcm-day-claimed'; stateIcon = '✓'; }
+      else { stateClass = 'dcm-day-locked'; stateIcon = '🔒'; }
+
+      html += `
+        <div class="dcm-day ${stateClass} ${isDay7 ? 'dcm-day-7' : ''}">
+          <div class="dcm-day-num">${day}</div>
+          <div class="dcm-day-reward">${reward}</div>
+          <div class="dcm-day-state">${stateIcon}</div>
+        </div>`;
+    }
+    return html;
+  }
+
+  // Update daily check-in card summary in wallet page
+  function _updateDailyCheckinCard() {
+    const state = _dailyCheckinState;
+    if (!state) return;
+    const rewardEl = document.getElementById('daily-reward-amount');
+    if (rewardEl) {
+      const rewards = state.streak_rewards || [1, 3, 6, 10, 18, 30, 50];
+      if (state.claimed_today) {
+        rewardEl.textContent = `Day ${state.streak_day}/7 · ✓`;
+        rewardEl.style.color = '#22C55E';
+      } else {
+        const day = state.streak_day > 0 ? state.streak_day : 1;
+        const nextReward = rewards[Math.max(0, Math.min(6, day - 1))] || 1;
+        rewardEl.textContent = `Day ${day}/7 · +${nextReward} AB`;
+        rewardEl.style.color = '#f5a623';
+      }
+    }
+  }
+
+  // Weekly countdown to Saturday 00:00 Tehran
+  function _startWeeklyCountdown() {
+    if (_weeklyCountdownTimer) clearInterval(_weeklyCountdownTimer);
+    const el = document.getElementById('weekly-reset-countdown');
+    if (!el) return;
+
+    function update() {
+      // Calculate next Saturday 00:00 Tehran
+      const now = new Date();
+      const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Tehran', weekday: 'short',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      });
+      const parts = fmt.formatToParts(now);
+      const weekday = parts.find(p => p.type === 'weekday')?.value || 'Sat';
+      const weekdayMap = { 'Sat': 0, 'Sun': 1, 'Mon': 2, 'Tue': 3, 'Wed': 4, 'Thu': 5, 'Fri': 6 };
+      const daysToSaturday = (7 - (weekdayMap[weekday] ?? 0)) % 7;
+
+      // Target: next Saturday 00:00 Tehran = Saturday minus current time in Tehran
+      const target = new Date(now);
+      target.setDate(target.getDate() + daysToSaturday);
+      target.setHours(0, 0, 0, 0);
+      if (daysToSaturday === 0) {
+        // Today is Saturday — check if already past midnight Tehran
+        // If current Tehran time is past midnight, next Saturday is 7 days away
+        const tehranHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+        const tehranMinute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+        if (tehranHour > 0 || tehranMinute > 0) {
+          // Already past midnight — next Saturday is 7 days away
+          target.setDate(target.getDate() + 7);
+        }
+      }
+
+      const diff = target.getTime() - now.getTime();
+      if (diff <= 0) {
+        el.textContent = '';
+        _startWeeklyCountdown(); // Recalculate
+        return;
+      }
+
+      const days = Math.floor(diff / 86400000);
+      const hours = Math.floor((diff % 86400000) / 3600000);
+      const mins = Math.floor((diff % 3600000) / 60000);
+
+      if (days > 0) {
+        el.textContent = `⟳ ${days}d ${String(hours).padStart(2, '0')}h`;
+      } else if (hours > 0) {
+        el.textContent = `⟳ ${hours}h ${String(mins).padStart(2, '0')}m`;
+      } else {
+        el.textContent = `⟳ ${mins}m`;
+      }
+    }
+
+    update();
+    _weeklyCountdownTimer = setInterval(update, 60000); // Update every 1 min
+  }
+
+  function _stopWeeklyCountdown() {
+    if (_weeklyCountdownTimer) { clearInterval(_weeklyCountdownTimer); _weeklyCountdownTimer = null; }
+  }
+
   return {
     loadProfileCard,
     openWallet,
@@ -1358,8 +1517,13 @@ const WalletApp = (() => {
     getTokenLogo,
     showTokenInfo,
     closeTokenInfo,
+    openDailyCheckinModal,
+    closeDailyCheckinModal,
     _invalidateCache: invalidateWalletCache,
     _refreshWalletData: loadWalletData,
+    _updateDailyCheckinCard,
+    _startWeeklyCountdown,
+    _stopWeeklyCountdown,
   };
 })();
 
