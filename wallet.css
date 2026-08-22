@@ -1126,6 +1126,81 @@
   box-shadow: none;
 }
 
+/* PHASE UX-V2: 7-day streak UI */
+.streak-days-container {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.streak-day {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border-radius: 8px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  min-width: 0;
+}
+
+.streak-day-num {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--w-text-dim);
+  letter-spacing: 0.3px;
+}
+
+.streak-day-reward {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--w-text);
+  line-height: 1;
+}
+
+.streak-day-state {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.streak-day-claimed {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+}
+.streak-day-claimed .streak-day-num { color: rgba(34, 197, 94, 0.8); }
+.streak-day-claimed .streak-day-reward { color: rgba(34, 197, 94, 0.7); }
+.streak-day-claimed .streak-day-state { color: #22C55E; }
+
+.streak-day-today {
+  background: rgba(245, 166, 35, 0.10);
+  border: 1px solid rgba(245, 166, 35, 0.30);
+}
+.streak-day-today .streak-day-num { color: #f5a623; }
+.streak-day-today .streak-day-reward { color: #f5a623; font-weight: 900; }
+.streak-day-today .streak-day-state { color: #f5a623; }
+
+.streak-day-locked {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.streak-day-locked .streak-day-num { color: rgba(255, 255, 255, 0.2); }
+.streak-day-locked .streak-day-reward { color: rgba(255, 255, 255, 0.15); }
+.streak-day-locked .streak-day-state { color: rgba(255, 255, 255, 0.2); }
+
+/* Day 7 — visually important */
+.streak-day-7 .streak-day-reward {
+  font-size: 13px;
+  font-weight: 900;
+}
+.streak-day-7.streak-day-today {
+  background: linear-gradient(135deg, rgba(245, 166, 35, 0.15), rgba(245, 166, 35, 0.05));
+  border: 1.5px solid rgba(245, 166, 35, 0.40);
+}
+
 /* #endregion */
 
 /* #region Referral Section */

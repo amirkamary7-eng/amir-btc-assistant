@@ -265,7 +265,9 @@ export function createWalletRepository(deps) {
   // STREAK_REWARDS[day-1] = reward amount for that day (before tier multiplier).
   // Day 1 = base, Day 7 = highest. After Day 7 → cycle restarts at Day 1.
   // These are NORMAL-tier amounts. Premium tier multiplier applied in controller.
-  const STREAK_REWARDS = [10, 12, 15, 18, 22, 28, 40]; // Days 1-7
+  // PHASE UX-V2: Updated reward values to match new progression design.
+  // Early days are small but meaningful; Day 7 is the main reward.
+  const STREAK_REWARDS = [1, 3, 6, 10, 18, 30, 50]; // Days 1-7
 
   /**
    * Get the streak state for a user.
@@ -303,7 +305,7 @@ export function createWalletRepository(deps) {
    *
    * @returns { claimed, amount, newBalance, txId, streak_day, cycle_complete, cycle_count }
    */
-  async function claimDailyRewardWithStreak(env, userId, amount) {
+  async function claimDailyRewardWithStreak(env, userId, amount, options = {}) {
     if (!queryDbTransaction) {
       throw new Error('queryDbTransaction not available');
     }
@@ -314,7 +316,6 @@ export function createWalletRepository(deps) {
     const refId = `daily_${tehranToday}`;
 
     // Compute yesterday's Tehran date for streak-continuation check.
-    // We use Intl.DateTimeFormat with timeZone to get the correct date.
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const yesterdayFmt = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
@@ -322,7 +323,7 @@ export function createWalletRepository(deps) {
     });
     const tehranYesterday = yesterdayFmt.format(yesterday);
 
-    // Compute advisory lock key from user_id + Tehran date (same as original).
+    // Compute advisory lock key from user_id + Tehran date.
     const lockKeyResult = await queryDb(env,
       `SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint) AS lock_key`,
       [uid, tehranToday],
@@ -349,6 +350,8 @@ export function createWalletRepository(deps) {
 
     // Step 2: Compute new streak_day + cycle_count.
     // Read current streak state (may be null if first claim).
+    // PHASE UX-V2: This is the ONLY streak state read — eliminates the duplicate
+    // getStreakStatus call that was in the controller.
     const streakRow = await queryDb(env,
       `SELECT streak_day, last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
       [uid],
@@ -360,34 +363,38 @@ export function createWalletRepository(deps) {
 
     if (current) {
       newCycleCount = Number(current.cycle_count) || 0;
-      const lastClaimDate = current.last_claim_date; // DATE type (no timezone)
-      // Convert both to YYYY-MM-DD strings for comparison
+      const lastClaimDate = current.last_claim_date;
       const lastClaimStr = lastClaimDate ? String(lastClaimDate).slice(0, 10) : '';
       const currentStreakDay = Number(current.streak_day) || 0;
 
       if (lastClaimStr === tehranYesterday) {
-        // Streak continues: 1→2, 2→3, ..., 6→7, 7→1 (cycle restart)
         newStreakDay = (currentStreakDay % 7) + 1;
         if (currentStreakDay === 7) {
-          // Day 7 → Day 1: cycle complete, increment cycle_count
           cycleComplete = true;
           newCycleCount += 1;
         }
       } else if (lastClaimStr === tehranToday) {
-        // Already claimed today — should have been caught by the refId check above,
-        // but double-check for safety (streak row might be out of sync).
         throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
       } else {
-        // Streak broken (missed a day): reset to Day 1
         newStreakDay = 1;
       }
     } else {
-      // First claim ever: streak_day = 1, cycle_count = 0
       newStreakDay = 1;
       newCycleCount = 0;
     }
 
-    // Step 3: UPSERT streak row (update streak_day, last_claim_date, cycle_count).
+    // PHASE UX-V2: Compute the reward amount from STREAK_REWARDS inside the function.
+    // This eliminates the need for the controller to call getStreakStatus separately.
+    let finalAmount = amount;
+    if (options.computeReward && Array.isArray(STREAK_REWARDS)) {
+      const baseReward = STREAK_REWARDS[Math.max(0, Math.min(6, newStreakDay - 1))] || 1;
+      finalAmount = baseReward;
+      if (options.entitlementConfig && typeof options.entitlementConfig.getMissionRewardAmount === 'function') {
+        finalAmount = options.entitlementConfig.getMissionRewardAmount(baseReward, options.isPremium);
+      }
+    }
+
+    // Step 3: UPSERT streak row.
     await queryDb(env,
       `INSERT INTO daily_checkin_streaks (user_id, streak_day, last_claim_date, cycle_count, updated_at)
        VALUES ($1, $2, $3, $4, NOW())
@@ -400,7 +407,7 @@ export function createWalletRepository(deps) {
     );
 
     // Step 4: Credit tokens via the centralized path (idempotent via refId).
-    const result = await creditTokens(env, uid, amount, 'daily_claim', 'Daily check-in reward', refId, {
+    const result = await creditTokens(env, uid, finalAmount, 'daily_claim', 'Daily check-in reward', refId, {
       daily_date: tehranToday,
       streak_day: newStreakDay,
       cycle_complete: cycleComplete,
@@ -408,7 +415,7 @@ export function createWalletRepository(deps) {
 
     return {
       claimed: true,
-      amount,
+      amount: finalAmount,
       newBalance: result.newBalance,
       txId: result.txId,
       streak_day: newStreakDay,

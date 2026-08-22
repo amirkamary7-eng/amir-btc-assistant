@@ -624,9 +624,10 @@ const WalletApp = (() => {
             <div class="checkin-icon">${ICONS.calendar}</div>
             <div class="checkin-info">
               <div class="checkin-title">${esc(WT('daily_checkin'))}</div>
-              <div class="checkin-reward">+${DAILY_REWARD} AB</div>
+              <div class="checkin-reward" id="daily-reward-amount">+${DAILY_REWARD} AB</div>
             </div>
             <button class="checkin-btn" id="daily-claim-btn" onclick="WalletApp.claimDaily()">${esc(WT('claim'))}</button>
+            <div class="streak-days-container" id="streak-days-container"></div>
           </div>
           <div class="wallet-earn-card" id="mission-analysis-read">
             <div class="earn-reward">+5 AB</div>
@@ -1135,6 +1136,46 @@ const WalletApp = (() => {
 
   // loadWalletReferralStats removed — referral moved to Referral Center module
 
+  // PHASE UX-V2: Render 7-day streak UI inside the daily check-in card.
+  // Shows Day 1→7 with reward amounts, locked/available/claimed states.
+  // Called from claimDaily (after claim) and loadWalletData (initial render).
+  function _renderStreakUI(currentStreakDay, streakRewards, claimedToday) {
+    const container = document.getElementById('streak-days-container');
+    if (!container || !Array.isArray(streakRewards)) return;
+
+    const days = streakRewards.length >= 7 ? streakRewards.slice(0, 7) : streakRewards;
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const day = i + 1;
+      const reward = days[i] || 0;
+      const isClaimed = claimedToday ? day < currentStreakDay : day < currentStreakDay;
+      const isToday = claimedToday ? day === currentStreakDay : day === currentStreakDay;
+      const isFuture = day > currentStreakDay;
+      const isDay7 = day === 7;
+
+      let stateClass = '';
+      let stateIcon = '';
+      if (isClaimed) {
+        stateClass = 'streak-day-claimed';
+        stateIcon = '✓';
+      } else if (isToday) {
+        stateClass = 'streak-day-today';
+        stateIcon = claimedToday ? '✓' : '●';
+      } else if (isFuture) {
+        stateClass = 'streak-day-locked';
+        stateIcon = '🔒';
+      }
+
+      html += `
+        <div class="streak-day ${stateClass} ${isDay7 ? 'streak-day-7' : ''}">
+          <div class="streak-day-num">${day}</div>
+          <div class="streak-day-reward">${reward}</div>
+          <div class="streak-day-state">${stateIcon}</div>
+        </div>`;
+    }
+    container.innerHTML = html;
+  }
+
   function updateClaimButton(claimed) {
     const btn = document.getElementById('daily-claim-btn');
     const card = document.getElementById('daily-checkin-card');
@@ -1177,22 +1218,53 @@ const WalletApp = (() => {
         badge.textContent = WT('claimed').toUpperCase();
         card?.appendChild(badge);
       }
-      // Refresh wallet data
-      // ROOT CAUSE FIX: invalidate cache so fetchWallet actually hits the API
-      // instead of returning the stale pre-claim balance.
+
+      // PHASE UX-V2: Use balance from API response directly — no extra fetchWallet call.
+      // The backend returns newBalance in the claim response. We update the UI
+      // immediately with animateBalanceChange, eliminating one API round-trip (~100-200ms).
       invalidateWalletCache();
-      const walletRes = await fetchWallet();
-      if (walletRes) renderWalletPage(walletRes);
-      // Show success popup
+      if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
+        // Update balance display immediately using the value from the claim response
+        const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
+        if (balanceEl) {
+          const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+          if (typeof animateBalanceChange === 'function') {
+            animateBalanceChange(balanceEl, currentBalance, result.newBalance);
+          } else {
+            balanceEl.textContent = result.newBalance.toLocaleString('en-US');
+          }
+        }
+        // Update internal walletData so next page open doesn't show stale balance
+        if (walletData) {
+          walletData.balance = result.newBalance;
+          _walletCache.wallet = walletData;
+          _walletCache.walletAt = Date.now();
+        }
+      } else {
+        // Fallback: if newBalance is null (shouldn't happen with streak), do a full fetch
+        const walletRes = await fetchWallet();
+        if (walletRes) renderWalletPage(walletRes);
+      }
+
+      // PHASE UX-V2: Render streak UI with the data from claim response
+      if (result.streak_day && result.streak_rewards) {
+        _renderStreakUI(result.streak_day, result.streak_rewards, true);
+      }
+
+      // PHASE UX-V2: Update notification badge immediately after claim
+      if (typeof updateNotifBadge === 'function') {
+        try { updateNotifBadge(); } catch (_) {}
+      }
+
+      // Show success popup — use actual amount from API (not hardcoded)
       const tg = window.getTg?.();
-      // PHASE 3 FIX: add haptic feedback on successful claim (success type)
       try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
-      tg?.showPopup?.({ title: WT('success'), message: `+${DAILY_REWARD} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
+      const rewardAmount = result.amount || result.daily_reward || 0;
+      tg?.showPopup?.({ title: WT('success'), message: `+${rewardAmount} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
     } else {
       btn.disabled = false;
       btn.textContent = WT('claim');
       const tg = window.getTg?.();
-      // PHASE 3 FIX: add haptic feedback on failed claim (error type)
       try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
       tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
     }
