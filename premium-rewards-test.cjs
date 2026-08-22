@@ -106,11 +106,33 @@ test('DAILY-01: handleGetClaimStatus uses tier-based amount', () => {
   assert.ok(!WALLET_SRC.includes('const DAILY_REWARD = 10;'), 'no hard-coded 10');
 });
 
-test('DAILY-02: handleClaimDaily uses tier-based amount', () => {
+test('DAILY-02: handleClaimDaily uses tier-based + streak-based amount', () => {
   const block = WALLET_SRC.slice(WALLET_SRC.indexOf('async function handleClaimDaily'), WALLET_SRC.indexOf('async function handleMissionIssueToken'));
-  assert.ok(block.includes('_isPremiumSafe'));
-  assert.ok(block.includes('_getDailyRewardAmount'));
-  assert.ok(block.includes('DAILY_REWARD = _getDailyRewardAmount'));
+
+  // PHASE 4 FIX: Daily reward is now streak-based + tier-based.
+  // The controller reads streak state, looks up base reward from STREAK_REWARDS,
+  // then applies the tier multiplier. The test validates the BEHAVIOR (not
+  // implementation details like a specific assignment line).
+
+  // 1. Must check user tier (Premium affects the final reward)
+  assert.ok(block.includes('_isPremiumSafe'), 'must check user tier via _isPremiumSafe');
+
+  // 2. Must read streak state (streak_day determines the base reward)
+  assert.ok(block.includes('getStreakStatus'), 'must read streak status to determine streak_day');
+
+  // 3. Must look up base reward from STREAK_REWARDS array (or fall back to _getDailyRewardAmount)
+  assert.ok(block.includes('STREAK_REWARDS') || block.includes('_getDailyRewardAmount'),
+    'must look up base reward from STREAK_REWARDS or fall back to tier-based amount');
+
+  // 4. Must apply tier multiplier to the base reward
+  assert.ok(block.includes('getMissionRewardAmount'),
+    'must apply tier multiplier via entitlementConfig.getMissionRewardAmount');
+
+  // 5. Must pass the computed reward to the claim function
+  assert.ok(block.includes('claimFn(env,'), 'must pass the computed reward amount to the claim function');
+
+  // 6. Should NOT have a hard-coded flat reward
+  assert.ok(!block.includes('const DAILY_REWARD = 10;'), 'no hard-coded flat 10 AB reward');
 });
 
 // ─── Mission integration ────────────────────────────────────────────────────
