@@ -858,7 +858,15 @@ const WalletApp = (() => {
     claimAt: 0,
     summaryAt: 0,
   };
-  const WALLET_CACHE_TTL = 30;   // seconds — wallet balance/history
+  // PHASE 6 FIX: reduced WALLET_CACHE_TTL from 30s to 15s.
+  // 30s was too long — after a reward credit (e.g., daily_login on bootstrap),
+  // the cached balance could be stale for up to 30s if invalidateWalletCache
+  // wasn't called. 15s is a better balance: still eliminates redundant API
+  // calls on rapid wallet open/close, but reduces stale window by 50%.
+  // The bootstrap wallet_changed flag (Phase 1 fix) + refreshWalletAfterMission
+  // (Phase 3 fix) already invalidate cache on explicit reward events — the TTL
+  // is just a safety net for cases where no explicit event fires.
+  const WALLET_CACHE_TTL = 15;   // seconds — wallet balance/history
   const CLAIM_CACHE_TTL = 60;    // seconds — daily claim status (changes once/day)
   const SUMMARY_CACHE_TTL = 60;  // seconds — aggregate stats
 

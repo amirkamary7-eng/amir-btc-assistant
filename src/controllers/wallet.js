@@ -456,10 +456,21 @@ export function createWalletHandlers(deps) {
     try {
       const userId = String(authState.user.id);
 
-      // 1. Read mission config from DB
-      const missionConfig = rewardCenterRepo
-        ? await rewardCenterRepo.getMissionReward(env, missionId)
-        : { token_amount: 0, mission_name: missionId };
+      // PHASE 6 FIX: parallelize independent DB queries to reduce latency.
+      // Previously: getMissionReward → _isPremiumSafe → getActiveMissionRewards (3 sequential)
+      // Now: all 3 run in parallel via Promise.all (1 round-trip instead of 3)
+      const [missionConfig, isPremium, activeMissions] = await Promise.all([
+        // 1. Read mission config from DB
+        rewardCenterRepo
+          ? rewardCenterRepo.getMissionReward(env, missionId)
+          : Promise.resolve({ token_amount: 0, mission_name: missionId }),
+        // 2. Tier check (parallel — independent of mission config)
+        _isPremiumSafe(env, userId),
+        // 3. Get active missions (for target_count — parallel with mission config)
+        rewardCenterRepo
+          ? rewardCenterRepo.getActiveMissionRewards(env)
+          : Promise.resolve([]),
+      ]);
 
       const baseAmount = Number(missionConfig.token_amount) || 0;
       const label = missionConfig.mission_name || missionId;
@@ -473,19 +484,15 @@ export function createWalletHandlers(deps) {
       // affects the reward amount — it does NOT bypass duplicate protection,
       // event_token validation, progress tracking, or idempotency.
       // Rounding: Math.ceil (Premium users always get AT LEAST the multiplier value).
-      const isPremium = await _isPremiumSafe(env, userId);
       const amount = (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function')
         ? entitlementConfig.getMissionRewardAmount(baseAmount, isPremium)
         : baseAmount; // Legacy fallback: no multiplier
 
-      // 2. Get target_count from mission metadata
-      const activeMissions = rewardCenterRepo
-        ? await rewardCenterRepo.getActiveMissionRewards(env)
-        : [];
+      // 2. Get target_count from mission metadata (already fetched in parallel above)
       const missionMeta = activeMissions.find(m => m.mission_id === missionId);
       const targetCount = missionMeta?.target_count || 1;
 
-      // 3. Atomically increment progress
+      // 3. Atomically increment progress (must be sequential — depends on targetCount)
       const progress = rewardCenterRepo
         ? await rewardCenterRepo.incrementMissionProgress(env, userId, missionId, targetCount)
         : { progress_count: 1, target_count: 1, completed: true, rewarded: false };
