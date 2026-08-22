@@ -5889,6 +5889,7 @@ function fireMissionEvent(eventType) { MissionBus.fire(eventType); }
  * Refresh wallet display after a mission reward.
  * Updates balance, transaction history, summary, tier, and progress bar
  * without full page reload.
+ * PHASE UX-V2: Uses new_balance from API response directly — no extra _refreshWalletData call.
  */
 function refreshWalletAfterMission(newBalance) {
     // 1. Invalidate wallet cache so next fetch hits the API
@@ -5896,7 +5897,8 @@ function refreshWalletAfterMission(newBalance) {
         window.WalletApp._invalidateCache();
     }
 
-    // 2. If wallet page is open, refresh the balance display immediately
+    // 2. Update balance display immediately using newBalance from API response
+    // PHASE UX-V2: No extra _refreshWalletData() call — the API response already has the new balance.
     const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
     if (balanceEl && newBalance != null) {
         const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
@@ -5904,21 +5906,13 @@ function refreshWalletAfterMission(newBalance) {
     }
 
     // 3. Refresh profile card (balance + tier on the profile page)
-    // PHASE 3 FIX: removed 300ms delay — fire immediately (no reason to wait).
     if (typeof window.WalletApp?.loadProfileCard === 'function') {
         try { window.WalletApp.loadProfileCard(); } catch (_) {}
     }
 
-    // 4. If wallet full page is open, refresh ALL wallet data in background
-    //    This updates: balance, tier, progress bar, transaction history, summary strip
-    // PHASE 3 FIX: removed 500ms delay — fire immediately (no reason to wait).
-    //    The balance animation (step 2) runs in parallel via requestAnimationFrame,
-    //    so the full refresh doesn't block the UI.
-    const walletPage = document.getElementById('wallet-full-page');
-    if (walletPage && walletPage.classList.contains('open')) {
-        if (typeof window.WalletApp?._refreshWalletData === 'function') {
-            try { window.WalletApp._refreshWalletData(); } catch (_) {}
-        }
+    // 4. PHASE UX-V2: Update notification badge immediately after mission reward
+    if (typeof updateNotifBadge === 'function') {
+        try { updateNotifBadge(); } catch (_) {}
     }
 }
 

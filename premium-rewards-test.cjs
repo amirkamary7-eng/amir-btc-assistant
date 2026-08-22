@@ -109,29 +109,31 @@ test('DAILY-01: handleGetClaimStatus uses tier-based amount', () => {
 test('DAILY-02: handleClaimDaily uses tier-based + streak-based amount', () => {
   const block = WALLET_SRC.slice(WALLET_SRC.indexOf('async function handleClaimDaily'), WALLET_SRC.indexOf('async function handleMissionIssueToken'));
 
-  // PHASE 4 FIX: Daily reward is now streak-based + tier-based.
-  // The controller reads streak state, looks up base reward from STREAK_REWARDS,
-  // then applies the tier multiplier. The test validates the BEHAVIOR (not
-  // implementation details like a specific assignment line).
+  // PHASE UX-V2: Daily reward is streak-based + tier-based.
+  // The controller passes isPremium + entitlementConfig to claimDailyRewardWithStreak,
+  // which computes the reward internally from STREAK_REWARDS[streak_day] + tier multiplier.
+  // The test validates BEHAVIOR (not implementation details).
 
   // 1. Must check user tier (Premium affects the final reward)
   assert.ok(block.includes('_isPremiumSafe'), 'must check user tier via _isPremiumSafe');
 
-  // 2. Must read streak state (streak_day determines the base reward)
-  assert.ok(block.includes('getStreakStatus'), 'must read streak status to determine streak_day');
+  // 2. Must pass computeReward option to claimDailyRewardWithStreak
+  assert.ok(block.includes('computeReward'), 'must pass computeReward: true to claimDailyRewardWithStreak');
 
-  // 3. Must look up base reward from STREAK_REWARDS array (or fall back to _getDailyRewardAmount)
-  assert.ok(block.includes('STREAK_REWARDS') || block.includes('_getDailyRewardAmount'),
-    'must look up base reward from STREAK_REWARDS or fall back to tier-based amount');
+  // 3. Must pass isPremium + entitlementConfig for tier multiplier
+  assert.ok(block.includes('isPremium'), 'must pass isPremium to claim function');
+  assert.ok(block.includes('entitlementConfig'), 'must pass entitlementConfig to claim function');
 
-  // 4. Must apply tier multiplier to the base reward
-  assert.ok(block.includes('getMissionRewardAmount'),
-    'must apply tier multiplier via entitlementConfig.getMissionRewardAmount');
+  // 4. Must use claimDailyRewardWithStreak (not legacy claimDailyReward)
+  assert.ok(block.includes('claimDailyRewardWithStreak'), 'must use streak-enabled claim function');
 
-  // 5. Must pass the computed reward to the claim function
-  assert.ok(block.includes('claimFn(env,'), 'must pass the computed reward amount to the claim function');
+  // 5. Must include streak_rewards in response for frontend UI
+  assert.ok(block.includes('streak_rewards'), 'must include streak_rewards array in response');
 
-  // 6. Should NOT have a hard-coded flat reward
+  // 6. Must use result.amount in notification (not hardcoded)
+  assert.ok(block.includes('result.amount'), 'must use result.amount (not hardcoded) in notification');
+
+  // 7. Should NOT have a hard-coded flat reward
   assert.ok(!block.includes('const DAILY_REWARD = 10;'), 'no hard-coded flat 10 AB reward');
 });
 
