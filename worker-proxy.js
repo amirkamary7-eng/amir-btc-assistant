@@ -8437,6 +8437,9 @@ const rewardCenterRepo = createRewardCenterRepository({
   isDatabaseConfigured,
   isoDate: _rcIsoDate,
   normalizeOptionalString,
+  // PHASE 2: shared Tehran date helper (replaces CURRENT_DATE UTC in mission_progress)
+  getTehranDateString: sharedGetTehranDateString,
+  getTehranWeekStart: getTehranWeekStart,
 });
 
 // ── Notification Platform repository (needed by wheel + analysis + referral) ──
@@ -8456,7 +8459,7 @@ const notificationService = createNotificationService({
 });
 
 // alertEconomyRepo is already created above (before alertHandlers).
-const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction });
+const wheelRepo = createWheelRepository({ queryDb, queryDbTransaction, getTehranDateString: sharedGetTehranDateString });
 const wheelHandlers = createWheelHandlers({
   jsonResponse,
   authenticateTelegramRequest,

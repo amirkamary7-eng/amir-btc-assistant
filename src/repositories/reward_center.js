@@ -14,7 +14,13 @@
  */
 
 export function createRewardCenterRepository(deps) {
-  const { queryDb, queryDbTransaction, isDatabaseConfigured, isoDate, normalizeOptionalString } = deps;
+  const { queryDb, queryDbTransaction, isDatabaseConfigured, isoDate, normalizeOptionalString,
+    // PHASE 2: shared Tehran date helper — replaces CURRENT_DATE (UTC) in mission_progress.
+    // Previously mission_progress used CURRENT_DATE which is UTC on Neon/Supabase, causing
+        // daily reset at 03:30 Tehran instead of 00:00 Tehran. Now uses Tehran date consistently.
+        getTehranDateString: _getTehranDateString = () => new Date().toISOString().slice(0, 10),
+        getTehranWeekStart: _getTehranWeekStart = () => new Date().toISOString().slice(0, 10),
+  } = deps;
 
   let _schemaVerified = false;
 
@@ -699,17 +705,21 @@ export function createRewardCenterRepository(deps) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
     try {
+      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC) for daily_date.
+      // Previously CURRENT_DATE caused daily reset at 03:30 Tehran (00:00 UTC)
+      // instead of 00:00 Tehran. Now passes Tehran date as parameter.
+      const tehranToday = _getTehranDateString();
       // Atomic UPSERT: increment progress_count, set completed if target reached
       const result = await queryDb(env,
         `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date)
-         VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, CURRENT_DATE)
+         VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, $4)
          ON CONFLICT (user_id, mission_id, daily_date)
          DO UPDATE SET
            progress_count = mission_progress.progress_count + 1,
            completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
            updated_at = NOW()
          RETURNING *`,
-        [String(userId), String(missionId), Number(targetCount)],
+        [String(userId), String(missionId), Number(targetCount), tehranToday],
       );
       return result.rows[0] ? {
         id: Number(result.rows[0].id),
@@ -731,11 +741,13 @@ export function createRewardCenterRepository(deps) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return [];
     try {
+      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC)
+      const tehranToday = _getTehranDateString();
       const result = await queryDb(env,
         `SELECT mission_id, progress_count, target_count, completed, rewarded
          FROM mission_progress
-         WHERE user_id = $1 AND daily_date = CURRENT_DATE`,
-        [String(userId)],
+         WHERE user_id = $1 AND daily_date = $2`,
+        [String(userId), tehranToday],
       );
       return result.rows.map(r => ({
         mission_id: r.mission_id,
@@ -754,12 +766,14 @@ export function createRewardCenterRepository(deps) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     try {
+      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC)
+      const tehranToday = _getTehranDateString();
       const result = await queryDb(env,
         `UPDATE mission_progress
          SET rewarded = TRUE, updated_at = NOW()
-         WHERE user_id = $1 AND mission_id = $2 AND daily_date = CURRENT_DATE AND rewarded = FALSE
+         WHERE user_id = $1 AND mission_id = $2 AND daily_date = $3 AND rewarded = FALSE
          RETURNING id`,
-        [String(userId), String(missionId)],
+        [String(userId), String(missionId), tehranToday],
       );
       return result.rows.length > 0;
     } catch { return false; }

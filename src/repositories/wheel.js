@@ -6,7 +6,12 @@
  * to token_balances/token_transactions.
  */
 export function createWheelRepository(deps) {
-  const { queryDb, queryDbTransaction } = deps;
+  const { queryDb, queryDbTransaction,
+    // PHASE 2: shared Tehran date helper (injected from worker-proxy.js).
+    // Eliminates the duplicate getTehranDateString() defined locally below.
+    // Falls back to local implementation if not injected (backward compat).
+    getTehranDateString: _injectedGetTehranDateString,
+  } = deps;
 
   let _schemaVerified = false;
 
@@ -20,10 +25,10 @@ export function createWheelRepository(deps) {
   // use this Tehran date string. This ensures ALL users get 3 fresh spins at
   // exactly Tehran midnight, regardless of when they used their spins.
   //
-  // We pass the Tehran date as a PARAMETER to SQL (not rely on CURRENT_DATE)
-  // because Neon's CURRENT_DATE uses the DB's timezone (UTC by default).
+  // PHASE 2: Use injected helper if available (shared with wallet/reward_center).
+  // Falls back to local implementation for backward compat.
   function getTehranDateString() {
-    // Intl.DateTimeFormat with timeZone gives us the correct date in Tehran
+    if (_injectedGetTehranDateString) return _injectedGetTehranDateString();
     const fmt = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran',
       year: 'numeric',
