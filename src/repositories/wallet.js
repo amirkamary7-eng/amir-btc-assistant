@@ -39,6 +39,25 @@ export function createWalletRepository(deps) {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_token_tx_user_type_ref
         ON token_transactions (user_id, tx_type, ref_id)
         WHERE ref_id IS NOT NULL AND status = 'completed';
+
+      -- PHASE 4 (WALLET-REWARDS): daily_checkin_streaks table for 1→7 streak system.
+      -- Separate table (NOT added to token_balances) for:
+      --   - Single Responsibility (streak logic isolated from balance)
+      --   - Easier migration (additive, no ALTER TABLE on balance table)
+      --   - Easier queries (streak state independent of balance)
+      --   - Backward compat (token_balances untouched)
+      -- streak_day: 1..7 (current day in cycle)
+      -- last_claim_date: Tehran date of last successful claim (idempotency key)
+      -- cycle_count: how many 7-day cycles completed (analytics)
+      CREATE TABLE IF NOT EXISTS daily_checkin_streaks (
+        user_id TEXT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+        streak_day SMALLINT NOT NULL DEFAULT 0,
+        last_claim_date DATE NOT NULL DEFAULT '1970-01-01',
+        cycle_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_checkin_streaks_last_claim ON daily_checkin_streaks (last_claim_date);
     `;
     try {
       await queryDb(env, batchSql);
@@ -240,6 +259,162 @@ export function createWalletRepository(deps) {
       [String(userId), `daily_${tehranToday}`],
     );
     return result.rows.length > 0;
+  }
+
+  // PHASE 4 (WALLET-REWARDS): Daily check-in streak system (1→7 progressive reward).
+  // STREAK_REWARDS[day-1] = reward amount for that day (before tier multiplier).
+  // Day 1 = base, Day 7 = highest. After Day 7 → cycle restarts at Day 1.
+  // These are NORMAL-tier amounts. Premium tier multiplier applied in controller.
+  const STREAK_REWARDS = [10, 12, 15, 18, 22, 28, 40]; // Days 1-7
+
+  /**
+   * Get the streak state for a user.
+   * Returns { streak_day, last_claim_date, cycle_count } or null if no row.
+   */
+  async function getStreakStatus(env, userId) {
+    await ensureSchema(env).catch(() => {});
+    const result = await queryDb(env,
+      `SELECT streak_day, last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
+      [String(userId)],
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * PHASE 4 (WALLET-REWARDS): Claim daily reward with 1→7 streak system.
+   *
+   * Streak logic:
+   *   - First claim ever: streak_day = 1
+   *   - Last claim was yesterday (Tehran): streak_day = (streak_day % 7) + 1
+   *     (1→2, 2→3, ..., 6→7, 7→1 — Day 7 wraps to Day 1 for new cycle)
+   *   - Last claim was today (Tehran): ALREADY_CLAIMED (idempotent)
+   *   - Last claim was before yesterday: streak_day = 1 (streak broken)
+   *
+   * Reward: STREAK_REWARDS[streak_day - 1] (before tier multiplier).
+   * The controller applies the tier multiplier and passes the final amount
+   * as `amount` parameter. This function returns the computed streak_day
+   * so the controller can look up the reward amount.
+   *
+   * Cycle completion: when streak_day goes 7→1, cycle_count is incremented.
+   * This happens WITHIN the same transaction as the credit — atomic.
+   *
+   * Concurrent claim protection: pg_advisory_xact_lock on (user_id + Tehran date).
+   * Same lock key as the original claimDailyReward — backward compatible.
+   *
+   * @returns { claimed, amount, newBalance, txId, streak_day, cycle_complete, cycle_count }
+   */
+  async function claimDailyRewardWithStreak(env, userId, amount) {
+    if (!queryDbTransaction) {
+      throw new Error('queryDbTransaction not available');
+    }
+    await ensureSchema(env).catch(() => {});
+
+    const uid = String(userId);
+    const tehranToday = _getTehranDateString();
+    const refId = `daily_${tehranToday}`;
+
+    // Compute yesterday's Tehran date for streak-continuation check.
+    // We use Intl.DateTimeFormat with timeZone to get the correct date.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const yesterdayFmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const tehranYesterday = yesterdayFmt.format(yesterday);
+
+    // Compute advisory lock key from user_id + Tehran date (same as original).
+    const lockKeyResult = await queryDb(env,
+      `SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint) AS lock_key`,
+      [uid, tehranToday],
+    );
+    const lockKey = lockKeyResult.rows[0]?.lock_key;
+    if (lockKey == null) {
+      throw new Error('Failed to compute advisory lock key');
+    }
+
+    // Step 1: Acquire advisory lock + check if already claimed today (atomic).
+    const lockResults = await queryDbTransaction(env, [
+      { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
+      {
+        sql: `SELECT id FROM token_transactions
+              WHERE user_id = $1 AND tx_type = 'daily_claim'
+              AND ref_id = $2 LIMIT 1`,
+        params: [uid, refId],
+      },
+    ]);
+
+    if (lockResults[1].rows.length > 0) {
+      throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
+    }
+
+    // Step 2: Compute new streak_day + cycle_count.
+    // Read current streak state (may be null if first claim).
+    const streakRow = await queryDb(env,
+      `SELECT streak_day, last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
+      [uid],
+    );
+    const current = streakRow.rows[0];
+    let newStreakDay = 1;
+    let newCycleCount = 0;
+    let cycleComplete = false;
+
+    if (current) {
+      newCycleCount = Number(current.cycle_count) || 0;
+      const lastClaimDate = current.last_claim_date; // DATE type (no timezone)
+      // Convert both to YYYY-MM-DD strings for comparison
+      const lastClaimStr = lastClaimDate ? String(lastClaimDate).slice(0, 10) : '';
+      const currentStreakDay = Number(current.streak_day) || 0;
+
+      if (lastClaimStr === tehranYesterday) {
+        // Streak continues: 1→2, 2→3, ..., 6→7, 7→1 (cycle restart)
+        newStreakDay = (currentStreakDay % 7) + 1;
+        if (currentStreakDay === 7) {
+          // Day 7 → Day 1: cycle complete, increment cycle_count
+          cycleComplete = true;
+          newCycleCount += 1;
+        }
+      } else if (lastClaimStr === tehranToday) {
+        // Already claimed today — should have been caught by the refId check above,
+        // but double-check for safety (streak row might be out of sync).
+        throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
+      } else {
+        // Streak broken (missed a day): reset to Day 1
+        newStreakDay = 1;
+      }
+    } else {
+      // First claim ever: streak_day = 1, cycle_count = 0
+      newStreakDay = 1;
+      newCycleCount = 0;
+    }
+
+    // Step 3: UPSERT streak row (update streak_day, last_claim_date, cycle_count).
+    await queryDb(env,
+      `INSERT INTO daily_checkin_streaks (user_id, streak_day, last_claim_date, cycle_count, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         streak_day = EXCLUDED.streak_day,
+         last_claim_date = EXCLUDED.last_claim_date,
+         cycle_count = EXCLUDED.cycle_count,
+         updated_at = NOW()`,
+      [uid, newStreakDay, tehranToday, newCycleCount],
+    );
+
+    // Step 4: Credit tokens via the centralized path (idempotent via refId).
+    const result = await creditTokens(env, uid, amount, 'daily_claim', 'Daily check-in reward', refId, {
+      daily_date: tehranToday,
+      streak_day: newStreakDay,
+      cycle_complete: cycleComplete,
+    });
+
+    return {
+      claimed: true,
+      amount,
+      newBalance: result.newBalance,
+      txId: result.txId,
+      streak_day: newStreakDay,
+      cycle_complete: cycleComplete,
+      cycle_count: newCycleCount,
+    };
   }
 
   /**
@@ -698,7 +873,10 @@ export function createWalletRepository(deps) {
     getTransactionHistory,
     getTransactionById,
     getDailyClaimStatus,
-    claimDailyReward,
+    claimDailyReward, // backward compat (still works, no streak)
+    claimDailyRewardWithStreak, // PHASE 4: streak-enabled claim
+    getStreakStatus, // PHASE 4: read streak state for UI
+    STREAK_REWARDS, // PHASE 4: exported for controller to look up reward amounts
     getReferralStats,
     creditTokens,
     debitTokens,

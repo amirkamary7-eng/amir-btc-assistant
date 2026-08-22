@@ -176,20 +176,37 @@ export function createWalletHandlers(deps) {
   }
 
   /**
-   * GET /api/wallet/claim — Get daily claim status.
+   * GET /api/wallet/claim — Get daily claim status + streak info.
    */
   async function handleGetClaimStatus(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
-    // PHASE 4: Tier-based daily reward amount
+    // PHASE 4: Tier-based daily reward amount (fallback)
     const isPremium = await _isPremiumSafe(env, authState.user.id);
     const dailyReward = _getDailyRewardAmount(isPremium);
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', claimed_today: false, daily_reward: dailyReward }, {}, env);
+      return jsonResponse({ status: 'success', claimed_today: false, daily_reward: dailyReward, streak_day: 0, cycle_count: 0 }, {}, env);
     }
     try {
       const claimed = await walletRepo.getDailyClaimStatus(env, authState.user.id);
-      return jsonResponse({ status: 'success', claimed_today: claimed, daily_reward: dailyReward }, {}, env);
+      // PHASE 4: include streak info for UI
+      let streakInfo = { streak_day: 0, cycle_count: 0, last_claim_date: null };
+      if (typeof walletRepo.getStreakStatus === 'function') {
+        const streak = await walletRepo.getStreakStatus(env, authState.user.id);
+        if (streak) {
+          streakInfo = {
+            streak_day: Number(streak.streak_day) || 0,
+            cycle_count: Number(streak.cycle_count) || 0,
+            last_claim_date: streak.last_claim_date ? String(streak.last_claim_date).slice(0, 10) : null,
+          };
+        }
+      }
+      return jsonResponse({
+        status: 'success',
+        claimed_today: claimed,
+        daily_reward: dailyReward,
+        ...streakInfo,
+      }, {}, env);
     } catch (error) {
       console.warn(safeError('get-claim-status', error));
       return safeDbErrorResponse(error, {}, env);
@@ -209,11 +226,65 @@ export function createWalletHandlers(deps) {
     const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_claim', 5, 60);
     if (rlErr) return rlErr;
     try {
-      // PHASE 4: Tier-based daily reward amount (Normal 10, Premium 20).
+      // PHASE 4 (WALLET-REWARDS): Streak-based daily reward.
+      // The reward amount now depends on streak_day (1..7) + tier multiplier.
+      // We need to compute the streak_day FIRST, then look up the reward amount.
+      // However, streak_day is computed inside claimDailyRewardWithStreak (atomic).
+      // To avoid a separate DB query before the claim, we pass the tier multiplier
+      // to the function and let it compute the final amount internally.
+
       const isPremium = await _isPremiumSafe(env, authState.user.id);
-      const DAILY_REWARD = _getDailyRewardAmount(isPremium);
+
+      // PHASE 4: Look up streak reward amount BEFORE calling claim, so we can
+      // pass the correct amount. But we don't know streak_day yet — we need to
+      // read streak state first.
+      let streakDay = 1; // default for first claim
+      let streakStatus = null;
+      if (typeof walletRepo.getStreakStatus === 'function') {
+        streakStatus = await walletRepo.getStreakStatus(env, authState.user.id);
+        if (streakStatus) {
+          // Compute what the next streak_day WILL be (same logic as claimDailyRewardWithStreak)
+          const tehranToday = _getTehranDateString();
+          const lastClaimStr = streakStatus.last_claim_date ? String(streakStatus.last_claim_date).slice(0, 10) : '';
+          // Compute Tehran yesterday
+          const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const yesterdayFmt = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+          });
+          const tehranYesterday = yesterdayFmt.format(yesterday);
+          const currentStreakDay = Number(streakStatus.streak_day) || 0;
+          if (lastClaimStr === tehranYesterday) {
+            streakDay = (currentStreakDay % 7) + 1;
+          } else if (lastClaimStr === tehranToday) {
+            // Already claimed today — will throw ALREADY_CLAIMED below
+            streakDay = currentStreakDay;
+          } else {
+            streakDay = 1; // streak broken
+          }
+        }
+      }
+
+      // Look up the base reward amount from STREAK_REWARDS array.
+      // If STREAK_REWARDS is not exported (old walletRepo), fall back to tier-based.
+      let baseReward;
+      if (walletRepo.STREAK_REWARDS && Array.isArray(walletRepo.STREAK_REWARDS)) {
+        baseReward = walletRepo.STREAK_REWARDS[Math.max(0, Math.min(6, streakDay - 1))] || 10;
+      } else {
+        baseReward = _getDailyRewardAmount(isPremium); // legacy fallback
+      }
+
+      // Apply tier multiplier (Premium 1.5×, Normal 1×)
+      const DAILY_REWARD = (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function')
+        ? entitlementConfig.getMissionRewardAmount(baseReward, isPremium)
+        : baseReward;
+
       const clientIp = request.headers.get('cf-connecting-ip') || null;
-      const result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
+
+      // PHASE 4: Use streak-enabled claim function if available, else fallback to legacy.
+      const claimFn = typeof walletRepo.claimDailyRewardWithStreak === 'function'
+        ? walletRepo.claimDailyRewardWithStreak
+        : walletRepo.claimDailyReward;
+      const result = await claimFn(env, authState.user.id, DAILY_REWARD);
 
       // Dispatch notification via NotificationService (single entry point)
       if (notificationService && result && result.credited !== false) {
@@ -223,13 +294,13 @@ export function createWalletHandlers(deps) {
           category: 'wallet',
           priority: 'low',
           channel: 'both',
-          metadata: { amount: String(DAILY_REWARD), name: 'Daily Reward' },
+          metadata: { amount: String(DAILY_REWARD), name: 'Daily Reward', streak_day: result.streak_day },
           // PHASE 1 FIX: use Tehran date (consistent with refId) — previously UTC
           dedupKey: `wallet_daily_${authState.user.id}_${_getTehranDateString()}`,
         }).catch(() => {});
       }
 
-      return jsonResponse({ status: 'success', ...result }, {}, env);
+      return jsonResponse({ status: 'success', ...result, daily_reward: DAILY_REWARD }, {}, env);
     } catch (error) {
       if (error.code === 'ALREADY_CLAIMED') {
         return jsonResponse({ status: 'error', message: 'Already claimed today', code: 'ALREADY_CLAIMED' }, { status: 409 }, env);
