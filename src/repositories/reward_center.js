@@ -97,9 +97,14 @@ export function createRewardCenterRepository(deps) {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
-      -- Mission progress — tracks per-user per-day progress for multi-step missions
+      -- Mission progress — tracks per-user per-day (daily) or per-week (weekly) progress.
       -- For single-step missions (target_count=1), a row is created on completion
       -- For multi-step missions (target_count=N), progress increments until target reached
+      -- PHASE 5 (WALLET-REWARDS): added week_start column for weekly missions.
+      --   - daily missions (daily_login): use daily_date (Tehran date)
+      --   - weekly missions (news, analysis, calendar, market): use week_start (Saturday Tehran)
+      -- The UNIQUE constraint on (user_id, mission_id, daily_date) remains for daily missions.
+      -- A new UNIQUE constraint on (user_id, mission_id, week_start) is added for weekly missions.
       CREATE TABLE IF NOT EXISTS mission_progress (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(64) NOT NULL,
@@ -109,12 +114,22 @@ export function createRewardCenterRepository(deps) {
         completed BOOLEAN NOT NULL DEFAULT FALSE,
         rewarded BOOLEAN NOT NULL DEFAULT FALSE,
         daily_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        -- PHASE 5: nullable for backward compat (old rows have week_start = NULL)
+        week_start DATE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(user_id, mission_id, daily_date)
       );
       CREATE INDEX IF NOT EXISTS idx_mission_progress_user ON mission_progress (user_id, daily_date);
       CREATE INDEX IF NOT EXISTS idx_mission_progress_completed ON mission_progress (user_id, completed, daily_date);
+      -- PHASE 5: add week_start column (additive — existing rows get NULL)
+      ALTER TABLE mission_progress ADD COLUMN IF NOT EXISTS week_start DATE;
+      -- PHASE 5: partial UNIQUE index for weekly missions (only when week_start IS NOT NULL)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_progress_week
+        ON mission_progress (user_id, mission_id, week_start)
+        WHERE week_start IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_mission_progress_week_user ON mission_progress (user_id, week_start)
+        WHERE week_start IS NOT NULL;
 
       -- Campaigns — time-bounded reward events
       CREATE TABLE IF NOT EXISTS campaigns (
@@ -700,34 +715,66 @@ export function createRewardCenterRepository(deps) {
    * Creates or updates a row in mission_progress.
    * Uses atomic UPSERT with progress increment.
    * Returns the updated progress record.
+   *
+   * PHASE 5 (WALLET-REWARDS): now supports weekly missions.
+   * If missionId is in the WEEKLY_MISSION_IDS set, uses week_start (Saturday Tehran)
+   * for the period key instead of daily_date. The UPSERT conflicts on the weekly
+   * UNIQUE index (user_id, mission_id, week_start) instead of the daily one.
    */
+  // PHASE 5: mission IDs that are weekly (reset every Saturday Tehran).
+  // daily_login stays daily. All others are weekly.
+  const WEEKLY_MISSION_IDS = new Set(['read_news', 'read_analysis', 'check_calendar', 'visit_market']);
+
   async function incrementMissionProgress(env, userId, missionId, targetCount = 1) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
     try {
-      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC) for daily_date.
-      // Previously CURRENT_DATE caused daily reset at 03:30 Tehran (00:00 UTC)
-      // instead of 00:00 Tehran. Now passes Tehran date as parameter.
       const tehranToday = _getTehranDateString();
-      // Atomic UPSERT: increment progress_count, set completed if target reached
-      const result = await queryDb(env,
-        `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date)
-         VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, $4)
-         ON CONFLICT (user_id, mission_id, daily_date)
-         DO UPDATE SET
-           progress_count = mission_progress.progress_count + 1,
-           completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
-           updated_at = NOW()
-         RETURNING *`,
-        [String(userId), String(missionId), Number(targetCount), tehranToday],
-      );
-      return result.rows[0] ? {
-        id: Number(result.rows[0].id),
-        progress_count: Number(result.rows[0].progress_count),
-        target_count: Number(result.rows[0].target_count),
-        completed: result.rows[0].completed,
-        rewarded: result.rows[0].rewarded,
-      } : null;
+      const isWeekly = WEEKLY_MISSION_IDS.has(String(missionId));
+
+      if (isWeekly) {
+        // PHASE 5: weekly mission — use week_start for period key.
+        const weekStart = _getTehranWeekStart();
+        const result = await queryDb(env,
+          `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date, week_start)
+           VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, $4, $5)
+           ON CONFLICT (user_id, mission_id, week_start)
+           WHERE week_start IS NOT NULL
+           DO UPDATE SET
+             progress_count = mission_progress.progress_count + 1,
+             completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+             updated_at = NOW()
+           RETURNING *`,
+          [String(userId), String(missionId), Number(targetCount), tehranToday, weekStart],
+        );
+        return result.rows[0] ? {
+          id: Number(result.rows[0].id),
+          progress_count: Number(result.rows[0].progress_count),
+          target_count: Number(result.rows[0].target_count),
+          completed: result.rows[0].completed,
+          rewarded: result.rows[0].rewarded,
+        } : null;
+      } else {
+        // Daily mission — use daily_date (existing behavior)
+        const result = await queryDb(env,
+          `INSERT INTO mission_progress (user_id, mission_id, progress_count, target_count, completed, rewarded, daily_date)
+           VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, $4)
+           ON CONFLICT (user_id, mission_id, daily_date)
+           DO UPDATE SET
+             progress_count = mission_progress.progress_count + 1,
+             completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+             updated_at = NOW()
+           RETURNING *`,
+          [String(userId), String(missionId), Number(targetCount), tehranToday],
+        );
+        return result.rows[0] ? {
+          id: Number(result.rows[0].id),
+          progress_count: Number(result.rows[0].progress_count),
+          target_count: Number(result.rows[0].target_count),
+          completed: result.rows[0].completed,
+          rewarded: result.rows[0].rewarded,
+        } : null;
+      }
     } catch (e) {
       console.warn('incrementMissionProgress error:', e.message);
       return null;
@@ -735,19 +782,24 @@ export function createRewardCenterRepository(deps) {
   }
 
   /**
-   * Get today's mission progress for a user (all missions).
+   * Get today's/this week's mission progress for a user (all missions).
+   * PHASE 5: now returns both daily (daily_date = today) AND weekly (week_start = this week)
+   * progress rows. The frontend merges them by mission_id.
    */
   async function getTodayMissionProgress(env, userId) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return [];
     try {
-      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC)
       const tehranToday = _getTehranDateString();
+      const weekStart = _getTehranWeekStart();
+      // PHASE 5: query BOTH daily (daily_date = today) AND weekly (week_start = this week).
+      // Daily missions: daily_date = tehranToday (week_start is NULL)
+      // Weekly missions: week_start = weekStart (daily_date is set but not used for filtering)
       const result = await queryDb(env,
-        `SELECT mission_id, progress_count, target_count, completed, rewarded
+        `SELECT mission_id, progress_count, target_count, completed, rewarded, week_start
          FROM mission_progress
-         WHERE user_id = $1 AND daily_date = $2`,
-        [String(userId), tehranToday],
+         WHERE user_id = $1 AND (daily_date = $2 OR week_start = $3)`,
+        [String(userId), tehranToday, weekStart],
       );
       return result.rows.map(r => ({
         mission_id: r.mission_id,
@@ -755,27 +807,43 @@ export function createRewardCenterRepository(deps) {
         target_count: Number(r.target_count),
         completed: r.completed,
         rewarded: r.rewarded,
+        week_start: r.week_start ? String(r.week_start).slice(0, 10) : null,
       }));
     } catch { return []; }
   }
 
   /**
    * Mark a mission as rewarded (prevents double-reward at the progress level).
+   * PHASE 5: now supports weekly missions — checks both daily_date and week_start.
    */
   async function markMissionRewarded(env, userId, missionId) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return false;
     try {
-      // PHASE 2 FIX: use Tehran date (not CURRENT_DATE UTC)
       const tehranToday = _getTehranDateString();
-      const result = await queryDb(env,
-        `UPDATE mission_progress
-         SET rewarded = TRUE, updated_at = NOW()
-         WHERE user_id = $1 AND mission_id = $2 AND daily_date = $3 AND rewarded = FALSE
-         RETURNING id`,
-        [String(userId), String(missionId), tehranToday],
-      );
-      return result.rows.length > 0;
+      const isWeekly = WEEKLY_MISSION_IDS.has(String(missionId));
+      if (isWeekly) {
+        // PHASE 5: weekly mission — match by week_start
+        const weekStart = _getTehranWeekStart();
+        const result = await queryDb(env,
+          `UPDATE mission_progress
+           SET rewarded = TRUE, updated_at = NOW()
+           WHERE user_id = $1 AND mission_id = $2 AND week_start = $3 AND rewarded = FALSE
+           RETURNING id`,
+          [String(userId), String(missionId), weekStart],
+        );
+        return result.rows.length > 0;
+      } else {
+        // Daily mission — match by daily_date
+        const result = await queryDb(env,
+          `UPDATE mission_progress
+           SET rewarded = TRUE, updated_at = NOW()
+           WHERE user_id = $1 AND mission_id = $2 AND daily_date = $3 AND rewarded = FALSE
+           RETURNING id`,
+          [String(userId), String(missionId), tehranToday],
+        );
+        return result.rows.length > 0;
+      }
     } catch { return false; }
   }
 
