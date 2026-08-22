@@ -538,9 +538,8 @@ const WalletApp = (() => {
         </div>
       </div>
 
-      <!-- Brand Quote + Token Slogan -->
-      <div class="wallet-brand-quote">${esc(WT('brand_quote'))}</div>
-      <div class="wallet-token-slogan">${esc(WT('token_slogan'))}</div>
+      <!-- PHASE 3 FIX: removed brand_quote + token_slogan (decorative, no UX value).
+           Token info is available via showTokenInfo() popup if user taps the info icon. -->
 
       <!-- Hero Balance Card -->
       <div class="wallet-hero-card">
@@ -1178,11 +1177,15 @@ const WalletApp = (() => {
       if (walletRes) renderWalletPage(walletRes);
       // Show success popup
       const tg = window.getTg?.();
+      // PHASE 3 FIX: add haptic feedback on successful claim (success type)
+      try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
       tg?.showPopup?.({ title: WT('success'), message: `+${DAILY_REWARD} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
     } else {
       btn.disabled = false;
       btn.textContent = WT('claim');
       const tg = window.getTg?.();
+      // PHASE 3 FIX: add haptic feedback on failed claim (error type)
+      try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
       tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
     }
   }

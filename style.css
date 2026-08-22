@@ -11570,6 +11570,22 @@ body.jl-locked .cd-fullscreen {
     text-decoration-color: rgba(255, 255, 255, 0.3);
 }
 
+/* PHASE 3 FIX: clearer "✓ دریافت شد" badge for completed missions */
+.mission-completed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 6px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #22C55E;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+
 /* Mission checkmark badge */
 .mission-checkmark {
     position: absolute;

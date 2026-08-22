@@ -5904,22 +5904,21 @@ function refreshWalletAfterMission(newBalance) {
     }
 
     // 3. Refresh profile card (balance + tier on the profile page)
+    // PHASE 3 FIX: removed 300ms delay — fire immediately (no reason to wait).
     if (typeof window.WalletApp?.loadProfileCard === 'function') {
-        setTimeout(() => window.WalletApp.loadProfileCard(), 300);
+        try { window.WalletApp.loadProfileCard(); } catch (_) {}
     }
 
     // 4. If wallet full page is open, refresh ALL wallet data in background
     //    This updates: balance, tier, progress bar, transaction history, summary strip
+    // PHASE 3 FIX: removed 500ms delay — fire immediately (no reason to wait).
+    //    The balance animation (step 2) runs in parallel via requestAnimationFrame,
+    //    so the full refresh doesn't block the UI.
     const walletPage = document.getElementById('wallet-full-page');
     if (walletPage && walletPage.classList.contains('open')) {
-        // Re-fetch wallet data (balance + history) and summary in parallel
-        setTimeout(async () => {
-            try {
-                if (typeof window.WalletApp?._refreshWalletData === 'function') {
-                    await window.WalletApp._refreshWalletData();
-                }
-            } catch (_) {}
-        }, 500);
+        if (typeof window.WalletApp?._refreshWalletData === 'function') {
+            try { window.WalletApp._refreshWalletData(); } catch (_) {}
+        }
     }
 }
 
@@ -5972,6 +5971,11 @@ function updateMissionCards() {
             const checkmarkHtml = isCompleted
                 ? '<div class="mission-checkmark"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>'
                 : '';
+            // PHASE 3 FIX: add clear "✓ دریافت شد" badge for completed missions
+            // (in addition to the checkmark icon) — makes completion status unambiguous.
+            const completedBadgeHtml = isCompleted
+                ? '<div class="mission-completed-badge">✓ دریافت شد</div>'
+                : '';
             const progressHtml = progressText && !isCompleted
                 ? `<div class="mission-progress-text">${progressText}</div>`
                 : '';
@@ -5982,6 +5986,7 @@ function updateMissionCards() {
                 <div class="earn-title">${escapeHtml(m.mission_name || m.mission_id)}</div>
                 ${m.description ? `<div class="earn-desc">${escapeHtml(m.description)}</div>` : ''}
                 ${progressHtml}
+                ${completedBadgeHtml}
                 ${checkmarkHtml}
             </div>`;
         }

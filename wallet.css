@@ -984,13 +984,16 @@
 .wallet-earn-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  /* PHASE 3 FIX: tighter gap for compact cards */
+  gap: 8px;
 }
 
 .wallet-earn-card {
   position: relative;
-  padding: 16px;
-  border-radius: 16px;
+  /* PHASE 3 FIX: compact padding (was 16px) */
+  padding: 12px;
+  /* PHASE 3 FIX: tighter radius (was 16px) */
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(11, 18, 32, 0.55);
   backdrop-filter: blur(12px);
@@ -1012,24 +1015,27 @@
 }
 
 .wallet-earn-card .earn-reward {
-  font-size: 20px;
+  /* PHASE 3 FIX: smaller reward badge (was 20px) */
+  font-size: 16px;
   font-weight: 800;
   color: var(--w-green);
-  margin-block-end: 6px;
+  margin-block-end: 4px;
   letter-spacing: -0.4px;
 }
 
 .wallet-earn-card .earn-title {
-  font-size: 13px;
+  /* PHASE 3 FIX: slightly smaller title (was 13px) */
+  font-size: 12px;
   font-weight: 700;
   color: var(--w-text);
-  margin-block-end: 3px;
+  margin-block-end: 2px;
 }
 
 .wallet-earn-card .earn-desc {
-  font-size: 11px;
+  /* PHASE 3 FIX: smaller description (was 11px) */
+  font-size: 10.5px;
   color: var(--w-text-dim);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .wallet-earn-card .earn-claimed-badge {
