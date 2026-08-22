@@ -273,7 +273,8 @@ const WalletApp = (() => {
   let historyLoading = false;
   let historyOffset = 0;
   let _tokenLogo = 'assets/token-logo.png';
-  const DAILY_REWARD = 10;
+  // PHASE UX-V2.1: removed dead constant DAILY_REWARD = 10.
+  // Reward amount is server-authoritative (result.amount from API response).
 
   /** Escape HTML to prevent XSS when rendering dynamic content. */
   function esc(str) {
@@ -1045,6 +1046,10 @@ const WalletApp = (() => {
     if (!page) return;
     page.classList.remove('open');
     document.body.style.overflow = '';
+    // PHASE UX-V2.1 FIX: stop weekly countdown timer to prevent memory leak.
+    // Without this, the setInterval continues running after the wallet page
+    // is closed, consuming battery/CPU on mobile devices.
+    _stopWeeklyCountdown();
     // ROOT CAUSE FIX (O3): Previously closeWallet always called loadProfileCard()
     // which fires GET /api/wallet — a redundant call since the wallet data was
     // just fetched on openWallet. Now we skip the re-fetch if walletData is
@@ -1151,26 +1156,8 @@ const WalletApp = (() => {
 
   // PHASE UX-V2.1: Old _renderStreakUI removed — 7-day streak now rendered
   // inside the Daily Check-in Modal (see _renderStreakDaysHTML below).
-
-  function updateClaimButton(claimed) {
-    const btn = document.getElementById('daily-claim-btn');
-    const card = document.getElementById('daily-checkin-card');
-    if (!btn || !card) return;
-
-    if (claimed) {
-      btn.disabled = true;
-      btn.textContent = WT('claimed');
-      if (!card.querySelector('.earn-claimed-badge')) {
-        const badge = document.createElement('span');
-        badge.className = 'earn-claimed-badge';
-        badge.textContent = WT('claimed').toUpperCase();
-        card.appendChild(badge);
-      }
-    } else {
-      btn.disabled = false;
-      btn.textContent = WT('claim');
-    }
-  }
+  // PHASE UX-V2.1 FIX: removed dead function updateClaimButton (never called
+  // after _dailyCheckinState + _updateDailyCheckinCard replaced it).
 
   async function claimDaily() {
     const btn = document.getElementById('daily-claim-btn');
