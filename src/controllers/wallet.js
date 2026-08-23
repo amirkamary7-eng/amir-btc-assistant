@@ -549,6 +549,12 @@ export function createWalletHandlers(deps) {
    * No token required — bootstrap itself IS the proof of login.
    *
    * Returns the same shape as handleMissionComplete's success response.
+   *
+   * N13 FIX: this path is a MISSION reward and must apply the same canonical
+   * tier multiplier as handleMissionComplete (it previously granted the raw
+   * base amount with no multiplier at all — a Premium user got base here while
+   * the interactive path was supposed to grant ceil(1.5 × base)). Same helper,
+   * same MembershipAuthority fail-safe (error → Normal → base amount).
    */
   async function fireDailyLoginMission(env, userId) {
     if (!isDatabaseConfigured(env)) return null;
@@ -560,10 +566,18 @@ export function createWalletHandlers(deps) {
         : null;
       if (!missionConfig) return null;
 
-      const amount = Number(missionConfig.token_amount) || 0;
-      if (amount <= 0) return null;
+      const baseAmount = Number(missionConfig.token_amount) || 0;
+      if (baseAmount <= 0) return null;
 
       const label = missionConfig.mission_name || missionId;
+
+      // N13 FIX: apply the SAME canonical tier multiplier as
+      // handleMissionComplete (Normal 1×, Premium ceil(1.5×)) — identical
+      // guard shape, identical fallback, identical helper.
+      const isPremium = await _isPremiumSafe(env, userId);
+      const amount = (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function')
+        ? entitlementConfig.getMissionRewardAmount(baseAmount, isPremium)
+        : baseAmount; // Legacy fallback: no multiplier
 
       // Get target_count
       const activeMissions = rewardCenterRepo

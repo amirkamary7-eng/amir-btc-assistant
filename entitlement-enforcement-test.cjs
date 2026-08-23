@@ -126,7 +126,9 @@ test('AI-02: checkRateLimits uses tier-based limits', () => {
 test('AI-03: assistantHandlers wired with authority + config', () => {
   const w = WORKER_SRC.slice(WORKER_SRC.indexOf('const assistantHandlers = createAssistantHandlers'), WORKER_SRC.indexOf('const analysisRepo'));
   assert.ok(w.includes('membershipAuthority'));
-  assert.ok(w.includes('ENTITLEMENT_CONFIG'));
+  // N13: injected object renamed to the ENTITLEMENT composite (spreads
+  //  ENTITLEMENT_CONFIG + attaches the canonical reward helpers)
+  assert.ok(w.includes('ENTITLEMENT'));
 });
 
 // ─── Tests: Wheel tier-based ────────────────────────────────────────────────
@@ -145,7 +147,9 @@ test('WHEEL-02: both handlers use _getEffectiveMaxSpins', () => {
 test('WHEEL-03: wheelHandlers wired with authority + config', () => {
   const w = WORKER_SRC.slice(WORKER_SRC.indexOf('const wheelHandlers = createWheelHandlers'), WORKER_SRC.indexOf('const walletHandlers'));
   assert.ok(w.includes('membershipAuthority'));
-  assert.ok(w.includes('ENTITLEMENT_CONFIG'));
+  // N13: injected object renamed to the ENTITLEMENT composite (spreads
+  //  ENTITLEMENT_CONFIG + attaches the canonical reward helpers)
+  assert.ok(w.includes('ENTITLEMENT'));
 });
 
 // ─── Tests: Watchlist tier-based ────────────────────────────────────────────
@@ -165,7 +169,9 @@ test('WATCH-02: handlePut uses maxWatchlist (not hard-coded 7)', () => {
 test('WATCH-03: watchlistHandlers wired with authority + config', () => {
   const w = WORKER_SRC.slice(WORKER_SRC.indexOf('const watchlistHandlers = createWatchlistHandlers'), WORKER_SRC.indexOf('const referralRepo'));
   assert.ok(w.includes('membershipAuthority'));
-  assert.ok(w.includes('ENTITLEMENT_CONFIG'));
+  // N13: injected object renamed to the ENTITLEMENT composite (spreads
+  //  ENTITLEMENT_CONFIG + attaches the canonical reward helpers)
+  assert.ok(w.includes('ENTITLEMENT'));
 });
 
 // ─── Tests: Fail-safe ───────────────────────────────────────────────────────
@@ -244,9 +250,8 @@ test('WIRE-02: No duplicate membershipAuthority definition', () => {
   assert.equal(matches.length, 1);
 });
 
-test('WIRE-03: ENTITLEMENT_CONFIG imported', () => {
-  // M3: the import now also brings getMissionRewardAmount (the REAL tier
-  // multiplier helper) so retryFailedMissionRewards applies the same
-  // premium multiplier as the normal completion path.
-  assert.ok(WORKER_SRC.includes("import { ENTITLEMENT_CONFIG, getMissionRewardAmount }"));
+test('WIRE-03: ENTITLEMENT_CONFIG imported (with canonical reward helpers)', () => {
+  // N13: the import now brings ALL canonical reward helpers so the ENTITLEMENT
+  // composite attaches them at the injection boundary.
+  assert.ok(WORKER_SRC.includes("import { ENTITLEMENT_CONFIG, getMissionRewardAmount, getReferralRewardAmount, getDailyClaimAmount }"));
 });

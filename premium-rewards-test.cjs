@@ -197,7 +197,9 @@ test('SEC-03: Fail-safe — authority error returns Normal', () => {
 test('WIRE-01: walletHandlers wired with authority + config', () => {
   const w = WORKER_SRC.slice(WORKER_SRC.indexOf('const walletHandlers = createWalletHandlers'), WORKER_SRC.indexOf('const sessionRepo'));
   assert.ok(w.includes('membershipAuthority'));
-  assert.ok(w.includes('ENTITLEMENT_CONFIG'));
+  // N13: injected object renamed to the ENTITLEMENT composite (spreads
+  // ENTITLEMENT_CONFIG data + attaches the canonical reward helpers)
+  assert.ok(w.includes('ENTITLEMENT'));
 });
 
 // ─── No behavior change for Normal ──────────────────────────────────────────

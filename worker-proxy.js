@@ -46,7 +46,33 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
 import { createMembershipAuthority } from './src/services/membership_authority.js';
-import { ENTITLEMENT_CONFIG, getMissionRewardAmount } from './src/services/entitlement_config.js';
+import { ENTITLEMENT_CONFIG, getMissionRewardAmount, getReferralRewardAmount, getDailyClaimAmount } from './src/services/entitlement_config.js';
+
+// ── N13 FIX: unified entitlement injection object ──────────────────────────
+// ENTITLEMENT_CONFIG is DATA-ONLY (frozen config object). The reward helpers
+// (getMissionRewardAmount / getReferralRewardAmount / getDailyClaimAmount) are
+// separate named exports in entitlement_config.js — they were NEVER attached
+// to the config object, so every `typeof config.getX === 'function'` guard in
+// the controllers/repos evaluated FALSE and all normal reward paths silently
+// skipped the premium tier multiplier (verified in production: all 81
+// mission_reward txs at raw base amounts, VIP user included — since Phase 4,
+// commit f6545e4). The M3 retry fix imported the real helper directly and was
+// the FIRST path actually applying the multiplier, creating a Normal-vs-Retry
+// inconsistency for Premium users.
+//
+// This composite attaches the CANONICAL helpers ONCE at the injection
+// boundary — controllers/repositories keep their existing guards verbatim
+// (they now evaluate true), no helper is duplicated, and every path (normal,
+// retry, daily, referral) uses the same canonical implementation.
+// Spread keeps all data keys intact (wheel.spins etc. keep working); the
+// composite is frozen, so no downstream mutation is possible.
+const ENTITLEMENT = Object.freeze({
+  ...ENTITLEMENT_CONFIG,
+  getMissionRewardAmount,
+  getReferralRewardAmount,
+  getDailyClaimAmount,
+});
+
 import { createCosmeticsRepository } from './src/repositories/cosmetics.js';
 import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
@@ -2695,10 +2721,10 @@ async function processPendingReferralReward(env, inviteeId, channelJoined) {
   // PHASE 4: Apply tier-based referral reward (Normal 3 AB, Premium 6 AB).
   // Tier = INVITER's tier (the one who earns the reward), NOT the invitee's.
   let finalRewardAmount = baseRewardAmount;
-  if (membershipAuthority && ENTITLEMENT_CONFIG && typeof ENTITLEMENT_CONFIG.getReferralRewardAmount === 'function') {
+  if (membershipAuthority && ENTITLEMENT && typeof ENTITLEMENT.getReferralRewardAmount === 'function') {
     try {
       const inviterIsPremium = await membershipAuthority.isPremium(env, String(pending.inviter_id));
-      finalRewardAmount = ENTITLEMENT_CONFIG.getReferralRewardAmount(inviterIsPremium);
+      finalRewardAmount = ENTITLEMENT.getReferralRewardAmount(inviterIsPremium);
     } catch (e) {
       finalRewardAmount = baseRewardAmount;
     }
@@ -8440,7 +8466,7 @@ const watchlistHandlers = createWatchlistHandlers({
   watchlistRepo,
   // PHASE 3: Tier-based watchlist limit
   membershipAuthority,
-  entitlementConfig: ENTITLEMENT_CONFIG,
+  entitlementConfig: ENTITLEMENT,
 });
 const referralRepo = createReferralRepository({ queryDb, getReferralRewardPerInvite, getNumericEnv });
 const referralHandlers = createReferralHandlers({
@@ -8499,7 +8525,7 @@ const wheelHandlers = createWheelHandlers({
   notificationService,
   // PHASE 3: Tier-based daily spins
   membershipAuthority,
-  entitlementConfig: ENTITLEMENT_CONFIG,
+  entitlementConfig: ENTITLEMENT,
 });
 const walletHandlers = createWalletHandlers({
   jsonResponse,
@@ -8519,7 +8545,7 @@ const walletHandlers = createWalletHandlers({
   isUserRateLimited,
   // PHASE 4: Tier-based daily claim + mission rewards
   membershipAuthority,
-  entitlementConfig: ENTITLEMENT_CONFIG,
+  entitlementConfig: ENTITLEMENT,
   // PHASE 1 (WALLET-REWARDS): shared Tehran date helpers for idempotency keys
   getTehranDateString: sharedGetTehranDateString,
   getTehranWeekStart: getTehranWeekStart,
@@ -8648,7 +8674,7 @@ const assistantHandlers = createAssistantHandlers({
   queryDb,
   // PHASE 3: Tier-based AI quota
   membershipAuthority,
-  entitlementConfig: ENTITLEMENT_CONFIG,
+  entitlementConfig: ENTITLEMENT,
   // Chat AI redesign: reuse News AI circuit breaker infrastructure
   shouldAttemptProvider,
   recordCircuitResult,
