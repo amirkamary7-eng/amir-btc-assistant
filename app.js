@@ -12819,12 +12819,55 @@ function _startMaintenanceStatusRotation() {
 function updateMaintenanceAdminBypass() {
     const bypassBtn = document.getElementById('maint-admin-bypass');
     if (!bypassBtn) return;
-    // Only show if user is admin (isAdmin() requires bootstrapComplete)
     if (isAdmin()) {
+        // Admin confirmed — show the bypass button
         bypassBtn.style.display = 'inline-flex';
-    } else {
+        _removeMaintCheckingIndicator();
+    } else if (!bootstrapComplete) {
+        // Bootstrap hasn't finished yet — auth/admin identity still loading.
+        // Show a subtle 'checking access...' indicator instead of hiding the
+        // bypass area entirely. The admin won't think the app is broken;
+        // they'll see "checking..." for 200-500ms, then the bypass button
+        // appears when bootstrap completes (updateMaintenanceAdminBypass is
+        // called again from the bootstrap completion path at line ~1218).
         bypassBtn.style.display = 'none';
+        _showMaintCheckingIndicator();
+    } else {
+        // Bootstrap completed and user is NOT admin — hide bypass, remove indicator
+        bypassBtn.style.display = 'none';
+        _removeMaintCheckingIndicator();
     }
+}
+
+/**
+ * Show a subtle 'checking access...' indicator below the maintenance popup
+ * content. Only visible while bootstrap is in-flight (200-500ms typically).
+ * Removed automatically when updateMaintenanceAdminBypass() resolves.
+ */
+function _showMaintCheckingIndicator() {
+    const overlay = document.getElementById('maintenance-overlay');
+    if (!overlay || document.getElementById('maint-checking-indicator')) return;
+    const indicator = document.createElement('div');
+    indicator.id = 'maint-checking-indicator';
+    indicator.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 0;font-size:12px;color:rgba(255,255,255,0.4);';
+    indicator.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="animation:maint-spin 1s linear infinite;">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+        <span>در حال بررسی دسترسی...</span>
+    `;
+    // Insert after the bypass button's parent (maint-bypass-area)
+    const bypassArea = overlay.querySelector('.maint-bypass-area') || overlay.querySelector('#maint-admin-bypass')?.parentElement;
+    if (bypassArea && bypassArea.parentElement) {
+        bypassArea.parentElement.insertBefore(indicator, bypassArea.nextSibling);
+    } else {
+        overlay.appendChild(indicator);
+    }
+}
+
+function _removeMaintCheckingIndicator() {
+    const indicator = document.getElementById('maint-checking-indicator');
+    if (indicator) indicator.remove();
 }
 
 /**

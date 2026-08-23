@@ -15713,3 +15713,9 @@ body.jl-locked .cd-fullscreen {
     .ads-item-actions { flex-direction: column; align-items: stretch; }
     .ads-item-actions .adm-btn-sm { width: 100%; justify-content: center; }
 }
+
+/* Maintenance popup: admin access checking indicator */
+@keyframes maint-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
