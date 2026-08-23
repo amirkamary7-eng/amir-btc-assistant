@@ -27,45 +27,38 @@ const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf
 // Section 1: PHASE 1 — Frontend admin bypass during maintenance
 // ============================================================================
 
-test('STARTUP-001: bootstrapUser() is fired in parallel with checkMaintenanceMode()', () => {
-  // The parallel bootstrap promise must be created BEFORE the maintenance .then
+test('STARTUP-001: bootstrapUser() completes BEFORE checkMaintenanceMode() (sequential)', () => {
+  // PERMANENT FIX: checkMaintenanceMode now runs AFTER bootstrap completes.
+  // The bootstrap promise is created first, then .then() chains maintenance.
   const bootIdx = APP_SRC.indexOf('_parallelBootstrapPromise = bootstrapUser()');
-  const maintIdx = APP_SRC.indexOf('checkMaintenanceMode().then(');
+  const maintIdx = APP_SRC.indexOf('const _maintOk = await checkMaintenanceMode()');
   assert.ok(bootIdx > -1, 'bootstrapUser() must be assigned to _parallelBootstrapPromise');
-  assert.ok(maintIdx > -1, 'checkMaintenanceMode().then() must exist');
+  assert.ok(maintIdx > -1, 'checkMaintenanceMode() must be awaited inside bootstrap .then()');
   assert.ok(bootIdx < maintIdx,
-    `bootstrapUser() must fire BEFORE checkMaintenanceMode().then() — bootIdx=${bootIdx}, maintIdx=${maintIdx}`);
+    `bootstrapUser() must fire BEFORE checkMaintenanceMode() — bootIdx=${bootIdx}, maintIdx=${maintIdx}`);
 });
 
-test('STARTUP-002: maintenance ON does NOT block bootstrap (admin can be detected)', () => {
-  // When maintenance is ON, the .then early-returns but the parallel bootstrap
-  // continues in the background.
-  // Verify the early-return path doesn't reference _parallelBootstrapPromise
-  // (i.e., the bootstrap is not awaited or chained off when maintenance is ON).
-  const maintBlockStart = APP_SRC.indexOf('checkMaintenanceMode().then(async (_maintOk) => {');
-  assert.ok(maintBlockStart > -1, 'maintenance .then block must exist');
-
-  // Find the early return (when !_maintOk)
-  const earlyReturnIdx = APP_SRC.indexOf("return; // Stop here — don't load data or start polling", maintBlockStart);
+test('STARTUP-002: maintenance ON does NOT block bootstrap (admin detection still works)', () => {
+  // PERMANENT FIX: Bootstrap runs FIRST (assigning isCurrentUserAdmin),
+  // THEN checkMaintenanceMode runs. If maintenance is ON and user is admin,
+  // the bypass button is already visible (no background wait needed).
+  // Verify the maintenance check is inside the bootstrap .then
+  const maintIdx = APP_SRC.indexOf('const _maintOk = await checkMaintenanceMode()');
+  assert.ok(maintIdx > -1, 'maintenance check must be inside bootstrap .then()');
+  // Verify the early return exists
+  const earlyReturnIdx = APP_SRC.indexOf("return; // Stop here — don't load data or start polling");
   assert.ok(earlyReturnIdx > -1, 'early return for maintenance ON must exist');
-
-  // After the early return, the bootstrap promise is NOT awaited
-  // (the bootstrap continues in the background and updates admin bypass button)
-  // Verify the comment about background bootstrap continuation
-  const maintOnBlock = APP_SRC.slice(maintBlockStart, earlyReturnIdx + 50);
-  assert.ok(maintOnBlock.includes('background') && maintOnBlock.includes('updateMaintenanceAdminBypass'),
-    'maintenance-ON path must explain that bootstrap continues in background and calls updateMaintenanceAdminBypass()');
 });
 
-test('STARTUP-003: maintenance OFF chains post-bootstrap tasks off parallel promise', () => {
-  // When maintenance is OFF, post-bootstrap tasks are chained off _parallelBootstrapPromise
-  const chainIdx = APP_SRC.indexOf('_parallelBootstrapPromise.then(() => {');
-  assert.ok(chainIdx > -1, 'post-bootstrap tasks must chain off _parallelBootstrapPromise');
-  // Verify the chained tasks include loadUser + loadForexData + loadMissionStatus
-  const chainedBlock = APP_SRC.slice(chainIdx, chainIdx + 2000);
-  assert.ok(chainedBlock.includes('loadUser()'), 'loadUser must be in the post-bootstrap chain');
-  assert.ok(chainedBlock.includes('loadForexData'), 'loadForexData retry must be in the post-bootstrap chain');
-  assert.ok(chainedBlock.includes('loadMissionStatus'), 'loadMissionStatus must be in the post-bootstrap chain');
+test('STARTUP-003: maintenance OFF runs post-bootstrap tasks sequentially after maintenance check', () => {
+  // PERMANENT FIX: post-bootstrap tasks now run INSIDE the same .then() as
+  // the maintenance check (sequential, not a separate chained .then).
+  const maintOffIdx = APP_SRC.indexOf('Maintenance is OFF — bootstrap already completed');
+  assert.ok(maintOffIdx > -1, 'maintenance-OFF path must exist inside bootstrap .then()');
+  const block = APP_SRC.slice(maintOffIdx, maintOffIdx + 2000);
+  assert.ok(block.includes('loadUser()'), 'loadUser must run after maintenance check passes');
+  assert.ok(block.includes('loadForexData'), 'loadForexData retry must be in the block');
+  assert.ok(block.includes('loadMissionStatus'), 'loadMissionStatus must be in the block');
 });
 
 test('STARTUP-004: bootstrapUser() catch handler exists (non-fatal)', () => {
@@ -119,14 +112,14 @@ test('STARTUP-008: adminBypassMaintenance double-checks isAdmin() before bypass 
 });
 
 test('STARTUP-009: maintenance ON early-return skips ALL other init (data loading, polling)', () => {
-  // Verify the early return is BEFORE _startDataLoading, startPolling, _bootstrapLongTimer, etc.
-  // These must ALL be inside the maintenance .then block AFTER the early return point.
-  const maintBlockStart = APP_SRC.indexOf('checkMaintenanceMode().then(async (_maintOk) => {');
-  const earlyReturnIdx = APP_SRC.indexOf("return; // Stop here — don't load data or start polling", maintBlockStart);
+  // PERMANENT FIX: maintenance check is now inside _parallelBootstrapPromise.then().
+  // The early return must be BEFORE _startDataLoading, startPolling, etc.
+  const maintCheckIdx = APP_SRC.indexOf('const _maintOk = await checkMaintenanceMode()');
+  const earlyReturnIdx = APP_SRC.indexOf("return; // Stop here — don't load data or start polling", maintCheckIdx);
 
-  const startDataLoadingIdx = APP_SRC.indexOf('_startDataLoading();', maintBlockStart);
-  const startPollingIdx = APP_SRC.indexOf('startPolling();', maintBlockStart);
-  const bootstrapLongTimerIdx = APP_SRC.indexOf('_bootstrapLongTimer = setInterval(', maintBlockStart);
+  const startDataLoadingIdx = APP_SRC.indexOf('_startDataLoading();', maintCheckIdx);
+  const startPollingIdx = APP_SRC.indexOf('startPolling();', maintCheckIdx);
+  const bootstrapLongTimerIdx = APP_SRC.indexOf('_bootstrapLongTimer = setInterval(', maintCheckIdx);
 
   // All these must be AFTER the early return (so they're skipped when maintenance is ON)
   assert.ok(startDataLoadingIdx > earlyReturnIdx, '_startDataLoading must be after early return');
@@ -135,20 +128,13 @@ test('STARTUP-009: maintenance ON early-return skips ALL other init (data loadin
 });
 
 test('STARTUP-010: cold-start boot poll is set up BEFORE maintenance check (admin detection during maintenance)', () => {
-  // PHASE 1 EXTENSION: The cold-start boot poll must be set up OUTSIDE the
-  // maintenance .then block so it runs even when maintenance is ON.
-  // Without this, cold-start admin detection would wait for viewportChanged (5-20s+).
-  const bootPollIdx = APP_SRC.indexOf("If user is pending (cold open), set up retry mechanism");
-  // The original boot poll location must be GONE (moved out of maintenance .then)
-  assert.equal(bootPollIdx, -1,
-    'old boot poll comment must be removed from inside maintenance .then block');
-
-  // The new boot poll must be BEFORE the maintenance .then block
+  // The cold-start boot poll must be set up OUTSIDE the bootstrap.then/maintenance
+  // block so it runs even when maintenance is ON and auth is pending.
   const newBootPollIdx = APP_SRC.indexOf('COLD-START BOOT POLL (runs regardless of maintenance state)');
-  const maintBlockStart = APP_SRC.indexOf('checkMaintenanceMode().then(');
+  const maintCheckIdx = APP_SRC.indexOf('const _maintOk = await checkMaintenanceMode()');
   assert.ok(newBootPollIdx > -1, 'new cold-start boot poll setup must exist');
-  assert.ok(newBootPollIdx < maintBlockStart,
-    `cold-start boot poll must be set up BEFORE maintenance check — bootPollIdx=${newBootPollIdx}, maintBlockStart=${maintBlockStart}`);
+  assert.ok(newBootPollIdx < maintCheckIdx,
+    `cold-start boot poll must be set up BEFORE maintenance check — bootPollIdx=${newBootPollIdx}, maintCheckIdx=${maintCheckIdx}`);
 });
 
 test('STARTUP-011: cold-start boot poll only calls tryLateBootstrap (no other init)', () => {

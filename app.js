@@ -13410,18 +13410,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         setTimeout(() => { _bootObserver.disconnect(); clearInterval(_bootPollInterval); }, 30000);
     }
 
-    // MAINTENANCE FIX: check maintenance BEFORE any other init (except
-    // bootstrap, which now runs in parallel for admin detection).
-    // Previously bootstrap ran in parallel with maintenance, causing the
-    // app UI to render before the maintenance response arrived → user saw
-    // the full app briefly, then maintenance popup appeared on refresh.
-    // Now: we AWAIT the maintenance check first. If maintenance is ON,
-    // we block all further init (data loading, polling, rendering). The
-    // parallel bootstrap continues in the background — for admins, the
-    // bypass button appears once bootstrap completes. For non-admins,
-    // the maintenance popup stays (no bypass).
-    // If maintenance is OFF (or network fails → fail open), we continue.
-    checkMaintenanceMode().then(async (_maintOk) => {
+    // PERMANENT FIX (Maintenance/Auth Race Condition):
+    // checkMaintenanceMode() now runs AFTER bootstrap completes, not in
+    // parallel. This guarantees the admin identity is server-confirmed
+    // BEFORE the maintenance decision is made:
+    //
+    //   Telegram SDK ready → Auth ready → bootstrapUser → server-confirmed
+    //   is_admin → checkMaintenanceMode
+    //
+    // If bootstrap completes with is_admin=true → bypass available IMMEDIATELY
+    // (no 500ms gap where admin sees popup without bypass).
+    // If bootstrap completes with is_admin=false → maintenance popup shown.
+    // If bootstrap FAILS (auth invalid, network error) → isAdmin()=false →
+    // maintenance popup shown (fail-closed for security).
+    //
+    // The boot-loader-overlay stays visible while bootstrap is in-flight
+    // (typically 200-500ms) — the user sees the loading spinner instead of
+    // a maintenance popup without a bypass button.
+    //
+    // If bootstrap already completed before this code runs (warm start),
+    // the .then fires immediately with zero additional delay.
+    _parallelBootstrapPromise.then(async () => {
+        const _maintOk = await checkMaintenanceMode();
         if (!_maintOk) {
             _maintenanceBlocked = true;
             console.log('[MAINT] App load blocked — maintenance mode active');
@@ -13432,10 +13442,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             return; // Stop here — don't load data or start polling
         }
 
-    // Maintenance is OFF — chain post-bootstrap tasks off the parallel
-    // bootstrap promise. If bootstrap already completed (likely, since
-    // it started before the maintenance check), the .then runs immediately.
-    _parallelBootstrapPromise.then(() => {
+        // Maintenance is OFF — bootstrap already completed (we're inside
+        // _parallelBootstrapPromise.then). Run post-bootstrap tasks directly.
         loadUser();
         // ROOT CAUSE FIX: Retry forex data load after bootstrap completes.
         // On startup, loadForexData fires in parallel but may fail because
@@ -13467,7 +13475,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             }
         }
-    });
 
     // ROOT CAUSE FIX (warm-start speed): Fire data loading IMMEDIATELY —
     // in parallel with bootstrapUser(). Previously this waited for
