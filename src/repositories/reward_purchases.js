@@ -44,6 +44,13 @@ export function createRewardPurchaseRepository(deps) {
       `);
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_rp_user ON reward_purchases (user_id, created_at DESC)`).catch(() => {});
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_rp_status ON reward_purchases (status, created_at ASC)`).catch(() => {});
+      // P2-FIX: DB-level race protection — a user can have AT MOST ONE pending
+      // purchase per VPN plan. If two concurrent requests both pass the
+      // SELECT check, the unique index makes the second INSERT fail with
+      // 23505, which we catch and treat as "already pending".
+      await queryDb(env, `CREATE UNIQUE INDEX IF NOT EXISTS uq_rp_pending_plan
+        ON reward_purchases (user_id, reward_type, vpn_gb)
+        WHERE status = 'pending'`).catch(() => {});
       _schemaVerified = true;
     } catch (e) {
       console.warn('[reward-purchases] schema migration warning:', e.message);
@@ -87,24 +94,40 @@ export function createRewardPurchaseRepository(deps) {
     const plan = getVpnPlan(planId);
     if (!plan) throw new Error('INVALID_PLAN');
 
-    // Duplicate-pending check (server-side)
+    // P2-FIX: race-safe creation. The partial unique index
+    // uq_rp_pending_plan (user_id, reward_type, vpn_gb) WHERE status='pending'
+    // guarantees AT MOST ONE pending purchase per user+plan at the DB level.
+    // The INSERT ... ON CONFLICT DO NOTHING atomically:
+    //   - succeeds (returns a row) → this request created the purchase
+    //   - conflicts (returns 0 rows) → a concurrent request already created
+    //     one → read the existing row and return created=false
+    // NOTE: plain ON CONFLICT DO NOTHING (no constraint target) is used
+    // because it works on both real PostgreSQL (catches the partial index
+    // violation) and pg-mem (which doesn't support constraint-name targets
+    // with partial indexes). The fallback SELECT handles the PK-conflict
+    // edge case identically.
+    const result = await queryDb(env,
+      `INSERT INTO reward_purchases (user_id, reward_type, vpn_gb, cost_ab, status, tx_ref_id, created_at)
+       VALUES ($1, 'vpn', $2, $3, 'pending', $4, NOW())
+       ON CONFLICT DO NOTHING
+       RETURNING id, user_id, reward_type, vpn_gb, cost_ab, status, created_at`,
+      [uid, plan.gb, Number(costAb), String(txRefId || '')],
+    );
+
+    if (result.rows.length > 0) {
+      return { purchase: result.rows[0], created: true };
+    }
+
+    // Conflict — a pending purchase already exists (concurrent or retry).
+    // Read it and return created=false so the controller refunds the debit.
     const existing = await queryDb(env,
-      `SELECT id FROM reward_purchases
+      `SELECT id, user_id, reward_type, vpn_gb, cost_ab, status, created_at
+       FROM reward_purchases
        WHERE user_id = $1 AND reward_type = 'vpn' AND vpn_gb = $2 AND status = 'pending'
        LIMIT 1`,
       [uid, plan.gb],
     );
-    if (existing.rows.length > 0) {
-      return { purchase: existing.rows[0], created: false };
-    }
-
-    const result = await queryDb(env,
-      `INSERT INTO reward_purchases (user_id, reward_type, vpn_gb, cost_ab, status, tx_ref_id, created_at)
-       VALUES ($1, 'vpn', $2, $3, 'pending', $4, NOW())
-       RETURNING id, user_id, reward_type, vpn_gb, cost_ab, status, created_at`,
-      [uid, plan.gb, Number(costAb), String(txRefId || '')],
-    );
-    return { purchase: result.rows[0], created: true };
+    return { purchase: existing.rows[0] || null, created: false };
   }
 
   /**
@@ -123,6 +146,9 @@ export function createRewardPurchaseRepository(deps) {
 
   /**
    * Fulfill a purchase (admin action). Records WHO fulfilled it and WHEN.
+   * Changing status from 'pending' to 'fulfilled' automatically frees the
+   * partial unique index slot (uq_rp_pending_plan) — the user can then
+   * purchase the same plan again if needed.
    */
   async function fulfillPurchase(env, purchaseId, adminId) {
     await ensureSchema(env);

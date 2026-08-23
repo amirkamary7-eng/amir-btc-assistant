@@ -5806,7 +5806,7 @@ async function completeMission(missionId, targetId) {
         if (missionId !== 'daily_login') {
             const tokenResp = await apiFetch('/api/wallet/mission/issue-token', {
                 method: 'POST',
-                body: JSON.stringify({ mission_id: missionId, target_id: targetId || null }),
+                body: JSON.stringify({ mission_id: missionId, target_id: targetId || '' }),
             });
             if (tokenResp?.status !== 'success' || !tokenResp.event_token) {
                 // Token issuance failed — abort. The mission is NOT completed.

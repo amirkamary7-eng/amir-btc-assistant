@@ -335,11 +335,16 @@ export function createWalletHandlers(deps) {
         }
       }
 
-      // Issue one-time token
+      // Issue one-time token — P1-FIX: bind the target_id (the specific
+      // content the user claims to have viewed) INTO the token record.
+      // At complete time, consumeMissionEventToken verifies the submitted
+      // target matches what was bound here. A client cannot complete a
+      // mission with a different or missing target than what it issued for.
       if (typeof issueMissionEventToken !== 'function') {
         return jsonResponse({ status: 'error', message: 'Mission token service unavailable', code: 'TOKEN_SERVICE_UNAVAILABLE' }, { status: 503 }, env);
       }
-      const token = await issueMissionEventToken(env, userId, missionId);
+      const targetId = String(body?.target_id || '').trim();
+      const token = await issueMissionEventToken(env, userId, missionId, targetId);
       if (!token) {
         return jsonResponse({ status: 'error', message: 'Failed to issue token (KV unavailable)', code: 'TOKEN_ISSUE_FAILED' }, { status: 503 }, env);
       }
@@ -416,7 +421,10 @@ export function createWalletHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Mission token service unavailable', code: 'TOKEN_SERVICE_UNAVAILABLE' }, { status: 503 }, env);
       }
       const userId = String(authState.user.id);
-      const consumed = await consumeMissionEventToken(env, userId, missionId, eventToken);
+      // P1-FIX: pass the target_id from the request body — it must match
+      // what was bound into the event token at issue time.
+      const completeTargetId = String(body?.target_id || '').trim();
+      const consumed = await consumeMissionEventToken(env, userId, missionId, eventToken, completeTargetId);
       if (!consumed) {
         return jsonResponse({
           status: 'error',

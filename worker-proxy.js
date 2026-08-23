@@ -806,7 +806,7 @@ function _generateMissionToken() {
  * @param {string} missionId - Mission ID (e.g. 'read_news')
  * @returns {Promise<string|null>} - 32-char hex token, or null on failure
  */
-async function issueMissionEventToken(env, userId, missionId) {
+async function issueMissionEventToken(env, userId, missionId, targetId) {
   if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.put !== 'function') {
     return null;
   }
@@ -815,8 +815,13 @@ async function issueMissionEventToken(env, userId, missionId) {
   const today = _getTodayISOString();
   const token = _generateMissionToken();
   const key = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
+  // P1-FIX: bind the target_id INTO the token record — at consume time we
+  // verify that the submitted target matches what was bound at issue time.
+  // The value stored is the target_id (or empty string if the mission has
+  // no target requirement). Consume checks strict equality.
+  const boundTarget = String(targetId || '').trim();
   try {
-    await env.SESSION_CACHE.put(key, '1', { expirationTtl: MISSION_TOKEN_TTL_SECONDS });
+    await env.SESSION_CACHE.put(key, boundTarget, { expirationTtl: MISSION_TOKEN_TTL_SECONDS });
     return token;
   } catch (e) {
     console.warn('issueMissionEventToken failed:', e.message || e);
@@ -843,7 +848,7 @@ async function issueMissionEventToken(env, userId, missionId) {
  * @param {string} token - 32-char hex token from frontend
  * @returns {Promise<boolean>} - true if consumed, false if invalid/already used
  */
-async function consumeMissionEventToken(env, userId, missionId, token) {
+async function consumeMissionEventToken(env, userId, missionId, token, targetId) {
   if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
     return false;
   }
@@ -863,8 +868,15 @@ async function consumeMissionEventToken(env, userId, missionId, token) {
   }
 
   const tokenKey = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
-  const existing = await env.SESSION_CACHE.get(tokenKey);
-  if (!existing) {
+  // P1-FIX: the stored value is the target_id bound at issue time.
+  // The submitted targetId must match EXACTLY — a client cannot swap or
+  // omit the target between issue and complete.
+  const boundTarget = await env.SESSION_CACHE.get(tokenKey);
+  if (boundTarget === null || boundTarget === undefined) {
+    return false;
+  }
+  const submittedTarget = String(targetId || '').trim();
+  if (String(boundTarget) !== submittedTarget) {
     return false;
   }
 
