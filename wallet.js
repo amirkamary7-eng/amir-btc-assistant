@@ -509,6 +509,17 @@ const WalletApp = (() => {
 
     page.innerHTML = buildWalletHTML(tier, balance, history);
 
+    // Re-render mission cards into the new grid (the page innerHTML was
+    // completely replaced, so any previously rendered cards are gone —
+    // updateMissionCards is a global from app.js that rebuilds the
+    // #wallet-earn-grid from cached backend mission data)
+    if (typeof window.updateMissionCards === 'function') {
+      try { window.updateMissionCards(); } catch (_) {}
+    }
+    // VPN market also needs re-rendering (the grid container was replaced)
+    // — but isPremium is not known here; it will be re-rendered by
+    // loadWalletData's vpnPromise after fetchClaimStatus resolves.
+
     // Animate elements (tier progress bar + ring)
     requestAnimationFrame(() => {
       const heroFill = page.querySelector('.tier-bar-fill');
@@ -650,20 +661,24 @@ const WalletApp = (() => {
         </div>
       </div>
 
-            <!-- Transaction History -->
+            <!-- Transaction History — PHASE 3 UI: compact (first 5 by default) -->
       <div class="wallet-section" id="wallet-history-section">
         <div class="wallet-section-header">
           <h3>${esc(WT('transaction_history'))}</h3>
+          ${history.length > 5 ? `<span class="tx-count-badge">${history.length}</span>` : ''}
         </div>
         <div id="wallet-tx-list" class="wallet-tx-list">
           ${history.length > 0
-            ? history.map(tx => buildTxItemHTML(tx)).join('')
+            ? history.slice(0, 5).map(tx => buildTxItemHTML(tx)).join('')
             : buildEmptyStateHTML()
           }
         </div>
-        ${history.length > 0 && history.length >= 20 ? `
-          <div id="wallet-load-more" class="wallet-load-more-wrap">
-            <button class="wallet-load-more-btn" onclick="WalletApp.loadMoreHistory()">${esc(WT('load_more'))}</button>
+        ${history.length > 5 ? `
+          <div class="wallet-load-more-wrap">
+            <button class="wallet-load-more-btn" onclick="WalletApp.showFullHistory()">
+              ${detectLang() === 'fa' ? 'مشاهده تاریخچه کامل' : 'View Full History'}
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-inline-start:4px;"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
         ` : ''}
       </div>
@@ -1157,7 +1172,7 @@ const WalletApp = (() => {
         // Update reward display + hint
         const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
         if (rewardDisplay) {
-          rewardDisplay.innerHTML = `<span class="dcm-claimed">✓ ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
+          rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
         }
         const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
         if (!hintEl) {
@@ -1187,6 +1202,25 @@ const WalletApp = (() => {
       const tg = window.getTg?.();
       try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
       tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
+    }
+  }
+
+  // PHASE 3 UI: Show full history — expands to show ALL cached transactions
+  // and starts pagination for more (Load More)
+  function showFullHistory() {
+    const list = document.getElementById('wallet-tx-list');
+    if (!list || !walletData?.history) return;
+
+    // Render all transactions from the initial wallet data (up to 20 from API)
+    list.innerHTML = walletData.history.map(tx => buildTxItemHTML(tx)).join('');
+
+    // Replace the "view full" button with Load More (if more pages exist)
+    const btnWrap = document.querySelector('#wallet-history-section .wallet-load-more-wrap');
+    if (walletData.history.length >= 20 && btnWrap) {
+      btnWrap.innerHTML = `<button class="wallet-load-more-btn" onclick="WalletApp.loadMoreHistory()">${esc(WT('load_more'))}</button>`;
+      btnWrap.id = 'wallet-load-more';
+    } else if (btnWrap) {
+      btnWrap.remove();
     }
   }
 
@@ -1302,14 +1336,14 @@ const WalletApp = (() => {
           </button>
         </div>
         <div class="dcm-streak-summary">
-          ${streakDay > 0 ? `${streakDay} ${detectLang() === 'fa' ? 'روز پشت سر هم' : 'days in a row'} 🔥` : ''}
+          ${streakDay > 0 ? `<span class="dcm-streak-flame"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg> ${streakDay} ${detectLang() === 'fa' ? 'روز پشت سر هم' : 'days in a row'}</span>` : ''}
         </div>
         <div class="dcm-days-grid" id="dcm-days-grid">
           ${_renderStreakDaysHTML(streakDay, streakRewards, claimedToday)}
         </div>
         <div class="dcm-reward-display">
           ${claimedToday
-            ? `<span class="dcm-claimed">✓ ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`
+            ? `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`
             : `<span class="dcm-today-reward">+${streakRewards[Math.max(0, Math.min(6, (streakDay > 0 ? streakDay : 0)))]} AB</span>`
           }
         </div>
@@ -1463,6 +1497,7 @@ const WalletApp = (() => {
     closeWallet,
     claimDaily,
     loadMoreHistory,
+    showFullHistory,
     scrollToSection,
     getTokenLogo,
     showTokenInfo,
