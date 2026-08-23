@@ -1072,18 +1072,26 @@ const WalletApp = (() => {
     // Fire all 3 in parallel
     const walletPromise = fetchWallet();
     const claimPromise = fetchClaimStatus();
-    // PHASE 5-7: render the VPN market (needs isPremium from claim status)
-    const vpnPromise = fetchClaimStatus().then(claimRes => {
-      renderVpnMarket(claimRes?.is_premium || false);
-    }).catch(() => renderVpnMarket(false));
     const summaryPromise = fetchSummary();
 
-    // Render wallet page as soon as wallet data arrives (don't wait for others)
+    // ROOT CAUSE FIX (VPN Market invisible for regular users):
+    // Previously vpnPromise ran in PARALLEL with walletPromise.
+    // When vpnPromise resolved FIRST (cached claim status = fast), it
+    // populated the VPN grid. Then walletPromise resolved and
+    // renderWalletPage() REPLACED the entire innerHTML — wiping the
+    // already-populated VPN market. This was a race condition that
+    // affected users with cached claim status (all returning users).
+    //
+    // Fix: chain VPN market rendering AFTER renderWalletPage completes.
     walletPromise.then(walletRes => {
       if (walletRes) {
         renderWalletPage(walletRes);
         walletData = walletRes;
         _lastKnownBalance = Number(walletRes.balance) || 0;
+        // Render VPN market AFTER the page is built (grid exists)
+        claimPromise.then(claimRes => {
+          renderVpnMarket(claimRes?.is_premium || false);
+        }).catch(() => renderVpnMarket(false));
         // Persist to localStorage for instant render on next open
         try {
           localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
@@ -1096,6 +1104,10 @@ const WalletApp = (() => {
           history: [],
         };
         renderWalletPage(fallbackData);
+        // Still render VPN market even on wallet data failure
+        claimPromise.then(claimRes => {
+          renderVpnMarket(claimRes?.is_premium || false);
+        }).catch(() => renderVpnMarket(false));
       }
     }).catch(() => {
       const fallbackData = {
@@ -1104,6 +1116,10 @@ const WalletApp = (() => {
         history: [],
       };
       renderWalletPage(fallbackData);
+      // Still render VPN market on wallet error
+      claimPromise.then(claimRes => {
+        renderVpnMarket(claimRes?.is_premium || false);
+      }).catch(() => renderVpnMarket(false));
     });
 
     // Update claim button when claim status arrives

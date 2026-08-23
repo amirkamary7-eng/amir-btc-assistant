@@ -5780,9 +5780,19 @@ async function loadMissionStatus() {
                 if (m.completed) _completedMissionsToday.add(m.mission_id);
             }
             updateMissionCards();
+            // ROOT CAUSE 2 FIX: only mark as loaded on SUCCESS. Previously
+            // this was set even on API failure (401, timeout, network error),
+            // permanently blocking retry until page refresh. Now if the
+            // first attempt fails (e.g., auth not ready yet during bootstrap),
+            // the next attempt (wallet open → reloadMissions) can retry.
+            _missionsLoaded = true;
+        } else {
+            console.warn('[MISSION] loadMissionStatus: API returned non-success:', data?.status);
         }
-        _missionsLoaded = true;
-    } catch (_) {}
+    } catch (e) {
+        console.warn('[MISSION] loadMissionStatus failed:', e?.message);
+        // Do NOT set _missionsLoaded — allow retry on next attempt
+    }
 }
 
 /**
