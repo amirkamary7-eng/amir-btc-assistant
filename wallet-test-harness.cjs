@@ -92,6 +92,15 @@ const SCHEMA_SQL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_user_cosmetic UNIQUE (user_id, cosmetic_id)
   );
+
+  CREATE TABLE daily_checkin_streaks (
+    user_id TEXT PRIMARY KEY,
+    streak_day SMALLINT NOT NULL DEFAULT 0,
+    last_claim_date DATE NOT NULL DEFAULT '1970-01-01',
+    cycle_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 `;
 
 // Partial unique index — same definition as wallet.js ensureSchema (R-3.1).
@@ -126,6 +135,17 @@ function normalizeRows(rows) {
   for (const row of rows) {
     for (const k of Object.keys(row)) {
       const v = row[k];
+      // DATE columns: the real pg driver returns 'YYYY-MM-DD' strings;
+      // pg-mem returns Date objects (whose String() is not ISO). Normalize
+      // to the date-only ISO string the production code expects
+      // (String(v).slice(0, 10) === 'YYYY-MM-DD').
+      if (v instanceof Date) {
+        const iso = v.toISOString();
+        if (iso.slice(11, 23) === '00:00:00.000') {
+          row[k] = iso.slice(0, 10);
+          continue;
+        }
+      }
       if (Array.isArray(v)) row[k] = v.length === 0 ? null : v[0];
     }
   }
@@ -143,6 +163,23 @@ function makePgHarness() {
   const db = newDb();
   db.public.many(SCHEMA_SQL);
   db.public.many(UNIQUE_INDEX_SQL);
+  // Shim #6: pg-mem has no pg_advisory_xact_lock. Register a no-op stub so
+  // the production claim SQL executes verbatim. Tests then assert RESULT
+  // semantics (single winner, correct state); real lock/blocking behavior
+  // requires a real PostgreSQL staging run (documented per-test).
+  // NOTE: 'void' is not a registrable pg-mem type — the stub returns 'text'
+  // (NULL); and args are typed 'integer' because the harness's param
+  // interpolation turns the numeric lock key into an integer literal.
+  try {
+    db.public.registerFunction({ name: 'pg_advisory_xact_lock', returns: 'text', args: ['integer'], implementation: () => null });
+  } catch { /* already registered */ }
+  // Shim #7: pg-mem has no md5(). The production lock-key query is
+  // SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint)
+  // We can't fake bit(64) casting cheaply, so intercept the WHOLE lock-key
+  // query in queryDb below and return a deterministic numeric key instead.
+  try {
+    db.public.registerFunction({ name: 'md5', returns: 'text', args: [], variadic: true, implementation: (...a) => String(a.join(':')) });
+  } catch { /* already registered */ }
   const Pool = db.adapters.createPg().Pool;
 
   async function queryDb(env, sqlText, params = []) {
@@ -150,6 +187,16 @@ function makePgHarness() {
     // ensureSchema batch — schema is pre-created by the harness (note #4)
     if (sql.includes('idx_token_tx_user_type_ref')) {
       return { rows: [], rowCount: 0 };
+    }
+    // Shim #7 (companion): the lock-key derivation query uses
+    // ::bit(64)::bigint casts that pg-mem cannot evaluate. Return a
+    // deterministic numeric key derived from the params instead — the tests
+    // only need the query to succeed; locking is stubbed (see note #6).
+    if (sql.includes('lock_key') && /MD5/i.test(sql)) {
+      const seed = (params[0] || '') + '|' + (params[1] || '');
+      let k = 0;
+      for (let i = 0; i < seed.length; i++) k = (k * 31 + seed.charCodeAt(i)) % 9007199254740991;
+      return { rows: [{ lock_key: k }], rowCount: 1 };
     }
     // Shim #5: pg-mem's plain INSERT ... ON CONFLICT DO NOTHING RETURNING
     // returns the existing row on conflict; real PG returns 0 rows. Emulate

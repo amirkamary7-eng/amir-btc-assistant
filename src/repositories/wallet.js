@@ -304,15 +304,33 @@ export function createWalletRepository(deps) {
    *   - Last claim was before yesterday: streak_day = 1 (streak broken)
    *
    * Reward: STREAK_REWARDS[streak_day - 1] (before tier multiplier).
-   * The controller applies the tier multiplier and passes the final amount
-   * as `amount` parameter. This function returns the computed streak_day
-   * so the controller can look up the reward amount.
+   * The tier multiplier is applied via options.entitlementConfig (same as
+   * the controller contract: { computeReward: true, isPremium, entitlementConfig }).
    *
-   * Cycle completion: when streak_day goes 7→1, cycle_count is incremented.
-   * This happens WITHIN the same transaction as the credit — atomic.
+   * FIX M1 + M2 (atomicity): the ENTIRE claim runs inside ONE logical unit —
+   * a single queryDbTransaction (BEGIN ... COMMIT) holds the advisory lock,
+   * runs the duplicate check, reads the streak (FOR UPDATE), upserts the
+   * streak row, and executes the atomic credit CTE (the exact core of
+   * creditTokens, inlined):
+   *   1. pg_advisory_xact_lock(user_id + Tehran date)   ← held until COMMIT
+   *   2. duplicate check (existing completed tx for today's refId)
+   *   3. streak read ... FOR UPDATE (row-locked to COMMIT)
+   *   4. streak UPSERT
+   *   5. credit CTE (tx INSERT ... ON CONFLICT DO NOTHING + balance UPSERT)
+   * Any failure at any step → ROLLBACK → no partial state survives.
    *
-   * Concurrent claim protection: pg_advisory_xact_lock on (user_id + Tehran date).
-   * Same lock key as the original claimDailyReward — backward compatible.
+   * Previously the lock lived in a FIRST transaction that committed right
+   * after the duplicate check (M2 — the lock protected nothing), and the
+   * streak UPSERT ran in autocommit BEFORE the credit transaction (M1 — a
+   * Worker death in between left last_claim_date=today with no tx, and
+   * retries then hit the streak check and returned ALREADY_CLAIMED forever:
+   * the reward was lost with no retry cron to recover it). Verified by
+   * wallet-daily-claim-atomic-test.cjs DR2/DR2b/DR4.
+   *
+   * Concurrency: a concurrent winner (same refId) makes the credit CTE's
+   * INSERT conflict (ON CONFLICT DO NOTHING → 0 rows → claim_tx_id NULL)
+   * → the claim is a no-op → ALREADY_CLAIMED. The partial unique index
+   * remains the final line of defense.
    *
    * @returns { claimed, amount, newBalance, txId, streak_day, cycle_complete, cycle_count }
    */
@@ -344,8 +362,10 @@ export function createWalletRepository(deps) {
       throw new Error('Failed to compute advisory lock key');
     }
 
-    // Step 1: Acquire advisory lock + check if already claimed today (atomic).
-    const lockResults = await queryDbTransaction(env, [
+    // PHASE 1 (inside the single claim transaction): lock + duplicate check
+    // + streak read. The transaction stays OPEN (see PHASE 2) — the lock is
+    // held until the final COMMIT, so the whole claim is one atomic unit.
+    const phase1 = await queryDbTransaction(env, [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
         sql: `SELECT id FROM token_transactions
@@ -353,21 +373,19 @@ export function createWalletRepository(deps) {
               AND ref_id = $2 LIMIT 1`,
         params: [uid, refId],
       },
+      {
+        sql: `SELECT streak_day, last_claim_date, cycle_count
+              FROM daily_checkin_streaks WHERE user_id = $1 FOR UPDATE`,
+        params: [uid],
+      },
     ]);
 
-    if (lockResults[1].rows.length > 0) {
+    if (phase1[1].rows.length > 0) {
       throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
     }
 
-    // Step 2: Compute new streak_day + cycle_count.
-    // Read current streak state (may be null if first claim).
-    // PHASE UX-V2: This is the ONLY streak state read — eliminates the duplicate
-    // getStreakStatus call that was in the controller.
-    const streakRow = await queryDb(env,
-      `SELECT streak_day, last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
-      [uid],
-    );
-    const current = streakRow.rows[0];
+    // ── Streak computation (pure JS — identical product logic) ──
+    const current = phase1[2].rows[0];
     let newStreakDay = 1;
     let newCycleCount = 0;
     let cycleComplete = false;
@@ -385,6 +403,8 @@ export function createWalletRepository(deps) {
           newCycleCount += 1;
         }
       } else if (lastClaimStr === tehranToday) {
+        // Locked-in streak says today was claimed but no tx exists — cannot
+        // happen post-fix; kept as a defensive idempotency net.
         throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
       } else {
         newStreakDay = 1;
@@ -394,8 +414,7 @@ export function createWalletRepository(deps) {
       newCycleCount = 0;
     }
 
-    // PHASE UX-V2: Compute the reward amount from STREAK_REWARDS inside the function.
-    // This eliminates the need for the controller to call getStreakStatus separately.
+    // ── Reward computation (identical product logic) ──
     let finalAmount = amount;
     if (options.computeReward && Array.isArray(STREAK_REWARDS)) {
       const baseReward = STREAK_REWARDS[Math.max(0, Math.min(6, newStreakDay - 1))] || 1;
@@ -404,31 +423,92 @@ export function createWalletRepository(deps) {
         finalAmount = options.entitlementConfig.getMissionRewardAmount(baseReward, options.isPremium);
       }
     }
+    const amt = Math.abs(Number(finalAmount));
+    if (amt <= 0) throw new Error('Amount must be positive');
 
-    // Step 3: UPSERT streak row.
-    await queryDb(env,
-      `INSERT INTO daily_checkin_streaks (user_id, streak_day, last_claim_date, cycle_count, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET
-         streak_day = EXCLUDED.streak_day,
-         last_claim_date = EXCLUDED.last_claim_date,
-         cycle_count = EXCLUDED.cycle_count,
-         updated_at = NOW()`,
-      [uid, newStreakDay, tehranToday, newCycleCount],
-    );
-
-    // Step 4: Credit tokens via the centralized path (idempotent via refId).
-    const result = await creditTokens(env, uid, finalAmount, 'daily_claim', 'Daily check-in reward', refId, {
+    const metadataJson = JSON.stringify({
       daily_date: tehranToday,
       streak_day: newStreakDay,
       cycle_complete: cycleComplete,
     });
 
+    // PHASE 2 (same transaction continues): streak UPSERT + atomic credit
+    // CTE (the exact core of creditTokens, inlined). Both commit or roll
+    // back together with PHASE 1 — there is no window in which the streak
+    // row is advanced without the matching credit (M1) and no window in
+    // which the lock has been released mid-claim (M2).
+    //   - tx_insert: INSERT ... ON CONFLICT DO NOTHING → 0 rows if a
+    //     concurrent claimant won the same refId → claim_tx_id IS NULL
+    const phase2 = await queryDbTransaction(env, [
+      {
+        sql: `INSERT INTO daily_checkin_streaks (user_id, streak_day, last_claim_date, cycle_count, updated_at)
+              VALUES ($1, $2, $3, $4, NOW())
+              ON CONFLICT (user_id) DO UPDATE SET
+                streak_day = EXCLUDED.streak_day,
+                last_claim_date = EXCLUDED.last_claim_date,
+                cycle_count = EXCLUDED.cycle_count,
+                updated_at = NOW()`,
+        params: [uid, newStreakDay, tehranToday, newCycleCount],
+      },
+      {
+        sql: `WITH tx_insert AS (
+                INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
+                VALUES ($1, $2, 'daily_claim', 'daily', 'completed', $3, $4, $5, NOW(), NOW())
+                ON CONFLICT DO NOTHING
+                RETURNING id
+              ),
+              balance_upsert AS (
+                INSERT INTO token_balances (user_id, balance, updated_at)
+                SELECT $1, $2, NOW() FROM tx_insert
+                ON CONFLICT (user_id) DO UPDATE
+                  SET balance = token_balances.balance + EXCLUDED.balance,
+                      updated_at = NOW()
+              )
+              SELECT
+                (SELECT id FROM tx_insert LIMIT 1) AS claim_tx_id,
+                (SELECT balance FROM token_balances WHERE user_id = $1) AS new_balance`,
+        params: [uid, amt, 'Daily check-in reward', refId, metadataJson],
+      },
+    ]);
+
+    const creditRow = phase2[1].rows[0] || {};
+    const claimTxId = creditRow.claim_tx_id;
+
+    if (!claimTxId) {
+      // A concurrent claimant committed the same refId first — this whole
+      // claim is a no-op (ON CONFLICT skipped the tx INSERT; balance and
+      // streak upserts wrote values the winner also wrote). Resolve
+      // ALREADY_CLAIMED; the unique index is the final defense.
+      throw Object.assign(new Error('ALREADY_CLAIMED'), { code: 'ALREADY_CLAIMED' });
+    }
+
+    const newBalance = (creditRow.new_balance !== null && creditRow.new_balance !== undefined)
+      ? Number(creditRow.new_balance)
+      : null;
+    const txId = claimTxId;
+
+    // AUDIT LOG (same shape as creditTokens')
+    console.log(JSON.stringify({
+      scope: 'wallet-audit-credit',
+      user_id: uid,
+      tx_id: txId,
+      amount: amt,
+      tx_type: 'daily_claim',
+      source: 'daily',
+      status: 'completed',
+      ref_id: refId,
+      new_balance: newBalance,
+      actor: 'system',
+      ip: null,
+      request_id: null,
+      timestamp: new Date().toISOString(),
+    }));
+
     return {
       claimed: true,
-      amount: finalAmount,
-      newBalance: result.newBalance,
-      txId: result.txId,
+      amount: amt,
+      newBalance,
+      txId,
       streak_day: newStreakDay,
       cycle_complete: cycleComplete,
       cycle_count: newCycleCount,
