@@ -1535,56 +1535,88 @@ const WalletApp = (() => {
   }
 
   async function renderVpnMarket(isPremium) {
-    _isPremiumUser = Boolean(isPremium);
+    // FIX 5: isPremium is used only as fallback — the actual plan states
+    // (eligible, purchased, premium_only) come from the backend API response.
     const grid = document.getElementById('vpn-market-grid');
     const banner = document.getElementById('reward-market-premium-banner');
     if (!grid) return;
     if (banner) banner.style.display = 'none';
-    if (!_vpnPlansCache) {
-      try {
-        const resp = await window.apiFetch('/api/rewards/vpn/plans');
-        if (resp?.status === 'success' && Array.isArray(resp.plans) && resp.plans.length > 0) {
-          _vpnPlansCache = resp.plans;
-        }
-      } catch (_) {}
-    }
-    if (!_vpnPlansCache || _vpnPlansCache.length === 0) {
+
+    // Always fetch fresh plans (server-authoritative, includes eligibility)
+    let plansData = null;
+    try {
+      const resp = await window.apiFetch('/api/rewards/vpn/plans');
+      if (resp?.status === 'success' && Array.isArray(resp.plans)) {
+        plansData = resp;
+      }
+    } catch (_) {}
+    if (!plansData || plansData.plans.length === 0) {
       grid.innerHTML = `<div class="vpn-market-empty">${detectLang() === 'fa' ? 'به‌زودی' : 'Coming soon'}</div>`;
       return;
     }
-    let userPurchases = [];
-    try {
-      const pr = await window.apiFetch('/api/rewards/purchases');
-      if (pr?.status === 'success' && Array.isArray(pr.purchases)) userPurchases = pr.purchases;
-    } catch (_) {}
+
+    _vpnPlansCache = plansData.plans;
     const fa = detectLang() === 'fa';
-    grid.innerHTML = _vpnPlansCache.map(plan => {
-      const planLocked = plan.premium_only && !_isPremiumUser;
-      const recent = userPurchases.find(p =>
-        p.plan_id === plan.id && p.status === 'fulfilled' &&
-        p.created_at && (Date.now() - new Date(p.created_at).getTime()) < 30 * 86400000
-      );
-      const dur = plan.duration_fa || plan.duration_en || '';
-      const daysLeft = recent ? Math.ceil(30 - (Date.now() - new Date(recent.created_at).getTime()) / 86400000) : 0;
-      let action;
-      if (recent) {
-        action = `<span class="vpn-purchased-badge">${fa ? 'خریداری شده · ' + daysLeft + ' روز' : 'Purchased · ' + daysLeft + 'd'}</span>`;
-      } else if (planLocked) {
-        action = `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ${fa ? 'Premium' : 'Premium'}</span>`;
+
+    grid.innerHTML = plansData.plans.map(plan => {
+      // FIX 3+9: Server-authoritative states with priority:
+      // Purchased > Eligible > Premium Locked > Available
+      const isPurchased = plan.purchased === true;
+      const isEligible = plan.eligible === true;
+      const isPremiumLocked = !isPurchased && !isEligible && plan.premium_only;
+
+      // FIX 8: Duration text from backend catalog
+      const durText = fa
+        ? (plan.duration_days >= 30 ? 'اشتراک یک ماهه' : 'اشتراک یک هفته‌ای')
+        : (plan.duration_days >= 30 ? '1-month subscription' : '1-week subscription');
+
+      let cardClass = 'vpn-card';
+      let badgeHtml = '';
+      let actionHtml = '';
+
+      if (isPurchased) {
+        // State C — Purchased (FIX 2+9: subdued, badge, no buy button)
+        cardClass += ' vpn-card-purchased';
+        badgeHtml = `<span class="vpn-purchased-badge">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          ${fa ? 'خریداری شده' : 'Purchased'}
+        </span>`;
+        if (plan.days_remaining > 0) {
+          actionHtml = `<span class="vpn-purchased-days">${fa ? plan.days_remaining + ' روز دیگر' : plan.days_remaining + ' days left'}</span>`;
+        }
+      } else if (isPremiumLocked) {
+        // State B — Premium Locked
+        cardClass += ' vpn-card-locked';
+        badgeHtml = `<span class="vpn-premium-badge">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
+          PREMIUM
+        </span>`;
+        actionHtml = `<span class="vpn-locked-badge">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          ${fa ? 'مخصوص Premium' : 'Premium only'}
+        </span>`;
       } else {
-        action = `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`;
+        // State A — Available (also State D — eligible again after cooldown)
+        if (plan.premium_only) {
+          badgeHtml = `<span class="vpn-premium-badge active">
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
+            PREMIUM
+          </span>`;
+        }
+        actionHtml = `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`;
       }
+
       return `
-      <div class="vpn-card${planLocked || recent ? ' vpn-card-locked' : ''}" data-plan="${plan.id}">
-        ${plan.premium_only ? `<span class="vpn-premium-badge${!planLocked ? ' active' : ''}"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg> PREMIUM</span>` : ''}
+      <div class="${cardClass}" data-plan="${plan.id}">
+        ${badgeHtml}
         <div class="vpn-card-icon">${_vpnIconSvg(28)}</div>
         <div class="vpn-card-info">
           <div class="vpn-card-title">VPN ${plan.gb}GB</div>
-          <div class="vpn-card-desc">${dur}</div>
+          <div class="vpn-card-desc">${durText}</div>
         </div>
         <div class="vpn-card-footer">
           <span class="vpn-card-cost">${plan.cost_ab} AB</span>
-          ${action}
+          ${actionHtml}
         </div>
       </div>`;
     }).join('');

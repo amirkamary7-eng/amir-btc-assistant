@@ -2858,3 +2858,100 @@
   border: 1px solid rgba(34, 197, 94, 0.15);
   white-space: nowrap;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   FIX 2+10: VPN Card Visual States (Available / Locked / Purchased)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* State A — Available (default, no extra class needed) */
+
+/* State B — Premium Locked (subdued but readable) */
+.vpn-card.vpn-card-locked {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+.vpn-card.vpn-card-locked:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: none;
+}
+
+/* State C — Purchased (subtle subdued, still readable) */
+.vpn-card.vpn-card-purchased {
+  opacity: 0.7;
+  filter: saturate(0.6);
+  border-color: rgba(34, 197, 94, 0.15);
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.04), rgba(255, 255, 255, 0.02));
+}
+.vpn-card.vpn-card-purchased:hover {
+  border-color: rgba(34, 197, 94, 0.2);
+  transform: none;
+}
+
+/* Purchased badge — clean pill with checkmark SVG */
+.vpn-purchased-badge {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #22C55E;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  padding: 3px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.vpn-purchased-badge svg {
+  color: #22C55E;
+}
+
+.vpn-purchased-days {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(34, 197, 94, 0.7);
+  white-space: nowrap;
+}
+
+/* State D — Eligible again (falls back to State A default styling) */
+
+/* Premium badge — gold accent */
+.vpn-premium-badge {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: rgba(245, 166, 35, 0.8);
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.vpn-premium-badge.active {
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.15);
+  border-color: rgba(245, 166, 35, 0.4);
+}
+
+/* Premium locked badge (replaces buy button) */
+.vpn-locked-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}

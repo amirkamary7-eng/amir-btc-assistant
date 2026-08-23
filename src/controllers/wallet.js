@@ -205,6 +205,10 @@ export function createWalletHandlers(deps) {
         status: 'success',
         claimed_today: claimed,
         daily_reward: dailyReward,
+        // FIX 4: expose the server-side premium status so the frontend
+        // (VPN Market, mission multiplier display, etc.) can use the
+        // AUTHORITATIVE value instead of guessing or caching stale state.
+        is_premium: isPremium,
         ...streakInfo,
         // PHASE UX-V2: include streak_rewards array for frontend UI rendering
         streak_rewards: walletRepo.STREAK_REWARDS || [1, 3, 6, 10, 18, 30, 50],

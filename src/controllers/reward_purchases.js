@@ -48,19 +48,71 @@ export function createRewardPurchaseHandlers(deps) {
   }
 
   // ── GET /api/rewards/vpn/plans ─────────────────────────────────────────
+  // FIX 5: Returns per-plan eligibility + purchased state from backend.
+  // The frontend just renders this — it never decides who is Premium or
+  // what's purchased. Server-authoritative for every field.
   async function handleVpnPlans(request, env) {
     const plans = rewardPurchaseRepo.getVpnPlans();
+
+    // Try to authenticate (plans are viewable without auth, but eligibility
+    // and purchased state require knowing who the user is)
+    const authState = await authenticateTelegramRequest(request, env);
+    const userId = authState.error ? null : String(authState.user.id);
+
+    let isPremium = false;
+    let userPurchases = [];
+
+    if (userId) {
+      // Get premium status from MembershipAuthority (server-side, fail-safe)
+      isPremium = await _isPremiumSafe(env, userId);
+
+      // Get user's purchase history for purchased/eligibility state
+      if (isDatabaseConfigured(env)) {
+        try {
+          userPurchases = await rewardPurchaseRepo.listUserPurchases(env, userId, 50);
+        } catch (_) {}
+      }
+    }
+
+    const now = Date.now();
+    const plansWithState = plans.map(plan => {
+      // Check if user has a recent fulfilled purchase for this plan (30-day cooldown)
+      const recentPurchase = userPurchases.find(p =>
+        p.plan_id === plan.id && p.status === 'fulfilled' &&
+        p.created_at && (now - new Date(p.created_at).getTime()) < 30 * 86400000
+      );
+
+      const purchased = Boolean(recentPurchase);
+      const daysRemaining = purchased
+        ? Math.max(0, Math.ceil(30 - (now - new Date(recentPurchase.created_at).getTime()) / 86400000))
+        : null;
+      const eligible = !purchased && (!plan.premiumOnly || isPremium);
+
+      return {
+        id: plan.id,
+        gb: plan.gb,
+        cost_ab: plan.costAb,
+        premium_only: plan.premiumOnly,
+        duration_days: plan.durationDays,
+        duration_fa: plan.durationFa,
+        duration_en: plan.durationEn,
+        // Server-authoritative state for this user
+        eligible,
+        purchased,
+        ...(purchased ? {
+          purchased_tracking_id: recentPurchase.tracking_id,
+          purchased_at: recentPurchase.created_at,
+          purchased_expires_at: recentPurchase.expires_at,
+          days_remaining: daysRemaining,
+        } : {}),
+      };
+    });
+
     return jsonResponse({
       status: 'success',
-      plans: plans.map(p => ({
-        id: p.id,
-        gb: p.gb,
-        cost_ab: p.costAb,
-        premium_only: p.premiumOnly,
-        duration_days: p.durationDays,
-        duration_fa: p.durationFa,
-        duration_en: p.durationEn,
-      })),
+      is_premium: isPremium,
+      authenticated: Boolean(userId),
+      plans: plansWithState,
     }, {}, env);
   }
 
