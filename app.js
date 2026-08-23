@@ -12904,6 +12904,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     UserContext.init().then(() => {
         // When auth resolves, update the profile name (was showing "Loading...")
         loadUser();
+        // RACE CONDITION FIX: When Telegram SDK finishes initializing AFTER
+        // _doBootstrap has already checked isTelegramAuthReady()=false and
+        // skipped, there was NO immediate retry — only the 15s timer. This
+        // caused Join Check to intermittently fail on cold opens (one-in-two
+        // behavior). Calling tryLateBootstrap() here ensures bootstrap runs
+        // the moment auth becomes available. It's deduped by _bootstrapPromise
+        // and _bootstrapUserInFlight — no duplicate requests possible.
+        tryLateBootstrap();
     }).catch(e => {
         console.warn('[BOOT] UserContext.init failed:', e?.message);
     });
