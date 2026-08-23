@@ -49,8 +49,7 @@ export function createRewardPurchaseHandlers(deps) {
     const plans = rewardPurchaseRepo.getVpnPlans();
     return jsonResponse({
       status: 'success',
-      plans: plans.map(p => ({ id: p.id, gb: p.gb, cost_ab: p.costAb })),
-      premium_required: true,
+      plans: plans.map(p => ({ id: p.id, gb: p.gb, cost_ab: p.costAb, premium_only: p.premiumOnly })),
     }, {}, env);
   }
 
@@ -64,17 +63,6 @@ export function createRewardPurchaseHandlers(deps) {
 
     const userId = String(authState.user.id);
 
-    // PHASE 5: Premium-only purchase — server-side MembershipAuthority,
-    // NEVER from client payload or localStorage. Fail-safe to deny.
-    const isPremium = await _isPremiumSafe(env, userId);
-    if (!isPremium) {
-      return jsonResponse({
-        status: 'error',
-        message: 'Premium membership required to purchase rewards',
-        code: 'PREMIUM_REQUIRED',
-      }, { status: 403 }, env);
-    }
-
     const bodyResult = await readJsonBody(request, 10240, env);
     if (bodyResult.error) return bodyResult.error;
     const payload = bodyResult.payload;
@@ -86,6 +74,20 @@ export function createRewardPurchaseHandlers(deps) {
     const plan = rewardPurchaseRepo.getVpnPlan(planId);
     if (!plan) {
       return jsonResponse({ status: 'error', message: 'Invalid plan', code: 'INVALID_PLAN' }, { status: 422 }, env);
+    }
+
+    // PHASE 5: Premium check is PER-PLAN (server-side MembershipAuthority).
+    // The 1GB plan (premiumOnly=false) is available to ALL users.
+    // 2GB-10GB plans are Premium-only. Fail-safe to deny.
+    if (plan.premiumOnly) {
+      const isPremium = await _isPremiumSafe(env, userId);
+      if (!isPremium) {
+        return jsonResponse({
+          status: 'error',
+          message: 'Premium membership required to purchase this plan',
+          code: 'PREMIUM_REQUIRED',
+        }, { status: 403 }, env);
+      }
     }
 
     try {
@@ -177,11 +179,13 @@ export function createRewardPurchaseHandlers(deps) {
             priority: 'high',
             channel: 'both',
             title: 'VPN Reward Purchase — Action Needed',
-            message: `VPN ${plan.gb}GB purchased by ${displayName} (${username ? '@' + username : 'ID:' + userId}) for ${plan.costAb} AB. Purchase #${purchase.id}. Admin: please send the VPN subscription link to this user.`,
+            message: `NEW VPN PURCHASE\n\nUser: ${displayName} (${username ? '@' + username : 'ID: ' + userId})\nProduct: VPN ${plan.gb}GB\nCost: ${plan.costAb} AB\nTracking: VPN-${String(purchase.id).padStart(8, '0')}\nStatus: Pending — send subscription link to user`,
             metadata: {
               purchase_id: purchase.id,
+              tracking_id: 'VPN-' + String(purchase.id).padStart(8, '0'),
               user_id: userId,
               username: username,
+              display_name: displayName,
               reward: 'VPN',
               vpn_gb: plan.gb,
               cost_ab: plan.costAb,
@@ -207,11 +211,15 @@ export function createRewardPurchaseHandlers(deps) {
         timestamp: new Date().toISOString(),
       }));
 
+      // Generate a human-friendly tracking ID from the purchase ID
+      const trackingId = 'VPN-' + String(purchase.id).padStart(8, '0');
+
       return jsonResponse({
         status: 'success',
         message: 'Purchase created. Your VPN subscription link will be sent to you shortly.',
         purchase: {
           id: purchase.id,
+          tracking_id: trackingId,
           plan_id: plan.id,
           vpn_gb: plan.gb,
           cost_ab: plan.costAb,

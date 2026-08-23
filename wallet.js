@@ -381,8 +381,17 @@ const WalletApp = (() => {
       redeem: WT('purchase'),
       airdrop: WT('airdrop'),
       admin_credit: WT('admin_credit'),
+      wheel_reward: detectLang() === 'fa' ? 'پاداش چرخ شانس' : 'Wheel Reward',
+      bonus_reward: detectLang() === 'fa' ? 'پاداش تشویقی' : 'Bonus Reward',
+      cosmetic_purchase: detectLang() === 'fa' ? 'خرید کازمتیک' : 'Cosmetic Purchase',
+      alert_debit: detectLang() === 'fa' ? 'هشدار اضافه' : 'Extra Alert',
+      vpn_purchase: detectLang() === 'fa' ? 'خرید VPN' : 'VPN Purchase',
+      marketplace_refund: detectLang() === 'fa' ? 'بازگشت مبلغ' : 'Refund',
+      campaign_reward: detectLang() === 'fa' ? 'پاداش کمپین' : 'Campaign Reward',
+      event_reward: detectLang() === 'fa' ? 'پاداش رویداد' : 'Event Reward',
     };
-    return map[type] || type;
+    // FIX 4: never show raw type/undefined/null — always a human label
+    return map[type] || (detectLang() === 'fa' ? 'تراکنش توکن' : 'Token Transaction');
   }
 
   function getTxStatusLabel(status) {
@@ -392,7 +401,7 @@ const WalletApp = (() => {
       failed: WT('failed'),
       reversed: WT('reversed'),
     };
-    return map[status] || status;
+    return map[status] || (detectLang() === 'fa' ? 'نامشخص' : 'Unknown');
   }
 
   function applyDir(root) {
@@ -638,9 +647,12 @@ const WalletApp = (() => {
             <div class="checkin-icon">${ICONS.calendar}</div>
             <div class="checkin-info">
               <div class="checkin-title">${esc(WT('daily_checkin'))}</div>
+              <div class="checkin-subtitle">${detectLang() === 'fa' ? 'هر روز وارد شو و پاداش بگیر' : 'Come back daily for rewards'}</div>
               <div class="checkin-reward" id="daily-reward-amount">—</div>
             </div>
-            <div class="checkin-arrow">›</div>
+            <div class="checkin-arrow">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
           </div>
           <!-- Mission cards are rendered dynamically by updateMissionCards()
                from backend data (mission_id, reward, status, trigger) -->
@@ -724,19 +736,26 @@ const WalletApp = (() => {
   }
 
   function buildTxItemHTML(tx) {
-    const isPositive = Number(tx.amount) > 0;
-    const status = tx.status ? `<span class="tx-status status-${esc(tx.status)}">${esc(getTxStatusLabel(tx.status))}</span>` : '';
+    // FIX 4: guard against null/undefined/NaN — always show clean values
+    const amount = Number(tx.amount) || 0;
+    const isPositive = amount > 0;
+    const type = tx.type || 'unknown';
+    const desc = (tx.description && String(tx.description).trim()) || '';
+    const time = tx.created_at ? formatTime(tx.created_at) : '';
+    const status = tx.status
+      ? `<span class="tx-status status-${esc(tx.status)}">${esc(getTxStatusLabel(tx.status))}</span>`
+      : '';
     return `
       <div class="wallet-tx-item">
-        <div class="wallet-tx-icon tx-${getTxIcon(tx.type)}">${getTxIconSvg(tx.type)}</div>
+        <div class="wallet-tx-icon tx-${getTxIcon(type)}">${getTxIconSvg(type)}</div>
         <div class="wallet-tx-info">
-          <div class="tx-type">${esc(getTxLabel(tx.type))}</div>
-          <div class="tx-desc">${esc(tx.description || '')}</div>
+          <div class="tx-type">${esc(getTxLabel(type))}</div>
+          ${desc ? `<div class="tx-desc">${esc(desc)}</div>` : ''}
           ${status ? `<div class="tx-status-row">${status}</div>` : ''}
         </div>
         <div class="wallet-tx-right">
-          <div class="tx-amount ${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : '−'}${formatNumber(Math.abs(tx.amount))} <span class="tx-unit">AB</span></div>
-          <div class="tx-time">${esc(formatTime(tx.created_at))}</div>
+          <div class="tx-amount ${isPositive ? 'positive' : 'negative'}">${isPositive ? '+' : '−'}${formatNumber(Math.abs(amount))} <span class="tx-unit">AB</span></div>
+          ${time ? `<div class="tx-time">${esc(time)}</div>` : ''}
         </div>
       </div>
     `;
@@ -1491,32 +1510,13 @@ const WalletApp = (() => {
     if (_weeklyCountdownTimer) { clearInterval(_weeklyCountdownTimer); _weeklyCountdownTimer = null; }
   }
 
-  return {
-    loadProfileCard,
-    openWallet,
-    closeWallet,
-    claimDaily,
-    loadMoreHistory,
-    showFullHistory,
-    scrollToSection,
-    getTokenLogo,
-    showTokenInfo,
-    closeTokenInfo,
-    openDailyCheckinModal,
-    closeDailyCheckinModal,
-    _invalidateCache: invalidateWalletCache,
-    _refreshWalletData: loadWalletData,
-    _updateDailyCheckinCard,
-    _startWeeklyCountdown,
-    _stopWeeklyCountdown,
-  };
-
   // ═══════════════════════════════════════════════════════════════════
   // PHASE 5-7: VPN Reward Market (Premium-only purchase)
   // ═══════════════════════════════════════════════════════════════════
 
   let _vpnPlansCache = null;
   let _isPremiumUser = false;
+  let _lastKnownBalance = 0;
   let _purchaseInFlight = false;
 
   function _vpnIconSvg(size) {
@@ -1529,21 +1529,30 @@ const WalletApp = (() => {
     const banner = document.getElementById('reward-market-premium-banner');
     if (!grid) return;
 
-    if (banner) banner.style.display = _isPremiumUser ? 'none' : 'flex';
+    if (banner) banner.style.display = 'none'; // per-card premium badge instead
 
     if (!_vpnPlansCache) {
       try {
-        const resp = await apiFetch('/api/rewards/vpn/plans');
-        if (resp?.status === 'success' && Array.isArray(resp.plans)) {
+        const resp = await window.apiFetch('/api/rewards/vpn/plans');
+        if (resp?.status === 'success' && Array.isArray(resp.plans) && resp.plans.length > 0) {
           _vpnPlansCache = resp.plans;
         }
-      } catch (_) { return; }
+      } catch (_) { /* fall through to empty state */ }
     }
-    if (!_vpnPlansCache) return;
+    if (!_vpnPlansCache || _vpnPlansCache.length === 0) {
+      grid.innerHTML = `<div class="vpn-market-empty">${detectLang() === 'fa' ? 'به‌زودی' : 'Coming soon'}</div>`;
+      return;
+    }
 
     const fa = detectLang() === 'fa';
-    grid.innerHTML = _vpnPlansCache.map(plan => `
-      <div class="vpn-card${_isPremiumUser ? '' : ' vpn-card-locked'}" data-plan="${plan.id}">
+    grid.innerHTML = _vpnPlansCache.map(plan => {
+      const planLocked = plan.premium_only && !_isPremiumUser;
+      return `
+      <div class="vpn-card${planLocked ? ' vpn-card-locked' : ''}" data-plan="${plan.id}">
+        ${plan.premium_only ? `<span class="vpn-premium-badge${!planLocked ? ' active' : ''}">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
+          PREMIUM
+        </span>` : ''}
         <div class="vpn-card-icon">${_vpnIconSvg(28)}</div>
         <div class="vpn-card-info">
           <div class="vpn-card-title">VPN ${plan.gb}GB</div>
@@ -1551,35 +1560,104 @@ const WalletApp = (() => {
         </div>
         <div class="vpn-card-footer">
           <span class="vpn-card-cost">${plan.cost_ab} AB</span>
-          ${_isPremiumUser
-            ? `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`
-            : `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Premium</span>`
+          ${planLocked
+            ? `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ${fa ? 'ویژه Premium' : 'Premium only'}</span>`
+            : `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`
           }
         </div>
       </div>
-    `).join('');
+    `}).join('');
+  }
+
+  // FIX 6: Two-step purchase flow — Confirmation Modal → Purchase → Success Modal
+  let _confirmModalPlan = null;
+
+  function showVpnConfirmModal(plan) {
+    _confirmModalPlan = plan;
+    const fa = detectLang() === 'fa';
+    const existing = document.getElementById('vpn-confirm-modal');
+    if (existing) existing.remove();
+
+    const currentBalance = _lastKnownBalance || 0;
+    const afterBalance = Math.max(0, currentBalance - plan.costAb);
+
+    const modal = document.createElement('div');
+    modal.id = 'vpn-confirm-modal';
+    modal.className = 'daily-checkin-modal'; // reuse overlay styles
+    modal.setAttribute('dir', fa ? 'rtl' : 'ltr');
+    modal.innerHTML = `
+      <div class="dcm-overlay" onclick="WalletApp.closeVpnConfirmModal()"></div>
+      <div class="dcm-sheet vpn-confirm-sheet">
+        <div class="dcm-header">
+          <h3>${fa ? 'تأیید خرید' : 'Confirm Purchase'}</h3>
+          <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="Close">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="vpn-confirm-body">
+          <div class="vpn-confirm-icon">${_vpnIconSvg(36)}</div>
+          <div class="vpn-confirm-title">VPN ${plan.gb}GB</div>
+          <div class="vpn-confirm-desc">${fa ? 'اشتراک یک‌ماهه' : '1-month subscription'}</div>
+          <div class="vpn-confirm-row">
+            <span>${fa ? 'هزینه:' : 'Cost:'}</span>
+            <strong>${plan.costAb} AB</strong>
+          </div>
+          <div class="vpn-confirm-row">
+            <span>${fa ? 'موجودی شما:' : 'Your balance:'}</span>
+            <strong>${formatNumber(currentBalance)} AB</strong>
+          </div>
+          <div class="vpn-confirm-row ${afterBalance < 0 ? 'vpn-insufficient' : ''}">
+            <span>${fa ? 'بعد از خرید:' : 'After purchase:'}</span>
+            <strong>${formatNumber(afterBalance)} AB</strong>
+          </div>
+          ${afterBalance < 0 ? `<div class="vpn-insufficient-warning">${fa ? 'موجودی کافی نیست' : 'Insufficient balance'}</div>` : ''}
+        </div>
+        <div class="vpn-confirm-actions">
+          <button class="vpn-cancel-btn" onclick="WalletApp.closeVpnConfirmModal()">${fa ? 'انصراف' : 'Cancel'}</button>
+          <button class="vpn-confirm-btn ${afterBalance < 0 ? 'disabled' : ''}" ${afterBalance < 0 ? 'disabled' : ''} onclick="WalletApp.executeVpnPurchase('${plan.id}')">
+            ${fa ? 'تأیید و خرید' : 'Confirm Purchase'}
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    requestAnimationFrame(() => modal.classList.add('visible'));
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('medium'); } catch (_) {}
+  }
+
+  function closeVpnConfirmModal() {
+    const modal = document.getElementById('vpn-confirm-modal');
+    if (!modal) return;
+    modal.classList.remove('visible');
+    setTimeout(() => modal.remove(), 250);
   }
 
   async function purchaseVpn(planId) {
+    // Step 1: show confirmation modal (NOT the purchase itself)
+    const plan = _vpnPlansCache ? _vpnPlansCache.find(p => p.id === planId) : null;
+    if (!plan) return;
+    showVpnConfirmModal(plan);
+  }
+
+  async function executeVpnPurchase(planId) {
+    closeVpnConfirmModal();
     if (_purchaseInFlight) return;
-    if (!_isPremiumUser) {
-      showToast(detectLang() === 'fa' ? 'برای خرید ابتدا عضو Premium شوید' : 'Premium membership required');
-      return;
-    }
     _purchaseInFlight = true;
     try {
-      const resp = await apiFetch('/api/rewards/vpn/purchase', {
+      const resp = await window.apiFetch('/api/rewards/vpn/purchase', {
         method: 'POST',
         body: JSON.stringify({ plan_id: planId }),
       });
       if (resp?.status === 'success') {
-        showToast(detectLang() === 'fa' ? 'خرید ثبت شد — لینک VPN به‌زودی ارسال می‌شود' : 'Purchase created — VPN link will be sent shortly');
-        try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch (_) {}
+        showVpnSuccessModal(resp.purchase);
         refreshWalletBalance();
+        _lastKnownBalance = Math.max(0, (_lastKnownBalance || 0) - resp.purchase.cost_ab);
       } else if (resp?.code === 'DUPLICATE_PENDING') {
         showToast(detectLang() === 'fa' ? 'یک درخواست در انتظار برای این پلن دارید' : 'Pending purchase exists for this plan');
       } else if (resp?.code === 'PAYMENT_FAILED') {
         showToast(detectLang() === 'fa' ? 'توکن کافی نیست' : 'Insufficient balance');
+      } else if (resp?.code === 'PREMIUM_REQUIRED') {
+        showToast(detectLang() === 'fa' ? 'این پلن ویژه اعضای Premium است' : 'This plan is Premium-only');
       } else {
         showToast(resp?.message || 'Purchase failed');
       }
@@ -1590,10 +1668,57 @@ const WalletApp = (() => {
     }
   }
 
+  function showVpnSuccessModal(purchase) {
+    const fa = detectLang() === 'fa';
+    const existing = document.getElementById('vpn-success-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'vpn-success-modal';
+    modal.className = 'daily-checkin-modal';
+    modal.setAttribute('dir', fa ? 'rtl' : 'ltr');
+    modal.innerHTML = `
+      <div class="dcm-overlay" onclick="WalletApp.closeVpnSuccessModal()"></div>
+      <div class="dcm-sheet vpn-success-sheet">
+        <div class="vpn-success-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#22C55E" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="8 12 11 15 16 9" stroke-width="3"/>
+          </svg>
+        </div>
+        <div class="vpn-success-title">${fa ? 'خرید با موفقیت انجام شد' : 'Purchase Successful'}</div>
+        <div class="vpn-success-product">
+          <div class="vpn-success-product-icon">${_vpnIconSvg(24)}</div>
+          <div>
+            <div class="vpn-success-product-name">VPN ${purchase.vpn_gb}GB</div>
+            <div class="vpn-success-product-cost">${purchase.cost_ab} AB ${fa ? 'پرداخت شد' : 'paid'}</div>
+          </div>
+        </div>
+        <div class="vpn-success-tracking">
+          <span class="tracking-label">${fa ? 'شماره پیگیری:' : 'Tracking ID:'}</span>
+          <span class="tracking-value">${purchase.tracking_id || 'VPN-' + String(purchase.id).padStart(8, '0')}</span>
+        </div>
+        <div class="vpn-success-note">${fa ? 'درخواست شما ثبت شد. لینک اشتراک پس از آماده‌سازی ارسال می‌شود.' : 'Your request has been submitted. The subscription link will be sent after preparation.'}</div>
+        <button class="vpn-success-close-btn" onclick="WalletApp.closeVpnSuccessModal()">${fa ? 'متوجه شدم' : 'Got it'}</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    requestAnimationFrame(() => modal.classList.add('visible'));
+    try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch (_) {}
+  }
+
+  function closeVpnSuccessModal() {
+    const modal = document.getElementById('vpn-success-modal');
+    if (!modal) return;
+    modal.classList.remove('visible');
+    setTimeout(() => modal.remove(), 250);
+  }
+
   async function refreshWalletBalance() {
     try {
-      const resp = await apiFetch('/api/wallet/balance');
+      const resp = await window.apiFetch('/api/wallet/balance');
       if (resp?.status === 'success') {
+        _lastKnownBalance = Number(resp.balance) || 0;
         const el = document.getElementById('wallet-balance-amount');
         if (el) el.textContent = Number(resp.balance).toLocaleString('en-US');
       }
@@ -1604,10 +1729,13 @@ const WalletApp = (() => {
     loadProfileCard,
     openWallet,
     closeWallet,
-    refresh: refreshWallet,
+    refresh: loadWalletData,
     openDailyCheckinModal,
     renderVpnMarket,
     purchaseVpn,
+    executeVpnPurchase,
+    closeVpnConfirmModal,
+    closeVpnSuccessModal,
     refreshWalletBalance,
     claimDaily: claimDailyRewardAPI,
     closeDailyCheckinModal,

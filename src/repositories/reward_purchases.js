@@ -62,12 +62,15 @@ export function createRewardPurchaseRepository(deps) {
    * VPN plan catalog — the ONLY purchasable rewards in this release.
    * (PHASE 6: exactly 5 plans, 100–500 AB.)
    */
+  // PHASE 3: 1GB plan is available to ALL users (Free + Premium).
+  // 2GB-10GB plans are Premium-only (server-enforced in the controller).
   const VPN_PLANS = Object.freeze([
-    { id: 'vpn_2gb',  gb: 2,  costAb: 100 },
-    { id: 'vpn_4gb',  gb: 4,  costAb: 200 },
-    { id: 'vpn_6gb',  gb: 6,  costAb: 300 },
-    { id: 'vpn_8gb',  gb: 8,  costAb: 400 },
-    { id: 'vpn_10gb', gb: 10, costAb: 500 },
+    { id: 'vpn_1gb',  gb: 1,  costAb: 200, premiumOnly: false },
+    { id: 'vpn_2gb',  gb: 2,  costAb: 100, premiumOnly: true },
+    { id: 'vpn_4gb',  gb: 4,  costAb: 200, premiumOnly: true },
+    { id: 'vpn_6gb',  gb: 6,  costAb: 300, premiumOnly: true },
+    { id: 'vpn_8gb',  gb: 8,  costAb: 400, premiumOnly: true },
+    { id: 'vpn_10gb', gb: 10, costAb: 500, premiumOnly: true },
   ]);
 
   function getVpnPlans() {

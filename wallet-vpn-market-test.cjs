@@ -180,16 +180,23 @@ test('VM6: Invalid plan → 422 INVALID_PLAN', async () => {
   assert.equal(res.body.code, 'INVALID_PLAN');
 });
 
-test('VM7: Plans catalog — exactly 5 plans, 100-500 AB', () => {
+test('VM7: Plans catalog — 6 plans (1GB universal + 5 Premium)', () => {
   const repo = createRewardPurchaseRepository({
     queryDb: async () => ({ rows: [] }),
     queryDbTransaction: async () => [],
     isDatabaseConfigured: () => false,
   });
   const plans = repo.getVpnPlans();
-  assert.equal(plans.length, 5, 'exactly 5 VPN plans');
-  assert.deepEqual(plans.map(p => p.costAb), [100, 200, 300, 400, 500]);
-  assert.deepEqual(plans.map(p => p.gb), [2, 4, 6, 8, 10]);
+  assert.equal(plans.length, 6, 'exactly 6 VPN plans (1GB + 5 Premium)');
+  // 1GB is universal (premiumOnly=false)
+  assert.equal(plans[0].gb, 1);
+  assert.equal(plans[0].costAb, 200);
+  assert.equal(plans[0].premiumOnly, false);
+  // 2GB-10GB are Premium-only
+  const premiumPlans = plans.slice(1);
+  assert.deepEqual(premiumPlans.map(p => p.costAb), [100, 200, 300, 400, 500]);
+  assert.deepEqual(premiumPlans.map(p => p.gb), [2, 4, 6, 8, 10]);
+  assert.ok(premiumPlans.every(p => p.premiumOnly === true), 'all 2GB+ plans Premium-only');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
