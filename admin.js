@@ -4199,50 +4199,109 @@ function renderVpnPurchases(purchases) {
     const tbody = document.getElementById('vpn-purchases-body');
     if (!tbody) return;
     if (!purchases.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="adm-loading">موردی یافت نشد</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="adm-loading">موردی یافت نشد</td></tr>';
         return;
     }
-    const statusLabels = {
-        pending: 'در انتظار',
-        fulfilled: 'انجام شده',
-        cancelled: 'لغو شده',
-    };
-    const statusClasses = {
-        pending: 'status-pending',
-        fulfilled: 'status-fulfilled',
-        cancelled: 'status-cancelled',
-    };
+    const statusLabels = { pending: 'در انتظار ارسال', fulfilled: 'ارسال شده', cancelled: 'لغو شده', failed: 'خطا / نیازمند Retry' };
+    const statusDots = { pending: '🟡', fulfilled: '🟢', cancelled: '⚪', failed: '🔴' };
     tbody.innerHTML = purchases.map(function (p) {
-        const userDisplay = p.username ? '@' + p.username : (p.display_name || p.user_id);
-        const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
-        const actionBtn = p.status === 'pending'
-            ? '<button class="adm-action-btn adm-action-fulfill" onclick="fulfillVpnPurchase(' + p.id + ')">انجام شد</button>'
-            : (p.fulfilled_at ? '<span class="adm-fulfilled-by">' + (p.fulfilled_by ? 'توسط ' + p.fulfilled_by : '') + '</span>' : '—');
+        var userDisplay = p.username ? '@' + p.username : (p.display_name || p.user_id);
+        var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
+        var durationLabel = p.duration_days >= 30 ? '۱ ماه' : '۷ روز';
+        var statusHtml = '<span class="adm-status">' + (statusDots[p.status] || '⚪') + ' ' + (statusLabels[p.status] || p.status) + '</span>';
+        var actionHtml = '';
+        if (p.status === 'pending') {
+            actionHtml = '<button class="adm-action-btn adm-action-fulfill" onclick="openVpnSendModal(' + p.id + ', \'' + escapeHtmlAdmin(String(p.tracking_id || '')) + '\', \'' + escapeHtmlAdmin(String(p.plan_name || '')) + '\', ' + (p.cost_ab || 0) + ', \'' + escapeHtmlAdmin(String(userDisplay)) + '\', \'' + durationLabel + '\')">ارسال لینک</button>';
+        } else if (p.status === 'fulfilled' && p.fulfilled_at) {
+            actionHtml = '<span class="adm-fulfilled-ok">✓ ارسال شد</span>';
+        }
         return '<tr>' +
-            '<td>' + p.id + '</td>' +
             '<td>' + escapeHtmlAdmin(userDisplay) + '</td>' +
-            '<td>VPN ' + (p.vpn_gb || '?') + 'GB</td>' +
-            '<td>' + p.cost_ab + ' AB</td>' +
-            '<td><span class="adm-status ' + (statusClasses[p.status] || '') + '">' + (statusLabels[p.status] || p.status) + '</span></td>' +
+            '<td>' + escapeHtmlAdmin(p.plan_name || ('VPN ' + (p.vpn_gb || '?') + 'GB')) + '</td>' +
+            '<td>' + (p.cost_ab || '?') + ' AB</td>' +
+            '<td>' + durationLabel + '</td>' +
+            '<td><code class="adm-tracking">' + escapeHtmlAdmin(p.tracking_id || '—') + '</code></td>' +
             '<td>' + dateStr + '</td>' +
-            '<td>' + actionBtn + '</td>' +
+            '<td>' + statusHtml + '</td>' +
+            '<td>' + actionHtml + '</td>' +
             '</tr>';
     }).join('');
 }
 
-async function fulfillVpnPurchase(purchaseId) {
-    if (!confirm('لینک VPN برای این کاربر ارسال شد؟ وضعیت به «انجام شده» تغییر کند؟')) return;
+// ── VPN Send Link Modal ──
+var _vpnModalPurchaseId = null;
+
+function openVpnSendModal(purchaseId, trackingId, planName, costAb, userDisplay, durationLabel) {
+    _vpnModalPurchaseId = purchaseId;
+    var existing = document.getElementById('vpn-send-modal');
+    if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.id = 'vpn-send-modal';
+    modal.className = 'daily-checkin-modal';
+    modal.setAttribute('dir', 'rtl');
+    modal.innerHTML = `
+        <div class="dcm-overlay" onclick="closeVpnSendModal()"></div>
+        <div class="dcm-sheet vpn-confirm-sheet">
+            <div class="dcm-header">
+                <h3>ارسال VPN</h3>
+                <button class="dcm-close" onclick="closeVpnSendModal()" aria-label="Close">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="vpn-confirm-body">
+                <div class="vpn-confirm-row"><span>👤 کاربر:</span><strong>${userDisplay}</strong></div>
+                <div class="vpn-confirm-row"><span>📦 بسته:</span><strong>${planName}</strong></div>
+                <div class="vpn-confirm-row"><span>💎 هزینه:</span><strong>${costAb} AB</strong></div>
+                <div class="vpn-confirm-row"><span>⏳ اعتبار:</span><strong>${durationLabel}</strong></div>
+                <div class="vpn-confirm-row"><span>🆔 کد رهگیری:</span><strong>${trackingId}</strong></div>
+                <div style="margin-top:12px;width:100%;">
+                    <label style="font-size:12px;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">🔗 لینک VPN:</label>
+                    <input type="text" id="vpn-link-input" placeholder="https://..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:14px;box-sizing:border-box;" />
+                </div>
+            </div>
+            <div class="vpn-confirm-actions">
+                <button class="vpn-cancel-btn" onclick="closeVpnSendModal()">انصراف</button>
+                <button class="vpn-confirm-btn" onclick="sendVpnLink()">ارسال برای کاربر</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    requestAnimationFrame(function() { modal.classList.add('visible'); });
+}
+
+function closeVpnSendModal() {
+    var modal = document.getElementById('vpn-send-modal');
+    if (!modal) return;
+    modal.classList.remove('visible');
+    setTimeout(function() { modal.remove(); }, 250);
+}
+
+var _vpnSendInFlight = false;
+async function sendVpnLink() {
+    if (_vpnSendInFlight) return;
+    var linkInput = document.getElementById('vpn-link-input');
+    var vpnLink = linkInput ? linkInput.value.trim() : '';
+    if (!vpnLink || vpnLink.length < 10) {
+        alert('لطفاً لینک VPN معتبر وارد کنید (حداقل ۱۰ کاراکتر).');
+        return;
+    }
+    if (!confirm('ارسال لینک برای کاربر تأیید می‌شود؟')) return;
+    _vpnSendInFlight = true;
     try {
-        const resp = await adminApiFetch('/api/admin/reward-purchases/' + purchaseId + '/fulfill', {
+        var resp = await adminApiFetch('/api/admin/reward-purchases/' + _vpnModalPurchaseId + '/fulfill', {
             method: 'POST',
+            body: JSON.stringify({ vpn_link: vpnLink })
         });
-        if (resp?.status === 'success') {
+        if (resp && resp.status === 'success') {
+            closeVpnSendModal();
             loadVpnPurchases();
         } else {
-            alert(resp?.message || 'خطا در انجام عملیات');
+            alert('خطا: ' + (resp && resp.message ? resp.message : 'ارسال ناموفق بود') + (resp && resp.code === 'TELEGRAM_SEND_FAILED' ? '\n\nPurchase در وضعیت pending باقی مانده. می‌توانید دوباره تلاش کنید.' : ''));
         }
     } catch (e) {
-        alert('خطا در برقراری ارتباط');
+        alert('خطا در برقراری ارتباط: ' + (e.message || e));
+    } finally {
+        _vpnSendInFlight = false;
     }
 }
 

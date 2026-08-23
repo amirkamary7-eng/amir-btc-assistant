@@ -272,10 +272,11 @@ export function createRewardPurchaseHandlers(deps) {
       // FIX 5: Send Telegram message to USER about successful purchase
       if (sendTelegramMessage) {
         try {
-          const durationFa = plan.durationFa;
           const trackingId = purchase.tracking_id;
-          const msg = `🎉 تبریک! خرید شما با موفقیت ثبت شد.\n\n📦 پلن:\nVPN ${plan.gb}GB (${durationFa})\n\n💰 مبلغ:\n${plan.costAb} AB\n\n🎫 کد رهگیری:\n${trackingId}\n\n⏳ وضعیت:\nدر انتظار ارسال\n\nلینک اشتراک VPN پس از آماده‌سازی برای شما ارسال خواهد شد.`;
-          await sendTelegramMessage(env, { chat_id: String(userId), text: msg, parse_mode: 'HTML' });
+          // Dynamic duration label: 7 → «۷ روز», 30 → «۱ ماه»
+          const durationLabel = plan.durationDays >= 30 ? '۱ ماه' : '۷ روز';
+          const msg = `🎉 درخواست شما با موفقیت ثبت شد!\n\n📦 بسته: ${purchase.plan_name || `VPN ${plan.gb}GB`}\n💎 هزینه: ${plan.costAb} AB\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n⏳ لینک سرویس پس از آماده‌سازی برای شما ارسال خواهد شد.\n\n💙 ممنون که همراه Amir BTC هستید.`;
+          await sendTelegramMessage(env, { chat_id: String(userId), text: msg });
         } catch (tgErr) {
           console.warn('[vpn-purchase] Telegram purchase notification failed (non-blocking):', tgErr?.message);
         }
@@ -406,9 +407,10 @@ export function createRewardPurchaseHandlers(deps) {
 
       // Build the delivery message
       const plan = rewardPurchaseRepo.getVpnPlan(purchase.plan_id);
-      const durationFa = plan ? plan.durationFa : `${purchase.duration_days} روز`;
       const trackingId = purchase.tracking_id;
-      const deliveryMsg = `🎉 تبریک! خرید شما با موفقیت تأیید شد.\n\n🔐 سرویس: VPN\n📦 پلن: ${purchase.plan_name || `VPN ${purchase.vpn_gb}GB`}\n⏳ مدت اشتراک: ${durationFa}\n💰 مبلغ: ${purchase.cost_ab} AB\n\n🎫 کد رهگیری:\n${trackingId}\n\n🔗 لینک اتصال:\n${vpnLink}\n\nاز خرید شما متشکریم ❤️\nدر صورت وجود مشکل، با پشتیبانی در ارتباط باشید.`;
+      // Dynamic duration label from actual duration_days
+      const durationLabel = purchase.duration_days >= 30 ? '۱ ماه' : '۷ روز';
+      const deliveryMsg = `🎉 اشتراک VPN شما آماده است\n\n📦 بسته: ${purchase.plan_name || `VPN ${purchase.vpn_gb}GB`}\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n🔗 لینک دریافت:\n${vpnLink}\n\n💙 از همراهی شما با Amir BTC ممنونیم.`;
 
       // FIX 12: Send Telegram message FIRST, then mark fulfilled.
       // If Telegram fails, purchase stays pending → admin can retry.

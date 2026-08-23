@@ -2955,3 +2955,59 @@
   font-weight: 500;
   white-space: nowrap;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADMIN VPN: tracking code + status indicators + send modal
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Tracking ID — monospace, selectable, compact */
+.adm-tracking {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  user-select: all;
+  cursor: pointer;
+}
+
+/* Admin status indicator */
+.adm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Fulfilled indicator */
+.adm-fulfilled-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #22C55E;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Admin action button (send link) */
+.adm-action-btn.adm-action-fulfill {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.12);
+  color: #f5a623;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.adm-action-btn.adm-action-fulfill:hover {
+  background: rgba(245, 166, 35, 0.2);
+}
