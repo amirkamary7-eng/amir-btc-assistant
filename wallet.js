@@ -1188,7 +1188,7 @@ const WalletApp = (() => {
       // PHASE UX-V2.1: Update balance immediately from API response — no extra fetchWallet.
       invalidateWalletCache();
       if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
-        const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance');
+        const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance');
         if (balanceEl) {
           const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
           if (typeof animateBalanceChange === 'function') {

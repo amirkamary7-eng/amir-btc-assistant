@@ -2402,8 +2402,7 @@ async function openAnalysisDetailPage(id) {
         window.scrollTo(0, 0);
     }
 
-    // Fire daily mission: analysis_read (non-blocking, idempotent)
-    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.ANALYSIS_OPEN);
+    // (Mission trigger 'analysis_detail_open' already fired above with target_id)
 
     // Fetch fresh detail from server in background (for view-count increment
     // and to pick up any edits made after the list was cached). Includes
@@ -5829,7 +5828,12 @@ async function completeMission(missionId, targetId) {
 
         const data = await apiFetch('/api/wallet/mission/complete', {
             method: 'POST',
-            body: JSON.stringify({ mission_id: missionId, event_token: eventToken }),
+            // ROOT CAUSE FIX: target_id MUST be sent here. The backend binds
+            // it into the event token at issue time, then verifies the
+            // submitted target matches the bound target at consume time.
+            // Without this field, the verification always failed (empty
+            // string vs bound target) → missions never completed.
+            body: JSON.stringify({ mission_id: missionId, event_token: eventToken, target_id: targetId || '' }),
         });
 
         if (data?.status === 'success') {
@@ -11675,8 +11679,7 @@ function openNewsModalWith(n) {
     }
     const modalEl = el('news-modal'); if (modalEl) modalEl.style.display = 'flex';
 
-    // Fire daily mission: news_view (non-blocking, idempotent)
-    if (typeof fireMissionEvent === 'function') fireMissionEvent(MISSION_EVENTS.NEWS_OPEN);
+    // (Mission trigger 'news_article_open' already fired above with target_id)
 }
 
 // ============================================================================
