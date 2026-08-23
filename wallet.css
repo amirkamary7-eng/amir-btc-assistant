@@ -3011,3 +3011,90 @@
 .adm-action-btn.adm-action-fulfill:hover {
   background: rgba(245, 166, 35, 0.2);
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADMIN VPN: SVG icons + status pills (no emoji)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Cell icon — small inline SVG next to text */
+.adm-cell-icon {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.35);
+  margin-inline-end: 2px;
+  vertical-align: middle;
+}
+
+.adm-cell-icon svg {
+  opacity: 0.7;
+}
+
+/* Status pill — graphical badge (no emoji dots) */
+.vpn-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.vpn-status-pill svg {
+  flex-shrink: 0;
+}
+
+/* Pending — amber */
+.vpn-st-pending {
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+}
+
+/* Fulfilled — green */
+.vpn-st-fulfilled {
+  color: #22C55E;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+/* Cancelled — neutral gray */
+.vpn-st-cancelled {
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Failed — red */
+.vpn-st-failed {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* Action button with icon */
+.adm-action-btn.adm-action-fulfill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.12);
+  color: #f5a623;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.adm-action-btn.adm-action-fulfill:hover {
+  background: rgba(245, 166, 35, 0.2);
+}
+
+.adm-action-btn.adm-action-fulfill svg {
+  width: 12px;
+  height: 12px;
+}

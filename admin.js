@@ -4195,6 +4195,19 @@ async function loadVpnPurchases() {
     }
 }
 
+// SVG icon helpers for admin VPN panel (no emoji)
+var VPN_ICONS = {
+  user: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  box: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
+  cost: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M15 9.5a3 3 0 0 0-3-1.5 3 3 0 0 0 0 6 3 3 0 0 0 3-1.5"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  tracking: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  send: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+};
+
 function renderVpnPurchases(purchases) {
     const tbody = document.getElementById('vpn-purchases-body');
     if (!tbody) return;
@@ -4202,26 +4215,31 @@ function renderVpnPurchases(purchases) {
         tbody.innerHTML = '<tr><td colspan="8" class="adm-loading">موردی یافت نشد</td></tr>';
         return;
     }
-    const statusLabels = { pending: 'در انتظار ارسال', fulfilled: 'ارسال شده', cancelled: 'لغو شده', failed: 'خطا / نیازمند Retry' };
-    const statusDots = { pending: '🟡', fulfilled: '🟢', cancelled: '⚪', failed: '🔴' };
+    var statusConfig = {
+        pending:   { label: 'در انتظار ارسال', cls: 'vpn-st-pending' },
+        fulfilled: { label: 'ارسال شده',      cls: 'vpn-st-fulfilled' },
+        cancelled: { label: 'لغو شده',        cls: 'vpn-st-cancelled' },
+        failed:    { label: 'خطا / Retry',   cls: 'vpn-st-failed' },
+    };
     tbody.innerHTML = purchases.map(function (p) {
         var userDisplay = p.username ? '@' + p.username : (p.display_name || p.user_id);
         var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
         var durationLabel = p.duration_days >= 30 ? '۱ ماه' : '۷ روز';
-        var statusHtml = '<span class="adm-status">' + (statusDots[p.status] || '⚪') + ' ' + (statusLabels[p.status] || p.status) + '</span>';
+        var st = statusConfig[p.status] || { label: p.status, cls: '' };
+        var statusHtml = '<span class="vpn-status-pill ' + st.cls + '">' + st.label + '</span>';
         var actionHtml = '';
         if (p.status === 'pending') {
-            actionHtml = '<button class="adm-action-btn adm-action-fulfill" onclick="openVpnSendModal(' + p.id + ', \'' + escapeHtmlAdmin(String(p.tracking_id || '')) + '\', \'' + escapeHtmlAdmin(String(p.plan_name || '')) + '\', ' + (p.cost_ab || 0) + ', \'' + escapeHtmlAdmin(String(userDisplay)) + '\', \'' + durationLabel + '\')">ارسال لینک</button>';
-        } else if (p.status === 'fulfilled' && p.fulfilled_at) {
-            actionHtml = '<span class="adm-fulfilled-ok">✓ ارسال شد</span>';
+            actionHtml = '<button class="adm-action-btn adm-action-fulfill" onclick="openVpnSendModal(' + p.id + ', \'' + escapeHtmlAdmin(String(p.tracking_id || '')) + '\', \'' + escapeHtmlAdmin(String(p.plan_name || '')) + '\', ' + (p.cost_ab || 0) + ', \'' + escapeHtmlAdmin(String(userDisplay)) + '\', \'' + durationLabel + '\')">' + VPN_ICONS.send + ' ارسال لینک</button>';
+        } else if (p.status === 'fulfilled') {
+            actionHtml = '<span class="vpn-status-pill vpn-st-fulfilled">' + VPN_ICONS.check + ' ارسال شد</span>';
         }
         return '<tr>' +
-            '<td>' + escapeHtmlAdmin(userDisplay) + '</td>' +
-            '<td>' + escapeHtmlAdmin(p.plan_name || ('VPN ' + (p.vpn_gb || '?') + 'GB')) + '</td>' +
-            '<td>' + (p.cost_ab || '?') + ' AB</td>' +
-            '<td>' + durationLabel + '</td>' +
-            '<td><code class="adm-tracking">' + escapeHtmlAdmin(p.tracking_id || '—') + '</code></td>' +
-            '<td>' + dateStr + '</td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.user + '</span> ' + escapeHtmlAdmin(userDisplay) + '</td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.shield + '</span> ' + escapeHtmlAdmin(p.plan_name || ('VPN ' + (p.vpn_gb || '?') + 'GB')) + '</td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.cost + '</span> ' + (p.cost_ab || '?') + ' AB</td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.clock + '</span> ' + durationLabel + '</td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.tracking + '</span> <code class="adm-tracking">' + escapeHtmlAdmin(p.tracking_id || '—') + '</code></td>' +
+            '<td><span class="adm-cell-icon">' + VPN_ICONS.calendar + '</span> ' + dateStr + '</td>' +
             '<td>' + statusHtml + '</td>' +
             '<td>' + actionHtml + '</td>' +
             '</tr>';
@@ -4249,19 +4267,19 @@ function openVpnSendModal(purchaseId, trackingId, planName, costAb, userDisplay,
                 </button>
             </div>
             <div class="vpn-confirm-body">
-                <div class="vpn-confirm-row"><span>👤 کاربر:</span><strong>${userDisplay}</strong></div>
-                <div class="vpn-confirm-row"><span>📦 بسته:</span><strong>${planName}</strong></div>
-                <div class="vpn-confirm-row"><span>💎 هزینه:</span><strong>${costAb} AB</strong></div>
-                <div class="vpn-confirm-row"><span>⏳ اعتبار:</span><strong>${durationLabel}</strong></div>
-                <div class="vpn-confirm-row"><span>🆔 کد رهگیری:</span><strong>${trackingId}</strong></div>
+                <div class="vpn-confirm-row"><span>${VPN_ICONS.user} کاربر:</span><strong>${userDisplay}</strong></div>
+                <div class="vpn-confirm-row"><span>${VPN_ICONS.shield} بسته:</span><strong>${planName}</strong></div>
+                <div class="vpn-confirm-row"><span>${VPN_ICONS.cost} هزینه:</span><strong>${costAb} AB</strong></div>
+                <div class="vpn-confirm-row"><span>${VPN_ICONS.clock} اعتبار:</span><strong>${durationLabel}</strong></div>
+                <div class="vpn-confirm-row"><span>${VPN_ICONS.tracking} کد رهگیری:</span><strong>${trackingId}</strong></div>
                 <div style="margin-top:12px;width:100%;">
-                    <label style="font-size:12px;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">🔗 لینک VPN:</label>
+                    <label style="font-size:12px;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">${VPN_ICONS.send} لینک VPN:</label>
                     <input type="text" id="vpn-link-input" placeholder="https://..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:14px;box-sizing:border-box;" />
                 </div>
             </div>
             <div class="vpn-confirm-actions">
                 <button class="vpn-cancel-btn" onclick="closeVpnSendModal()">انصراف</button>
-                <button class="vpn-confirm-btn" onclick="sendVpnLink()">ارسال برای کاربر</button>
+                <button class="vpn-confirm-btn" onclick="sendVpnLink()">${VPN_ICONS.send} ارسال برای کاربر</button>
             </div>
         </div>
     `;
