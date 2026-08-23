@@ -34,6 +34,13 @@
  *      mission-retry candidate query is mechanically rewritten to the
  *      semantically identical LEFT JOIN anti-join form (NOT EXISTS ≡
  *      LEFT JOIN ... IS NULL). Purely syntactic; verified by probe.
+ *  10. pg-mem's INSERT ... ON CONFLICT DO UPDATE ... WHERE <cond> RETURNING
+ *      returns the EXISTING row even when the WHERE is false; real
+ *      PostgreSQL returns 0 rows (probe: claim on used=3/free=3 returned
+ *      the row). The alert-economy claimFreeSlot SQL is intercepted with a
+ *      pre-check that reproduces real-PG observable behavior: when the
+ *      existing row's used_count >= freeLimit the claim resolves to 0 rows
+ *      (not claimed).
  *
  * Not a test file itself — required by:
  *   - wallet-debit-atomic-regression-test.cjs
@@ -246,6 +253,19 @@ function makePgHarness() {
     // inside subqueries — see header note #9).
     if (/NOT\s+EXISTS/.test(sql) && /mission_progress\s+mp/.test(sql)) {
       sql = rewriteCorrelatedNotExistsToAntiJoin(sql);
+    }
+    // Shim #10: alert-economy claimFreeSlot — pg-mem returns the existing
+    // row from ON CONFLICT DO UPDATE ... WHERE even when the WHERE is false
+    // (real PG returns 0 rows). Pre-check the row: used_count >= freeLimit →
+    // resolve to 0 rows (not claimed). Params: [userId, alertType, date, limit].
+    if (sql.includes('INSERT INTO alert_quota') && /ON CONFLICT/i.test(sql) && params && params.length === 4) {
+      const pre = await raw(
+        'SELECT used_count FROM alert_quota WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3::date LIMIT 1',
+        [String(params[0]), String(params[1]), String(params[2])],
+      );
+      if (pre.rows.length > 0 && Number(pre.rows[0].used_count) >= Number(params[3])) {
+        return { rows: [], rowCount: 0 };
+      }
     }
     // Shim #7 (companion): the lock-key derivation query uses
     // ::bit(64)::bigint casts that pg-mem cannot evaluate. Return a

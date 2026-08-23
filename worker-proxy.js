@@ -8424,6 +8424,9 @@ const alertEconomyRepo = createAlertEconomyRepository({
   isDatabaseConfigured,
   isoDate: _rcIsoDate,
   normalizeOptionalString,
+  // M5-C FIX: quota dates align with the shared Tehran date boundary
+  // (same helper as daily claims / missions).
+  getTehranDateString: sharedGetTehranDateString,
 });
 
 // ── Wallet + Economy (must be created BEFORE alertHandlers which debits tokens) ──

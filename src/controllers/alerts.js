@@ -128,6 +128,26 @@ export function createAlertHandlers(deps) {
     // `reactivated: true/false` so we can distinguish.
     const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
 
+    // ── Alert Economy: quota, atomic free-slot claim, token debit ──
+    // M5-A FIX: the free-vs-paid decision is made ATOMICALLY by
+    // claimFreeSlot (conditional upsert at the DB level). The old
+    // checkQuota → create → incrementQuota chain let N concurrent requests
+    // all read the same stale free-remaining and ALL pass as free — every
+    // extra alert that should have been paid escaped payment.
+    //
+    // M5-B FIX: the refund refunds EXACTLY what THIS request debited
+    // (debitAmount captured below). The old refund re-computed the cost via
+    // a second checkQuota call: after a midnight crossing it returned 0
+    // (refund skipped, user's tokens lost); after a cost config change it
+    // refunded the WRONG amount; for a free-at-billing request whose quota
+    // was exhausted meanwhile it refunded tokens never debited. It also
+    // referenced `isPremium` outside its block scope — a ReferenceError the
+    // refund try/catch swallowed, so the refund path was DEAD CODE
+    // (finding M5-B2: every create-failure-after-debit silently lost the
+    // user's tokens).
+    let claimedFree = false;
+    let debitAmount = 0;
+
     if (alertEconomyRepo) {
       // PHASE 3: Determine tier via MembershipAuthority (fail-safe to Normal).
       let isPremium = false;
@@ -143,12 +163,28 @@ export function createAlertHandlers(deps) {
         }, { status: 403 }, env);
       }
 
-      // If not free, debit AB tokens BEFORE creating the alert
-      if (quota.costInTokens > 0 && economyService) {
+      // M5-A FIX: atomically claim one free slot. claimed → this creation is
+      // free (the slot is consumed NOW, not after creation). Not claimed →
+      // quota exhausted → paid path below.
+      if (typeof alertEconomyRepo.claimFreeSlot === 'function') {
+        const freeLimit = Number(
+          quota.effectiveFreePerDay
+          ?? ((isPremium === true)
+            ? (quota.config?.premium_free_per_day || quota.config?.free_per_day)
+            : quota.config?.free_per_day)
+          ?? 0) || 0;
+        const claim = await alertEconomyRepo.claimFreeSlot(env, payload.user_id, 'price_alert', freeLimit);
+        claimedFree = Boolean(claim && claim.claimed);
+      }
+
+      // If not free, debit AB tokens BEFORE creating the alert — and capture
+      // the ACTUAL debited amount for the failure refund (M5-B FIX).
+      if (!claimedFree && quota.costInTokens > 0 && economyService) {
+        debitAmount = quota.costInTokens;
         try {
           await economyService.debitUser({
             userId: payload.user_id,
-            amount: quota.costInTokens,
+            amount: debitAmount,
             debitType: 'alert_debit',
             description: `Extra price alert: ${rawSymbol} ${rawDirection} ${rawPrice}`,
             refId: alertRefId,
@@ -156,12 +192,13 @@ export function createAlertHandlers(deps) {
             env,
           });
         } catch (e) {
-          // Insufficient balance or rule violation
+          // Insufficient balance or rule violation — nothing consumed
+          // (the free slot was NOT claimed on the paid path).
           return jsonResponse({
             status: 'error',
             message: e?.code === 'RULE_VIOLATION' ? 'Insufficient AB balance' : 'Payment failed',
             code: 'PAYMENT_FAILED',
-            required_tokens: quota.costInTokens,
+            required_tokens: debitAmount,
           }, { status: 402 }, env);
         }
       }
@@ -170,37 +207,49 @@ export function createAlertHandlers(deps) {
     try {
       const alert = await alertRepo.create(env, payload.user_id, payload);
 
-      // Increment quota AFTER successful creation — but ONLY for new alerts.
-      // Reactivated alerts don't need a new quota increment because the quota
-      // was already counted when the alert was first created.
+      // Quota accounting AFTER successful creation:
+      //   - free path: the slot was already consumed atomically by
+      //     claimFreeSlot — nothing more to do.
+      //   - paid path (not claimed): increment so used_count keeps tracking
+      //     total creations (incrementQuota stays gated by !reactivated —
+      //     reactivations must not consume quota).
       if (alertEconomyRepo && !alert.reactivated) {
-        await alertEconomyRepo.incrementQuota(env, payload.user_id, 'price_alert').catch(() => {});
+        if (!claimedFree) {
+          await alertEconomyRepo.incrementQuota(env, payload.user_id, 'price_alert').catch(() => {});
+        }
+      } else if (alertEconomyRepo && alert.reactivated && claimedFree
+        && typeof alertEconomyRepo.releaseFreeSlot === 'function') {
+        // Reactivation: the original creation already counted its quota —
+        // give the claimed slot back (net zero, same as the old behavior of
+        // never incrementing for reactivations).
+        await alertEconomyRepo.releaseFreeSlot(env, payload.user_id, 'price_alert').catch(() => {});
       }
 
       return jsonResponse({ status: 'success', alert }, {}, env);
     } catch (error) {
-      // ECON-01 FIX: If alert creation fails after a successful debit,
-      // refund the debited tokens. Uses grantReward with the SAME refId
-      // pattern (suffixed with '_refund') so the refund is idempotent.
-      // The UNIQUE constraint on token_transactions prevents double-refund.
-      if (alertEconomyRepo && economyService) {
+      // M5-B FIX: refund EXACTLY what THIS request debited — captured at
+      // debit time, never re-computed from quota/config. grantReward uses
+      // the SAME refId suffixed with '_refund' so the refund is idempotent
+      // (the UNIQUE constraint on token_transactions prevents double-refund).
+      if (debitAmount > 0 && economyService) {
         try {
-          const refundQuota = await alertEconomyRepo.checkQuota(env, payload.user_id, 'price_alert', isPremium);
-          if (refundQuota.costInTokens > 0) {
-            await economyService.grantReward({
-              userId: payload.user_id,
-              amount: refundQuota.costInTokens,
-              rewardType: 'marketplace_refund',
-              description: `Refund: alert creation failed (${rawSymbol} ${rawDirection} ${rawPrice})`,
-              refId: `${alertRefId}_refund`,
-              metadata: { reason: 'alert_create_failure', symbol: rawSymbol, price: rawPrice, direction: rawDirection },
-              auditInfo: { actor: 'system' },
-              env,
-            });
-          }
+          await economyService.grantReward({
+            userId: payload.user_id,
+            amount: debitAmount,
+            rewardType: 'marketplace_refund',
+            description: `Refund: alert creation failed (${rawSymbol} ${rawDirection} ${rawPrice})`,
+            refId: `${alertRefId}_refund`,
+            metadata: { reason: 'alert_create_failure', symbol: rawSymbol, price: rawPrice, direction: rawDirection, debited_amount: debitAmount },
+            auditInfo: { actor: 'system' },
+            env,
+          });
         } catch (refundErr) {
           console.warn('[alerts] Refund failed after alert creation error:', refundErr?.message);
         }
+      }
+      // A failed creation must not consume the claimed free slot (M5-A).
+      if (claimedFree && alertEconomyRepo && typeof alertEconomyRepo.releaseFreeSlot === 'function') {
+        await alertEconomyRepo.releaseFreeSlot(env, payload.user_id, 'price_alert').catch(() => {});
       }
       console.warn(safeError('create-alert', error));
       return safeDbErrorResponse(error, {}, env);

@@ -8,11 +8,26 @@
  * Quota model:
  *   Each user gets N free alerts per day per alert type.
  *   After free quota exhausted, each extra alert costs M AB tokens.
- *   Quota resets at UTC midnight.
+ *   Quota resets at Tehran midnight (M5-C FIX — was UTC, resetting at 03:30
+ *   Tehran; now uses the shared getTehranDateString helper).
+ *
+ * M5-A FIX: claimFreeSlot() atomically decides free-vs-paid at the DB level
+ * (conditional upsert) so concurrent requests cannot all pass as free.
+ * releaseFreeSlot() gives back a claimed slot when creation fails or the
+ * alert turns out to be a reactivation.
  */
 
 export function createAlertEconomyRepository(deps) {
-  const { queryDb, isDatabaseConfigured, isoDate, normalizeOptionalString } = deps;
+  const {
+    queryDb,
+    isDatabaseConfigured,
+    isoDate,
+    normalizeOptionalString,
+    // M5-C FIX: quota dates use the shared Tehran date helper (same boundary
+    // as daily claims / missions). Fallback = UTC for standalone callers that
+    // don't inject it (worker-proxy injects the real helper).
+    getTehranDateString: _getTehranDateString = () => new Date().toISOString().slice(0, 10),
+  } = deps;
 
   let _schemaVerified = false;
 
@@ -163,11 +178,11 @@ export function createAlertEconomyRepository(deps) {
       : config.free_per_day;
 
     if (!isDatabaseConfigured(env)) {
-      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: effectiveFreePerDay, config };
+      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: effectiveFreePerDay, effectiveFreePerDay, config };
     }
 
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = _getTehranDateString();
       const result = await queryDb(env, `
         SELECT used_count FROM alert_quota
         WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3
@@ -184,10 +199,68 @@ export function createAlertEconomyRepository(deps) {
         costInTokens,
         usedToday,
         freeRemaining,
+        effectiveFreePerDay,
         config,
       };
     } catch {
-      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: config.free_per_day, config };
+      return { allowed: true, isFree: true, costInTokens: 0, usedToday: 0, freeRemaining: config.free_per_day, effectiveFreePerDay, config };
+    }
+  }
+
+  /**
+   * M5-A FIX: Atomically claim one free quota slot.
+   *
+   * The conditional upsert increments used_count ONLY when a free slot is
+   * still available (used_count < freeLimit). This is the single decision
+   * point for free-vs-paid — concurrent requests serialize at the row level,
+   * so with one slot left exactly ONE request claims it and the others must
+   * pay. Compare: the old checkQuota→create→incrementQuota chain let every
+   * concurrent request read the stale free-remaining and all pass as free.
+   *
+   * INSERT path: first usage of the day (claims when freeLimit > 0).
+   * CONFLICT path: used_count < freeLimit → +1 (claimed); otherwise the
+   * WHERE fails, no row is returned → NOT claimed (paid path).
+   *
+   * @returns {Promise<{claimed: boolean, usedNow: number}>}
+   */
+  async function claimFreeSlot(env, userId, alertType, freeLimit) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return { claimed: true, usedNow: 0 };
+    const limit = Math.max(0, Number(freeLimit) || 0);
+    try {
+      const today = _getTehranDateString();
+      const result = await queryDb(env, `
+        INSERT INTO alert_quota (user_id, alert_type, quota_date, used_count, updated_at)
+        SELECT $1, $2, $3::date, 1, NOW() WHERE $4::int > 0
+        ON CONFLICT (user_id, alert_type, quota_date) DO UPDATE
+          SET used_count = alert_quota.used_count + 1, updated_at = NOW()
+          WHERE alert_quota.used_count < $4::int
+        RETURNING used_count
+      `, [String(userId), String(alertType), today, limit]);
+      const usedNow = Number(result.rows[0]?.used_count || 0);
+      return { claimed: result.rows.length > 0, usedNow };
+    } catch {
+      // Fail-open to free: mirrors checkQuota's read-failure behavior
+      // (DB unavailable → don't block or charge the user).
+      return { claimed: true, usedNow: 0 };
+    }
+  }
+
+  /**
+   * M5-A FIX: Give back a claimed free slot (failed creation / reactivation).
+   * Conditional decrement — can never take used_count below zero.
+   */
+  async function releaseFreeSlot(env, userId, alertType) {
+    await ensureSchema(env);
+    if (!isDatabaseConfigured(env)) return;
+    try {
+      const today = _getTehranDateString();
+      await queryDb(env, `
+        UPDATE alert_quota SET used_count = used_count - 1, updated_at = NOW()
+        WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3::date AND used_count > 0
+      `, [String(userId), String(alertType), today]);
+    } catch (e) {
+      console.warn('Alert quota release error:', e.message);
     }
   }
 
@@ -199,10 +272,10 @@ export function createAlertEconomyRepository(deps) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = _getTehranDateString();
       await queryDb(env, `
         INSERT INTO alert_quota (user_id, alert_type, used_count, quota_date, updated_at)
-        VALUES ($1, $2, 1, $3, NOW())
+        VALUES ($1, $2, 1, $3::date, NOW())
         ON CONFLICT (user_id, alert_type, quota_date)
         DO UPDATE SET used_count = alert_quota.used_count + 1, updated_at = NOW()
       `, [String(userId), String(alertType), today]);
@@ -224,7 +297,7 @@ export function createAlertEconomyRepository(deps) {
       : config.free_per_day;
     if (!isDatabaseConfigured(env)) return { usedToday: 0, freeRemaining: effectiveFreePerDay, config };
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = _getTehranDateString();
       const result = await queryDb(env, `SELECT used_count FROM alert_quota WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3`, [String(userId), String(alertType), today]);
       const usedToday = Number(result.rows[0]?.used_count || 0);
       return { usedToday, freeRemaining: Math.max(0, effectiveFreePerDay - usedToday), config };
@@ -273,6 +346,8 @@ export function createAlertEconomyRepository(deps) {
     getAllConfigs,
     updateConfig,
     checkQuota,
+    claimFreeSlot,
+    releaseFreeSlot,
     incrementQuota,
     getQuotaStatus,
     getDashboard,
