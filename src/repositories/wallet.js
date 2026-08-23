@@ -307,30 +307,49 @@ export function createWalletRepository(deps) {
    * The tier multiplier is applied via options.entitlementConfig (same as
    * the controller contract: { computeReward: true, isPremium, entitlementConfig }).
    *
-   * FIX M1 + M2 (atomicity): the ENTIRE claim runs inside ONE logical unit —
-   * a single queryDbTransaction (BEGIN ... COMMIT) holds the advisory lock,
-   * runs the duplicate check, reads the streak (FOR UPDATE), upserts the
-   * streak row, and executes the atomic credit CTE (the exact core of
-   * creditTokens, inlined):
-   *   1. pg_advisory_xact_lock(user_id + Tehran date)   ← held until COMMIT
-   *   2. duplicate check (existing completed tx for today's refId)
-   *   3. streak read ... FOR UPDATE (row-locked to COMMIT)
-   *   4. streak UPSERT
-   *   5. credit CTE (tx INSERT ... ON CONFLICT DO NOTHING + balance UPSERT)
-   * Any failure at any step → ROLLBACK → no partial state survives.
+   * FIX M1 + M2 (atomicity) — ACCURATE DESCRIPTION (HR-1):
+   * The claim runs in TWO queryDbTransaction calls (two BEGIN...COMMIT
+   * units), NOT one — each queryDbTransaction call in worker-proxy.js is a
+   * self-contained pool/client lifecycle (BEGIN → statements → COMMIT →
+   * release), so the advisory lock cannot span them:
    *
-   * Previously the lock lived in a FIRST transaction that committed right
-   * after the duplicate check (M2 — the lock protected nothing), and the
-   * streak UPSERT ran in autocommit BEFORE the credit transaction (M1 — a
-   * Worker death in between left last_claim_date=today with no tx, and
-   * retries then hit the streak check and returned ALREADY_CLAIMED forever:
-   * the reward was lost with no retry cron to recover it). Verified by
-   * wallet-daily-claim-atomic-test.cjs DR2/DR2b/DR4.
+   *   PHASE 1 (read-only transaction):
+   *     1. pg_advisory_xact_lock(user_id + Tehran date)
+   *     2. duplicate check (existing completed tx for today's refId)
+   *     3. streak read ... FOR UPDATE
+   *     → COMMIT releases the lock and row locks. Writes nothing, so a
+   *       failure after PHASE 1 leaves zero state behind (clean retry).
    *
-   * Concurrency: a concurrent winner (same refId) makes the credit CTE's
-   * INSERT conflict (ON CONFLICT DO NOTHING → 0 rows → claim_tx_id NULL)
-   * → the claim is a no-op → ALREADY_CLAIMED. The partial unique index
-   * remains the final line of defense.
+   *   PHASE 2 (THE write transaction — this is where the M1 guarantee
+   *   lives and what DR2/DR2b lock):
+   *     4. streak UPSERT
+   *     5. atomic credit CTE (the exact core of creditTokens, inlined:
+   *        tx INSERT ... ON CONFLICT DO NOTHING + balance UPSERT)
+   *     → single COMMIT: the streak row can NEVER be advanced without the
+   *       matching credit. Any failure between them → ROLLBACK of both →
+   *       retry succeeds (the pre-fix lost-reward window is closed).
+   *
+   * The lock is therefore advisory for the write phase (it serializes the
+   * duplicate-check reads, not the writes); the REAL write-phase defenses
+   * are the ON CONFLICT DO NOTHING credit CTE + the partial unique index
+   * on (user_id, tx_type, ref_id) — the final line of defense against
+   * double-credit.
+   *
+   * Previously (pre-fix) the streak UPSERT ran in autocommit BEFORE a
+   * SEPARATE credit transaction — a Worker death in between left
+   * last_claim_date=today with no tx, and retries then hit the streak
+   * check and returned ALREADY_CLAIMED forever: the reward was lost with
+   * no retry cron to recover it (verified RED by wallet-daily-claim-
+   * atomic-test.cjs DR2/DR2b before the fix, GREEN after).
+   *
+   * Concurrency: a concurrent winner (same refId) makes PHASE 2's credit
+   * CTE INSERT conflict (ON CONFLICT DO NOTHING → 0 rows → claim_tx_id
+   * NULL) → the loser's credit is a no-op → ALREADY_CLAIMED. The loser's
+   * streak UPSERT still commits values identical to the winner's (both
+   * computed from equivalent reads) — benign overwrite. Known benign edge:
+   * a same-millisecond race straddling Tehran midnight could interleave
+   * two different legitimate days' streak computations (pre-existing
+   * class, ultra-rare, self-corrects next day).
    *
    * @returns { claimed, amount, newBalance, txId, streak_day, cycle_complete, cycle_count }
    */
@@ -362,9 +381,11 @@ export function createWalletRepository(deps) {
       throw new Error('Failed to compute advisory lock key');
     }
 
-    // PHASE 1 (inside the single claim transaction): lock + duplicate check
-    // + streak read. The transaction stays OPEN (see PHASE 2) — the lock is
-    // held until the final COMMIT, so the whole claim is one atomic unit.
+    // PHASE 1 (read-only transaction — HR-1 accurate description): lock +
+    // duplicate check + streak read. This transaction COMMITS right here and
+    // releases the lock/row locks; it writes nothing, so any failure after
+    // it leaves zero partial state. The write-phase atomicity lives in
+    // PHASE 2 below.
     const phase1 = await queryDbTransaction(env, [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
@@ -432,11 +453,14 @@ export function createWalletRepository(deps) {
       cycle_complete: cycleComplete,
     });
 
-    // PHASE 2 (same transaction continues): streak UPSERT + atomic credit
-    // CTE (the exact core of creditTokens, inlined). Both commit or roll
-    // back together with PHASE 1 — there is no window in which the streak
-    // row is advanced without the matching credit (M1) and no window in
-    // which the lock has been released mid-claim (M2).
+    // PHASE 2 (THE write transaction — separate BEGIN...COMMIT from PHASE 1):
+    // streak UPSERT + atomic credit CTE (the exact core of creditTokens,
+    // inlined). THESE TWO WRITES commit or roll back TOGETHER in this one
+    // transaction — that is the M1 guarantee: no window in which the streak
+    // row is advanced without the matching credit. (The advisory lock from
+    // PHASE 1 has already been released by its COMMIT — by design; the
+    // write-phase defense against a concurrent winner is the credit CTE's
+    // ON CONFLICT DO NOTHING + the partial unique index, not the lock.)
     //   - tx_insert: INSERT ... ON CONFLICT DO NOTHING → 0 rows if a
     //     concurrent claimant won the same refId → claim_tx_id IS NULL
     const phase2 = await queryDbTransaction(env, [
