@@ -1664,8 +1664,15 @@ const WalletApp = (() => {
       });
       if (resp?.status === 'success' && resp.purchase) {
         showVpnSuccessModal(resp.purchase);
-        // Update balance from server response (authoritative)
-        _lastKnownBalance = Math.max(0, (_lastKnownBalance || 0) - resp.purchase.cost_ab);
+        // PART 10: use the AUTHORITATIVE balance from the server response
+        // (not a frontend guess). Falls back to refreshWalletBalance() if
+        // the server didn't return new_balance (e.g., idempotent path).
+        if (typeof resp.new_balance === 'number') {
+          _lastKnownBalance = resp.new_balance;
+          const balEl = document.getElementById('wallet-balance-amount');
+          if (balEl) balEl.textContent = resp.new_balance.toLocaleString('en-US');
+        }
+        // Always refresh from server as final source of truth
         refreshWalletBalance();
       } else if (resp?.code === 'DUPLICATE_PENDING') {
         showToast(fa ? 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.' : 'You already have a pending purchase for this plan.');

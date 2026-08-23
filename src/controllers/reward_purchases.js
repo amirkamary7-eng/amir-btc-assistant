@@ -114,8 +114,9 @@ export function createRewardPurchaseHandlers(deps) {
     try {
       // 1. Atomic wallet debit — price from backend catalog (plan.costAb)
       const refId = `vpn_purchase_${userId}_${plan.id}_${Date.now()}`;
+      let debitResult;
       try {
-        await economyService.debitUser({
+        debitResult = await economyService.debitUser({
           userId,
           amount: plan.costAb,
           debitType: 'vpn_purchase',
@@ -242,6 +243,12 @@ export function createRewardPurchaseHandlers(deps) {
         timestamp: new Date().toISOString(),
       }));
 
+      // PART 10: return the AUTHORITATIVE new balance from the debit result
+      // (never let frontend guess — this eliminates stale-balance issues)
+      const newBalance = debitResult && typeof debitResult.newBalance === 'number'
+        ? debitResult.newBalance
+        : null;
+
       return jsonResponse({
         status: 'success',
         message: 'Purchase created. Your VPN subscription link will be sent to you shortly.',
@@ -257,6 +264,7 @@ export function createRewardPurchaseHandlers(deps) {
           expires_at: purchase.expires_at,
           created_at: purchase.created_at,
         },
+        new_balance: newBalance,
       }, { status: 201 }, env);
     } catch (e) {
       console.warn(safeError('vpn-purchase', e));
