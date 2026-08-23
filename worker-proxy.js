@@ -74,6 +74,8 @@ const ENTITLEMENT = Object.freeze({
 });
 
 import { createCosmeticsRepository } from './src/repositories/cosmetics.js';
+import { createRewardPurchaseRepository } from './src/repositories/reward_purchases.js';
+import { createRewardPurchaseHandlers } from './src/controllers/reward_purchases.js';
 import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
@@ -8554,6 +8556,27 @@ const walletHandlers = createWalletHandlers({
   getTehranWeekStart: getTehranWeekStart,
 });
 
+// ── Reward Purchases (VPN Reward Market — Phase 5-8) ──
+const rewardPurchaseRepo = createRewardPurchaseRepository({
+  queryDb,
+  queryDbTransaction,
+  isDatabaseConfigured,
+  getTehranDateString: sharedGetTehranDateString,
+});
+const rewardPurchaseHandlers = createRewardPurchaseHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  economyService,
+  rewardPurchaseRepo,
+  membershipAuthority,
+  notificationService,
+  requireAdmin: (request, env, perm) => adminHandlers.requireAdmin(request, env, perm),
+});
+
 // ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────
 const cosmeticsRepo = createCosmeticsRepository({ queryDb, queryDbTransaction, isDatabaseConfigured });
 const cosmeticsHandlers = createCosmeticsHandlers({
@@ -13166,6 +13189,30 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/api/wheel/spin') {
         return wheelHandlers.handleSpin(request, env);
+      }
+
+      // ── Reward Purchases (VPN Reward Market) ──
+      if (request.method === 'GET' && url.pathname === '/api/rewards/vpn/plans') {
+        return rewardPurchaseHandlers.handleVpnPlans(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/rewards/vpn/purchase') {
+        return rewardPurchaseHandlers.handleVpnPurchase(request, env);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/rewards/purchases') {
+        return rewardPurchaseHandlers.handleUserPurchases(request, env);
+      }
+      // Admin: reward purchase queue
+      if (request.method === 'GET' && url.pathname === '/api/admin/reward-purchases') {
+        return rewardPurchaseHandlers.handleAdminListPurchases(request, env);
+      }
+      if (url.pathname.startsWith('/api/admin/reward-purchases/') && request.method === 'POST') {
+        const parts = url.pathname.split('/');
+        // /api/admin/reward-purchases/:id/fulfill|cancel
+        if (parts.length === 6 && (parts[5] === 'fulfill' || parts[5] === 'cancel')) {
+          const purchaseId = parts[4];
+          if (parts[5] === 'fulfill') return rewardPurchaseHandlers.handleAdminFulfill(request, env, purchaseId);
+          return rewardPurchaseHandlers.handleAdminCancel(request, env, purchaseId);
+        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/wheel/history') {

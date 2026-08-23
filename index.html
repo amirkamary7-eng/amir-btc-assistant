@@ -1636,6 +1636,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                             <span>مرکز اعلانات</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="vpn-purchases" onclick="switchAdminSection('vpn-purchases', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                            <span>خریدهای VPN</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="alert-economy" onclick="switchAdminSection('alert-economy', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                             <span>اقتصاد هشدارها</span>
@@ -2070,6 +2074,37 @@
                     </div>
                     <div class="rc-tab-content" id="rc-tab-settings" style="display:none;">
                         <div id="rc-settings-section"></div>
+                    </div>
+                </section>
+
+                <!-- VPN Reward Purchases (Phase 8) -->
+                <section class="adm-section" id="admin-section-vpn-purchases">
+                    <div class="adm-section-header">
+                        <h2>خریدهای VPN — صف انجام</h2>
+                        <p class="adm-section-desc">درخواست‌های خرید VPN کاربران Premium. پس از ارسال لینک VPN، وضعیت را به «انجام شد» تغییر دهید.</p>
+                    </div>
+                    <div class="adm-filter-row" id="vpn-purchases-filter">
+                        <button class="adm-filter-btn active" data-vpn-status="pending" onclick="filterVpnPurchases('pending', this)">در انتظار</button>
+                        <button class="adm-filter-btn" data-vpn-status="fulfilled" onclick="filterVpnPurchases('fulfilled', this)">انجام شده</button>
+                        <button class="adm-filter-btn" data-vpn-status="all" onclick="filterVpnPurchases(null, this)">همه</button>
+                    </div>
+                    <div id="vpn-purchases-table" class="adm-table-wrap">
+                        <table class="adm-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>کاربر</th>
+                                    <th>پلن</th>
+                                    <th>هزینه</th>
+                                    <th>وضعیت</th>
+                                    <th>تاریخ</th>
+                                    <th>اقدام</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vpn-purchases-body">
+                                <tr><td colspan="7" class="adm-loading">در حال بارگذاری...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </section>
 

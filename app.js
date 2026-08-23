@@ -2371,6 +2371,9 @@ window.tgBackReset = tgBackReset;
 
 // ── Analysis Detail Page ──
 async function openAnalysisDetailPage(id) {
+    // PHASE 2: target-based mission trigger — fires ONLY when a specific
+    // analysis detail page is opened with a real analysis ID.
+    try { if (window.MissionBus && id) { MissionBus.fire('analysis_detail_open', String(id)); } } catch (_) {}
     // Push onto the BackButton navigation stack so pressing Back returns to
     // the analysis list (not stuck on the detail page).
     tgBackPush(closeAnalysisDetailPage);
@@ -5735,28 +5738,23 @@ const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
 let _missionStatusList = [];
 
-// Tab-to-event mapping: when user switches to a tab, this event fires.
-// This covers ALL 5 main tabs + calendar sub-tab automatically.
-const TAB_EVENT_MAP = {
-    'dashboard-page': 'dashboard_open',
-    'market-page': 'market_open',
-    'analysis-page': 'analysis_open',
-    'news-page': 'news_open',         // fires when user opens the News tab
-    'profile-page': 'profile_open',
-};
-
 /**
- * Central Mission Event Bus.
- * - fire(eventType): emits an event, triggers all matching missions
- * - autoInstrumentTabs(): hooks into switchTab to auto-fire tab events
- * - Events are NOT hardcoded in the bus — they come from backend metadata
+ * Central Mission Event Bus — TARGET-BASED (PHASE 2 security fix).
+ *
+ * OLD (removed): autoInstrumentTabs hooked switchTab and fired mission
+ * events on TAB SWITCHES — just opening the News tab completed "read_news".
+ *
+ * NEW: missions are triggered ONLY from specific content-detail events:
+ *   - news_article_open    → openNewsModal() with the article index
+ *   - analysis_detail_open → openAnalysisDetailPage() with the analysis ID
+ *   - asset_detail_open    → openCoinDetail()/openForexDetail() with symbol
+ *   - calendar_open        → switchNewsTab('calendar') sub-view
+ *   - daily_open           → server-side (bootstrap auto-fire)
+ *
+ * Tab switches alone trigger NOTHING. UI state/localStorage trigger NOTHING.
  */
 const MissionBus = {
-    /**
-     * Fire a mission event. Checks all missions from backend whose
-     * metadata.trigger matches this event, and fires completion for each.
-     */
-    fire(eventType) {
+    fire(eventType, targetId) {
         if (!eventType || !API_BASE) return;
 
         const matching = _missionStatusList.filter(m =>
@@ -5764,32 +5762,8 @@ const MissionBus = {
         );
 
         for (const mission of matching) {
-            completeMission(mission.mission_id);
+            completeMission(m.mission_id, targetId);
         }
-    },
-
-    /**
-     * Hook into switchTab to auto-fire events for tab switches.
-     * Called once during initialization. Wraps the original switchTab.
-     */
-    _tabHooked: false,
-    autoInstrumentTabs() {
-        if (this._tabHooked) return;
-        this._tabHooked = true;
-
-        const origSwitchTab = window.switchTab;
-        if (typeof origSwitchTab !== 'function') return;
-
-        window.switchTab = function(pageId, btn) {
-            // Call original switchTab
-            origSwitchTab.call(this, pageId, btn);
-
-            // Auto-fire the corresponding mission event
-            const eventType = TAB_EVENT_MAP[pageId];
-            if (eventType) {
-                MissionBus.fire(eventType);
-            }
-        };
     },
 };
 
@@ -5808,8 +5782,6 @@ async function loadMissionStatus() {
             updateMissionCards();
         }
         _missionsLoaded = true;
-        // Now that we have mission data, auto-instrument tab switches
-        MissionBus.autoInstrumentTabs();
     } catch (_) {}
 }
 
@@ -5823,7 +5795,7 @@ async function loadMissionStatus() {
  * daily_login is fired automatically by bootstrap — frontend doesn't need
  * to call this for daily_login.
  */
-async function completeMission(missionId) {
+async function completeMission(missionId, targetId) {
     if (_completedMissionsToday.has(missionId)) return;
     if (!API_BASE || !canRunSessionRequests()) return;
 
@@ -5834,7 +5806,7 @@ async function completeMission(missionId) {
         if (missionId !== 'daily_login') {
             const tokenResp = await apiFetch('/api/wallet/mission/issue-token', {
                 method: 'POST',
-                body: JSON.stringify({ mission_id: missionId }),
+                body: JSON.stringify({ mission_id: missionId, target_id: targetId || null }),
             });
             if (tokenResp?.status !== 'success' || !tokenResp.event_token) {
                 // Token issuance failed — abort. The mission is NOT completed.
@@ -7949,6 +7921,11 @@ function filterCalCountry(country, btn) {
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
 function openNewsModal(idx) {
+    // PHASE 2: target-based mission trigger — fires ONLY when a specific
+    // news article detail is actually opened (not on tab switch).
+    try { if (window.MissionBus && displayedNews && displayedNews[idx]) {
+        MissionBus.fire('news_article_open', displayedNews[idx].url || displayedNews[idx].id || String(idx));
+    } } catch (_) {}
     const n = displayedNews[idx];
     if (!n) return;
     const el = (id) => $(id);
@@ -8354,6 +8331,9 @@ function parseBtcPairSymbol(symbol) {
 }
 
 async function openCoinDetail(symbol) {
+    // PHASE 2: target-based mission trigger — fires when a specific asset
+    // detail is opened (not on Market tab entry).
+    try { if (window.MissionBus && symbol) { MissionBus.fire('asset_detail_open', String(symbol)); } } catch (_) {}
     // DEFENSE-IN-DEPTH (Watchlist Detail/Chart fix): if this symbol is actually
     // a forex/metal/stock pair (in allForexPairs), route to openForexDetail
     // instead. This catches forex symbols that reach openCoinDetail via any
@@ -8812,6 +8792,7 @@ function closeCoinDetail() {
  * Open forex pair detail modal with TradingView chart.
  */
 async function openForexDetail(symbol) {
+    try { if (window.MissionBus && symbol) { MissionBus.fire('asset_detail_open', String(symbol)); } } catch (_) {}
     const pair = allForexPairs.find(f => f.symbol === symbol);
     if (!pair) return;
 

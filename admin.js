@@ -4169,3 +4169,104 @@ async function loadAdminMembership() {
         if (container) container.innerHTML = '<div class="admin-empty">در حال بارگذاری ماژول عضویت...</div>';
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 8: VPN Reward Purchases — Admin Queue
+// ═══════════════════════════════════════════════════════════════════════
+
+var _vpnPurchasesFilter = 'pending';
+
+async function loadVpnPurchases() {
+    const tbody = document.getElementById('vpn-purchases-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" class="adm-loading">در حال بارگذاری...</td></tr>';
+    try {
+        const url = _vpnPurchasesFilter && _vpnPurchasesFilter !== 'all'
+            ? '/api/admin/reward-purchases?status=' + _vpnPurchasesFilter
+            : '/api/admin/reward-purchases';
+        const resp = await adminApiFetch(url);
+        if (resp?.status === 'success' && Array.isArray(resp.purchases)) {
+            renderVpnPurchases(resp.purchases);
+        } else {
+            tbody.innerHTML = '<tr><td colspan="7" class="adm-loading">خطا در بارگذاری</td></tr>';
+        }
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" class="adm-loading">خطا در بارگذاری</td></tr>';
+    }
+}
+
+function renderVpnPurchases(purchases) {
+    const tbody = document.getElementById('vpn-purchases-body');
+    if (!tbody) return;
+    if (!purchases.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="adm-loading">موردی یافت نشد</td></tr>';
+        return;
+    }
+    const statusLabels = {
+        pending: 'در انتظار',
+        fulfilled: 'انجام شده',
+        cancelled: 'لغو شده',
+    };
+    const statusClasses = {
+        pending: 'status-pending',
+        fulfilled: 'status-fulfilled',
+        cancelled: 'status-cancelled',
+    };
+    tbody.innerHTML = purchases.map(function (p) {
+        const userDisplay = p.username ? '@' + p.username : (p.display_name || p.user_id);
+        const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
+        const actionBtn = p.status === 'pending'
+            ? '<button class="adm-action-btn adm-action-fulfill" onclick="fulfillVpnPurchase(' + p.id + ')">انجام شد</button>'
+            : (p.fulfilled_at ? '<span class="adm-fulfilled-by">' + (p.fulfilled_by ? 'توسط ' + p.fulfilled_by : '') + '</span>' : '—');
+        return '<tr>' +
+            '<td>' + p.id + '</td>' +
+            '<td>' + escapeHtmlAdmin(userDisplay) + '</td>' +
+            '<td>VPN ' + (p.vpn_gb || '?') + 'GB</td>' +
+            '<td>' + p.cost_ab + ' AB</td>' +
+            '<td><span class="adm-status ' + (statusClasses[p.status] || '') + '">' + (statusLabels[p.status] || p.status) + '</span></td>' +
+            '<td>' + dateStr + '</td>' +
+            '<td>' + actionBtn + '</td>' +
+            '</tr>';
+    }).join('');
+}
+
+async function fulfillVpnPurchase(purchaseId) {
+    if (!confirm('لینک VPN برای این کاربر ارسال شد؟ وضعیت به «انجام شده» تغییر کند؟')) return;
+    try {
+        const resp = await adminApiFetch('/api/admin/reward-purchases/' + purchaseId + '/fulfill', {
+            method: 'POST',
+        });
+        if (resp?.status === 'success') {
+            loadVpnPurchases();
+        } else {
+            alert(resp?.message || 'خطا در انجام عملیات');
+        }
+    } catch (e) {
+        alert('خطا در برقراری ارتباط');
+    }
+}
+
+function filterVpnPurchases(status, btn) {
+    _vpnPurchasesFilter = status;
+    document.querySelectorAll('#vpn-purchases-filter .adm-filter-btn').forEach(function (b) {
+        b.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
+    loadVpnPurchases();
+}
+
+function escapeHtmlAdmin(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Hook into admin section switcher
+(function () {
+    const orig = window.switchAdminSection;
+    if (typeof orig === 'function') {
+        window.switchAdminSection = function (section, btn) {
+            orig(section, btn);
+            if (section === 'vpn-purchases') loadVpnPurchases();
+        };
+    }
+})();

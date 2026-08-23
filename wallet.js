@@ -621,8 +621,8 @@ const WalletApp = (() => {
           <h3>${esc(WT('earn_tokens'))}</h3>
           <span class="weekly-reset-countdown" id="weekly-reset-countdown"></span>
         </div>
-        <div class="wallet-earn-grid">
-          <!-- PHASE UX-V2.1: compact Daily Check-in card — opens modal for full 7-day streak view -->
+        <div class="wallet-earn-grid" id="wallet-earn-grid">
+          <!-- Compact Daily Check-in card (opens the 7-day streak modal) -->
           <div class="wallet-earn-card daily-checkin" id="daily-checkin-card" onclick="WalletApp.openDailyCheckinModal()">
             <div class="checkin-icon">${ICONS.calendar}</div>
             <div class="checkin-info">
@@ -631,81 +631,26 @@ const WalletApp = (() => {
             </div>
             <div class="checkin-arrow">›</div>
           </div>
-          <div class="wallet-earn-card" id="mission-analysis-read">
-            <div class="earn-reward">+5 AB</div>
-            <div class="earn-title">${esc(WT('read_analysis'))}</div>
-            <div class="earn-desc">${esc(WT('view_premium_reports'))}</div>
-          </div>
-          <div class="wallet-earn-card" id="mission-news-view">
-            <div class="earn-reward">+3 AB</div>
-            <div class="earn-title">${esc(WT('view_news'))}</div>
-            <div class="earn-desc">${esc(WT('stay_updated'))}</div>
-          </div>
-          <div class="wallet-earn-card" id="mission-calendar-view">
-            <div class="earn-reward">+2 AB</div>
-            <div class="earn-title">مشاهده تقویم اقتصادی</div>
-            <div class="earn-desc">رویدادهای بازار را دنبال کنید</div>
-          </div>
-          <div class="wallet-earn-card" id="mission-daily-open">
-            <div class="earn-reward">+10 AB</div>
-            <div class="earn-title">${esc(WT('open_app_daily'))}</div>
-            <div class="earn-desc">${esc(WT('active_daily'))}</div>
-          </div>
-          <div class="wallet-earn-card" id="mission-invite-friend">
-            <div class="earn-reward">+50 AB</div>
-            <div class="earn-title">${esc(WT('invite_friend'))}</div>
-            <div class="earn-desc">${esc(WT('earn_per_referral'))}</div>
-          </div>
+          <!-- Mission cards are rendered dynamically by updateMissionCards()
+               from backend data (mission_id, reward, status, trigger) -->
         </div>
       </div>
 
-      <!-- Rewards Marketplace -->
+      <!-- Reward Market (VPN) -->
       <div class="wallet-section" id="wallet-marketplace-section">
         <div class="wallet-section-header">
           <h3>${esc(WT('rewards_marketplace'))}</h3>
-          <button class="section-action">${esc(WT('view_all'))}</button>
         </div>
-        <div class="wallet-marketplace-scroll">
-          <div class="wallet-marketplace-card">
-            <div class="reward-icon icon-analysis">${ICONS.chart}</div>
-            <div class="reward-name">${esc(WT('premium_analysis'))}</div>
-            <div class="reward-desc">${esc(WT('unlock_premium'))}</div>
-            <div class="reward-footer">
-              <span class="reward-cost">500 AB</span>
-              <span class="reward-status status-coming">${esc(WT('coming_soon'))}</span>
-            </div>
-          </div>
-          <div class="wallet-marketplace-card">
-            <div class="reward-icon icon-vip">${ICONS.shield}</div>
-            <div class="reward-name">${esc(WT('vip_features'))}</div>
-            <div class="reward-desc">${esc(WT('vip_status'))}</div>
-            <div class="reward-footer">
-              <span class="reward-cost">2,000 AB</span>
-              <span class="reward-status status-locked">${esc(WT('locked'))}</span>
-            </div>
-          </div>
-          <div class="wallet-marketplace-card">
-            <div class="reward-icon icon-report">${ICONS.star}</div>
-            <div class="reward-name">${esc(WT('exclusive_reports'))}</div>
-            <div class="reward-desc">${esc(WT('unlock_premium'))}</div>
-            <div class="reward-footer">
-              <span class="reward-cost">1,000 AB</span>
-              <span class="reward-status status-coming">${esc(WT('coming_soon'))}</span>
-            </div>
-          </div>
-          <div class="wallet-marketplace-card">
-            <div class="reward-icon icon-future">${ICONS.rocket}</div>
-            <div class="reward-name">${esc(WT('future_utilities'))}</div>
-            <div class="reward-desc">${esc(WT('staking_discounts'))}</div>
-            <div class="reward-footer">
-              <span class="reward-cost">TBA</span>
-              <span class="reward-status status-coming">${esc(WT('coming_soon'))}</span>
-            </div>
-          </div>
+        <div id="reward-market-premium-banner" class="reward-market-premium-banner" style="display:none;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span>${detectLang() === 'fa' ? 'ویژه اعضای Premium — برای خرید ارتقا دهید' : 'Premium members only — upgrade to purchase'}</span>
+        </div>
+        <div class="vpn-market-grid" id="vpn-market-grid">
+          <!-- VPN plan cards rendered dynamically by WalletApp.renderVpnMarket() -->
         </div>
       </div>
 
-      <!-- Transaction History -->
+            <!-- Transaction History -->
       <div class="wallet-section" id="wallet-history-section">
         <div class="wallet-section-header">
           <h3>${esc(WT('transaction_history'))}</h3>
@@ -1083,6 +1028,10 @@ const WalletApp = (() => {
     // Fire all 3 in parallel
     const walletPromise = fetchWallet();
     const claimPromise = fetchClaimStatus();
+    // PHASE 5-7: render the VPN market (needs isPremium from claim status)
+    const vpnPromise = fetchClaimStatus().then(claimRes => {
+      renderVpnMarket(claimRes?.is_premium || false);
+    }).catch(() => renderVpnMarket(false));
     const summaryPromise = fetchSummary();
 
     // Render wallet page as soon as wallet data arrives (don't wait for others)
@@ -1384,30 +1333,44 @@ const WalletApp = (() => {
     setTimeout(() => modal.remove(), 250);
   }
 
-  // Render 7-day streak HTML for modal
+  // Render 7-day streak HTML — PHASE 1: explicit rewards + clear statuses
   function _renderStreakDaysHTML(currentStreakDay, streakRewards, claimedToday) {
     const days = (streakRewards && streakRewards.length >= 7) ? streakRewards.slice(0, 7) : [1, 3, 6, 10, 18, 30, 50];
+    const fa = detectLang() === 'fa';
     let html = '';
     for (let i = 0; i < 7; i++) {
       const day = i + 1;
       const reward = days[i] || 0;
       const isClaimed = day < currentStreakDay || (claimedToday && day === currentStreakDay);
-      const isToday = claimedToday ? day === currentStreakDay : day === currentStreakDay;
-      const isFuture = day > currentStreakDay;
+      const isToday = day === currentStreakDay;
       const isDay7 = day === 7;
 
       let stateClass = '';
-      let stateIcon = '';
-      if (isClaimed) { stateClass = 'dcm-day-claimed'; stateIcon = '✓'; }
-      else if (isToday && !claimedToday) { stateClass = 'dcm-day-today'; stateIcon = '●'; }
-      else if (claimedToday && isToday) { stateClass = 'dcm-day-claimed'; stateIcon = '✓'; }
-      else { stateClass = 'dcm-day-locked'; stateIcon = '🔒'; }
+      let stateLabel = '';
+      let stateSvg = '';
+      if (isClaimed) {
+        stateClass = 'dcm-day-claimed';
+        stateLabel = fa ? 'دریافت شد' : 'Claimed';
+        stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+      } else if (isToday && !claimedToday) {
+        stateClass = 'dcm-day-today';
+        stateLabel = fa ? 'قابل دریافت' : 'Available';
+        stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>';
+      } else if (isToday && claimedToday) {
+        stateClass = 'dcm-day-claimed';
+        stateLabel = fa ? 'دریافت شد' : 'Claimed';
+        stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+      } else {
+        stateClass = 'dcm-day-locked';
+        stateLabel = fa ? 'قفل' : 'Locked';
+        stateSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+      }
 
       html += `
-        <div class="dcm-day ${stateClass} ${isDay7 ? 'dcm-day-7' : ''}">
-          <div class="dcm-day-num">${day}</div>
-          <div class="dcm-day-reward">${reward}</div>
-          <div class="dcm-day-state">${stateIcon}</div>
+        <div class="dcm-day ${stateClass} ${isDay7 ? 'dcm-day-7' : ''}" title="${fa ? 'روز ' + day : 'Day ' + day}: +${reward} AB">
+          <div class="dcm-day-label">${fa ? 'روز' : 'Day'} ${day}</div>
+          <div class="dcm-day-reward">+${reward} AB</div>
+          <div class="dcm-day-state">${stateSvg}<span>${stateLabel}</span></div>
         </div>`;
     }
     return html;
@@ -1512,7 +1475,118 @@ const WalletApp = (() => {
     _startWeeklyCountdown,
     _stopWeeklyCountdown,
   };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PHASE 5-7: VPN Reward Market (Premium-only purchase)
+  // ═══════════════════════════════════════════════════════════════════
+
+  let _vpnPlansCache = null;
+  let _isPremiumUser = false;
+  let _purchaseInFlight = false;
+
+  function _vpnIconSvg(size) {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>`;
+  }
+
+  async function renderVpnMarket(isPremium) {
+    _isPremiumUser = Boolean(isPremium);
+    const grid = document.getElementById('vpn-market-grid');
+    const banner = document.getElementById('reward-market-premium-banner');
+    if (!grid) return;
+
+    if (banner) banner.style.display = _isPremiumUser ? 'none' : 'flex';
+
+    if (!_vpnPlansCache) {
+      try {
+        const resp = await apiFetch('/api/rewards/vpn/plans');
+        if (resp?.status === 'success' && Array.isArray(resp.plans)) {
+          _vpnPlansCache = resp.plans;
+        }
+      } catch (_) { return; }
+    }
+    if (!_vpnPlansCache) return;
+
+    const fa = detectLang() === 'fa';
+    grid.innerHTML = _vpnPlansCache.map(plan => `
+      <div class="vpn-card${_isPremiumUser ? '' : ' vpn-card-locked'}" data-plan="${plan.id}">
+        <div class="vpn-card-icon">${_vpnIconSvg(28)}</div>
+        <div class="vpn-card-info">
+          <div class="vpn-card-title">VPN ${plan.gb}GB</div>
+          <div class="vpn-card-desc">${fa ? 'اشتراک یک‌ماهه' : '1-month subscription'}</div>
+        </div>
+        <div class="vpn-card-footer">
+          <span class="vpn-card-cost">${plan.cost_ab} AB</span>
+          ${_isPremiumUser
+            ? `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`
+            : `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Premium</span>`
+          }
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function purchaseVpn(planId) {
+    if (_purchaseInFlight) return;
+    if (!_isPremiumUser) {
+      showToast(detectLang() === 'fa' ? 'برای خرید ابتدا عضو Premium شوید' : 'Premium membership required');
+      return;
+    }
+    _purchaseInFlight = true;
+    try {
+      const resp = await apiFetch('/api/rewards/vpn/purchase', {
+        method: 'POST',
+        body: JSON.stringify({ plan_id: planId }),
+      });
+      if (resp?.status === 'success') {
+        showToast(detectLang() === 'fa' ? 'خرید ثبت شد — لینک VPN به‌زودی ارسال می‌شود' : 'Purchase created — VPN link will be sent shortly');
+        try { window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success'); } catch (_) {}
+        refreshWalletBalance();
+      } else if (resp?.code === 'DUPLICATE_PENDING') {
+        showToast(detectLang() === 'fa' ? 'یک درخواست در انتظار برای این پلن دارید' : 'Pending purchase exists for this plan');
+      } else if (resp?.code === 'PAYMENT_FAILED') {
+        showToast(detectLang() === 'fa' ? 'توکن کافی نیست' : 'Insufficient balance');
+      } else {
+        showToast(resp?.message || 'Purchase failed');
+      }
+    } catch (e) {
+      showToast('Purchase failed');
+    } finally {
+      _purchaseInFlight = false;
+    }
+  }
+
+  async function refreshWalletBalance() {
+    try {
+      const resp = await apiFetch('/api/wallet/balance');
+      if (resp?.status === 'success') {
+        const el = document.getElementById('wallet-balance-amount');
+        if (el) el.textContent = Number(resp.balance).toLocaleString('en-US');
+      }
+    } catch (_) {}
+  }
+
+  return {
+    loadProfileCard,
+    openWallet,
+    closeWallet,
+    refresh: refreshWallet,
+    openDailyCheckinModal,
+    renderVpnMarket,
+    purchaseVpn,
+    refreshWalletBalance,
+    claimDaily: claimDailyRewardAPI,
+    closeDailyCheckinModal,
+    scrollToSection,
+    _invalidateCache: invalidateWalletCache,
+    _refreshWalletData: loadWalletData,
+    _updateDailyCheckinCard,
+    _startWeeklyCountdown,
+    _stopWeeklyCountdown,
+  };
 })();
+
+// Expose globally
+window.WalletApp = WalletApp;
 
 // Expose globally
 window.WalletApp = WalletApp;
