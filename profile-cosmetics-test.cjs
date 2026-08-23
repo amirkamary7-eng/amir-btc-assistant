@@ -109,11 +109,15 @@ test('CTRL-04: purchase uses atomic AB debit', () => {
   assert.ok(block.includes('402'));
 });
 
-test('CTRL-05: race condition refund', () => {
+test('CTRL-05: race condition — ownership conflict returns 409 WITHOUT refund (FIX C2)', () => {
   const block = COSMETICS_CTRL_SRC.slice(COSMETICS_CTRL_SRC.indexOf('async function handlePurchase'), COSMETICS_CTRL_SRC.indexOf('async function handleActivate'));
-  assert.ok(block.includes('race_condition_already_owned'));
-  assert.ok(block.includes('_refund'));
-  assert.ok(block.includes('grantReward'));
+  // FIX C2 (free purchase): the old race-condition refund returned the tokens
+  // while the user kept the cosmetic (net free purchase). The conflict path
+  // must return 409 ALREADY_OWNED and must NOT issue any refund — the single
+  // completed debit for the deterministic refId paid for the delivered
+  // ownership. Regression-locked by cosmetics-refund-guard-test.cjs CSM5-7.
+  assert.ok(block.includes('ALREADY_OWNED'));
+  assert.ok(!block.includes('grantReward'), 'handlePurchase must NOT issue refunds on the ownership-conflict path (FIX C2)');
 });
 
 test('CTRL-06: fail-safe — authority error returns Normal', () => {
@@ -273,7 +277,9 @@ test('ATOMIC-01: purchase debit + ownership insert safe', () => {
   const block = COSMETICS_CTRL_SRC.slice(COSMETICS_CTRL_SRC.indexOf('async function handlePurchase'), COSMETICS_CTRL_SRC.indexOf('async function handleActivate'));
   assert.ok(block.includes('debitUser'));
   assert.ok(block.includes('createOwnership'));
-  assert.ok(block.includes('race_condition'));
+  // FIX C2: the ownership-conflict branch resolves WITHOUT a refund and is
+  // audit-logged (cosmetics-purchase-race / already_owned_no_refund).
+  assert.ok(block.includes('already_owned_no_refund'));
 });
 
 test('ATOMIC-02: activate is atomic (single transaction)', () => {

@@ -148,10 +148,12 @@ export function createCosmeticsHandlers(deps) {
         return jsonResponse({ status: 'error', message: 'Cosmetic already owned', code: 'ALREADY_OWNED' }, { status: 409 }, env);
       }
 
-      // Atomic AB debit (via economyService — uses WHERE balance >= $2, no negative)
+      // Atomic AB debit (via economyService — FIX C1: single atomic CTE,
+      // insufficient balance can no longer leave a phantom completed tx)
       const refId = `cosmetic_purchase_${userId}_${cosmeticId}`;
+      let debitResult;
       try {
-        await economyService.debitUser({
+        debitResult = await economyService.debitUser({
           userId,
           amount: cosmetic.token_cost,
           debitType: 'cosmetic_purchase',
@@ -173,22 +175,31 @@ export function createCosmeticsHandlers(deps) {
       const { ownership, created } = await cosmeticsRepo.createOwnership(env, userId, cosmeticId, cosmetic.token_cost);
 
       if (!created) {
-        // Race condition: another concurrent purchase created ownership first.
-        // Refund the debit (idempotent via _refund suffix).
-        try {
-          await economyService.grantReward({
-            userId,
-            amount: cosmetic.token_cost,
-            rewardType: 'bonus_reward',
-            description: `Refund: cosmetic already owned (${cosmetic.title})`,
-            refId: `${refId}_refund`,
-            metadata: { reason: 'race_condition_already_owned', cosmetic_id: cosmeticId },
-            auditInfo: { actor: 'system' },
-            env,
-          });
-        } catch (refundErr) {
-          console.warn('[cosmetics] Race refund failed:', refundErr?.message);
-        }
+        // FIX C2 (free purchase): do NOT refund here. created=false means a
+        // concurrent purchase (same deterministic refId) already created the
+        // ownership. The partial UNIQUE index on (user_id, tx_type, ref_id)
+        // guarantees exactly ONE completed debit exists for this refId — and
+        // that debit PAID for the ownership that now exists. This holds in
+        // every interleaving:
+        //   - this request resolved idempotently (the concurrent twin paid and
+        //     created ownership) → refund would return the twin's payment
+        //   - this request performed the real debit but the twin (idempotent
+        //     on top of it) created ownership first → refund would return the
+        //     only payment for the delivered cosmetic
+        // In both cases refunding hands back the tokens while the user keeps
+        // the cosmetic → net free purchase. Previously this branch refunded
+        // unconditionally (verified as C2/N1 by cosmetics-refund-guard-test.cjs
+        // CSM5/CSM6/CSM7). user_cosmetic_ownership has exactly one writer
+        // (createOwnership — always preceded by a completed debit), so
+        // "ownership exists ⇒ paid" is an invariant.
+        console.log(JSON.stringify({
+          scope: 'cosmetics-purchase-race',
+          user_id: userId,
+          cosmetic_id: cosmeticId,
+          ref_id: refId,
+          this_request_paid: Boolean(debitResult && !debitResult.idempotent),
+          outcome: 'already_owned_no_refund',
+        }));
         return jsonResponse({ status: 'error', message: 'Cosmetic already owned', code: 'ALREADY_OWNED' }, { status: 409 }, env);
       }
 

@@ -61,10 +61,21 @@ export function createWalletRepository(deps) {
     `;
     try {
       await queryDb(env, batchSql);
+      // M4 FIX: only mark the schema as verified on SUCCESS. Previously the
+      // flag was set unconditionally, so a failed migration (e.g. CREATE UNIQUE
+      // INDEX failing due to pre-existing duplicate rows) was permanently
+      // swallowed for the lifetime of this isolate — silently disabling the
+      // DB-level idempotency protection that depends on the unique index.
+      _schemaVerified = true;
     } catch (e) {
-      console.warn('Wallet schema migration warning:', e.message);
+      // Log loudly and rethrow. All call sites already use .catch(() => {})
+      // where a schema failure must not block the operation (verified: 12
+      // internal callers + controllers/wallet.js handleGetWallet). NOT setting
+      // the flag guarantees the next invocation retries the migration instead
+      // of running forever without the unique index.
+      console.error('[WALLET] Schema migration FAILED (will retry on next invocation):', e?.message || e);
+      throw e;
     }
-    _schemaVerified = true;
   }
 
   /**
@@ -650,6 +661,21 @@ export function createWalletRepository(deps) {
    * ALL balance decreases in the app MUST go through this function.
    * Checks for sufficient balance before debiting.
    *
+   * FIX C1 (phantom debit): the balance UPDATE and the transaction INSERT are
+   * now a SINGLE atomic CTE statement. The INSERT is gated on the UPDATE's
+   * actual result (WHERE EXISTS (SELECT 1 FROM debited)) — not on an
+   * unrelated balance-row existence check. Previously an insufficient-balance
+   * debit COMMITted a phantom completed tx (amount = -X, no balance change)
+   * because queryDbTransaction commits before the JS result check; a retry
+   * with the same refId then hit the idempotency pre-check and returned
+   * { success: true, idempotent: true } without debiting → free purchases
+   * (cosmetics). Verified by wallet-debit-atomic-regression-test.cjs D2/D7.
+   *
+   * Concurrency: a concurrent debit with the same refId hits the partial
+   * UNIQUE index (idx_token_tx_user_type_ref) → 23505 → the WHOLE statement
+   * (balance UPDATE included) rolls back → we re-read the existing tx and
+   * return idempotent success. No double-spend, no unhandled error.
+   *
    * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
    * @throws Error if insufficient balance
    */
@@ -672,7 +698,7 @@ export function createWalletRepository(deps) {
     };
     const metadataJson = JSON.stringify(fullMetadata);
 
-    // IDEMPOTENCY: if refId is provided, check if already debited
+    // IDEMPOTENCY: if refId is provided, check if already debited (fast path)
     if (refId) {
       const existing = await queryDb(
         env,
@@ -686,28 +712,69 @@ export function createWalletRepository(deps) {
       }
     }
 
-    // CONCURRENCY SAFETY: the UPDATE ... WHERE balance >= $2 is an atomic
-    // conditional update. If two concurrent debits race, PostgreSQL's row-level
-    // locking ensures only one sees balance >= amount — the other gets 0 rows
-    // and throws INSUFFICIENT_BALANCE. No double-spend possible.
-    const results = await queryDbTransaction(env, [
-      {
-        sql: `UPDATE token_balances
-              SET balance = balance - $2, updated_at = NOW()
-              WHERE user_id = $1 AND balance >= $2
-              RETURNING balance`,
-        params: [uid, amt],
-      },
-      {
-        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
-              SELECT $1, -$2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW()
-              WHERE EXISTS (SELECT 1 FROM token_balances WHERE user_id = $1 AND balance >= 0)
-              RETURNING id`,
-        params: [uid, amt, txType, source, description || txType, refId || null, metadataJson],
-      },
-    ]);
+    // ATOMIC DEBIT — single CTE statement (mirrors the proven creditTokens
+    // pattern). Semantics:
+    //   debited:   conditional UPDATE — 0 rows when balance is insufficient
+    //   tx_insert: INSERT gated on the UPDATE's actual result — skipped when
+    //              debited produced no rows, so an insufficient balance can
+    //              never create a transaction record (no phantom rows)
+    // Both writes commit or roll back together inside one statement — there
+    // is no window in which the tx exists without the balance change.
+    let results;
+    try {
+      results = await queryDbTransaction(env, [
+        {
+          sql: `WITH debited AS (
+                  UPDATE token_balances
+                  SET balance = balance - $2, updated_at = NOW()
+                  WHERE user_id = $1 AND balance >= $2
+                  RETURNING balance
+                ),
+                tx_insert AS (
+                  INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
+                  SELECT $1, -$2, $3, $4, 'completed', $5, $6, $7, NOW(), NOW()
+                  WHERE EXISTS (SELECT 1 FROM debited)
+                  RETURNING id
+                )
+                SELECT
+                  (SELECT id FROM tx_insert LIMIT 1) AS tx_id,
+                  (SELECT balance FROM debited LIMIT 1) AS new_balance`,
+          params: [uid, amt, txType, source, description || txType, refId || null, metadataJson],
+        },
+      ]);
+    } catch (e) {
+      // 23505 (unique_violation): a concurrent debit with the same refId
+      // committed first. The whole statement — balance UPDATE included — was
+      // rolled back by the transaction, so this request debited nothing.
+      // Resolve idempotently instead of surfacing an error.
+      const isUniqueViolation = e && (
+        e.code === '23505' ||
+        /unique constraint|duplicate key/i.test(String(e.message || ''))
+      );
+      if (refId && isUniqueViolation) {
+        const existing = await queryDb(
+          env,
+          `SELECT id FROM token_transactions
+           WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed'
+           LIMIT 1`,
+          [uid, txType, refId],
+        );
+        if (existing.rows.length > 0) {
+          return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+        }
+      }
+      throw e;
+    }
 
-    if (!results[0].rows.length) {
+    const row = results[0].rows[0] || {};
+    const txId = row.tx_id;
+    const newBalance = (row.new_balance !== null && row.new_balance !== undefined)
+      ? Number(row.new_balance)
+      : null;
+
+    // Insufficient balance: debited produced 0 rows → tx_insert was skipped →
+    // nothing was written by the statement above.
+    if (!txId) {
       // AUDIT LOG for failed debit
       console.log(JSON.stringify({
         scope: 'wallet-audit-debit-failed',
@@ -723,9 +790,6 @@ export function createWalletRepository(deps) {
       }));
       throw Object.assign(new Error('INSUFFICIENT_BALANCE'), { code: 'INSUFFICIENT_BALANCE' });
     }
-    const newBalance = Number(results[0].rows[0]?.balance || 0);
-    const txId = results[1].rows[0]?.id;
-    if (!txId) throw new Error('Failed to record transaction');
 
     // AUDIT LOG
     console.log(JSON.stringify({
