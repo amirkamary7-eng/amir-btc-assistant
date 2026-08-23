@@ -2167,26 +2167,51 @@
 }
 
 /* VPN Market grid */
+/* FIX 1: Horizontal scroll carousel — cards never stack vertically */
 .vpn-market-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 10px;
+  padding-bottom: 4px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  /* Thin scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245, 166, 35, 0.2) transparent;
 }
 
-@media (max-width: 480px) {
-  .vpn-market-grid {
-    grid-template-columns: 1fr;
-  }
+.vpn-market-grid::-webkit-scrollbar {
+  height: 4px;
+}
+
+.vpn-market-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vpn-market-grid::-webkit-scrollbar-thumb {
+  background: rgba(245, 166, 35, 0.15);
+  border-radius: 2px;
+}
+
+.vpn-market-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 166, 35, 0.3);
+}
+
+.vpn-market-grid .vpn-card {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  min-width: 200px;
+  max-width: 240px;
 }
 
 /* VPN Card — horizontal compact row layout (FIX 2) */
 .vpn-card {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px;
+  border-radius: 14px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
   border: 1px solid rgba(255, 255, 255, 0.08);
   transition: border-color 0.2s ease, transform 0.15s ease;
@@ -2221,9 +2246,9 @@
 }
 
 .vpn-card-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   background: rgba(245, 166, 35, 0.1);
   border: 1px solid rgba(245, 166, 35, 0.2);
   display: flex;
@@ -2238,31 +2263,28 @@
 }
 
 .vpn-card-info {
-  flex: 1;
   min-width: 0;
 }
 
 .vpn-card-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   color: #fff;
   letter-spacing: 0.02em;
-  white-space: nowrap;
 }
 
 .vpn-card-desc {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2px;
 }
 
 .vpn-card-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: auto;
 }
 
 .vpn-card-cost {
@@ -2820,4 +2842,19 @@
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* FIX 15: Purchased badge for 30-day limited plans */
+.vpn-purchased-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #22C55E;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(34, 197, 94, 0.15);
+  white-space: nowrap;
 }

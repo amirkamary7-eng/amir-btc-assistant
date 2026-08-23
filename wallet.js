@@ -1539,45 +1539,55 @@ const WalletApp = (() => {
     const grid = document.getElementById('vpn-market-grid');
     const banner = document.getElementById('reward-market-premium-banner');
     if (!grid) return;
-
-    if (banner) banner.style.display = 'none'; // per-card premium badge instead
-
+    if (banner) banner.style.display = 'none';
     if (!_vpnPlansCache) {
       try {
         const resp = await window.apiFetch('/api/rewards/vpn/plans');
         if (resp?.status === 'success' && Array.isArray(resp.plans) && resp.plans.length > 0) {
           _vpnPlansCache = resp.plans;
         }
-      } catch (_) { /* fall through to empty state */ }
+      } catch (_) {}
     }
     if (!_vpnPlansCache || _vpnPlansCache.length === 0) {
       grid.innerHTML = `<div class="vpn-market-empty">${detectLang() === 'fa' ? 'به‌زودی' : 'Coming soon'}</div>`;
       return;
     }
-
+    let userPurchases = [];
+    try {
+      const pr = await window.apiFetch('/api/rewards/purchases');
+      if (pr?.status === 'success' && Array.isArray(pr.purchases)) userPurchases = pr.purchases;
+    } catch (_) {}
     const fa = detectLang() === 'fa';
     grid.innerHTML = _vpnPlansCache.map(plan => {
       const planLocked = plan.premium_only && !_isPremiumUser;
+      const recent = userPurchases.find(p =>
+        p.plan_id === plan.id && p.status === 'fulfilled' &&
+        p.created_at && (Date.now() - new Date(p.created_at).getTime()) < 30 * 86400000
+      );
+      const dur = plan.duration_fa || plan.duration_en || '';
+      const daysLeft = recent ? Math.ceil(30 - (Date.now() - new Date(recent.created_at).getTime()) / 86400000) : 0;
+      let action;
+      if (recent) {
+        action = `<span class="vpn-purchased-badge">${fa ? 'خریداری شده · ' + daysLeft + ' روز' : 'Purchased · ' + daysLeft + 'd'}</span>`;
+      } else if (planLocked) {
+        action = `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ${fa ? 'Premium' : 'Premium'}</span>`;
+      } else {
+        action = `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`;
+      }
       return `
-      <div class="vpn-card${planLocked ? ' vpn-card-locked' : ''}" data-plan="${plan.id}">
-        ${plan.premium_only ? `<span class="vpn-premium-badge${!planLocked ? ' active' : ''}">
-          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
-          PREMIUM
-        </span>` : ''}
+      <div class="vpn-card${planLocked || recent ? ' vpn-card-locked' : ''}" data-plan="${plan.id}">
+        ${plan.premium_only ? `<span class="vpn-premium-badge${!planLocked ? ' active' : ''}"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg> PREMIUM</span>` : ''}
         <div class="vpn-card-icon">${_vpnIconSvg(28)}</div>
         <div class="vpn-card-info">
           <div class="vpn-card-title">VPN ${plan.gb}GB</div>
-          <div class="vpn-card-desc">${fa ? 'اشتراک یک‌ماهه' : '1-month subscription'}</div>
+          <div class="vpn-card-desc">${dur}</div>
         </div>
         <div class="vpn-card-footer">
           <span class="vpn-card-cost">${plan.cost_ab} AB</span>
-          ${planLocked
-            ? `<span class="vpn-locked-badge"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ${fa ? 'ویژه Premium' : 'Premium only'}</span>`
-            : `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`
-          }
+          ${action}
         </div>
-      </div>
-    `}).join('');
+      </div>`;
+    }).join('');
   }
 
   // FIX 6: Two-step purchase flow — Confirmation Modal → Purchase → Success Modal
@@ -1588,13 +1598,13 @@ const WalletApp = (() => {
     const fa = detectLang() === 'fa';
     const existing = document.getElementById('vpn-confirm-modal');
     if (existing) existing.remove();
-
     const currentBalance = _lastKnownBalance || 0;
-    const afterBalance = Math.max(0, currentBalance - plan.costAb);
-
+    const costAb = plan.cost_ab || plan.costAb || 0;
+    const afterBalance = currentBalance - costAb;
+    const dur = plan.duration_fa || plan.duration_en || '';
     const modal = document.createElement('div');
     modal.id = 'vpn-confirm-modal';
-    modal.className = 'daily-checkin-modal'; // reuse overlay styles
+    modal.className = 'daily-checkin-modal';
     modal.setAttribute('dir', fa ? 'rtl' : 'ltr');
     modal.innerHTML = `
       <div class="dcm-overlay" onclick="WalletApp.closeVpnConfirmModal()"></div>
@@ -1608,26 +1618,16 @@ const WalletApp = (() => {
         <div class="vpn-confirm-body">
           <div class="vpn-confirm-icon">${_vpnIconSvg(36)}</div>
           <div class="vpn-confirm-title">VPN ${plan.gb}GB</div>
-          <div class="vpn-confirm-desc">${fa ? 'اشتراک یک‌ماهه' : '1-month subscription'}</div>
-          <div class="vpn-confirm-row">
-            <span>${fa ? 'هزینه:' : 'Cost:'}</span>
-            <strong>${plan.costAb} AB</strong>
-          </div>
-          <div class="vpn-confirm-row">
-            <span>${fa ? 'موجودی شما:' : 'Your balance:'}</span>
-            <strong>${formatNumber(currentBalance)} AB</strong>
-          </div>
-          <div class="vpn-confirm-row ${afterBalance < 0 ? 'vpn-insufficient' : ''}">
-            <span>${fa ? 'بعد از خرید:' : 'After purchase:'}</span>
-            <strong>${formatNumber(afterBalance)} AB</strong>
-          </div>
+          ${dur ? `<div class="vpn-confirm-desc">${dur}</div>` : ''}
+          <div class="vpn-confirm-row"><span>${fa ? 'قیمت:' : 'Price:'}</span><strong>${costAb} AB</strong></div>
+          ${dur ? `<div class="vpn-confirm-row"><span>${fa ? 'مدت:' : 'Duration:'}</span><strong>${dur}</strong></div>` : ''}
+          <div class="vpn-confirm-row"><span>${fa ? 'موجودی فعلی:' : 'Current:'}</span><strong>${formatNumber(currentBalance)} AB</strong></div>
+          <div class="vpn-confirm-row ${afterBalance < 0 ? 'vpn-insufficient' : ''}"><span>${fa ? 'پس از خرید:' : 'After:'}</span><strong>${formatNumber(Math.max(0, afterBalance))} AB</strong></div>
           ${afterBalance < 0 ? `<div class="vpn-insufficient-warning">${fa ? 'موجودی کافی نیست' : 'Insufficient balance'}</div>` : ''}
         </div>
         <div class="vpn-confirm-actions">
           <button class="vpn-cancel-btn" onclick="WalletApp.closeVpnConfirmModal()">${fa ? 'انصراف' : 'Cancel'}</button>
-          <button class="vpn-confirm-btn ${afterBalance < 0 ? 'disabled' : ''}" ${afterBalance < 0 ? 'disabled' : ''} onclick="WalletApp.executeVpnPurchase('${plan.id}')">
-            ${fa ? 'تأیید و خرید' : 'Confirm Purchase'}
-          </button>
+          <button class="vpn-confirm-btn ${afterBalance < 0 ? 'disabled' : ''}" ${afterBalance < 0 ? 'disabled' : ''} onclick="WalletApp.executeVpnPurchase('${plan.id}')">${fa ? 'تأیید و خرید' : 'Confirm'}</button>
         </div>
       </div>
     `;

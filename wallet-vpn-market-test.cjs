@@ -147,7 +147,8 @@ test('VM5: purchase record failure after debit → refund issued (token not lost
     'src/controllers/reward_purchases.js', 'createRewardPurchaseHandlers',
   );
   const brokenRepo = {
-    getVpnPlan: (id) => ({ id, gb: 4, costAb: 200 }),
+    getVpnPlan: (id) => ({ id, gb: 4, costAb: 200, durationDays: 7, durationFa: '۱ هفته' }),
+    checkPurchaseLimit: async () => ({ restricted: false }),
     createVpnPurchase: async () => { throw new Error('DB_WRITE_FAILED'); },
   };
   const handlers = createRewardPurchaseHandlers({

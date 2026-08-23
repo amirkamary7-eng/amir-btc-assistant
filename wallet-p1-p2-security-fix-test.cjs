@@ -158,9 +158,13 @@ test('P2-3: race simulation — concurrent createVpnPurchase → only ONE create
   await h.queryDb({}, `
     CREATE TABLE reward_purchases (
       id SERIAL PRIMARY KEY, user_id VARCHAR(64), reward_type VARCHAR(32),
-      vpn_gb INTEGER, cost_ab INTEGER, status VARCHAR(16) DEFAULT 'pending',
-      tx_ref_id VARCHAR(128), created_at TIMESTAMPTZ DEFAULT NOW(),
+      plan_id VARCHAR(64), plan_name VARCHAR(128),
+      vpn_gb INTEGER, cost_ab INTEGER, duration_days INTEGER DEFAULT 7,
+      status VARCHAR(16) DEFAULT 'pending', tracking_id VARCHAR(64),
+      tx_ref_id VARCHAR(128), vpn_link TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       fulfilled_at TIMESTAMPTZ, fulfilled_by VARCHAR(64),
+      expires_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`, []);
   await h.queryDb({}, `
@@ -198,9 +202,13 @@ test('P2-4: after fulfillment, same plan can be purchased again', async () => {
   await h.queryDb({}, `
     CREATE TABLE reward_purchases (
       id SERIAL PRIMARY KEY, user_id VARCHAR(64), reward_type VARCHAR(32),
-      vpn_gb INTEGER, cost_ab INTEGER, status VARCHAR(16) DEFAULT 'pending',
-      tx_ref_id VARCHAR(128), created_at TIMESTAMPTZ DEFAULT NOW(),
+      plan_id VARCHAR(64), plan_name VARCHAR(128),
+      vpn_gb INTEGER, cost_ab INTEGER, duration_days INTEGER DEFAULT 7,
+      status VARCHAR(16) DEFAULT 'pending', tracking_id VARCHAR(64),
+      tx_ref_id VARCHAR(128), vpn_link TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       fulfilled_at TIMESTAMPTZ, fulfilled_by VARCHAR(64),
+      expires_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`, []);
   await h.queryDb({}, `

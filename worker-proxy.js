@@ -8587,6 +8587,7 @@ const rewardPurchaseHandlers = createRewardPurchaseHandlers({
   membershipAuthority,
   notificationService,
   requireAdmin: (request, env, perm) => adminHandlers.requireAdmin(request, env, perm),
+  sendTelegramMessage,
 });
 
 // ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────
@@ -13216,6 +13217,12 @@ export default {
       // Admin: reward purchase queue
       if (request.method === 'GET' && url.pathname === '/api/admin/reward-purchases') {
         return rewardPurchaseHandlers.handleAdminListPurchases(request, env);
+      }
+      if (url.pathname.startsWith('/api/admin/reward-purchases/') && request.method === 'GET') {
+        const parts = url.pathname.split('/');
+        if (parts.length === 5 && /^\d+$/.test(parts[4])) {
+          return rewardPurchaseHandlers.handleAdminGetPurchase(request, env, parts[4]);
+        }
       }
       if (url.pathname.startsWith('/api/admin/reward-purchases/') && request.method === 'POST') {
         const parts = url.pathname.split('/');
