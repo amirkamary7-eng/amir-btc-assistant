@@ -230,22 +230,6 @@ export function createEconomyService(deps) {
   }
 
   /**
-   * Reverse a transaction (admin only).
-   */
-  async function reverseTransaction({ userId, txId, reason, env }) {
-    const result = await walletRepo.reverseTransaction(env, String(userId), Number(txId), reason);
-
-    emit('TransactionReversed', {
-      user_id: String(userId),
-      tx_id: txId,
-      reason,
-      new_balance: result.newBalance,
-    });
-
-    return result;
-  }
-
-  /**
    * Map reward type to event name.
    */
   function _getEventForReward(rewardType) {
@@ -292,7 +276,6 @@ export function createEconomyService(deps) {
     REWARD_TYPES,
     grantReward,
     debitUser,
-    reverseTransaction,
     registerRule,
     validateRules,
     on,

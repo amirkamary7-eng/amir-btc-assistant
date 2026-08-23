@@ -929,48 +929,14 @@ export function createWalletRepository(deps) {
     return result.rows[0] ? serializeTxRow(result.rows[0]) : null;
   }
 
-  /**
-   * Reverse a completed transaction (mark as reversed + reverse the balance change).
-   * Only completed transactions can be reversed. The reversal is atomic.
-   */
-  async function reverseTransaction(env, userId, txId, reason) {
-    if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
-    await ensureSchema(env).catch(() => {});
-    const uid = String(userId);
-    const tid = Number(txId);
-
-    const results = await queryDbTransaction(env, [
-      // Get the original transaction (must be completed)
-      {
-        sql: `SELECT amount, tx_type, status FROM token_transactions
-              WHERE id = $1 AND user_id = $2 AND status = 'completed' FOR UPDATE`,
-        params: [tid, uid],
-      },
-      // Reverse the balance (subtract if original was credit, add if debit)
-      {
-        sql: `UPDATE token_balances
-              SET balance = balance - (SELECT amount FROM token_transactions WHERE id = $1),
-                  updated_at = NOW()
-              WHERE user_id = $2
-              RETURNING balance`,
-        params: [tid, uid],
-      },
-      // Mark original as reversed
-      {
-        sql: `UPDATE token_transactions SET status = 'reversed', updated_at = NOW(),
-              metadata = metadata || $3::jsonb
-              WHERE id = $1 AND user_id = $2 AND status = 'completed'
-              RETURNING id`,
-        params: [tid, uid, JSON.stringify({ reversed_reason: reason || 'admin_reversal', reversed_at: new Date().toISOString() })],
-      },
-    ]);
-
-    if (!results[0].rows.length) {
-      throw new Error('Transaction not found or not reversible');
-    }
-    const newBalance = Number(results[1].rows[0]?.balance || 0);
-    return { success: true, newBalance, txId: tid };
-  }
+  // M6 REMOVED (fix/wallet-m6-delete): reverseTransaction() was deleted —
+  // verified dead code (0 callers, 0 routes, 0 production reversals in the
+  // entire git history; latent bugs LB1–LB4 documented in the audit). The
+  // read-side 'reversed' status handling (serializeTxRow, history filters,
+  // reversed_count in summaries, the partial unique index) is intentionally
+  // KEPT and remains functional. If transaction reversal is ever needed, it
+  // must be rebuilt with the atomic CTE pattern (status-guarded, negative-
+  // balance-guarded, with a reversal history row) — not restored from git.
 
   /**
    * Get wallet summary: balance, tier, and aggregate statistics.
@@ -1055,7 +1021,6 @@ export function createWalletRepository(deps) {
     getReferralStats,
     creditTokens,
     debitTokens,
-    reverseTransaction,
     getTierForBalance,
     queryDb,
   });

@@ -106,18 +106,41 @@ test('RATE-5: isUserRateLimited injected into wallet handler deps', () => {
   assert.ok(/isUserRateLimited/.test(fnSrc), 'isUserRateLimited must be injected into wallet handlers');
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// P2: Reverse Transaction — documented as dead code (not exposed)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// P2: Reverse Transaction — REMOVED as dead code (M6 deletion)
+// ═══════════════════════════════════════════════════════════════════════════
+// M6 audit (fix/wallet-m6-delete): 0 production callers, 0 routes, 0 dynamic
+// references, 0 production reversals across the entire git history; latent
+// bugs LB1-LB4 (double-reverse double-deduction, cross-user amount injection,
+// unguarded negative balance, no reversal history row) made keeping the dead
+// writer a liability. Read-side 'reversed' status handling is intentionally
+// kept and functional.
 
-test('P2-1: reverseTransaction exists in wallet repo but is NOT exposed as a route', () => {
-  // Function exists in repo
-  assert.ok(/async function reverseTransaction/.test(fs.readFileSync(path.join(__dirname, 'src/repositories/wallet.js'), 'utf8')),
-    'reverseTransaction must exist in wallet repo');
-  // No route in worker-proxy
+test('P2-1: reverseTransaction is REMOVED from the codebase (M6 dead-code deletion)', () => {
+  // The function must be gone from the repo AND the economy service wrapper
+  for (const rel of ['src/repositories/wallet.js', 'src/services/economy.js']) {
+    const src = fs.readFileSync(path.join(__dirname, rel), 'utf8');
+    assert.ok(!/async function reverseTransaction/.test(src),
+      rel + ' must not define reverseTransaction (dead code removed - M6)');
+    // Outside the removal tombstone comment, no references may remain
+    const withoutTombstone = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.ok(!/reverseTransaction/.test(withoutTombstone),
+      rel + ' must not reference reverseTransaction outside comments');
+  }
+});
+
+test('P2-2: NO reversal route/API is exposed anywhere in the Worker', () => {
   const workerSrc = fs.readFileSync(WORKER_PATH, 'utf8');
-  assert.ok(!/\/api\/wallet.*reverse/.test(workerSrc) && !/handleReverse/.test(workerSrc),
-    'reverseTransaction must NOT be exposed as a route (confirmed dead code)');
+  // No reversal path segment in ANY registered route
+  assert.ok(!/\/api\/[a-z-]+\/?[a-z-]*revers/i.test(workerSrc),
+    'no API route may contain a reversal path segment');
+  // No reversal handler dispatch
+  assert.ok(!/handleReverse\w*/.test(workerSrc),
+    'no reversal handler may be dispatched');
+  // The economy service must not expose a reversal entry point anymore
+  const ecoSrc = fs.readFileSync(path.join(__dirname, 'src', 'services', 'economy.js'), 'utf8');
+  assert.ok(!/reverseTransaction/.test(ecoSrc),
+    'economy service must not expose reverseTransaction');
 });
 
 // ═══════════════════════════════════════════════════════════════════════
