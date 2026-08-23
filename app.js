@@ -6043,6 +6043,14 @@ window.completeMission = completeMission;
 window.loadMissionStatus = loadMissionStatus;
 window.updateMissionCards = updateMissionCards;
 window.fireMissionEvent = fireMissionEvent;
+
+// FIX 3: Allow wallet.js to trigger a mission reload when the wallet page
+// is re-rendered (page innerHTML replacement destroys the rendered cards).
+// This resets the _missionsLoaded flag and re-fetches mission data.
+window.reloadMissions = function() {
+  _missionsLoaded = false;
+  return loadMissionStatus();
+};
 window.MISSION_EVENTS = MISSION_EVENTS;
 /**
  * واچ‌لیست را در رابط کاربری رندر می‌کند.

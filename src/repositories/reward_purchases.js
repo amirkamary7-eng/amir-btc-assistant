@@ -66,7 +66,7 @@ export function createRewardPurchaseRepository(deps) {
   // 2GB-10GB plans are Premium-only (server-enforced in the controller).
   const VPN_PLANS = Object.freeze([
     { id: 'vpn_1gb',  gb: 1,  costAb: 200, premiumOnly: false },
-    { id: 'vpn_2gb',  gb: 2,  costAb: 100, premiumOnly: true },
+    { id: 'vpn_2gb',  gb: 2,  costAb: 200, premiumOnly: true },
     { id: 'vpn_4gb',  gb: 4,  costAb: 200, premiumOnly: true },
     { id: 'vpn_6gb',  gb: 6,  costAb: 300, premiumOnly: true },
     { id: 'vpn_8gb',  gb: 8,  costAb: 400, premiumOnly: true },

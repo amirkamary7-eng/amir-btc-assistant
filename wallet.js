@@ -1018,6 +1018,16 @@ const WalletApp = (() => {
 
     // Load wallet data
     loadWalletData();
+
+    // FIX 3: Trigger mission status reload so mission cards render into
+    // the fresh #wallet-earn-grid. reloadMissions resets the loaded flag
+    // and re-fetches, then calls updateMissionCards() which finds the
+    // new #wallet-earn-grid in the re-rendered page.
+    if (typeof window.reloadMissions === 'function') {
+      window.reloadMissions();
+    } else if (typeof window.loadMissionStatus === 'function') {
+      window.loadMissionStatus();
+    }
   }
 
   function closeWallet() {
@@ -1073,6 +1083,7 @@ const WalletApp = (() => {
       if (walletRes) {
         renderWalletPage(walletRes);
         walletData = walletRes;
+        _lastKnownBalance = Number(walletRes.balance) || 0;
         // Persist to localStorage for instant render on next open
         try {
           localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
@@ -1643,26 +1654,32 @@ const WalletApp = (() => {
     closeVpnConfirmModal();
     if (_purchaseInFlight) return;
     _purchaseInFlight = true;
+    const fa = detectLang() === 'fa';
     try {
+      // FIX 5: Frontend sends ONLY plan_id — price/eligibility are
+      // server-side authoritative (backend uses its own catalog price).
       const resp = await window.apiFetch('/api/rewards/vpn/purchase', {
         method: 'POST',
         body: JSON.stringify({ plan_id: planId }),
       });
-      if (resp?.status === 'success') {
+      if (resp?.status === 'success' && resp.purchase) {
         showVpnSuccessModal(resp.purchase);
-        refreshWalletBalance();
+        // Update balance from server response (authoritative)
         _lastKnownBalance = Math.max(0, (_lastKnownBalance || 0) - resp.purchase.cost_ab);
+        refreshWalletBalance();
       } else if (resp?.code === 'DUPLICATE_PENDING') {
-        showToast(detectLang() === 'fa' ? 'یک درخواست در انتظار برای این پلن دارید' : 'Pending purchase exists for this plan');
+        showToast(fa ? 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.' : 'You already have a pending purchase for this plan.');
       } else if (resp?.code === 'PAYMENT_FAILED') {
-        showToast(detectLang() === 'fa' ? 'توکن کافی نیست' : 'Insufficient balance');
+        showToast(fa ? 'موجودی AB کافی نیست. ' + (resp.required_tokens || '') + ' AB لازم است.' : 'Insufficient AB balance.');
       } else if (resp?.code === 'PREMIUM_REQUIRED') {
-        showToast(detectLang() === 'fa' ? 'این پلن ویژه اعضای Premium است' : 'This plan is Premium-only');
+        showToast(fa ? 'این پلن ویژه اعضای Premium است. لطفاً ابتدا ارتقا دهید.' : 'This plan requires Premium membership.');
+      } else if (resp?.code === 'INVALID_PLAN') {
+        showToast(fa ? 'پلن نامعتبر است.' : 'Invalid plan.');
       } else {
-        showToast(resp?.message || 'Purchase failed');
+        showToast(resp?.message || (fa ? 'خطا در خرید. لطفاً دوباره تلاش کنید.' : 'Purchase failed. Please try again.'));
       }
     } catch (e) {
-      showToast('Purchase failed');
+      showToast(fa ? 'خطا در برقراری ارتباط. لطفاً دوباره تلاش کنید.' : 'Connection error. Please try again.');
     } finally {
       _purchaseInFlight = false;
     }

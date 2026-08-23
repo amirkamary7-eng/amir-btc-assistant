@@ -194,7 +194,7 @@ test('VM7: Plans catalog — 6 plans (1GB universal + 5 Premium)', () => {
   assert.equal(plans[0].premiumOnly, false);
   // 2GB-10GB are Premium-only
   const premiumPlans = plans.slice(1);
-  assert.deepEqual(premiumPlans.map(p => p.costAb), [100, 200, 300, 400, 500]);
+  assert.deepEqual(premiumPlans.map(p => p.costAb), [200, 200, 300, 400, 500]);
   assert.deepEqual(premiumPlans.map(p => p.gb), [2, 4, 6, 8, 10]);
   assert.ok(premiumPlans.every(p => p.premiumOnly === true), 'all 2GB+ plans Premium-only');
 });
