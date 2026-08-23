@@ -22,6 +22,18 @@
  *      0 rows. The harness pre-checks existence and short-circuits to 0 rows,
  *      reproducing real-PG observable behavior (verified by probe: pg-mem
  *      count=1 but RETURNING=[{id:1}] on the conflicting insert).
+ *   6. pg_advisory_xact_lock stubbed as a no-op ('void' is not a registrable
+ *      pg-mem type) — tests assert RESULT semantics, not lock/blocking.
+ *   7. The wallet lock-key derivation query (MD5 + ::bit(64)::bigint) cannot
+ *      evaluate in pg-mem — intercepted and answered with a deterministic
+ *      numeric key.
+ *   8. to_char(date, text) stubbed to the ISO date string (real PG's
+ *      'YYYY-MM-DD' output).
+ *   9. pg-mem does not support correlated NOT EXISTS referencing the outer
+ *      table alias (probe: `column "mp.user_id" does not exist`). The
+ *      mission-retry candidate query is mechanically rewritten to the
+ *      semantically identical LEFT JOIN anti-join form (NOT EXISTS ≡
+ *      LEFT JOIN ... IS NULL). Purely syntactic; verified by probe.
  *
  * Not a test file itself — required by:
  *   - wallet-debit-atomic-regression-test.cjs
@@ -101,6 +113,21 @@ const SCHEMA_SQL = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE mission_progress (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    mission_id VARCHAR(64) NOT NULL,
+    progress_count INTEGER NOT NULL DEFAULT 0,
+    target_count INTEGER NOT NULL DEFAULT 1,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    rewarded BOOLEAN NOT NULL DEFAULT FALSE,
+    daily_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    week_start DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, mission_id, daily_date)
+  );
 `;
 
 // Partial unique index — same definition as wallet.js ensureSchema (R-3.1).
@@ -159,6 +186,22 @@ function normalizeRows(rows) {
  *    (BEGIN → statements → COMMIT, ROLLBACK + rethrow on error — session client)
  *  - raw(sql, params)                    — direct query for test setup/assertions
  */
+// ── Shim #9: correlated NOT EXISTS → LEFT JOIN anti-join (pg-mem limit) ────
+function rewriteCorrelatedNotExistsToAntiJoin(sql) {
+  if (!/NOT\s+EXISTS/.test(sql) || !/mission_progress\s+mp/.test(sql)) return sql;
+  // Capture: AND NOT EXISTS ( SELECT 1 FROM token_transactions tt WHERE <conds> ) ORDER BY
+  // (the <conds> contain no `) ORDER BY` sequence, so the non-greedy match
+  // stops at the subquery's closing paren — verified against the current query)
+  const m = sql.match(/AND\s+NOT\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+token_transactions\s+tt\s+WHERE\s+([\s\S]*?)\)\s+ORDER\s+BY/i);
+  if (!m) return sql;
+  const conds = m[1].trim();
+  let out = sql.replace(m[0], 'ORDER BY');            // drop the NOT EXISTS block
+  out = out.replace(/FROM\s+mission_progress\s+mp/i,
+    `FROM mission_progress mp LEFT JOIN token_transactions tt ON ${conds}`);
+  out = out.replace(/\s+ORDER\s+BY/i, ' AND tt.id IS NULL ORDER BY'); // anti-join filter
+  return out;
+}
+
 function makePgHarness() {
   const db = newDb();
   db.public.many(SCHEMA_SQL);
@@ -173,6 +216,16 @@ function makePgHarness() {
   try {
     db.public.registerFunction({ name: 'pg_advisory_xact_lock', returns: 'text', args: ['integer'], implementation: () => null });
   } catch { /* already registered */ }
+  // Shim #8: pg-mem has no to_char(date, text). The mission-retry candidate
+  // query uses to_char(daily_date, 'YYYY-MM-DD') (+ date±1 arithmetic).
+  // Registered for (date, text) args; returns the ISO date string — exactly
+  // what real PostgreSQL returns for the 'YYYY-MM-DD' format.
+  try {
+    db.public.registerFunction({
+      name: 'to_char', returns: 'text', args: ['date', 'text'],
+      implementation: (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10)),
+    });
+  } catch { /* already registered */ }
   // Shim #7: pg-mem has no md5(). The production lock-key query is
   // SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint)
   // We can't fake bit(64) casting cheaply, so intercept the WHOLE lock-key
@@ -183,10 +236,16 @@ function makePgHarness() {
   const Pool = db.adapters.createPg().Pool;
 
   async function queryDb(env, sqlText, params = []) {
-    const sql = String(sqlText);
+    let sql = String(sqlText);
     // ensureSchema batch — schema is pre-created by the harness (note #4)
     if (sql.includes('idx_token_tx_user_type_ref')) {
       return { rows: [], rowCount: 0 };
+    }
+    // Shim #9: rewrite the correlated NOT EXISTS candidate query to the
+    // equivalent anti-join (pg-mem cannot resolve outer-alias references
+    // inside subqueries — see header note #9).
+    if (/NOT\s+EXISTS/.test(sql) && /mission_progress\s+mp/.test(sql)) {
+      sql = rewriteCorrelatedNotExistsToAntiJoin(sql);
     }
     // Shim #7 (companion): the lock-key derivation query uses
     // ::bit(64)::bigint casts that pg-mem cannot evaluate. Return a
@@ -274,7 +333,9 @@ function makePgHarness() {
 // ── ES module loader (repo files use `export function` — evaluate as CJS) ──
 function loadFactory(relPath, exportName) {
   const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
-  const body = src.replace(/export\s+function\s+/g, 'function ');
+  const body = src
+    .replace(/export\s+function\s+/g, 'function ')
+    .replace(/export\s+const\s+/g, 'const '); // e.g. entitlement_config.js exports
   const wrapped = `${body}\nmodule.exports = { ${exportName} };`;
   const mod = { exports: {} };
   new Function('module', 'exports', 'require', wrapped)(mod, mod.exports, require);

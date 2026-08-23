@@ -245,5 +245,8 @@ test('WIRE-02: No duplicate membershipAuthority definition', () => {
 });
 
 test('WIRE-03: ENTITLEMENT_CONFIG imported', () => {
-  assert.ok(WORKER_SRC.includes("import { ENTITLEMENT_CONFIG }"));
+  // M3: the import now also brings getMissionRewardAmount (the REAL tier
+  // multiplier helper) so retryFailedMissionRewards applies the same
+  // premium multiplier as the normal completion path.
+  assert.ok(WORKER_SRC.includes("import { ENTITLEMENT_CONFIG, getMissionRewardAmount }"));
 });

@@ -32,18 +32,22 @@ test('MISSION-RETRY-01: retryFailedMissionRewards function exists', () => {
     'retryFailedMissionRewards must be defined');
 });
 
-test('MISSION-RETRY-02: uses same ref_id format as fireDailyLoginMission (Tehran date)', () => {
-  // PHASE 1 FIX: fireDailyLoginMission now uses Tehran date (not UTC) for refId.
-  // Retry must use the SAME Tehran date to maintain idempotency.
-  // The retry cron uses sharedGetTehranDateString() (same helper as fireDailyLoginMission).
+test('MISSION-RETRY-02: refId carries the COMPLETION date — NOT the cron execution date (M3)', () => {
+  // M3 FIX: the retry refId must be built from the mission's completion date
+  // (row.date_str = to_char(mission_progress.daily_date) — the Tehran date
+  // the normal completion path used), because a cron-date refId collided
+  // with the user's NEXT-day completion of the same mission and silently
+  // stole that day's reward. The old assertion locked in the buggy
+  // `tehranToday` pattern; behavior is now locked by MR1 in
+  // wallet-mission-retry-test.cjs (pg-mem, real function extraction).
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
     WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
-  assert.ok(retryBlock.includes('sharedGetTehranDateString'),
-    'retry must use sharedGetTehranDateString helper (Tehran date, consistent with fireDailyLoginMission)');
-  assert.ok(retryBlock.includes("`mission_${row.user_id}_${row.mission_id}_${tehranToday}`"),
-    'retry must use Tehran date in refId: mission_${user_id}_${mission_id}_${tehranToday}');
+  assert.ok(retryBlock.includes("`mission_${row.user_id}_${row.mission_id}_${row.date_str}`"),
+    'retry must build the refId from the completion date (row.date_str / daily_date)');
+  assert.ok(!retryBlock.includes('tehranToday'),
+    'the cron execution date (tehranToday) must NOT be the refId identity');
 });
 
 test('MISSION-RETRY-03: uses same tx_type as original reward', () => {

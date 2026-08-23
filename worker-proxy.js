@@ -46,7 +46,7 @@ import { createMarketOverviewService } from './src/services/market_overview_serv
 import { createMembershipRepository } from './src/repositories/membership.js';
 import { createMembershipHandlers } from './src/controllers/membership.js';
 import { createMembershipAuthority } from './src/services/membership_authority.js';
-import { ENTITLEMENT_CONFIG } from './src/services/entitlement_config.js';
+import { ENTITLEMENT_CONFIG, getMissionRewardAmount } from './src/services/entitlement_config.js';
 import { createCosmeticsRepository } from './src/repositories/cosmetics.js';
 import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
@@ -2866,9 +2866,22 @@ async function retryFailedWheelRewards(env) {
  * prevents double-credit even if this runs concurrently with a bootstrap.
  *
  * Bounded: LIMIT 20 per cron tick (every 15 min), oldest first.
- * Window: today + yesterday (mission_progress.daily_date >= CURRENT_DATE - 1)
+ * Window: daily_date >= CURRENT_DATE - 2 (today + 2 days back, timezone safety)
  *
  * Follows the same pattern as retryFailedWheelRewards above.
+ *
+ * M3 FIX (refId date): the retry refId carries the mission's COMPLETION date
+ * (mission_progress.daily_date — the Tehran date written by
+ * incrementMissionProgress at completion, the same date the normal completion
+ * path used in its refId), NOT the cron's execution date. The old
+ * `tehranToday` refId made the retry tx collide with the user's NEXT real
+ * completion of the same mission on that date → grantReward resolved
+ * idempotent → that day's real reward was silently lost.
+ *
+ * M3 FIX (premium tier): the retry applies the same tier multiplier as the
+ * normal completion path — the REAL getMissionRewardAmount helper imported
+ * from entitlement_config.js (Normal = floor(base), Premium = ceil(1.5 ×))
+ * with MembershipAuthority resolving the tier (fail-safe to Normal/base).
  */
 async function retryFailedMissionRewards(env) {
   if (!isDatabaseConfigured(env)) return;
@@ -2917,21 +2930,17 @@ async function retryFailedMissionRewards(env) {
 
     let retried = 0;
     let succeeded = 0;
-    // PHASE 1 FIX: use Tehran date for refId reconstruction (consistent with
-    // fireDailyLoginMission after Phase 1 fix). Previously used row.date_str
-    // (UTC) which would create a DIFFERENT refId than fireDailyLoginMission,
-    // causing the retry to create a second token_transactions row (double-reward).
-    // Now both fireDailyLoginMission and retry use Tehran date — same refId →
-    // creditTokens idempotency (UNIQUE constraint) catches the duplicate.
-    const tehranToday = sharedGetTehranDateString();
     for (const row of result.rows) {
       try {
-        // Reconstruct the exact ref_id used by fireDailyLoginMission
-        // PHASE 1 FIX: use Tehran date — but we also check row.date_str (UTC)
-        // for backward compat with missions completed before Phase 1 fix.
-        // The query above already verified NEITHER refId exists in token_transactions,
-        // so we use Tehran date (the post-fix format).
-        const refId = `mission_${row.user_id}_${row.mission_id}_${tehranToday}`;
+        // M3 FIX: reconstruct the refId from the mission's COMPLETION date
+        // (row.date_str = to_char(daily_date) — the Tehran date recorded by
+        // incrementMissionProgress at completion, identical to the date the
+        // normal path used in its refId). The candidate query above already
+        // verified no tx exists under ANY of the 3 date-candidate refIds
+        // (daily_date ±1 — covers the historical UTC/pre-PHASE-1 rows and the
+        // Tehran-midnight race), so this credit cannot collide with an
+        // existing reward and cannot steal a future day's refId either.
+        const refId = `mission_${row.user_id}_${row.mission_id}_${row.date_str}`;
 
         // Get the current reward amount from DB (not hardcoded)
         const missionConfig = rewardCenterRepo
@@ -2943,7 +2952,24 @@ async function retryFailedMissionRewards(env) {
           continue;
         }
 
-        const amount = Number(missionConfig.token_amount);
+        // M3 FIX: apply the SAME tier multiplier as the normal completion
+        // path — the real getMissionRewardAmount helper (Normal 1×, Premium
+        // ceil(1.5×)), with the user's tier resolved via MembershipAuthority
+        // (fail-safe: keep the base amount if the tier lookup fails).
+        let amount = Number(missionConfig.token_amount);
+        if (membershipAuthority && typeof getMissionRewardAmount === 'function') {
+          try {
+            const isPremium = await membershipAuthority.isPremium(env, String(row.user_id));
+            amount = getMissionRewardAmount(amount, isPremium);
+          } catch (tierErr) {
+            console.warn('Mission reward retry tier lookup failed for user', row.user_id, '— using base amount:', tierErr?.message);
+          }
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+          // Multiplier produced nothing creditable — skip
+          retried++;
+          continue;
+        }
         const label = missionConfig.mission_name || row.mission_id;
 
         const grantResult = await economyService.grantReward({
