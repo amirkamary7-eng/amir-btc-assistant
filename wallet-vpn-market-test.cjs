@@ -110,7 +110,8 @@ test('VM2: Premium user + balance → 201, exactly one debit, purchase pending',
   assert.equal(res.body.purchase.vpn_gb, 4);
 
   assert.equal(await txCount(h, "WHERE tx_type = 'vpn_purchase' AND status = 'completed'"), 1, 'exactly one debit');
-  assert.equal(await balanceOf(h, 'u1'), 300, '500 - 200 = 300');
+  // PRICING UPDATE (2026-08-24): vpn_4gb is now 300 AB → 500 - 300 = 200
+  assert.equal(await balanceOf(h, 'u1'), 200, '500 - 300 = 200');
 });
 
 test('VM3: Premium + insufficient balance → 402, zero side effects', async () => {
@@ -126,7 +127,8 @@ test('VM4: Duplicate pending purchase → 409 + refund of second debit', async (
   const { h, handlers } = makeVpnStack({ premium: true, balance: 1000 });
   const first = await purchase(handlers, 'vpn_4gb');
   assert.equal(first.status, 201);
-  const balanceAfterFirst = await balanceOf(h, 'u1'); // 800
+  // PRICING UPDATE (2026-08-24): vpn_4gb is now 300 AB → 1000 - 300 = 700
+  const balanceAfterFirst = await balanceOf(h, 'u1'); // 700
 
   const second = await purchase(handlers, 'vpn_4gb');
   assert.equal(second.status, 409);
@@ -146,8 +148,10 @@ test('VM5: purchase record failure after debit → refund issued (token not lost
   const createRewardPurchaseHandlers = loadFactory(
     'src/controllers/reward_purchases.js', 'createRewardPurchaseHandlers',
   );
+  // PRICING UPDATE (2026-08-24): vpn_4gb costAb is now 300 (was 200).
+  // Test verifies refund flow — balance: 500 → -300 (debit) → +300 (refund) = 500
   const brokenRepo = {
-    getVpnPlan: (id) => ({ id, gb: 4, costAb: 200, durationDays: 7, durationFa: '۱ هفته' }),
+    getVpnPlan: (id) => ({ id, gb: 4, costAb: 300, durationDays: 7, durationFa: '۱ هفته' }),
     checkPurchaseLimit: async () => ({ restricted: false }),
     createVpnPurchase: async () => { throw new Error('DB_WRITE_FAILED'); },
   };
@@ -170,7 +174,7 @@ test('VM5: purchase record failure after debit → refund issued (token not lost
   );
   assert.equal(res.status, 500, 'creation fails');
 
-  // The debit happened (-200) then was refunded (+200) → balance back to 500
+  // The debit happened (-300) then was refunded (+300) → balance back to 500
   assert.equal(await balanceOf(h2, 'u1'), 500, 'token not lost — refund issued');
 });
 
@@ -193,9 +197,10 @@ test('VM7: Plans catalog — 6 plans (1GB universal + 5 Premium)', () => {
   assert.equal(plans[0].gb, 1);
   assert.equal(plans[0].costAb, 200);
   assert.equal(plans[0].premiumOnly, false);
-  // 2GB-10GB are Premium-only
+  // 2GB-10GB are Premium-only — pricing updated 2026-08-24:
+  //   2GB=200, 4GB=300, 6GB=400, 8GB=500, 10GB=600
   const premiumPlans = plans.slice(1);
-  assert.deepEqual(premiumPlans.map(p => p.costAb), [200, 200, 300, 400, 500]);
+  assert.deepEqual(premiumPlans.map(p => p.costAb), [200, 300, 400, 500, 600]);
   assert.deepEqual(premiumPlans.map(p => p.gb), [2, 4, 6, 8, 10]);
   assert.ok(premiumPlans.every(p => p.premiumOnly === true), 'all 2GB+ plans Premium-only');
 });

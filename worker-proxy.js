@@ -8588,6 +8588,9 @@ const rewardPurchaseHandlers = createRewardPurchaseHandlers({
   notificationService,
   requireAdmin: (request, env, perm) => adminHandlers.requireAdmin(request, env, perm),
   sendTelegramMessage,
+  // W-STAB-4 FIX: pass Tehran date helper so controller can build deterministic
+  // refId per (user, plan, tehran-today) for concurrent-request idempotency.
+  getTehranDateString: sharedGetTehranDateString,
 });
 
 // ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────

@@ -59,14 +59,26 @@ export function createRewardPurchaseRepository(deps) {
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_rp_tracking ON reward_purchases (tracking_id)`).catch(() => {});
       // Index for the 30-day limit query
       await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_rp_user_plan_status ON reward_purchases (user_id, plan_id, status, created_at DESC)`).catch(() => {});
-      // Partial unique index: at most ONE pending purchase per user+plan
+      // Partial unique index: at most ONE pending purchase per user+plan.
+      // This is the critical idempotency guard for the VPN purchase flow.
+      // If this fails (e.g. pre-existing duplicate pending rows), we MUST NOT
+      // mark schema as verified — otherwise the isolate will silently run
+      // forever without DB-level race protection (W-STAB-3).
       await queryDb(env, `CREATE UNIQUE INDEX IF NOT EXISTS uq_rp_pending_plan
         ON reward_purchases (user_id, reward_type, vpn_gb)
-        WHERE status = 'pending'`).catch(() => {});
+        WHERE status = 'pending'`);
+      // W-STAB-3 FIX (mirrors wallet.js M4 fix): only mark schema as verified
+      // on SUCCESS. Previously _schemaVerified was set to true in BOTH try and
+      // catch blocks — meaning a failed unique-index creation (e.g. due to
+      // pre-existing duplicate rows) was permanently swallowed for the
+      // isolate's lifetime, silently disabling the DB-level idempotency that
+      // the VPN purchase flow depends on. Now: on failure, log loudly and
+      // rethrow so the next invocation retries the migration. Call sites use
+      // .catch(() => {}) where a schema failure must not block the operation.
       _schemaVerified = true;
     } catch (e) {
-      console.warn('[reward-purchases] schema migration warning:', e.message);
-      _schemaVerified = true;
+      console.error('[reward-purchases] Schema migration FAILED (will retry on next invocation):', e?.message || e);
+      throw e;
     }
   }
 
@@ -74,13 +86,21 @@ export function createRewardPurchaseRepository(deps) {
 
   // FIX 8: Duration is part of the catalog (backend authoritative).
   // 1-4GB = 1 week (7 days), 6-10GB = 1 month (30 days).
+  // PRICING UPDATE (2026-08-24): revised per business request.
+  //   vpn_4gb  200 → 300 (+100)
+  //   vpn_6gb  300 → 400 (+100)
+  //   vpn_8gb  400 → 500 (+100)
+  //   vpn_10gb 500 → 600 (+100)
+  //   vpn_1gb / vpn_2gb unchanged (200 AB)
+  // Frontend (wallet.js) renders cost_ab from /api/rewards/vpn/plans — no
+  // hardcoded prices anywhere. This catalog is the SINGLE source of truth.
   const VPN_PLANS = Object.freeze([
     { id: 'vpn_1gb',  gb: 1,  costAb: 200, premiumOnly: false, durationDays: 7,  durationFa: '۱ هفته',  durationEn: '1 week'  },
     { id: 'vpn_2gb',  gb: 2,  costAb: 200, premiumOnly: true,  durationDays: 7,  durationFa: '۱ هفته',  durationEn: '1 week'  },
-    { id: 'vpn_4gb',  gb: 4,  costAb: 200, premiumOnly: true,  durationDays: 7,  durationFa: '۱ هفته',  durationEn: '1 week'  },
-    { id: 'vpn_6gb',  gb: 6,  costAb: 300, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
-    { id: 'vpn_8gb',  gb: 8,  costAb: 400, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
-    { id: 'vpn_10gb', gb: 10, costAb: 500, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
+    { id: 'vpn_4gb',  gb: 4,  costAb: 300, premiumOnly: true,  durationDays: 7,  durationFa: '۱ هفته',  durationEn: '1 week'  },
+    { id: 'vpn_6gb',  gb: 6,  costAb: 400, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
+    { id: 'vpn_8gb',  gb: 8,  costAb: 500, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
+    { id: 'vpn_10gb', gb: 10, costAb: 600, premiumOnly: true,  durationDays: 30, durationFa: '۱ ماه',   durationEn: '1 month' },
   ]);
 
   function getVpnPlans() {
@@ -112,7 +132,7 @@ export function createRewardPurchaseRepository(deps) {
    * @returns {Promise<{restricted: boolean, daysRemaining?: number, lastPurchase?: object}>}
    */
   async function checkPurchaseLimit(env, userId, planId) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const plan = getVpnPlan(planId);
     if (!plan) return { restricted: false };
 
@@ -160,7 +180,7 @@ export function createRewardPurchaseRepository(deps) {
    * @returns {Promise<{purchase, created}>}
    */
   async function createVpnPurchase(env, userId, planId, costAb, txRefId) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const uid = String(userId);
     const plan = getVpnPlan(planId);
     if (!plan) throw new Error('INVALID_PLAN');
@@ -197,7 +217,7 @@ export function createRewardPurchaseRepository(deps) {
    * Cancel a purchase. Only pending purchases can be cancelled.
    */
   async function cancelPurchase(env, purchaseId) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const result = await queryDb(env,
       `UPDATE reward_purchases SET status = 'cancelled', updated_at = NOW()
        WHERE id = $1 AND status = 'pending' RETURNING id`,
@@ -211,7 +231,7 @@ export function createRewardPurchaseRepository(deps) {
    * Failed purchases do NOT lock the 30-day limit.
    */
   async function failPurchase(env, purchaseId) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const result = await queryDb(env,
       `UPDATE reward_purchases SET status = 'failed', updated_at = NOW()
        WHERE id = $1 AND status = 'pending' RETURNING id`,
@@ -226,7 +246,7 @@ export function createRewardPurchaseRepository(deps) {
    * Only pending → fulfilled (state machine, no double-fulfillment).
    */
   async function fulfillPurchase(env, purchaseId, adminId, vpnLink) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const result = await queryDb(env,
       `UPDATE reward_purchases
        SET status = 'fulfilled',
@@ -247,7 +267,7 @@ export function createRewardPurchaseRepository(deps) {
    * Get a single purchase by ID (for admin fulfillment detail).
    */
   async function getPurchaseById(env, purchaseId) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const result = await queryDb(env,
       `SELECT rp.*, u.username, u.first_name, u.last_name
        FROM reward_purchases rp
@@ -285,7 +305,7 @@ export function createRewardPurchaseRepository(deps) {
   }
 
   async function listPurchases(env, { status = null, limit = 50, offset = 0 } = {}) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const params = [];
     let where = '';
     let idx = 1;
@@ -318,7 +338,7 @@ export function createRewardPurchaseRepository(deps) {
   }
 
   async function listUserPurchases(env, userId, limit = 20) {
-    await ensureSchema(env);
+    await ensureSchema(env).catch(() => {});
     const result = await queryDb(env,
       `SELECT id, reward_type, plan_id, plan_name, vpn_gb, cost_ab, duration_days,
               status, tracking_id, vpn_link, created_at, fulfilled_at, expires_at

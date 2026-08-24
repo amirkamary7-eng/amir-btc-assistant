@@ -36,7 +36,22 @@ export function createRewardPurchaseHandlers(deps) {
     notificationService,
     requireAdmin,
     sendTelegramMessage,
+    // W-STAB-4 FIX: Tehran date helper for deterministic refId.
+    // Previously refId used Date.now() — each concurrent request got a unique
+    // refId, so the wallet's unique index on (user_id, tx_type, ref_id) did
+    // NOT protect against double-debit. The only protection was the
+    // uq_rp_pending_plan index (which W-STAB-3 may have silently failed to
+    // create). Now refId is deterministic per (user, plan, tehran-today) so
+    // concurrent requests share the same refId → wallet unique index rejects
+    // the second debit idempotently (debitTokens handles 23505 unique
+    // violation by returning { idempotent: true }).
+    getTehranDateString,
   } = deps;
+
+  function _getTehranDateSafe() {
+    try { return (typeof getTehranDateString === 'function') ? getTehranDateString() : new Date().toISOString().slice(0, 10); }
+    catch { return new Date().toISOString().slice(0, 10); }
+  }
 
   async function _isPremiumSafe(env, userId) {
     if (!membershipAuthority) return false;
@@ -165,8 +180,26 @@ export function createRewardPurchaseHandlers(deps) {
 
     try {
       // 1. Atomic wallet debit — price from backend catalog (plan.costAb)
-      const refId = `vpn_purchase_${userId}_${plan.id}_${Date.now()}`;
+      // W-STAB-4 FIX: deterministic refId per (user, plan, tehran-today).
+      // Previously: `vpn_purchase_${userId}_${plan.id}_${Date.now()}` — each
+      // concurrent request got a unique refId, so the wallet's unique index
+      // on (user_id, tx_type, ref_id) could NOT reject the second debit.
+      // Now: `vpn_purchase_${userId}_${plan.id}_${tehranToday}` — concurrent
+      // requests in the same Tehran day share the same refId. If a duplicate
+      // debit hits the unique constraint, debitTokens handles 23505 by
+      // returning { idempotent: true, newBalance: null } (see wallet.js:858).
+      // The controller then treats idempotent debit as a duplicate-pending
+      // case (DUPLICATE_PENDING response, no refund issued because the
+      // winner's debit already paid for the purchase).
+      // Note: 30-day purchase limit (checkPurchaseLimit above) prevents the
+      // same user+plan from being purchased twice within 30 days after
+      // fulfillment, so a same-day refId reuse can only happen when the
+      // first purchase is still pending (which is exactly the duplicate
+      // case we want to reject).
+      const tehranToday = _getTehranDateSafe();
+      const refId = `vpn_purchase_${userId}_${plan.id}_${tehranToday}`;
       let debitResult;
+      let debitWasIdempotent = false;
       try {
         debitResult = await economyService.debitUser({
           userId,
@@ -177,6 +210,7 @@ export function createRewardPurchaseHandlers(deps) {
           metadata: { plan_id: plan.id, vpn_gb: plan.gb, duration_days: plan.durationDays },
           env,
         });
+        debitWasIdempotent = Boolean(debitResult && debitResult.idempotent);
       } catch (e) {
         return jsonResponse({
           status: 'error',
@@ -184,6 +218,26 @@ export function createRewardPurchaseHandlers(deps) {
           code: 'PAYMENT_FAILED',
           required_tokens: plan.costAb,
         }, { status: 402 }, env);
+      }
+
+      // W-STAB-4: if debit was idempotent (a concurrent winner already debited
+      // for the same refId), this request is a duplicate. Skip the purchase
+      // creation — the winner already created it. Return DUPLICATE_PENDING so
+      // the frontend shows the right message (no refund needed because no
+      // new debit happened on this request).
+      if (debitWasIdempotent) {
+        // Look up the existing pending purchase for this user+plan
+        let existingPurchase = null;
+        try {
+          const userPurchases = await rewardPurchaseRepo.listUserPurchases(env, userId, 50);
+          existingPurchase = userPurchases.find(p => p.plan_id === plan.id && p.status === 'pending') || null;
+        } catch (_) {}
+        return jsonResponse({
+          status: 'error',
+          message: 'You already have a pending purchase for this plan. Please wait for fulfillment.',
+          code: 'DUPLICATE_PENDING',
+          purchase_id: existingPurchase?.id || null,
+        }, { status: 409 }, env);
       }
 
       // 2. Create purchase record

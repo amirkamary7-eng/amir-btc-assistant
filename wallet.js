@@ -273,6 +273,14 @@ const WalletApp = (() => {
   let historyLoading = false;
   let historyOffset = 0;
   let _tokenLogo = 'assets/token-logo.png';
+  // W-STAB-2 FIX: monotonic sequence token to guard loadWalletData against
+  // out-of-order promise resolution. Previously, rapid open/close/reopen of
+  // the wallet could fire multiple loadWalletData invocations concurrently.
+  // If an earlier (stale) fetch resolved AFTER a later (fresh) one, the stale
+  // data would overwrite the fresh render — showing wrong balance / old state.
+  // Each invocation increments _loadWalletSeq and captures its own token; the
+  // .then() callback bails out if the token no longer matches the latest call.
+  let _loadWalletSeq = 0;
   // PHASE UX-V2.1: removed dead constant DAILY_REWARD = 10.
   // Reward amount is server-authoritative (result.amount from API response).
 
@@ -1055,6 +1063,14 @@ const WalletApp = (() => {
   async function loadWalletData() {
     walletSummary = null;
 
+    // W-STAB-2 FIX: capture a sequence token for this invocation. The .then()
+    // callbacks below bail out if `_loadWalletSeq` no longer matches — meaning
+    // a newer loadWalletData() call superseded this one. This prevents a stale
+    // fetch (e.g. from a rapid wallet close+reopen) from overwriting a fresh
+    // render with old data.
+    const mySeq = ++_loadWalletSeq;
+    const isStale = () => mySeq !== _loadWalletSeq;
+
     // ROOT CAUSE FIX (wallet P1): Progressive rendering.
     // Previously, Promise.all waited for ALL 3 API calls before rendering
     // anything. The slowest call (usually fetchSummary with its aggregate
@@ -1084,14 +1100,18 @@ const WalletApp = (() => {
     //
     // Fix: chain VPN market rendering AFTER renderWalletPage completes.
     walletPromise.then(walletRes => {
+      if (isStale()) return; // W-STAB-2: a newer loadWalletData superseded this one
       if (walletRes) {
         renderWalletPage(walletRes);
         walletData = walletRes;
         _lastKnownBalance = Number(walletRes.balance) || 0;
         // Render VPN market AFTER the page is built (grid exists)
         claimPromise.then(claimRes => {
+          if (isStale()) return; // W-STAB-2
           renderVpnMarket(claimRes?.is_premium || false);
-        }).catch(() => renderVpnMarket(false));
+        }).catch(() => {
+          if (!isStale()) renderVpnMarket(false);
+        });
         // Persist to localStorage for instant render on next open
         try {
           localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
@@ -1106,10 +1126,14 @@ const WalletApp = (() => {
         renderWalletPage(fallbackData);
         // Still render VPN market even on wallet data failure
         claimPromise.then(claimRes => {
+          if (isStale()) return; // W-STAB-2
           renderVpnMarket(claimRes?.is_premium || false);
-        }).catch(() => renderVpnMarket(false));
+        }).catch(() => {
+          if (!isStale()) renderVpnMarket(false);
+        });
       }
     }).catch(() => {
+      if (isStale()) return; // W-STAB-2
       const fallbackData = {
         balance: 0,
         tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 },
@@ -1118,13 +1142,17 @@ const WalletApp = (() => {
       renderWalletPage(fallbackData);
       // Still render VPN market on wallet error
       claimPromise.then(claimRes => {
+        if (isStale()) return; // W-STAB-2
         renderVpnMarket(claimRes?.is_premium || false);
-      }).catch(() => renderVpnMarket(false));
+      }).catch(() => {
+        if (!isStale()) renderVpnMarket(false);
+      });
     });
 
     // Update claim button when claim status arrives
     // PHASE UX-V2.1: cache streak state for Daily Check-in modal
     claimPromise.then(claimRes => {
+      if (isStale()) return; // W-STAB-2
       if (claimRes) {
         // Cache state for modal + card rendering
         _dailyCheckinState = {
@@ -1144,6 +1172,7 @@ const WalletApp = (() => {
     // Update summary strip when summary arrives (optional — buildSummaryStrip
     // handles null walletSummary gracefully)
     summaryPromise.then(summaryRes => {
+      if (isStale()) return; // W-STAB-2
       if (summaryRes) {
         walletSummary = summaryRes;
         // Re-render just the summary strip if the page is open
@@ -1809,7 +1838,14 @@ const WalletApp = (() => {
     closeVpnConfirmModal,
     closeVpnSuccessModal,
     refreshWalletBalance,
-    claimDaily: claimDailyRewardAPI,
+    // W-STAB-1 FIX: previously mapped to claimDailyRewardAPI (bare API call)
+    // which gave NO UI feedback. The Daily Check-in modal's Claim button calls
+    // WalletApp.claimDaily() (wallet.js:1398). With the old mapping, clicking
+    // Claim sent the API request but skipped button-disable, cache invalidate,
+    // balance animate, streak re-render, and success popup — so users clicked
+    // again and got ALREADY_CLAIMED. Now map to the local claimDaily() function
+    // (wallet.js:1172) which wraps claimDailyRewardAPI with full UI feedback.
+    claimDaily: claimDaily,
     closeDailyCheckinModal,
     scrollToSection,
     _invalidateCache: invalidateWalletCache,
