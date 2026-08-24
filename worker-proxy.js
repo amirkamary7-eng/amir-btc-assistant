@@ -2325,6 +2325,92 @@ async function getReferralRewardPerInvite(env) {
 // Cloudflare Workers. Module-level Pool caching does NOT work because
 // WebSocket connections are bound to the request context that created them.
 
+// ── DB QUERY HARD TIMEOUT HELPER ──────────────────────────────────────
+// ROOT CAUSE: pool.query() has NO execution timeout. connectionTimeoutMillis
+// only applies during connect(). Once connected, a half-open WebSocket
+// (connection established but server not responding) causes pool.query() to
+// hang indefinitely → Worker runtime kills the request ("code had hung").
+//
+// FIX: wrap every pool.query() in a Promise.race with a hard timeout. If the
+// timeout fires, we:
+//   1. Reject the promise (caller gets a controlled error, not a hang)
+//   2. Try to end the pool to discard the poisoned connection (best-effort,
+//      wrapped in try/catch — the pool may already be in a bad state)
+//   3. Log the timeout for observability
+//
+// The leaked timeout Promise (pool.query still running in background) is
+// acceptable — Cloudflare isolates are short-lived and GC will reclaim it.
+// The important thing is the CALLER gets a fast, controlled rejection.
+//
+// 8s is chosen because:
+//   - Normal queries complete in <500ms
+//   - Complex aggregate queries (analyses stats) complete in <2s
+//   - Cloudflare Worker CPU limit is 10s (Free) / 30s (Paid)
+//   - 8s gives 2s margin for error handling + response
+//   - Matches the existing 7900ms threshold in _traceQuery
+const DB_QUERY_TIMEOUT_MS = 8000;
+
+/**
+ * Run a pool.query() with a hard timeout. On timeout, rejects with a
+ * distinguishable error and best-effort discards the pool.
+ *
+ * @param {object} poolObj - the pg.Pool or NeonPool instance
+ * @param {string} sql - SQL text
+ * @param {Array} params - bind parameters
+ * @param {object} [opts] - { poolLabel: 'phasePool'|'shared'|'new' }
+ * @returns {Promise<object>} - query result (same shape as pool.query())
+ * @throws {Error} - on timeout: message starts with "DB_QUERY_TIMEOUT"
+ *                   - on query error: the original error
+ */
+async function _poolQueryWithTimeout(poolObj, sql, params, opts = {}) {
+  const poolLabel = opts.poolLabel || 'pool';
+  const _t0 = Date.now();
+  let timedOut = false;
+
+  // The timeout Promise — resolves with { _timeout: true } after DB_QUERY_TIMEOUT_MS
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => {
+      timedOut = true;
+      resolve({ _timeout: true });
+    }, DB_QUERY_TIMEOUT_MS);
+  });
+
+  // Race: query vs timeout
+  const result = await Promise.race([
+    poolObj.query(sql, params).then(r => ({ _timeout: false, _result: r })),
+    timeoutPromise,
+  ]);
+
+  if (result && result._timeout) {
+    // Timeout fired — the query is still running in the background.
+    // Best-effort: try to end the pool to discard the poisoned connection.
+    // The pool may be shared (env._reqPool) — ending it affects all callers
+    // using it, but a poisoned pool is worse than no pool (callers will
+    // fall through to neon() HTTP or createPool fallback).
+    try {
+      if (typeof poolObj.end === 'function') {
+        // Don't await — end() may also hang on a bad WebSocket. Fire-and-forget.
+        poolObj.end().catch(() => {});
+      }
+    } catch {}
+    const _elapsed = Date.now() - _t0;
+    console.warn(JSON.stringify({
+      scope: 'db-query-timeout',
+      poolLabel,
+      sqlPreview: String(sql).replace(/\s+/g, ' ').slice(0, 100),
+      elapsedMs: _elapsed,
+      timeoutMs: DB_QUERY_TIMEOUT_MS,
+    }));
+    const err = new Error(`DB_QUERY_TIMEOUT after ${_elapsed}ms (${poolLabel})`);
+    err.code = 'DB_QUERY_TIMEOUT';
+    err.poolLabel = poolLabel;
+    err.elapsedMs = _elapsed;
+    throw err;
+  }
+
+  return result._result;
+}
+
 async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   const _seq = _nextQuerySeq();
   const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
@@ -2336,7 +2422,7 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   // so it's NEVER visible to other requests → no "Cannot perform I/O" bug.
   if (pool) {
     try {
-      const _result = await pool.query(sqlText, params);
+      const _result = await _poolQueryWithTimeout(pool, sqlText, params, { poolLabel: 'phasePool' });
       const _t1 = Date.now();
       _traceStage('queryDb.phasePool:' + _sqlPreview.slice(0, 60), _t0);
       _traceQuery({
@@ -2372,7 +2458,7 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   // query simply uses a fresh pool.
   if (env && env._reqPool) {
     try {
-      const _result = await env._reqPool.query(sqlText, params);
+      const _result = await _poolQueryWithTimeout(env._reqPool, sqlText, params, { poolLabel: 'shared' });
       const _t1 = Date.now();
       _traceStage('queryDb.shared:' + _sqlPreview.slice(0, 60), _t0);
       _traceQuery({
@@ -2384,7 +2470,7 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
     } catch (error) {
       const _t1 = Date.now();
       const _errMsg = String(error?.message || '').slice(0, 200);
-      const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+      const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out') || error?.code === 'DB_QUERY_TIMEOUT';
       _traceStage('queryDb.shared.ERROR:' + _sqlPreview.slice(0, 60), _t0);
       _traceQuery({
         seq: _seq, poolType: 'shared', sql: _sqlPreview,
@@ -2397,7 +2483,14 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
       // race condition in the save/restore pattern, NOT a real DB error. Don't
       // throw — fall through to the neon/per-call pool path below. The query
       // will succeed with a fresh pool.
-      if (_errMsg.includes('Cannot use a pool after calling end on the pool')) {
+      // DB_QUERY_TIMEOUT FIX: if the shared pool query timed out (half-open
+      // WebSocket), the pool is poisoned. _poolQueryWithTimeout already
+      // called pool.end() (fire-and-forget). Clear env._reqPool and fall
+      // through to neon() HTTP (which has its own 10s timeout) for a retry.
+      // This prevents the timeout from propagating as a 5xx when neon() can
+      // still serve the query.
+      if (_errMsg.includes('Cannot use a pool after calling end on the pool') ||
+          error?.code === 'DB_QUERY_TIMEOUT') {
         // Fall through to neon() / per-call pool path
       } else {
         throw error;
@@ -2440,15 +2533,22 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
   }
 
   // ── Pool fallback: create a per-call WebSocket Pool (original path 3) ──
+  // DB QUERY TIMEOUT FIX: retry reduced to 0 (no retry) to prevent
+  // "timeout + retry + backoff" from extending request duration beyond
+  // Worker limits. If the first attempt fails (timeout or transient error),
+  // the caller gets a controlled error. The neon() HTTP path above (with its
+  // own 10s timeout) is the primary path — this Pool fallback is the LAST
+  // resort, not a retry target.
+  const _effectiveRetries = 0;
   const _tPoolCreate = Date.now();
   const _callPool = createPool(env);
   if (!_callPool) throw new Error('Database not configured');
 
   try {
-    for (let attempt = 0; attempt <= retries; attempt++) {
+    for (let attempt = 0; attempt <= _effectiveRetries; attempt++) {
       const _tAttempt = Date.now();
       try {
-        const _result = await _callPool.query(sqlText, params);
+        const _result = await _poolQueryWithTimeout(_callPool, sqlText, params, { poolLabel: 'new' });
         const _t1 = Date.now();
         _traceStage('queryDb.pool:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ')', _t0);
         _traceQuery({
@@ -2460,15 +2560,19 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
       } catch (error) {
         const _t1 = Date.now();
         const msg = String(error?.message || '');
-        const _isTimeout = _t1 - _tAttempt >= 7900 || msg.includes('timeout') || msg.includes('Timed out');
-        const isTransient = msg.includes('530') ||
+        const _isTimeout = _t1 - _tAttempt >= 7900 || msg.includes('timeout') || msg.includes('Timed out') || error?.code === 'DB_QUERY_TIMEOUT';
+        // DB QUERY TIMEOUT FIX: DB_QUERY_TIMEOUT is NOT transient — don't retry.
+        // The pool is poisoned (half-open WebSocket). Retrying with the same
+        // pool would just timeout again, doubling the latency.
+        const isTransient = error?.code !== 'DB_QUERY_TIMEOUT' && (
+                            msg.includes('530') ||
                             msg.includes('1016') ||
                             msg.includes('ECONNRESET') ||
                             msg.includes('Connection terminated') ||
                             msg.includes('timeout') ||
                             msg.includes('fetch failed') ||
-                            msg.includes('network');
-        if (attempt === retries || !isTransient) {
+                            msg.includes('network'));
+        if (attempt === _effectiveRetries || !isTransient) {
           _traceStage('queryDb.pool.ERROR:' + _sqlPreview.slice(0, 60) + ' (attempt ' + (attempt+1) + ', ' + msg.slice(0, 60) + ')', _t0);
           _traceQuery({
             seq: _seq, poolType: 'new', sql: _sqlPreview,
@@ -2520,12 +2624,17 @@ async function queryDbTransaction(env, queries) {
       startMs: _tConnect, endMs: _tConnectEnd, durationMs: _tConnectEnd - _tConnect,
       status: _tConnectEnd - _tConnect >= 7900 ? 'timeout' : 'ok', attempt: 1
     });
-    await client.query('BEGIN');
+    // DB QUERY TIMEOUT FIX: wrap each client.query() in a hard timeout.
+    // Uses the same _poolQueryWithTimeout helper (client.query has the same
+    // signature as pool.query). On timeout, the client is poisoned — we
+    // release it in finally (not return to pool) and the pool is ended.
+    // ROLLBACK may also fail on a poisoned connection — wrapped in try/catch.
+    await _poolQueryWithTimeout(client, 'BEGIN', [], { poolLabel: 'txn' });
     const results = [];
     for (const { sql, params } of queries) {
-      results.push(await client.query(sql, params));
+      results.push(await _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' }));
     }
-    await client.query('COMMIT');
+    await _poolQueryWithTimeout(client, 'COMMIT', [], { poolLabel: 'txn' });
     const _t1 = Date.now();
     _traceStage('queryDbTransaction.total (' + _numQueries + ' queries)', _t0);
     _traceQuery({
