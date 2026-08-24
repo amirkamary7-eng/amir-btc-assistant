@@ -1097,6 +1097,7 @@ export function createNotificationPlatformRepository(deps) {
       skipInApp = false, // Phase 2: skip in-app INSERT (for rich Telegram-only messages)
       dedupKey,          // Phase 2: deterministic notification ID (for idempotency)
       forceChannel = false, // Phase 2: ignore user preference (admin/system critical)
+      enqueueOnly = false, // FIX 1: skip immediate processQueue — caller will batch-process after loop
     } = opts;
 
     if (!userId) return { id: null, status: 'error', error: 'userId required' };
@@ -1193,7 +1194,11 @@ export function createNotificationPlatformRepository(deps) {
       //     wall-clock time as 1 item.
       // The cron ticks (*/1 LIMIT=3, */5 LIMIT=10) remain as backstop for
       // failures, retries, and cron-triggered notifications (alerts, broadcasts).
-      if (env_sendTelegramMessage) {
+      // FIX 1: enqueueOnly option skips this immediate processQueue call.
+      // Used by broadcast loops (Calendar Broadcast) to avoid N × processQueue(3)
+      // = up to 300 Telegram fetches for 100 users (exceeds Free Plan 50 subrequest
+      // limit). The caller processes the queue ONCE after the loop completes.
+      if (env_sendTelegramMessage && !enqueueOnly) {
         try {
           await processQueue(env, env_sendTelegramMessage, pool, 3);
         } catch (e) {

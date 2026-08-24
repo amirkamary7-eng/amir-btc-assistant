@@ -37,10 +37,11 @@ test('IMM-003: processQueue uses env_sendTelegramMessage (module-level)', () => 
     'sendNotification must use env_sendTelegramMessage for processQueue');
 });
 
-test('IMM-004: processQueue call is gated on deliverToTelegram', () => {
+test('IMM-004: processQueue call is gated on deliverToTelegram + enqueueOnly', () => {
   // The processQueue call is inside the `if (deliverToTelegram)` block
-  assert.ok(NOTIF_REPO.includes('if (env_sendTelegramMessage) {\n        try {\n          await processQueue'),
-    'processQueue must be inside deliverToTelegram + env_sendTelegramMessage gate');
+  // FIX 1: also gated on !enqueueOnly (broadcast loops skip immediate delivery)
+  assert.ok(NOTIF_REPO.includes('if (env_sendTelegramMessage && !enqueueOnly)'),
+    'processQueue must be inside deliverToTelegram + env_sendTelegramMessage + !enqueueOnly gate');
 });
 
 // ============================================================================
@@ -87,14 +88,14 @@ test('IMM-010: processQueue catch falls back to 60s when no retry_after', () => 
 // 4. Cron handlers unchanged
 // ============================================================================
 
-test('IMM-011: 1-min cron processQueue still LIMIT 3', () => {
-  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool, 3)'),
-    '1-min cron processQueue must still be LIMIT 3');
+test('IMM-011: 1-min cron processQueue LIMIT 5 (FIX 3: was 3)', () => {
+  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
+    '1-min cron processQueue must be LIMIT 5 (FIX 3: increased from 3)');
 });
 
-test('IMM-012: 5-min cron processQueue still default limit (10)', () => {
-  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool)'),
-    '5-min cron processQueue must still use default limit');
+test('IMM-012: 5-min cron processQueue LIMIT 15 (FIX 2: was 10)', () => {
+  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool, 15)'),
+    '5-min cron processQueue must be LIMIT 15 (FIX 2: increased from 10, reduced from 20 after subrequest re-analysis)');
 });
 
 // ============================================================================
