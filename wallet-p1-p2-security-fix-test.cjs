@@ -51,9 +51,22 @@ function createMemoryKv(initial = {}) {
 }
 
 function loadTokenService() {
+  // FA-7: _getTodayISOString now delegates to sharedGetTehranDateString (Tehran
+  // timezone). The token service source references this helper, so we must
+  // provide it in the eval context. We use the same implementation as
+  // src/services/timezone.js getTehranDateString().
+  const sharedGetTehranDateString = function() {
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return fmt.format(new Date());
+  };
   const wrapped = `${TOKEN_SERVICE_SRC}\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };`;
   const mod = { exports: {} };
-  new Function('module', 'exports', wrapped)(mod, mod.exports);
+  new Function('module', 'exports', 'sharedGetTehranDateString', wrapped)(mod, mod.exports, sharedGetTehranDateString);
   return mod.exports;
 }
 
@@ -68,7 +81,11 @@ test('P1-1: issueMissionEventToken stores target_id (not just "1")', async () =>
   assert.ok(token && token.length === 32, 'token issued');
 
   // The KV value must be the target_id, not '1'
-  const key = `mt:${'u1'}:${'read_news'}:${new Date().toISOString().slice(0, 10)}:${token}`;
+  // FA-7: key now uses Tehran date (not UTC) — match the implementation
+  const tehranToday = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const key = `mt:${'u1'}:${'read_news'}:${tehranToday}:${token}`;
   const stored = await kv.get(key);
   assert.equal(stored, 'article_123', 'stored value must be the bound target_id');
 });

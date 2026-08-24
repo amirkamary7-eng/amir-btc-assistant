@@ -52,6 +52,18 @@ if (startIdx < 0 || endIdx < 0) {
 const tokenServiceSrc = workerSrc.slice(startIdx, endIdx);
 
 // Build an isolated module with the token service functions
+// FA-7: _getTodayISOString now delegates to sharedGetTehranDateString (Tehran
+// timezone). We must provide this helper in the eval context.
+const sharedGetTehranDateString = function() {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return fmt.format(new Date());
+};
+
 const wrappedSrc = `
 ${tokenServiceSrc}
 module.exports = {
@@ -64,8 +76,8 @@ module.exports = {
 `;
 
 const tokenModule = { exports: {} };
-const evaluator = new Function('require', 'module', 'exports', 'crypto', wrappedSrc);
-evaluator(require, tokenModule, tokenModule.exports, globalThis.crypto);
+const evaluator = new Function('require', 'module', 'exports', 'crypto', 'sharedGetTehranDateString', wrappedSrc);
+evaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, sharedGetTehranDateString);
 const {
   issueMissionEventToken,
   consumeMissionEventToken,

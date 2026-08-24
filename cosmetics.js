@@ -162,6 +162,15 @@
       if (res && res.status === 'success') {
         if (window.admToast) admToast('خرید موفق!', 'success');
         openShop();
+        // FA-2 FIX: invalidate wallet cache + refresh balance display after
+        // cosmetics purchase (which debits AB tokens). Previously the wallet
+        // UI showed stale balance for up to 15s (WALLET_CACHE_TTL).
+        // Cosmetics purchase API does NOT return new_balance (unlike wheel/
+        // mission/VPN), so we pass null — refreshWalletAfterMutation will
+        // fetch fresh balance via WalletApp.refreshWalletBalance().
+        if (typeof window.refreshWalletAfterMutation === 'function') {
+          try { window.refreshWalletAfterMutation(null); } catch (_) {}
+        }
       } else {
         var msg = (res && res.message) ? res.message : 'خطا در خرید';
         if (res && res.code === 'PREMIUM_REQUIRED') msg = 'برای خرید، عضویت Premium لازم است';

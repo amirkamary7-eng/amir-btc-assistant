@@ -1748,7 +1748,27 @@ const WalletApp = (() => {
           _lastKnownBalance = resp.new_balance;
           const balEl = document.getElementById('wallet-balance-amount');
           if (balEl) balEl.textContent = resp.new_balance.toLocaleString('en-US');
+          // FA-6 FIX: keep walletData.balance in sync with the authoritative
+          // server response so closeWallet's profile card render (which uses
+          // walletData when _walletCache.wallet is fresh) shows the new
+          // balance immediately, not the stale pre-purchase value.
+          if (walletData) {
+            walletData.balance = resp.new_balance;
+          }
         }
+        // FA-6 FIX: invalidate the wallet cache BEFORE refreshWalletBalance.
+        // Without this, _walletCache.wallet retains the OLD balance for up
+        // to 15s (WALLET_CACHE_TTL). When the user closes the wallet,
+        // closeWallet() (line ~1055) renders the profile card from the
+        // stale cached walletData — showing the pre-purchase balance.
+        // invalidateWalletCache() nulls all three caches (wallet/claim/summary)
+        // so the next fetchWallet() call hits the API and gets fresh data.
+        // This mirrors the pattern used by claimDaily() (line 1218) which
+        // correctly invalidates cache after a balance mutation.
+        // Note: _purchaseInFlight is still set (cleared in finally block below),
+        // so no double-purchase race is introduced. The refreshWalletBalance()
+        // call below is idempotent and just re-fetches the balance for safety.
+        invalidateWalletCache();
         // Always refresh from server as final source of truth
         refreshWalletBalance();
       } else if (resp?.code === 'DUPLICATE_PENDING') {

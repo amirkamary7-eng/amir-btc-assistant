@@ -780,8 +780,25 @@ async function deleteSessionCache(env, key) {
 const MISSION_TOKEN_TTL_SECONDS = 120; // 2 minutes — enough for frontend to complete
 const MISSION_TOKEN_PREFIX = 'mt:';
 
+// FA-7 FIX: use Tehran date (Asia/Tehran) instead of UTC for the daily
+// boundary, so the mission event token consumed marker aligns with
+// mission_progress.daily_date (which also uses Tehran date via
+// sharedGetTehranDateString). Previously this returned UTC date, which
+// created a 3.5-hour window (00:00–03:30 Tehran) where the consumed
+// marker from the previous Tehran evening still blocked the new Tehran
+// day's mission completion.
+//
+// All 3 call sites of this helper (issueMissionEventToken,
+// consumeMissionEventToken, isMissionEventTokenConsumed) are in the
+// mission event token system and use the returned value as a KV key
+// segment to namespace tokens per-day. Aligning this with Tehran date
+// makes the marker expire at Tehran midnight (matching the
+// mission_progress UNIQUE constraint boundary).
+//
+// sharedGetTehranDateString is the single source of truth for Tehran
+// date (src/services/timezone.js) — reused here to avoid duplication.
 function _getTodayISOString() {
-  return new Date().toISOString().slice(0, 10);
+  return sharedGetTehranDateString();
 }
 
 function _generateMissionToken() {

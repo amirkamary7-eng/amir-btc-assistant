@@ -1688,6 +1688,14 @@ const ReferralApp = (() => {
       }
       // Refresh wheel status from backend
       refreshWheelStatus();
+      // FA-2 FIX: invalidate wallet cache + refresh balance display after
+      // wheel reward. Previously the wallet UI showed stale balance for up
+      // to 15s (WALLET_CACHE_TTL) because _invalidateCache was never called.
+      // spinResult.new_balance is the authoritative post-reward balance
+      // from the backend (src/controllers/wheel.js:241).
+      if (typeof window.refreshWalletAfterMutation === 'function') {
+        try { window.refreshWalletAfterMutation(spinResult.new_balance); } catch (_) {}
+      }
     }, 4900);
   }
 
