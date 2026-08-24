@@ -4547,14 +4547,16 @@ const PERSIAN_ALLOWED_ENGLISH_TERMS = new Set([
  *
  * @param {string} text - the AI-generated text to validate
  * @param {object} [opts] - optional configuration
- * @param {number} [opts.minLength=50] - minimum text length
+ * @param {number} [opts.minLength=200] - minimum text length (P2-P2-2: was 50)
+ * @param {number} [opts.maxLength=5000] - maximum text length (P2-P1-3)
  * @param {number} [opts.minPersianRatio=0.25] - minimum Persian char ratio (25%)
  * @param {number} [opts.maxCjkRatio=0.05] - maximum CJK char ratio (5%)
  * @param {number} [opts.maxAsciiLetterRatio=0.60] - maximum ASCII letter ratio (60%)
  * @returns {{valid: boolean, reason: string, stats: object}}
  */
 function validatePersianOutput(text, opts = {}) {
-  const minLength = opts.minLength ?? 50;
+  const minLength = opts.minLength ?? 200; // P2-P2-2: was 50, now 200 (still 6x below 1200-char target)
+  const maxLength = opts.maxLength ?? 5000; // P2-P1-3: max 5000 chars (well above 120-200 word target)
   const minPersianRatio = opts.minPersianRatio ?? 0.25;
   const maxCjkRatio = opts.maxCjkRatio ?? 0.05;
   const maxAsciiLetterRatio = opts.maxAsciiLetterRatio ?? 0.60;
@@ -4569,6 +4571,16 @@ function validatePersianOutput(text, opts = {}) {
   // 2. Minimum length check
   if (trimmed.length < minLength) {
     return { valid: false, reason: 'too_short', stats: { length: trimmed.length } };
+  }
+
+  // P2-P1-3: Maximum length check — reject excessively long output.
+  // JOURNALIST_SYSTEM targets 120-200 words (~600-1500 chars). 5000 chars
+  // is 3x the upper bound — anything above is a model misbehaving.
+  // The caller (processOneArticleSummary) truncates to 5000 BEFORE storing
+  // if the validator passes but the text is still long. This check rejects
+  // truly absurd outputs (10K+ chars).
+  if (trimmed.length > maxLength) {
+    return { valid: false, reason: 'too_long', stats: { length: trimmed.length, maxLength } };
   }
 
   // 3. Provider error string detection
@@ -5010,6 +5022,43 @@ function sanitizeNewsTitle(rawTitle) {
   }
 
   return title.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * P2-P1-1: Sanitize AI summary before storage.
+ * Applies the same duplicate-removal logic as sanitizeNewsTitle, plus:
+ * - Strips HTML tags (prevents injection from AI output)
+ * - Strips control characters
+ * - Normalizes whitespace
+ * Does NOT change valid Persian text — only removes artefacts.
+ *
+ * @param {string} rawSummary - the AI-generated summary
+ * @returns {string} - sanitized summary
+ */
+function sanitizeNewsSummary(rawSummary) {
+  if (!rawSummary) return '';
+  let summary = String(rawSummary);
+
+  // 1. Strip HTML tags (AI models sometimes return <br>, <p>, etc.)
+  summary = summary.replace(/<[^>]*>/g, '');
+
+  // 2. Strip control characters (except \n which is valid paragraph separator)
+  summary = summary.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+
+  // 3. Decode common HTML entities that AI models sometimes return
+  summary = summary
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+
+  // 4. Apply same duplicate-removal as sanitizeNewsTitle
+  //    (reuses the proven logic for repeated words/phrases)
+  summary = sanitizeNewsTitle(summary);
+
+  return summary;
 }
 
 function classifySentiment(title, description) {
@@ -7049,9 +7098,19 @@ async function processOneArticleSummary(env, pool = null) {
   }
 
   // ── STEP 4: Save to KV (7 days) or requeue ──
-  if (fallbackResult.summary && fallbackResult.summary.trim().length >= 50) {
-    // SUCCESS — save summary + provider metadata, remove from queue
-    return succeedWithSummary(fallbackResult.summary, fallbackResult.usedProvider, fallbackResult.attempts);
+  // P2-P2-2: Use 200-char threshold (matches validator default, was 50)
+  if (fallbackResult.summary && fallbackResult.summary.trim().length >= 200) {
+    // P2-P1-1: Sanitize AI summary before storage — strips HTML tags,
+    // control characters, HTML entities, and duplicate words/phrases.
+    // Does NOT change valid Persian text — only removes artefacts.
+    const sanitizedSummary = sanitizeNewsSummary(fallbackResult.summary);
+    // Re-check length after sanitization (sanitizer may have removed enough
+    // to drop below the 50-char threshold — if so, treat as failed)
+    if (sanitizedSummary.trim().length >= 200) { // P2-P2-2: was 50, now matches validator default
+      return succeedWithSummary(sanitizedSummary, fallbackResult.usedProvider, fallbackResult.attempts);
+    }
+    // Sanitization removed too much — treat as validation failure
+    console.warn('[NEWS-AI] Summary too short after sanitization — treating as failed');
   }
 
   // ALL PROVIDERS FAILED
@@ -7647,12 +7706,27 @@ ${headlines}`;
     try {
       const parsed = JSON.parse(jsonMatch[0]);
       const results = {};
+      // P2-P1-2: Enum validation — only accept valid sentiment/impact values.
+      // Invalid values fall back to safe defaults (neutral/low).
+      const validSentiments = new Set(['bullish', 'bearish', 'neutral']);
+      const validImpacts = new Set(['high', 'medium', 'low']);
       for (const item of parsed) {
         if (item && item.index && item.index >= 1 && item.index <= articles.length) {
+          // P2-P1-4: Validate impact_reason language — reject non-Persian.
+          // impact_reason should be a short Persian sentence. If AI returns
+          // English/empty, use empty string (frontend handles gracefully).
+          // Use validatePersianOutput with lower minLength (15 chars — it's a
+          // single sentence, not a full summary).
+          let validatedReason = '';
+          const rawReason = String(item.reason || '').trim();
+          if (rawReason.length >= 15) {
+            const reasonValidation = validatePersianOutput(rawReason, { minLength: 15 });
+            validatedReason = reasonValidation.valid ? rawReason : '';
+          }
           results[item.index - 1] = {
-            sentiment: item.sentiment || 'neutral',
-            impact: item.impact || 'low',
-            impact_reason: item.reason || '',
+            sentiment: validSentiments.has(item.sentiment) ? item.sentiment : 'neutral',
+            impact: validImpacts.has(item.impact) ? item.impact : 'low',
+            impact_reason: validatedReason,
             coins: Array.isArray(item.coins) ? item.coins : [],
           };
         }

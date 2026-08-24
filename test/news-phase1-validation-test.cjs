@@ -22,29 +22,29 @@ eval(validatorMatch[1].replace('function validatePersianOutput', 'validatePersia
 // 1. PERSIAN OUTPUT VALIDATOR — 20 test cases
 
 test('V1: Pure Persian text → PASS', () => {
-  const result = validatePersianOutput('بیت‌کوین با افزایش قابل توجه قیمت به بالای صد هزار دلار رسید. این رشد ناشی از ورود سرمایه‌گذاران نهادی به بازار است. کارشناسان پیش‌بینی می‌کنند این روند ادامه داشته باشد.');
+  const result = validatePersianOutput('بیت‌کوین با افزایش قابل توجه قیمت به بالای صد هزار دلار رسید. این رشد ناشی از ورود سرمایه‌گذاران نهادی به بازار است. کارشناسان پیش‌بینی می‌کنند این روند ادامه داشته باشد و قیمت به ۱۲۰ هزار دلار برسد. حجم معاملات به ۵۰ میلیارد دلار رسید که رکورد تاریخی محسوب می‌شود. بازار در وضعیت بسیار مثبتی قرار دارد.');
   assert.equal(result.valid, true);
 });
 
 test('V2: Persian + Bitcoin/BTC/ETF/Fed → PASS', () => {
-  const result = validatePersianOutput('بیت‌کوین (Bitcoin) با عبور از ۱۰۰ هزار دلار رکورد جدیدی ثبت کرد. ورود سرمایه به ETFهای فیزیکی BTC نقش کلیدی داشت. سخنرانی Fed نیز تاثیرگذار بود.');
+  const result = validatePersianOutput('بیت‌کوین (Bitcoin) با عبور از ۱۰۰ هزار دلار رکورد جدیدی ثبت کرد. ورود سرمایه به ETFهای فیزیکی BTC نقش کلیدی داشت. سخنرانی Fed نیز تاثیرگذار بود. کارشناسان پیش‌بینی می‌کنند این روند صعودی ادامه یابد و قیمت به ۱۱۰ هزار دلار برسد. حجم معاملات بازار به ۴۵ میلیارد دلار رسید که رکورد جدیدی محسوب می‌شود.');
   assert.equal(result.valid, true);
 });
 
 test('V3: Mostly English text → REJECT', () => {
-  const result = validatePersianOutput('Bitcoin surged past $100,000 driven by record ETF inflows. The milestone marks a significant moment for the cryptocurrency market as institutional adoption accelerates.');
+  const result = validatePersianOutput('Bitcoin surged past $100,000 driven by record ETF inflows. The milestone marks a significant moment for the cryptocurrency market as institutional adoption accelerates. Analysts expect the trend to continue through the end of the year as more institutional money flows into the space. The total market capitalization reached $2 trillion.');
   assert.equal(result.valid, false);
   assert.ok(['insufficient_persian', 'english_dominant'].includes(result.reason));
 });
 
 test('V4: Mostly Chinese text → REJECT', () => {
-  const result = validatePersianOutput('比特币突破十万美元大关，创历史新高。机构投资者大量涌入加密货币市场，推动比特币价格持续上涨。分析师认为这一趋势将继续保持。');
+  const result = validatePersianOutput('比特币突破十万美元大关，创历史新高。机构投资者大量涌入加密货币市场，推动比特币价格持续上涨。分析师认为这一趋势将继续保持。市场情绪非常乐观。交易量创下历史新高。比特币市值达到两万亿美元。以太坊也跟随上涨。投资者对未来充满信心。监管机构表示支持。比特币网络算力持续增长，表明矿工对未来充满信心。去中心化金融协议的总锁定价值突破一千亿美元。非同质化代币交易量大幅增长。区块链技术应用场景不断扩大。加密货币交易所的注册用户数量创下新高。全球各国央行正在研究数字货币发行方案。');
   assert.equal(result.valid, false);
   assert.equal(result.reason, 'cjk_contamination');
 });
 
 test('V5: Persian + few CJK proper noun → PASS (ratio ≤5%)', () => {
-  const result = validatePersianOutput('شرکت چینی علی‌بابا (阿里巴巴) اعلام کرد که در پروژه بلاکچین جدید سرمایه‌گذاری خواهد کرد. این خبر تاثیر مثبتی بر بازار کریپتو داشت.');
+  const result = validatePersianOutput('شرکت چینی علی‌بابا (阿里巴巴) اعلام کرد که در پروژه بلاکچین جدید سرمایه‌گذاری خواهد کرد. این خبر تاثیر مثبتی بر بازار کریپتو داشت. سرمایه‌گذاری این شرکت چینی در حوزه فناوری بلاکچین نشان‌دهنده اهمیت روزافزون این تکنولوژی در بازارهای مالی آسیاست.');
   assert.equal(result.valid, true);
 });
 
@@ -84,12 +84,12 @@ test('V11: Mixed Persian/English meaningless → REJECT', () => {
 });
 
 test('V12: Source English copied verbatim → REJECT', () => {
-  const result = validatePersianOutput('Bitcoin surged past $100,000 driven by record ETF inflows. The milestone marks a significant moment for the cryptocurrency market as institutional adoption accelerates.');
+  const result = validatePersianOutput('Bitcoin surged past $100,000 driven by record ETF inflows. The milestone marks a significant moment for the cryptocurrency market as institutional adoption accelerates. Analysts expect the trend to continue through the end of the year as more institutional money flows into the space. The total market capitalization reached $2 trillion.');
   assert.equal(result.valid, false);
 });
 
 test('V13: Persian with many numbers and symbols → PASS', () => {
-  const result = validatePersianOutput('قیمت بیت‌کوین ۱۰۲٬۵۰۰ دلار شد (+۳٫۲٪). حجم معاملات ۴۵ میلیارد دلار بود. ۲۳ صندوق ETF جدید ثبت شد.');
+  const result = validatePersianOutput('قیمت بیت‌کوین ۱۰۲٬۵۰۰ دلار شد (+۳٫۲٪). حجم معاملات ۴۵ میلیارد دلار بود. ۲۳ صندوق ETF جدید ثبت شد. این رشد ناشی از ورود سرمایه‌گذاران نهادی بود. کارشناسان پیش‌بینی می‌کنند روند صعودی ادامه یابد و قیمت به ۱۱۰ هزار دلار برسد. بازار در وضعیت بسیار مثبتی قرار دارد.');
   assert.equal(result.valid, true);
 });
 
@@ -99,19 +99,19 @@ test('V14: Only whitespace → REJECT', () => {
   // May be 'too_short' (0 chars after trim) or 'only_whitespace' — both valid
 });
 
-test('V15: Exactly 50 Persian chars (boundary) → PASS', () => {
-  const result = validatePersianOutput('ب'.repeat(50));
+test('V15: Exactly 200 Persian chars (boundary) → PASS', () => {
+  const result = validatePersianOutput('ب'.repeat(200));
   assert.equal(result.valid, true);
 });
 
-test('V16: 49 chars (below boundary) → REJECT', () => {
-  const result = validatePersianOutput('ب'.repeat(49));
+test('V16: 199 chars (below boundary) → REJECT', () => {
+  const result = validatePersianOutput('ب'.repeat(199));
   assert.equal(result.valid, false);
   assert.equal(result.reason, 'too_short');
 });
 
 test('V17: Persian with English company names → PASS', () => {
-  const result = validatePersianOutput('شرکت NVIDIA گزارش مالی قوی ارائه داد. سهام NVIDIA و AMD و INTC همگی صعودی شدند. بازار فارسی واکنش مثبتی نشان داد به NVIDIA.');
+  const result = validatePersianOutput('شرکت NVIDIA گزارش مالی قوی ارائه داد. سهام NVIDIA و AMD و INTC همگی صعودی شدند. بازار فارسی واکنش مثبتی نشان داد به NVIDIA. پیش‌بینی می‌شود درآمد NVIDIA در فصل آینده به ۳۸ میلیارد دلار برسد. تحلیل‌گران بازار این رشد را ناشی از تقاضای بالای برای تراشه‌های هوش مصنوعی می‌دانند.');
   assert.equal(result.valid, true);
 });
 
