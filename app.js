@@ -6502,10 +6502,17 @@ function niIsHeroEligible(news) {
 
 /**
  * Generate AI summary HTML for a news card.
+ * P1-9 FIX: Previously checked news.summary (always empty — API returns
+ * ai_summary, not summary). Now checks news.ai_summary and truncates to
+ * 120 chars for card preview. Full summary shown in modal (openNewsModal).
  */
 function niAiSummaryHtml(news) {
-    if (!news.summary) return '';
-    return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(news.summary)}</span></div>`;
+    // Use ai_summary (the actual Persian analysis from the API)
+    const preview = news.ai_summary || '';
+    if (!preview || preview.trim().length < 50) return '';
+    // Truncate to 120 chars for card preview (avoid overflow)
+    const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
+    return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(truncated)}</span></div>`;
 }
 
 // Legacy badge functions — kept for dashboard important news compatibility

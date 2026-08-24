@@ -385,7 +385,8 @@ test('P0-C-1: translateToFarsi returns { text, translation_failed } object', () 
   const fnEnd = src.indexOf('\n}', fnStart + 100);
   const fnSrc = src.slice(fnStart, fnEnd + 1);
   assert.ok(/return\s*\{\s*text:\s*'',\s*translation_failed:\s*false\s*\}/.test(fnSrc), 'Must return { text, translation_failed } for empty input');
-  assert.ok(/const cacheEntry = \{\s*text:\s*result,\s*translation_failed\s*\}/.test(fnSrc), 'Must construct cacheEntry object');
+  // P1-1 FIX: cacheEntry now also includes _expiresAt for TTL — updated regex
+  assert.ok(/const cacheEntry = \{\s*text:\s*result,\s*translation_failed/.test(fnSrc), 'Must construct cacheEntry object (with optional _expiresAt)');
 });
 
 test('P0-C-2: buildFarsiNewsArticles sets translation_failed on articles', () => {
@@ -613,7 +614,8 @@ test('GROQ-13: Groq falls back to Gemini on failure', () => {
   // Find the integration point (not the function definition comment)
   const fnStart = src.indexOf('// Provider 0: Groq (primary) — always tried first');
   assert.ok(fnStart > -1, 'Groq summary integration must exist');
-  const afterGroq = src.slice(fnStart, fnStart + 1500);
+  // P0-2 FIX: Increased window from 1500 to 2500 to account for validatePersianOutput code
+  const afterGroq = src.slice(fnStart, fnStart + 2500);
   assert.ok(/falling back to Gemini/.test(afterGroq), 'Groq failure must log "falling back to Gemini"');
   assert.ok(/!summary/.test(afterGroq), 'Gemini must be gated on !summary (only if Groq failed)');
 });
