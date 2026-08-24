@@ -22,8 +22,9 @@ const WORKER = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 // ============================================================================
 
 test('IMM-001: sendNotification calls processQueue after enqueue', () => {
-  assert.ok(NOTIF_REPO.includes('await processQueue(env, env_sendTelegramMessage, pool, 1)'),
-    'sendNotification must call processQueue(LIMIT=1) after enqueue');
+  // NOTIF-OPT: updated from LIMIT=1 to LIMIT=3 (concurrent Promise.allSettled)
+  assert.ok(NOTIF_REPO.includes('await processQueue(env, env_sendTelegramMessage, pool, 3)'),
+    'sendNotification must call processQueue(LIMIT=3) after enqueue (NOTIF-OPT: concurrent)');
 });
 
 test('IMM-002: processQueue call is wrapped in try/catch (non-fatal)', () => {
