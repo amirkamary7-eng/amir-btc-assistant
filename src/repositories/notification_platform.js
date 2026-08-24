@@ -809,7 +809,19 @@ export function createNotificationPlatformRepository(deps) {
           } else {
             tgPayload.disable_web_page_preview = true;
           }
-          const tgResult = await sendTelegramMessageFn(env, tgPayload);
+          // SAFETY FIX (in-flight retry → duplicate Telegram):
+          // sendTelegramMessage's default retries=1 retries on AbortError (8s timeout).
+          // If Telegram already received+delivered the message but the HTTP response is
+          // slow (>8s), the retry sends a SECOND message → user sees duplicate.
+          // The telegram_message_id idempotency guard (L774) only protects against
+          // cron-triggered re-claims, NOT in-flight retries inside one sendTelegramMessage
+          // call (telegram_message_id is still NULL at that point).
+          // FIX: pass retries:0 so a timeout throws immediately. processQueue's catch
+          // (L829) reverts the item to 'pending' with next_retry_at = NOW()+retry_after,
+          // and the next cron tick re-claims it with FOR UPDATE SKIP LOCKED — at which
+          // point telegram_message_id check (if a prior send actually succeeded) kicks in.
+          // Cron retry + requeueStaleQueueItems are UNCHANGED and remain the only retry path.
+          const tgResult = await sendTelegramMessageFn(env, tgPayload, { retries: 0 });
 
           // Phase 7: Store telegram_message_id for exactly-once delivery on retry.
           // sendTelegramMessage returns { ok, result, messageId } on success.
