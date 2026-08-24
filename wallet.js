@@ -869,6 +869,31 @@ const WalletApp = (() => {
     _walletCache.summaryAt = 0;
   }
 
+  // FA-15 FIX: inject a non-blocking retry banner at the top of the wallet
+  // page when fetchWallet returned null (API failure). The banner tells the
+  // user that the wallet couldn't be loaded and provides a tap-to-retry
+  // action. Without this, the user sees a Bronze/0-balance fallback and
+  // might think their tokens are lost.
+  function _injectWalletRetryBanner() {
+    const page = document.getElementById('wallet-full-page');
+    if (!page) return;
+    // Avoid duplicate banners
+    const existing = document.getElementById('wallet-retry-banner');
+    if (existing) existing.remove();
+    const fa = detectLang() === 'fa';
+    const banner = document.createElement('div');
+    banner.id = 'wallet-retry-banner';
+    banner.className = 'wallet-retry-banner';
+    banner.innerHTML = `
+      <div class="wallet-retry-banner-content">
+        <span class="wallet-retry-banner-text">${fa ? 'بارگذاری کیف پول ناموفق بود' : 'Couldn\'t load wallet'}</span>
+        <button class="wallet-retry-banner-btn" onclick="WalletApp._refreshWalletData()">${fa ? 'تلاش مجدد' : 'Retry'}</button>
+      </div>
+    `;
+    // Insert at the top of the wallet page content
+    page.insertBefore(banner, page.firstChild);
+  }
+
   async function fetchWallet() {
     // Cache-first: if we have fresh data, return it without a network call
     if (_walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
@@ -1124,6 +1149,13 @@ const WalletApp = (() => {
           history: [],
         };
         renderWalletPage(fallbackData);
+        // FA-15 FIX: show a retry banner when wallet data failed to load.
+        // Previously the user saw a Bronze/0-balance wallet with no indication
+        // that it was an error state — they might think their tokens are gone.
+        // Now we inject a non-blocking retry banner at the top of the wallet
+        // page. The banner calls loadWalletData() on tap. Safe no-op if the
+        // page element doesn't exist (closed wallet).
+        _injectWalletRetryBanner();
         // Still render VPN market even on wallet data failure
         claimPromise.then(claimRes => {
           if (isStale()) return; // W-STAB-2
@@ -1140,6 +1172,8 @@ const WalletApp = (() => {
         history: [],
       };
       renderWalletPage(fallbackData);
+      // FA-15 FIX: show retry banner on wallet fetch rejection too
+      _injectWalletRetryBanner();
       // Still render VPN market on wallet error
       claimPromise.then(claimRes => {
         if (isStale()) return; // W-STAB-2
@@ -1266,6 +1300,28 @@ const WalletApp = (() => {
         try { updateNotifBadge(); } catch (_) {}
       }
 
+      // FA-9 FIX: refresh transaction history after successful daily claim.
+      // Previously the new daily_claim transaction didn't appear in the UI
+      // until the user closed and reopened the wallet. Now we fetch fresh
+      // history (offset 0 = most recent) and prepend to the list if the
+      // wallet page is open. Safe no-op if the list element doesn't exist
+      // (wallet closed) — the next openWallet will fetch fresh data anyway.
+      try {
+        const freshHistory = await fetchHistory(0);
+        if (freshHistory && freshHistory.transactions && freshHistory.transactions.length > 0) {
+          // Update cached walletData.history so showFullHistory/loadMoreHistory use fresh data
+          if (walletData) {
+            walletData.history = freshHistory.transactions;
+          }
+          // Re-render the visible list if wallet page is open
+          const txList = document.getElementById('wallet-tx-list');
+          const walletPage = document.getElementById('wallet-full-page');
+          if (txList && walletPage && walletPage.classList.contains('open')) {
+            txList.innerHTML = freshHistory.transactions.slice(0, 5).map(tx => buildTxItemHTML(tx)).join('');
+          }
+        }
+      } catch (_) { /* non-fatal — history will refresh on next wallet open */ }
+
       // Show success popup — use actual amount from API
       const tg = window.getTg?.();
       try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
@@ -1316,13 +1372,21 @@ const WalletApp = (() => {
 
       const html = result.transactions.map(tx => buildTxItemHTML(tx)).join('');
       list?.insertAdjacentHTML('beforeend', html);
-
-      if (!result.hasMore) {
-        const loadMore = document.getElementById('wallet-load-more');
-        if (loadMore) loadMore.remove();
-      }
     } else {
+      // FA-8 FIX: revert offset on empty/error result so next retry starts
+      // from the correct position.
       historyOffset -= 20;
+    }
+
+    // FA-8 FIX: move the hasMore check OUTSIDE the length > 0 branch.
+    // Previously, when the server returned { transactions: [], hasMore: false }
+    // (which happens when total is an exact multiple of 20), the Load More
+    // button was NOT removed — causing an infinite click loop with no feedback.
+    // Now: if hasMore is false (regardless of transactions length), remove
+    // the button. If result is null (network error), keep the button for retry.
+    if (result && !result.hasMore) {
+      const loadMore = document.getElementById('wallet-load-more');
+      if (loadMore) loadMore.remove();
     }
 
     if (btn) btn.textContent = WT('load_more');
@@ -1771,6 +1835,14 @@ const WalletApp = (() => {
         invalidateWalletCache();
         // Always refresh from server as final source of truth
         refreshWalletBalance();
+        // FA-21 FIX: refresh notification badge after VPN purchase. The backend
+        // creates a high-priority admin-queue notification on purchase
+        // (reward_purchases.js:294-324). Without this call, the badge wouldn't
+        // update until the next polling cycle. Mirrors the pattern in claimDaily
+        // (line 1265) and refreshWalletAfterMission (app.js:5901).
+        if (typeof updateNotifBadge === 'function') {
+          try { updateNotifBadge(); } catch (_) {}
+        }
       } else if (resp?.code === 'DUPLICATE_PENDING') {
         showToast(fa ? 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.' : 'You already have a pending purchase for this plan.');
       } else if (resp?.code === 'PAYMENT_FAILED') {

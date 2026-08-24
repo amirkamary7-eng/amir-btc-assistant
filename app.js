@@ -5855,7 +5855,20 @@ async function completeMission(missionId, targetId) {
 
             updateMissionCards();
         }
-    } catch (_) {}
+    } catch (e) {
+        // FA-3 FIX: previously this was `catch (_) {}` which silently swallowed
+        // ALL errors (network failures, parse errors, unexpected exceptions).
+        // The server-side data is already correct (idempotent retry cron will
+        // credit the reward if this request failed), but the user got zero
+        // feedback. Now we log to console.warn for debuggability. We do NOT
+        // show a user-facing toast here because: (1) mission completion is
+        // non-critical (retry cron handles failures), (2) showing an error
+        // toast on every network blip would be noisy, (3) the mission card
+        // stays in "in progress" state which is self-explanatory. The user
+        // can retry by re-opening the content (which re-fires the mission
+        // event → re-calls completeMission → succeeds if network recovered).
+        console.warn('MissionBus.completeMission failed (will retry on next event):', e?.message || e);
+    }
 }
 
 // Backward-compatible alias
