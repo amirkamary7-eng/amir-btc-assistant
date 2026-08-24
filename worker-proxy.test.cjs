@@ -3283,11 +3283,11 @@ test('NOTIF-001 (source): processQueue accepts limit parameter for CPU-safe batc
     'processQueue must use batchLimit in the SQL LIMIT clause');
 });
 
-test('NOTIF-002 (source): 1-min cron runs processQueue with limit=3', () => {
+test('NOTIF-002 (source): 1-min cron runs processQueue with limit=5', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  // Verify 1-min cron calls processQueue with limit=3 (CPU-safe: worst case 9.5ms < 10ms)
-  assert.ok(/notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool, 3\)/.test(src),
-    '1-min cron must call processQueue with limit=3 (CPU-safe batch, worst case 9.5ms < 10ms)');
+  // FIX 3: limit increased from 3 to 5 (subrequest budget: 15 price + 15 alert + 5 PQ = 35 ≤ 50)
+  assert.ok(/notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool, 5\)/.test(src),
+    '1-min cron must call processQueue with limit=5 (FIX 3: was 3, now 5 — 35 ≤ 50 subrequests)');
 });
 
 test('NOTIF-003 (source): 1-min cron still runs runScheduledAlertsBaseline', () => {
@@ -3397,21 +3397,17 @@ test('NOTIF-011 (source): requeueStaleQueueItems preserved', () => {
     'requeueStaleQueueItems must still check 5-min stale threshold');
 });
 
-test('NOTIF-012 (source): */5 cron processQueue still uses default limit (10)', () => {
+test('NOTIF-012 (source): */5 cron processQueue uses limit=15 (FIX 2: was 10)', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  // The */5 cron call is in the Phase 4 section, inside isEvery5Min block.
-  // Find it by searching for the processQueue call that does NOT pass limit=3.
-  // The */5 call: processQueue(env, sendTelegramMessage, pool) — no 4th arg
-  // The 1-min call: processQueue(env, sendTelegramMessage, pool, 3) — 4th arg = 3
-
-  // Find the Phase 4 section (after the 1-min early return)
+  // FIX 2: limit increased from 10 (default) to 15.
+  // Subrequest budget: 15 PQ + 10 broadcast PQ + 15 calendar + 8 news = 48 ≤ 50
   const phase4Start = src.indexOf('PHASE 4: SEQUENTIAL EXECUTION');
   assert.ok(phase4Start > -1, 'Phase 4 section must exist');
 
-  // Find processQueue call in Phase 4 (should NOT have limit=3)
   const phase4Section = src.slice(phase4Start);
-  const phase4CallMatch = phase4Section.match(/notificationPlatformRepo\?\.processQueue\)\s*\{[\s\S]*?notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool\)/);
-  assert.ok(phase4CallMatch, '*/5 cron must call processQueue without limit (default 10)');
+  // The */5 call now passes limit=15 explicitly
+  const phase4CallMatch = phase4Section.match(/notificationPlatformRepo\?\.processQueue\)\s*\{[\s\S]*?notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool, 15\)/);
+  assert.ok(phase4CallMatch, '*/5 cron must call processQueue with limit=15 (FIX 2: was default 10, now 15)');
 });
 
 test('NOTIF-013 (source): broadcast dedupKey uses eventKey (not undefined event.id)', () => {
