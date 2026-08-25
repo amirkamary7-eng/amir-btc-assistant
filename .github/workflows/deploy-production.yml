@@ -1,4 +1,4 @@
-# Production deploy workflow
+# Production deploy workflow (trigger after production_branch config update)
 # Triggers on push to main (auto-deploys after tests pass) AND workflow_dispatch (manual).
 # Deploys BOTH the Cloudflare Worker (production env) and Cloudflare Pages.
 #
