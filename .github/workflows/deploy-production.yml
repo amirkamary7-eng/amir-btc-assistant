@@ -137,6 +137,37 @@ jobs:
             echo "Deployment ID: $DEPLOYMENT_ID"
             echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
           fi
+
+      - name: Purge CDN cache for production domain
+        # ROOT CAUSE CONFIRMED: The production deployment IS updated (environment=production),
+        # but the Cloudflare CDN edge cache serves stale index.html/version.json.
+        # The _headers file sets no-store for index.html, but the CDN edge doesn't
+        # always honor it immediately. We must explicitly purge the cache.
+        run: |
+          set -euo pipefail
+          echo "Purging CDN cache for amir-btc-assistant.pages.dev..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments/${{ steps.deploy-pages.outputs.deployment_id }}/history" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "History API HTTP Status: $HTTP_CODE"
+
+          # Also purge the zone cache (if the domain is on a Cloudflare zone)
+          # This purges ALL cached files for the zone
+          echo "Purging zone cache..."
+          PURGE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID || '' }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"purge_everything":true}')
+          PURGE_HTTP_CODE=$(echo "$PURGE_RESPONSE" | tail -1)
+          echo "Zone purge HTTP Status: $PURGE_HTTP_CODE"
+          echo "Zone purge Response: $(echo "$PURGE_RESPONSE" | head -n -1)"
+
+          # Wait for cache purge to propagate
+          echo "Waiting 10s for cache purge to propagate..."
+          sleep 10
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
