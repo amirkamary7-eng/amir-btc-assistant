@@ -3515,7 +3515,17 @@ function updateOnlineBadge(count) {
     // Online badge removed from profile page — no longer displayed
     // Only update live-count in market page header if it exists
     const liveCountEl = document.getElementById('live-count');
-    if (liveCountEl) liveCountEl.innerText = count > 0 ? count : '—';
+    if (!liveCountEl) return;
+    // FIX B2: Show 0 for a valid zero count (user may be the only one online,
+    // or count legitimately dropped to 0). Show '—' ONLY for null/undefined
+    // (loading/error state). Previously count=0 showed '—', making it
+    // indistinguishable from loading — which caused the badge to appear
+    // "stuck" after refresh when the count was legitimately 0 or 1.
+    if (count === null || count === undefined) {
+        liveCountEl.innerText = '—';
+    } else {
+        liveCountEl.innerText = count;
+    }
 }
 
 /**
@@ -12580,24 +12590,34 @@ function _startAllPolling() {
     }, 60000));
 
     // ── Session heartbeat — 180s ──
-    // FIX 2: Fire one heartbeat IMMEDIATELY on startup so the user appears in
-    // the PresenceDO within ~1-2s (was: first fire at T+180s, leaving the user
-    // invisible/uncounted for 3 minutes). The periodic interval below keeps
-    // the session alive. A dedup guard in sendSessionHeartbeat() prevents
-    // duplicate concurrent calls (e.g. immediate call + visibilitychange).
-    sendSessionHeartbeat();
+    // FIX B1 (Online count race): Wrap the immediate heartbeat in
+    // ensureTelegramAuthReady() so it fires AFTER auth is ready, not before.
+    // Previously, _startAllPolling() ran before auth was ready (bootstrap
+    // early-returns when isInTelegram() && !isTelegramAuthReady()), causing
+    // sendSessionHeartbeat() to silently no-op at canRunSessionRequests().
+    // No retry was scheduled, so the badge stayed '—' until the 180s interval.
+    // Now: wait for auth (up to 8s), then fire heartbeat + online count.
+    // The dedup guard (_inFlight) prevents duplicates if visibilitychange
+    // triggers _startAllPolling again while this is still pending.
+    ensureTelegramAuthReady(8000).then(() => {
+        if (!_appVisible) return;
+        sendSessionHeartbeat().then(() => {
+            // FIX B1: Only fetch online count AFTER heartbeat completes, so
+            // the count includes the current user (heartbeat registers them
+            // in the PresenceDO before we query the count).
+            if (_appVisible) fetchOnlineCount();
+        });
+    });
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         sendSessionHeartbeat();
     }, 180000));
 
     // ── Online count — 600s (all pages) ──
-    // FIX 2: Fire fetchOnlineCount() IMMEDIATELY so #live-count updates from
-    // '—' to a real number within ~1s of bootstrap. Removed the Profile-page
-    // gate because #live-count is in the GLOBAL header (index.html), not the
-    // profile page — the gate caused the badge to never refresh on dashboard,
-    // market, news, or other pages.
-    fetchOnlineCount();
+    // FIX B1: The immediate fetchOnlineCount is chained after the heartbeat
+    // above (so it includes the current user). This interval handles periodic
+    // refresh. Removed the Profile-page gate because #live-count is in the
+    // GLOBAL header (index.html), not the profile page.
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         fetchOnlineCount();

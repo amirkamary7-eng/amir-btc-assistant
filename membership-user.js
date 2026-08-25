@@ -282,8 +282,33 @@
   function open() {
     if (!_cache) { loadCard(); return; }
     if (_popupOpen) return;
-    _popupOpen = true;
 
+    // FIX A2 (Premium state race): If the cache says FREE, re-fetch the
+    // authoritative status from the backend BEFORE showing the registration
+    // form. This guards against the race where loadCard() set _cache.level='FREE'
+    // (stale) before bootstrap's setPremiumFromBootstrap(true) could override it.
+    // Without this re-check, a Premium user with a stale FREE cache would see
+    // "ثبت درخواست" (registration form) instead of the VIP status popup.
+    if (!isPremium(_cache)) {
+      _popupOpen = true; // prevent double-open during async re-fetch
+      // Clear stale cache so loadCard() actually re-fetches (it dedups if _cache is set)
+      _cache = null;
+      loadCard().then(function () {
+        _popupOpen = false;
+        // Re-check after fresh fetch — if now Premium, show VIP popup
+        if (_cache && isPremium(_cache)) {
+          if (!_popupOpen) { _popupOpen = true; openVipStatusPopup(_cache); }
+        } else {
+          checkPendingAndOpenPopup();
+        }
+      }).catch(function () {
+        _popupOpen = false;
+        checkPendingAndOpenPopup();
+      });
+      return;
+    }
+
+    _popupOpen = true;
     if (isPremium(_cache)) {
       openVipStatusPopup(_cache);
     } else {
@@ -1256,10 +1281,14 @@
     // full DTO (level, status, expireAt, etc.) when the user opens their profile.
     setPremiumFromBootstrap: function (isPremiumFlag) {
       if (isPremiumFlag) {
-        // Set a cache shape that isPremium() returns true for.
-        // isPremium(s): s.level !== 'FREE' && s.status === 'APPROVED'
+        // FIX A1 (Premium state race): Unconditionally set level='PREMIUM' +
+        // status='APPROVED'. Previously used `_cache.level = _cache.level || 'PREMIUM'`
+        // which short-circuited if loadCard() had already set _cache.level='FREE'
+        // (loadCard runs BEFORE bootstrap due to defer-script timing). This made
+        // it impossible for bootstrap to upgrade a stale FREE cache → isPremiumCached()
+        // returned false → upsell slide stayed visible → Premium user saw "ثبت درخواست".
         _cache = _cache || {};
-        _cache.level = _cache.level || 'PREMIUM';
+        _cache.level = 'PREMIUM';
         _cache.status = 'APPROVED';
       } else if (!_cache) {
         // Only seed the Free cache if we don't already have one — a real
