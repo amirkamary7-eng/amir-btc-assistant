@@ -11558,11 +11558,15 @@ class PresenceDO {
   }
 }
 
+// Wrangler requires Durable Object classes to be NAMED EXPORTS (not properties
+// on the default export). This named export is what makes `class_name: "PresenceDO"`
+// in wrangler.jsonc resolve correctly at deploy time.
+export { PresenceDO };
+
 // ============================================================================
 //#region ورودی اصلی Worker
 // ============================================================================
 export default {
-  PresenceDO, // Export DO class for wrangler binding
   async fetch(request, env, ctx) {
     _currentRequestOrigin = request.headers.get('Origin');
     // TEMP: set trace context for instrumentation

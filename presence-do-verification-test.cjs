@@ -701,10 +701,21 @@ test('P4.wrangler: migration v1 declares new_sqlite_classes PresenceDO', () => {
   }
 });
 
-test('P4.wrangler: PresenceDO class is exported from worker-proxy.js', () => {
-  // wrangler requires the DO class to be exported from the main entrypoint
-  assert.match(WORKER_SRC, /export\s+default\s*\{[^}]*PresenceDO/s,
-    'PresenceDO must be exported on the default export object');
+test('P4.wrangler: PresenceDO class is exported as a NAMED export from worker-proxy.js', () => {
+  // Wrangler requires DO classes to be NAMED exports (export { PresenceDO } or
+  // export class PresenceDO), NOT properties on the default export object.
+  // Putting PresenceDO on `export default { PresenceDO, ... }` causes wrangler
+  // deploy to FAIL with: "Your Worker depends on the following Durable Objects,
+  // which are not exported in your entrypoint file: PresenceDO."
+  assert.ok(
+    /export\s*\{\s*PresenceDO\s*\};?/.test(WORKER_SRC) ||
+    /export\s+class\s+PresenceDO\b/.test(WORKER_SRC),
+    'PresenceDO must be a NAMED export (export { PresenceDO } or export class PresenceDO), ' +
+    'NOT a property on export default — wrangler only detects named exports for DO bindings'
+  );
+  // Negative assertion: PresenceDO must NOT be on the default export object
+  assert.doesNotMatch(WORKER_SRC, /export\s+default\s*\{[^}]*\bPresenceDO\b/,
+    'PresenceDO must NOT be a property on export default (wrangler cannot detect it there)');
 });
 
 // ============================================================================
