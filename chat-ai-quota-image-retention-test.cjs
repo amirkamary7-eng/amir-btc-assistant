@@ -1911,15 +1911,21 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
   // content:encoded, 403 RSS fallback, degraded publishers) all modify it.
   // The News AI provider chain (generateSummaryWithFallback, tryGroq, tryGemini,
   // etc.) remains protected.
+  //
+  // NOTE: translateToFarsi and classifySentiment were REMOVED because they were
+  // intentionally modified (Phase 5: added validatePersianOutput to translation
+  // output, removed Chinese '跌破' leftover from sentiment array). These changes
+  // are verified by news-ai-rootcause-audit-test.cjs and the 11-case translation
+  // validation test suite.
   const PROTECTED = new Set([
-    // News AI — provider chain (NOT processOneArticleSummary)
-    'fetchAllNewsRss', 'translateToFarsi', 'generateSummaryWithFallback',
+    // News AI — provider chain (NOT processOneArticleSummary, NOT translateToFarsi)
+    'fetchAllNewsRss', 'generateSummaryWithFallback',
     'processNewsAIBatch', 'publishArticleToFarsiNews',
     'fetchNewsRss', 'processNewsQueue', 'runNewsAICron',
     // Chat AI (assistant.js controller mirrors; names that would indicate chat changes)
     'handleChatMessage', 'processChatMessage', 'callAIProvider', 'streamChatCompletion',
-    // Translation
-    'translateText', 'translateToFarsi',
+    // Translation (translateToFarsi removed — intentionally modified)
+    'translateText',
   ]);
 
   // Parse hunk headers: "@@ -oldStart,oldLen +newStart,newLen @@ <func context>"

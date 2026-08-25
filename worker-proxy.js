@@ -4827,6 +4827,42 @@ async function translateToFarsi(text, env) {
     translation_failed = true;
   }
 
+  // PHASE 5 FIX: Validate that the translation output is actually Persian.
+  // Previously, translateToFarsi only checked if the result was non-empty and
+  // different from the input — it did NOT verify the output was Persian. This
+  // meant Chinese/English output from m2m100 or Google Translate would be
+  // silently accepted and served as "Farsi" news titles.
+  //
+  // We use validatePersianOutput with LOWER thresholds than the summary path
+  // (minLength=200) because news titles are short (typically 30-100 chars):
+  //   - minLength: 3 (reject empty/malformed)
+  //   - minPersianRatio: 0.10 (lower — short titles with many tickers)
+  //   - maxCjkRatio: 0.05 (reject Chinese contamination)
+  //   - maxAsciiLetterRatio: 0.80 (higher — allows "Bitcoin ETF تایید شد")
+  //
+  // If the translation fails validation (Chinese/English/malformed), we treat
+  // it as a failed translation (translation_failed=true) and return the
+  // original text. This prevents non-Persian output from reaching the Farsi
+  // news feed.
+  if (!translation_failed && result !== text) {
+    const translationValidation = validatePersianOutput(result, {
+      minLength: 3,
+      minPersianRatio: 0.10,
+      maxCjkRatio: 0.05,
+      maxAsciiLetterRatio: 0.80,
+    });
+    if (!translationValidation.valid) {
+      console.warn('[TRANSLATE] Output failed Persian validation — treating as failed:', {
+        reason: translationValidation.reason,
+        persianRatio: translationValidation.stats?.persianRatio,
+        cjkRatio: translationValidation.stats?.cjkRatio,
+        length: translationValidation.stats?.totalChars,
+      });
+      translation_failed = true;
+      result = text; // revert to original English text
+    }
+  }
+
   const cacheEntry = { text: result, translation_failed, _expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS };
 
   // Cache the result (even on failure — avoids retrying failed translations)
@@ -5080,7 +5116,7 @@ function sanitizeNewsSummary(rawSummary) {
 function classifySentiment(title, description) {
   const text = `${title} ${description}`.toLowerCase();
   const bullish = ['رشد', 'صعود', 'موفق', 'بهبود', 'رکورد', 'پامپ', 'بالا', 'bullish', ' ATH', 'رالی', ' approvals', 'ETF', 'adopt', 'فیض', 'profit', 'surge', 'jump', 'rally', 'gain', 'recovery', 'positive', 'approve'];
-  const bearish = ['سقوط', 'نزول', 'هک', 'کلاهبردی', 'کاهش', 'ریزش', '跌破', 'دانش', 'ban', 'bearish', 'hack', 'crash', 'drop', 'fall', 'decline', 'loss', 'scam', 'fraud', 'warning', 'risk', 'fear', 'sell-off', 'plunge', 'sanction', 'تحریم'];
+  const bearish = ['سقوط', 'نزول', 'هک', 'کلاهبردی', 'کاهش', 'ریزش', 'دانش', 'ban', 'bearish', 'hack', 'crash', 'drop', 'fall', 'decline', 'loss', 'scam', 'fraud', 'warning', 'risk', 'fear', 'sell-off', 'plunge', 'sanction', 'تحریم'];
   const breaking = ['فوری', 'breaking', 'urgent', 'breaking:', 'flash'];
   
   // Check breaking first
