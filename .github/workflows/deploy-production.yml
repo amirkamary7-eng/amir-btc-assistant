@@ -125,6 +125,45 @@ jobs:
             echo "⚠️ Project PATCH failed with HTTP $PATCH_HTTP_CODE — continuing anyway"
           fi
 
+          # DIAGNOSTIC: Query the project config to verify production_branch is actually set
+          echo ""
+          echo "=== DIAGNOSTIC: Verifying production_branch via GET /projects/{name} ==="
+          GET_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+          GET_HTTP_CODE=$(echo "$GET_RESPONSE" | tail -1)
+          GET_BODY=$(echo "$GET_RESPONSE" | head -n -1)
+          echo "GET project HTTP Status: $GET_HTTP_CODE"
+          echo "production_branch in response: $(echo "$GET_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('production_branch', 'NOT FOUND'))" 2>/dev/null || echo 'parse error')"
+          echo "latest_deployment environment: $(echo "$GET_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('latest_deployment',{}).get('environment', 'NOT FOUND'))" 2>/dev/null || echo 'parse error')"
+          echo "latest_deployment short_id: $(echo "$GET_BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('latest_deployment',{}).get('short_id', 'NOT FOUND'))" 2>/dev/null || echo 'parse error')"
+
+          # DIAGNOSTIC: List all deployments to see which are production vs preview
+          echo ""
+          echo "=== DIAGNOSTIC: Listing recent deployments ==="
+          LIST_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments?per_page=10&sort_by=created_on&sort_order=desc" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+          LIST_HTTP_CODE=$(echo "$LIST_RESPONSE" | tail -1)
+          LIST_BODY=$(echo "$LIST_RESPONSE" | head -n -1)
+          echo "List deployments HTTP Status: $LIST_HTTP_CODE"
+          echo "$LIST_BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    deps = d.get('result', [])
+    print(f'Total deployments returned: {len(deps)}')
+    for dep in deps[:10]:
+        env = dep.get('environment', '?')
+        short_id = dep.get('short_id', '?')
+        branch = dep.get('deployment_trigger', {}).get('metadata', {}).get('branch', '?')
+        created = dep.get('created_on', '?')[:19]
+        is_skipped = dep.get('is_skipped', False)
+        print(f'  {short_id}  env={env:10s}  branch={branch:10s}  skipped={is_skipped}  created={created}')
+except Exception as e:
+    print(f'Parse error: {e}')
+" 2>/dev/null || echo "Failed to parse deployment list"
+
           # Step 2: Deploy with --branch=main (now matches the production branch)
           # Note: don't use set -e for the wrangler deploy — we need to capture
           # the output even if wrangler returns non-zero (it sometimes does on
