@@ -101,21 +101,23 @@ jobs:
           set -euo pipefail
 
           # Step 1: Set the project's production branch to 'main' via Cloudflare API
-          echo "Setting production branch to 'main' via Cloudflare API..."
+          # The correct field is the top-level 'production_branch' (NOT
+          # deployment_configs.production.deployment_branch which is a different setting).
+          echo "Setting production_branch to 'main' via Cloudflare API..."
           PATCH_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"deployment_configs":{"production":{"deployment_branch":"main"}}}')
+            -d '{"production_branch":"main"}')
           PATCH_HTTP_CODE=$(echo "$PATCH_RESPONSE" | tail -1)
           PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
           echo "Project PATCH HTTP Status: $PATCH_HTTP_CODE"
-          echo "Project PATCH Response: $PATCH_BODY"
+          echo "Project PATCH Response (first 500 chars): $(echo "$PATCH_BODY" | head -c 500)"
 
           if [ "$PATCH_HTTP_CODE" = "200" ]; then
             PATCH_SUCCESS=$(echo "$PATCH_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
             if [ "$PATCH_SUCCESS" = "True" ]; then
-              echo "✅ Production branch set to 'main'"
+              echo "✅ production_branch set to 'main'"
             else
               echo "⚠️ Project PATCH returned success=false — continuing anyway"
             fi
