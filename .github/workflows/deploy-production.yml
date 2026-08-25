@@ -237,8 +237,41 @@ jobs:
           fi
 
           echo "⚠️ Rollout API did not succeed (HTTP $ROLLOUT_HTTP_CODE)"
-          echo "The deployment was created but may not be live on production domain."
-          echo "Continuing to Verify step which will check if production serves the new code."
+          echo "The rollout endpoint is for gradual traffic splitting, not promotion."
+          echo ""
+
+          # Step 3: Try to find and DELETE the old 9439bac production deployment
+          # This forces the production alias to point to a newer deployment
+          echo "=== Attempting to find old production deployment (9439bac) ==="
+          # List ALL deployments (up to 100) to find the old one
+          ALL_DEPLOYMENTS=$(curl -s \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments?per_page=100&sort_by=created_on&sort_order=desc" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+
+          # Find the 9439bac deployment (the old production one)
+          OLD_UUID=$(echo "$ALL_DEPLOYMENTS" | python3 -c "import sys, json; d=json.load(sys.stdin); deps=d.get('result',[]); print(next((dep.get('id') for dep in deps if dep.get('short_id')=='9439bac'), ''))" 2>/dev/null || echo "")
+
+          if [ -n "$OLD_UUID" ]; then
+            echo "Found old production deployment 9439bac (UUID: $OLD_UUID)"
+            echo "Deleting it to force production alias to update..."
+            DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments/$OLD_UUID" \
+              -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}")
+            DELETE_HTTP_CODE=$(echo "$DELETE_RESPONSE" | tail -1)
+            DELETE_BODY=$(echo "$DELETE_RESPONSE" | head -n -1)
+            echo "Delete API HTTP Status: $DELETE_HTTP_CODE"
+            echo "Delete API Response: $DELETE_BODY"
+
+            if [ "$DELETE_HTTP_CODE" = "200" ]; then
+              echo "✅ Old production deployment deleted"
+              echo "Waiting 15s for production alias to update..."
+              sleep 15
+            fi
+          else
+            echo "Old deployment 9439bac not found in recent 100 deployments"
+            echo "It may be too old or already deleted"
+          fi
+
           # Don't fail — let the Verify step determine if production is correct
           exit 0
         env:
