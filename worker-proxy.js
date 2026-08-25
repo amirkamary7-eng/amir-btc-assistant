@@ -4685,7 +4685,10 @@ async function translateToFarsi(text, env) {
   // across multiple news refresh cycles.
   // P0-C FIX: Cache now stores { text, translation_failed } objects so that
   // cached results preserve whether the translation actually succeeded.
-  const cacheKey = text.length > 100 ? text.substring(0, 100) : text;
+  // P3-P2-1 FIX: Use full text as cache key (was first 100 chars — collision risk).
+  // Map can handle large keys efficiently. Most titles are <150 chars so memory
+  // impact is negligible. Eliminates collision risk for long titles sharing prefix.
+  const cacheKey = text;
   // P1-1 FIX: Check TTL on cache read — expired entries are treated as cache miss
   if (_translationCache.has(cacheKey)) {
     const cached = _translationCache.get(cacheKey);
@@ -5054,9 +5057,22 @@ function sanitizeNewsSummary(rawSummary) {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
 
+  // P3-P1-2 FIX: Preserve paragraph breaks (\n\n) before sanitizeNewsTitle
+  // collapses all whitespace. sanitizeNewsTitle uses replace(/\s+/g, ' ')
+  // which destroys \n — multi-paragraph summaries would become single block.
+  // Solution: replace \n\n with a placeholder, run sanitizeNewsTitle, then
+  // restore. Single \n (line break within paragraph) is converted to space
+  // (correct — within a paragraph, single \n is just word wrapping).
+  const PARAGRAPH_MARKER = '\x1F'; // Unit Separator — safe, never in AI output
+  summary = summary.replace(/\n{2,}/g, PARAGRAPH_MARKER);
+  summary = summary.replace(/\n/g, ' '); // single \n → space (within-paragraph wrap)
+
   // 4. Apply same duplicate-removal as sanitizeNewsTitle
   //    (reuses the proven logic for repeated words/phrases)
   summary = sanitizeNewsTitle(summary);
+
+  // Restore paragraph breaks
+  summary = summary.replace(new RegExp(PARAGRAPH_MARKER, 'g'), '\n\n');
 
   return summary;
 }
@@ -6226,8 +6242,11 @@ async function enqueueForSummary(env, articles) {
     // This prevents re-enqueuing and re-processing old articles.
     if (newsArticleRepo) {
       const dbArticle = await newsArticleRepo.findByUrl(env, a.url).catch(() => null);
-      if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
-        // Summary exists in DB — refresh KV cache and skip
+      // P3-P0-1 FIX: Use threshold=200 + validatePersianOutput (same as processOneArticleSummary)
+      if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 200) {
+        const enqueueDbValidation = validatePersianOutput(dbArticle.summary);
+        if (enqueueDbValidation.valid) {
+        // Summary exists in DB and is valid — refresh KV cache and skip
         try {
           const payload = JSON.stringify({
             summary: dbArticle.summary,
@@ -6240,6 +6259,7 @@ async function enqueueForSummary(env, articles) {
         } catch {}
         skipped++;
         continue;
+        } // end if (enqueueDbValidation.valid)
       }
     }
 
@@ -6573,15 +6593,18 @@ async function processOneArticleSummary(env, pool = null) {
   let existingProvider = null;
   if (existingRaw) {
     // Parse JSON format (Phase 10+) or plain string (legacy)
+    // P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) for KV cache too.
+    // Previously used 50 — bad summaries from before Phase 1 could persist in KV
+    // for 7 days and be served without validation.
     try {
       const parsed = JSON.parse(existingRaw);
-      if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim().length >= 50) {
+      if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim().length >= 200) {
         existingSummary = parsed.summary;
         existingProvider = parsed.provider || null;
       }
     } catch {
       // Plain string (legacy format)
-      if (typeof existingRaw === 'string' && existingRaw.trim().length >= 50) {
+      if (typeof existingRaw === 'string' && existingRaw.trim().length >= 200) {
         existingSummary = existingRaw;
       }
     }
@@ -6592,20 +6615,36 @@ async function processOneArticleSummary(env, pool = null) {
   // The DB stores summaries permanently — no TTL expiry.
   if (!existingSummary && newsArticleRepo) {
     const dbArticle = await newsArticleRepo.findByUrl(env, article.url, pool).catch(() => null);
-    if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
-      existingSummary = dbArticle.summary;
-      existingProvider = dbArticle.provider || 'db';
-      // Also refresh KV cache so next check is faster
-      try {
-        const payload = JSON.stringify({
-          summary: dbArticle.summary,
+    // P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) AND run
+    // validatePersianOutput on DB summary. Previously used threshold=50 and
+    // no language validation — bad summaries (English/Chinese/mixed) from
+    // before Phase 1 would leak from DB into KV and be served to users.
+    // Now: only accept DB summaries that pass BOTH length AND language validation.
+    if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 200) {
+      const dbValidation = validatePersianOutput(dbArticle.summary);
+      if (dbValidation.valid) {
+        existingSummary = dbArticle.summary;
+        existingProvider = dbArticle.provider || 'db';
+        // Also refresh KV cache so next check is faster
+        try {
+          const payload = JSON.stringify({
+            summary: dbArticle.summary,
+            provider: dbArticle.provider,
+            attempts: [],
+            generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
+            e2e: {},
+          });
+          await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+        } catch {}
+      } else {
+        // DB summary is invalid (English/Chinese/mixed/too short after Phase 2).
+        // Do NOT use it — let AI re-process the article to generate a valid summary.
+        console.warn('[NEWS-AI] DB summary failed Persian validation — will re-process:', {
+          url: article.url,
+          reason: dbValidation.reason,
           provider: dbArticle.provider,
-          attempts: [],
-          generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
-          e2e: {},
         });
-        await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
-      } catch {}
+      }
     }
   }
 
@@ -7611,19 +7650,31 @@ async function enrichNewsWithAISummaries(env, articles) {
           // Phase 10: KV now stores JSON { summary, provider, attempts, generated_at }
           // Backward compat: old entries are plain strings (just the summary text).
           // Try JSON parse first; if it fails or shape is wrong, treat as plain string.
+          let parsedSummary = null;
           try {
             const parsed = JSON.parse(raw);
             if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string') {
-              aiSummary = parsed.summary;
+              parsedSummary = parsed.summary;
               aiProvider = parsed.provider || null;
               aiGeneratedAt = parsed.generated_at || null;
             } else {
               // JSON but not the expected shape — treat as plain string
-              aiSummary = raw;
+              parsedSummary = raw;
             }
           } catch {
             // Not JSON — plain string (old format from before Phase 10)
-            aiSummary = raw;
+            parsedSummary = raw;
+          }
+          // P3-P0-1 FIX: Only accept KV summary if it passes Phase 2 validation.
+          // Previously: any non-null value was accepted, including bad summaries
+          // from before Phase 1. Now: validate length (>=200) AND language.
+          if (parsedSummary && parsedSummary.trim().length >= 200) {
+            const kvValidation = validatePersianOutput(parsedSummary);
+            if (kvValidation.valid) {
+              aiSummary = parsedSummary;
+            }
+            // If invalid: aiSummary stays null → article shows as 'pending'
+            // → will be re-processed by cron on next tick
           }
         }
       } catch (e) { console.warn('[NEWS-AI] enrichNews KV read error:', e?.message); }

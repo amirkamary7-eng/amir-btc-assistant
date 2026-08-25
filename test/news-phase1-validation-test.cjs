@@ -217,3 +217,118 @@ test('REGRESS-3: Circuit breaker preserved', () => {
 test('REGRESS-4: ON CONFLICT DO NOTHING preserved', () => {
   assert.ok(WORKER_SRC.includes('ON CONFLICT (notification_id, user_id) DO NOTHING'));
 });
+
+// ============================================================================
+// 8. PHASE 3 FIXES — P3-P0-1, P3-P1-2, P3-P2-1
+// ============================================================================
+
+// --- P3-P0-1: DB/KV lookup validation ---
+
+test('P3-P0-1a: processOneArticleSummary KV lookup uses threshold=200 (not 50)', () => {
+  // Find the KV cache read section
+  const kvSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200');
+  assert.ok(kvSection > -1, 'P3-P0-1 FIX comment must exist for KV lookup');
+  // Verify threshold=200 is used (not 50)
+  const afterComment = WORKER_SRC.slice(kvSection, kvSection + 500);
+  assert.ok(afterComment.includes('>= 200'), 'KV lookup must use >= 200');
+  assert.ok(!afterComment.includes('>= 50'), 'KV lookup must NOT use >= 50');
+});
+
+test('P3-P0-1b: processOneArticleSummary DB lookup runs validatePersianOutput', () => {
+  // Find the DB check section
+  const dbSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) AND run');
+  assert.ok(dbSection > -1, 'P3-P0-1 FIX comment must exist for DB lookup');
+  const afterComment = WORKER_SRC.slice(dbSection, dbSection + 800);
+  assert.ok(afterComment.includes('validatePersianOutput(dbArticle.summary)'),
+    'DB lookup must run validatePersianOutput on dbArticle.summary');
+  assert.ok(afterComment.includes('>= 200'),
+    'DB lookup must use >= 200 threshold');
+});
+
+test('P3-P0-1c: DB lookup logs warning on invalid summary (does NOT serve bad data)', () => {
+  assert.ok(WORKER_SRC.includes('DB summary failed Persian validation'),
+    'DB lookup must log warning when summary fails validation');
+});
+
+test('P3-P0-1d: enrichNewsWithAISummaries validates KV summary', () => {
+  // Find the enrichNews KV read section
+  const enrichSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Only accept KV summary if it passes Phase 2 validation');
+  assert.ok(enrichSection > -1, 'P3-P0-1 FIX comment must exist in enrichNewsWithAISummaries');
+  const afterComment = WORKER_SRC.slice(enrichSection, enrichSection + 500);
+  assert.ok(afterComment.includes('validatePersianOutput(parsedSummary)'),
+    'enrichNews must run validatePersianOutput on KV summary');
+  assert.ok(afterComment.includes('>= 200'),
+    'enrichNews must use >= 200 threshold');
+});
+
+test('P3-P0-1e: processNewsAIBatch enqueue DB check uses threshold=200 + validator', () => {
+  // Find the enqueue DB check
+  const enqueueSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 + validatePersianOutput (same as processOneArticleSummary)');
+  assert.ok(enqueueSection > -1, 'P3-P0-1 FIX comment must exist in enqueue path');
+  const afterComment = WORKER_SRC.slice(enqueueSection, enqueueSection + 500);
+  assert.ok(afterComment.includes('>= 200'),
+    'enqueue DB check must use >= 200 threshold');
+  assert.ok(afterComment.includes('validatePersianOutput(dbArticle.summary)'),
+    'enqueue DB check must run validatePersianOutput');
+});
+
+// --- P3-P1-2: Paragraph preservation in sanitizeNewsSummary ---
+
+test('P3-P1-2a: sanitizeNewsSummary preserves paragraph breaks (\\n\\n)', () => {
+  assert.ok(WORKER_SRC.includes('PARAGRAPH_MARKER'),
+    'sanitizeNewsSummary must use PARAGRAPH_MARKER for paragraph preservation');
+  assert.ok(WORKER_SRC.includes("const PARAGRAPH_MARKER = '\\x1F'"),
+    'PARAGRAPH_MARKER must be \\x1F (Unit Separator)');
+  assert.ok(WORKER_SRC.includes('summary.replace(/\\n{2,}/g, PARAGRAPH_MARKER)'),
+    'sanitizeNewsSummary must replace \\n\\n with PARAGRAPH_MARKER before sanitizeNewsTitle');
+  assert.ok(WORKER_SRC.includes("new RegExp(PARAGRAPH_MARKER, 'g'), '\\n\\n'"),
+    'sanitizeNewsSummary must restore PARAGRAPH_MARKER to \\n\\n after sanitizeNewsTitle');
+});
+
+test('P3-P1-2b: single \\n converted to space (within-paragraph wrap)', () => {
+  assert.ok(WORKER_SRC.includes("summary.replace(/\\n/g, ' ')"),
+    'sanitizeNewsSummary must convert single \\n to space (within-paragraph wrap)');
+});
+
+// --- P3-P2-1: Translation cache key full text ---
+
+test('P3-P2-1a: translation cache key uses full text (not substring)', () => {
+  assert.ok(WORKER_SRC.includes('P3-P2-1 FIX: Use full text as cache key'),
+    'P3-P2-1 FIX comment must exist');
+  assert.ok(WORKER_SRC.includes('const cacheKey = text;'),
+    'cacheKey must be full text (not text.substring(0, 100))');
+  // Ensure old pattern is NOT present
+  assert.ok(!/cacheKey = text\.length > 100 \? text\.substring\(0, 100\)/.test(WORKER_SRC),
+    'old substring cacheKey pattern must NOT exist');
+});
+
+// --- P3 Regression: ensure existing functionality preserved ---
+
+test('P3-REGRESS-1: sanitizeNewsTitle still exists and works (unchanged)', () => {
+  assert.ok(WORKER_SRC.includes('function sanitizeNewsTitle('),
+    'sanitizeNewsTitle must still exist');
+  assert.ok(WORKER_SRC.includes('function sanitizeNewsSummary('),
+    'sanitizeNewsSummary must still exist');
+});
+
+test('P3-REGRESS-2: validatePersianOutput still has maxLength=5000', () => {
+  assert.ok(WORKER_SRC.includes('maxLength = opts.maxLength ?? 5000'),
+    'validatePersianOutput maxLength must still be 5000');
+});
+
+test('P3-REGRESS-3: validatePersianOutput default minLength still 200', () => {
+  assert.ok(WORKER_SRC.includes("minLength = opts.minLength ?? 200"),
+    'validatePersianOutput default minLength must still be 200');
+});
+
+test('P3-REGRESS-4: Translation cache TTL still 5 minutes', () => {
+  assert.ok(WORKER_SRC.includes('TRANSLATION_CACHE_TTL_MS = 5 * 60 * 1000'),
+    'TRANSLATION_CACHE_TTL_MS must still be 5 minutes');
+});
+
+test('P3-REGRESS-5: Enum validation in parseBatchResult preserved', () => {
+  assert.ok(WORKER_SRC.includes("validSentiments = new Set(['bullish', 'bearish', 'neutral'])"),
+    'enum validation for sentiment must be preserved');
+  assert.ok(WORKER_SRC.includes("validImpacts = new Set(['high', 'medium', 'low'])"),
+    'enum validation for impact must be preserved');
+});
