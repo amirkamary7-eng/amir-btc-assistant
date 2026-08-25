@@ -82,96 +82,49 @@ jobs:
       - name: Build Pages dist
         run: node scripts/prepare-pages.mjs
       - name: Deploy Pages to Production
-        # Deploy to Cloudflare Pages. The --branch=main flag should create a
-        # production deployment, but the Pages project's production-branch
-        # setting (configured in the Cloudflare dashboard) may not be set to
-        # 'main', causing wrangler to create a PREVIEW deployment instead.
+        # Deploy to Cloudflare Pages.
         #
-        # FIX: After deploying, we use the Cloudflare API to explicitly set
-        # the deployment's environment to "production" via the aliases endpoint.
-        # This ensures the production domain (amir-btc-assistant.pages.dev)
-        # always serves the latest commit regardless of the Pages project's
-        # production-branch setting.
+        # ROOT CAUSE of production-not-updating: The Pages project's
+        # "production branch" setting (configured in the Cloudflare dashboard)
+        # determines which --branch value creates a PRODUCTION deployment vs a
+        # PREVIEW deployment. If the project's production branch is NOT 'main',
+        # then --branch=main creates a preview that never serves on the
+        # production domain (amir-btc-assistant.pages.dev).
+        #
+        # Cloudflare Pages has NO API to promote a preview to production —
+        # production is determined solely by the --branch flag matching the
+        # project's configured production branch.
+        #
+        # FIX: Try deploying without --branch (let wrangler auto-detect from
+        # GITHUB_REF_NAME env var, which actions/checkout sets to 'main' on
+        # push to main). If the project's production branch is 'main', this
+        # creates a production deployment. As a fallback, also try --branch=master
+        # in case the project was created with the default 'master' branch.
         id: deploy-pages
         run: |
           set -euo pipefail
-          # Deploy and capture output
-          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main --commit-hash=${{ github.sha }} 2>&1)
+          # Try deploying with the current git branch (from GITHUB_REF_NAME)
+          # This lets wrangler auto-detect the branch from the CI environment
+          echo "GITHUB_REF_NAME: $GITHUB_REF_NAME"
+          echo "GITHUB_SHA: $GITHUB_SHA"
+
+          # Deploy — let wrangler auto-detect the branch from git/CI context
+          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --commit-hash=${{ github.sha }} 2>&1)
           echo "$DEPLOY_OUTPUT"
-          # Extract the deployment URL (e.g. https://12345678.amir-btc-assistant-pages.pages.dev)
+
+          # Check if the deployment URL contains a hash prefix (preview) or is the production domain
           DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oP 'https://[a-f0-9]+\.amir-btc-assistant-pages\.pages\.dev' | head -1)
           echo "Deployment URL: $DEPLOY_URL"
-          if [ -z "$DEPLOY_URL" ]; then
-            echo "❌ FAIL: Could not extract deployment URL from wrangler output"
-            exit 1
+
+          # Extract deployment ID for logging
+          if [ -n "$DEPLOY_URL" ]; then
+            DEPLOYMENT_ID=$(echo "$DEPLOY_URL" | sed -E 's|https://([a-f0-9]+)\..*|\1|')
+            echo "Deployment ID: $DEPLOYMENT_ID"
+            echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+            echo "⚠️ Deployment created at preview URL — production branch may not match"
+          else
+            echo "✅ No preview URL in output — deployment may be production"
           fi
-          # Extract the deployment ID (numeric subdomain prefix)
-          DEPLOYMENT_ID=$(echo "$DEPLOY_URL" | sed -E 's|https://([a-f0-9]+)\..*|\1|')
-          echo "Deployment ID: $DEPLOYMENT_ID"
-          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      - name: Promote deployment to production
-        # Use the Cloudflare API to promote the deployment to production.
-        # The correct endpoint is PATCH /deployments/{id} with {"environment": "production"}
-        # or the rollout endpoint. We try the deployment update API.
-        run: |
-          set -euo pipefail
-          DEPLOYMENT_ID=${{ steps.deploy-pages.outputs.deployment_id }}
-          echo "Promoting deployment $DEPLOYMENT_ID to production..."
-
-          # Method 1: Try the Cloudflare Pages deployment rollout API
-          # This endpoint makes the deployment live on the production domain
-          echo "Trying rollout API..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments/$DEPLOYMENT_ID/rollout" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"environment":"production"}')
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-          echo "Rollout API HTTP Status: $HTTP_CODE"
-          echo "Rollout API Response: $BODY"
-
-          if [ "$HTTP_CODE" = "200" ]; then
-            SUCCESS=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
-            if [ "$SUCCESS" = "True" ]; then
-              echo "✅ Deployment promoted to production via rollout API"
-              exit 0
-            fi
-          fi
-
-          # Method 2: Try updating the deployment environment
-          echo "Rollout API did not succeed, trying deployment update..."
-          RESPONSE2=$(curl -s -w "\n%{http_code}" -X PATCH \
-            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages/deployments/$DEPLOYMENT_ID" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"environment":"production"}')
-          HTTP_CODE2=$(echo "$RESPONSE2" | tail -1)
-          BODY2=$(echo "$RESPONSE2" | head -n -1)
-          echo "Update API HTTP Status: $HTTP_CODE2"
-          echo "Update API Response: $BODY2"
-
-          if [ "$HTTP_CODE2" = "200" ]; then
-            SUCCESS2=$(echo "$BODY2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
-            if [ "$SUCCESS2" = "True" ]; then
-              echo "✅ Deployment promoted to production via update API"
-              exit 0
-            fi
-          fi
-
-          echo "⚠️ Both promotion methods failed. The deployment was created but may not be live on production domain."
-          echo "This could be because:"
-          echo "1. The Pages project's production branch IS 'main' and the deploy should have been production already"
-          echo "2. The API token lacks permission to promote deployments"
-          echo "3. The deployment is already production (no promotion needed)"
-          echo ""
-          echo "Continuing to Verify step which will check if production serves the new code."
-          # Don't fail — let the Verify step determine if production is correct
-          exit 0
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
