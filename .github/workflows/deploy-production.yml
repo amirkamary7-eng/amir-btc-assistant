@@ -124,19 +124,25 @@ jobs:
           fi
 
           # Step 2: Deploy with --branch=main (now matches the production branch)
+          # Note: don't use set -e for the wrangler deploy — we need to capture
+          # the output even if wrangler returns non-zero (it sometimes does on
+          # warnings). We check the output for the deployment URL instead.
           echo ""
           echo "Deploying with --branch=main..."
-          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main --commit-hash=${{ github.sha }} 2>&1)
+          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main --commit-hash=${{ github.sha }} 2>&1) || true
           echo "$DEPLOY_OUTPUT"
 
           # Extract deployment URL for logging
           DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oP 'https://[a-f0-9]+\.amir-btc-assistant-pages\.pages\.dev' | head -1)
           echo "Deployment URL: $DEPLOY_URL"
-          if [ -n "$DEPLOY_URL" ]; then
-            DEPLOYMENT_ID=$(echo "$DEPLOY_URL" | sed -E 's|https://([a-f0-9]+)\..*|\1|')
-            echo "Deployment ID: $DEPLOYMENT_ID"
-            echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "❌ FAIL: Could not extract deployment URL from wrangler output"
+            echo "Wrangler may have failed. Check the output above."
+            exit 1
           fi
+          DEPLOYMENT_ID=$(echo "$DEPLOY_URL" | sed -E 's|https://([a-f0-9]+)\..*|\1|')
+          echo "Deployment ID: $DEPLOYMENT_ID"
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
 
       - name: Purge CDN cache for production domain
         # ROOT CAUSE CONFIRMED: The production deployment IS updated (environment=production),
