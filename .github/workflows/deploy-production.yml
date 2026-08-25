@@ -82,48 +82,60 @@ jobs:
       - name: Build Pages dist
         run: node scripts/prepare-pages.mjs
       - name: Deploy Pages to Production
-        # Deploy to Cloudflare Pages.
+        # ROOT CAUSE: The Cloudflare Pages project's "production branch" setting
+        # (configured in the dashboard) is NOT 'main'. When wrangler deploys with
+        # --branch=main (or auto-detects main from GITHUB_REF_NAME), it creates a
+        # PREVIEW deployment because main != the configured production branch.
+        # This is why production (amir-btc-assistant.pages.dev) has been stuck
+        # serving commit 9439bac — all recent deploys went to preview URLs.
         #
-        # ROOT CAUSE of production-not-updating: The Pages project's
-        # "production branch" setting (configured in the Cloudflare dashboard)
-        # determines which --branch value creates a PRODUCTION deployment vs a
-        # PREVIEW deployment. If the project's production branch is NOT 'main',
-        # then --branch=main creates a preview that never serves on the
-        # production domain (amir-btc-assistant.pages.dev).
+        # Cloudflare Pages has NO API to promote a preview to production.
+        # The ONLY way to fix this is to set the project's production_branch
+        # to 'main' via the Cloudflare API, then deploy.
         #
-        # Cloudflare Pages has NO API to promote a preview to production —
-        # production is determined solely by the --branch flag matching the
-        # project's configured production branch.
-        #
-        # FIX: Try deploying without --branch (let wrangler auto-detect from
-        # GITHUB_REF_NAME env var, which actions/checkout sets to 'main' on
-        # push to main). If the project's production branch is 'main', this
-        # creates a production deployment. As a fallback, also try --branch=master
-        # in case the project was created with the default 'master' branch.
+        # FIX: Before deploying, use the Cloudflare API to PATCH the project's
+        # deployment_configs.production_branch to 'main'. Then deploy with
+        # --branch=main which will now create a PRODUCTION deployment.
         id: deploy-pages
         run: |
           set -euo pipefail
-          # Try deploying with the current git branch (from GITHUB_REF_NAME)
-          # This lets wrangler auto-detect the branch from the CI environment
-          echo "GITHUB_REF_NAME: $GITHUB_REF_NAME"
-          echo "GITHUB_SHA: $GITHUB_SHA"
 
-          # Deploy — let wrangler auto-detect the branch from git/CI context
-          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --commit-hash=${{ github.sha }} 2>&1)
+          # Step 1: Set the project's production branch to 'main' via Cloudflare API
+          echo "Setting production branch to 'main' via Cloudflare API..."
+          PATCH_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/amir-btc-assistant-pages" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"deployment_configs":{"production":{"deployment_branch":"main"}}}')
+          PATCH_HTTP_CODE=$(echo "$PATCH_RESPONSE" | tail -1)
+          PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
+          echo "Project PATCH HTTP Status: $PATCH_HTTP_CODE"
+          echo "Project PATCH Response: $PATCH_BODY"
+
+          if [ "$PATCH_HTTP_CODE" = "200" ]; then
+            PATCH_SUCCESS=$(echo "$PATCH_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
+            if [ "$PATCH_SUCCESS" = "True" ]; then
+              echo "✅ Production branch set to 'main'"
+            else
+              echo "⚠️ Project PATCH returned success=false — continuing anyway"
+            fi
+          else
+            echo "⚠️ Project PATCH failed with HTTP $PATCH_HTTP_CODE — continuing anyway"
+          fi
+
+          # Step 2: Deploy with --branch=main (now matches the production branch)
+          echo ""
+          echo "Deploying with --branch=main..."
+          DEPLOY_OUTPUT=$(npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main --commit-hash=${{ github.sha }} 2>&1)
           echo "$DEPLOY_OUTPUT"
 
-          # Check if the deployment URL contains a hash prefix (preview) or is the production domain
+          # Extract deployment URL for logging
           DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oP 'https://[a-f0-9]+\.amir-btc-assistant-pages\.pages\.dev' | head -1)
           echo "Deployment URL: $DEPLOY_URL"
-
-          # Extract deployment ID for logging
           if [ -n "$DEPLOY_URL" ]; then
             DEPLOYMENT_ID=$(echo "$DEPLOY_URL" | sed -E 's|https://([a-f0-9]+)\..*|\1|')
             echo "Deployment ID: $DEPLOYMENT_ID"
             echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-            echo "⚠️ Deployment created at preview URL — production branch may not match"
-          else
-            echo "✅ No preview URL in output — deployment may be production"
           fi
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
