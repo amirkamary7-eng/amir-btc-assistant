@@ -11481,9 +11481,88 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
 //#endregion
 
 // ============================================================================
+//#region Presence Durable Object — Online Members
+// ============================================================================
+// Replaces the KV-based session:presence_state read-modify-write pattern
+// (which had race conditions at scale). DO serializes all requests → race-free.
+//
+// Architecture:
+//   - Map<userId, expiresAtMs> in memory (no persistence — accept 180s recovery on eviction)
+//   - Alarm every 60s prunes expired entries
+//   - Worker cache (30s TTL) reduces DO requests for online count
+//   - Feature flag: env.PRESENCE_DO binding → use DO; otherwise fall back to KV
+
+class PresenceDO {
+  constructor(state, env) {
+    this.state = state;
+    this.sessions = new Map(); // userId → expiresAtMs
+    this._alarmSet = false;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action') || '';
+    const userId = url.searchParams.get('userId') || '';
+    const ttl = Number(url.searchParams.get('ttl')) || 240000; // default 240s
+    const now = Date.now();
+
+    // Ensure alarm is set (idempotent)
+    if (!this._alarmSet) {
+      try {
+        const existing = await this.state.storage.getAlarm();
+        if (!existing) {
+          await this.state.storage.setAlarm(now + 60000);
+        }
+        this._alarmSet = true;
+      } catch {}
+    }
+
+    if (action === 'heartbeat') {
+      if (!userId) return Response.json({ error: 'userId required' }, { status: 400 });
+      this.sessions.set(userId, now + ttl);
+      return Response.json({ online_count: this.sessions.size });
+    }
+
+    if (action === 'end') {
+      if (!userId) return Response.json({ error: 'userId required' }, { status: 400 });
+      this.sessions.delete(userId);
+      return Response.json({ online_count: this.sessions.size });
+    }
+
+    if (action === 'count') {
+      // Lazy prune: remove expired entries (in case alarm didn't fire recently)
+      // Only check entries that are definitely expired (cheap O(n) but n is small)
+      for (const [uid, expiresAt] of this.sessions) {
+        if (expiresAt <= now) {
+          this.sessions.delete(uid);
+        }
+      }
+      return Response.json({ count: this.sessions.size });
+    }
+
+    return Response.json({ error: 'unknown action' }, { status: 404 });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    // Full prune: remove all expired entries
+    for (const [userId, expiresAt] of this.sessions) {
+      if (expiresAt <= now) {
+        this.sessions.delete(userId);
+      }
+    }
+    // Reschedule alarm for 60s
+    try {
+      await this.state.storage.setAlarm(now + 60000);
+    } catch {}
+  }
+}
+
+// ============================================================================
 //#region ورودی اصلی Worker
 // ============================================================================
 export default {
+  PresenceDO, // Export DO class for wrangler binding
   async fetch(request, env, ctx) {
     _currentRequestOrigin = request.headers.get('Origin');
     // TEMP: set trace context for instrumentation

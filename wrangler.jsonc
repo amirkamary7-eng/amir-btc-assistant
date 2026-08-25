@@ -38,6 +38,20 @@
                         "id": "TODO_CREATE_DEV_NAMESPACE"
                 }
         ],
+        "durable_objects": {
+                "bindings": [
+                        {
+                                "name": "PRESENCE_DO",
+                                "class_name": "PresenceDO"
+                        }
+                ]
+        },
+        "migrations": [
+                {
+                        "tag": "v1",
+                        "new_sqlite_classes": ["PresenceDO"]
+                }
+        ],
         "vars": {
                 "APP_ENV": "development",
                 "ALERTS_CRON_ENABLED": "false",
@@ -81,6 +95,20 @@
                                 {
                                         "binding": "SESSION_CACHE",
                                         "id": "6de016b566f3404e832bb98895a60e85"
+                                }
+                        ],
+                        "durable_objects": {
+                                "bindings": [
+                                        {
+                                                "name": "PRESENCE_DO",
+                                                "class_name": "PresenceDO"
+                                        }
+                                ]
+                        },
+                        "migrations": [
+                                {
+                                        "tag": "v1",
+                                        "new_sqlite_classes": ["PresenceDO"]
                                 }
                         ],
                         "vars": {
@@ -134,6 +162,20 @@
                                 {
                                         "binding": "SESSION_CACHE",
                                         "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
+                                }
+                        ],
+                        "durable_objects": {
+                                "bindings": [
+                                        {
+                                                "name": "PRESENCE_DO",
+                                                "class_name": "PresenceDO"
+                                        }
+                                ]
+                        },
+                        "migrations": [
+                                {
+                                        "tag": "v1",
+                                        "new_sqlite_classes": ["PresenceDO"]
                                 }
                         ],
                         "vars": {
