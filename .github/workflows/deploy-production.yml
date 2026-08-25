@@ -85,7 +85,16 @@ jobs:
         # --branch=main deploys to the PRODUCTION domain (amir-btc-assistant.pages.dev),
         # not a preview deployment URL. Without this flag, wrangler deploys to a
         # random preview subdomain which doesn't update the main production URL.
-        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main
+        #
+        # FIX: Add --commit-hash and --commit-message so wrangler correctly
+        # identifies this as a production deployment tied to the main branch.
+        # Previously, --branch=main alone was creating PREVIEW deployments
+        # (x-robots-tag: noindex) that never promoted to the production alias.
+        # The production domain (amir-btc-assistant.pages.dev) was stuck serving
+        # an old deployment (9439bac) while all CI runs went to preview URLs.
+        # Adding --commit-hash + --commit-message gives wrangler the git context
+        # it needs to mark the deployment as production.
+        run: npx wrangler pages deploy ./webapp/pages-dist --project-name amir-btc-assistant-pages --branch=main --commit-hash=${{ github.sha }} --commit-message="${{ github.event.head_commit.message }}"
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -132,7 +141,10 @@ jobs:
           if [ "$SHORTSHA" = "$COMMIT_SHA" ]; then
             echo "✅ Pages buildId matches deployed commit"
           else
-            echo "⚠️  Pages buildId ($SHORTSHA) != commit ($COMMIT_SHA) — may still be propagating"
+            echo "❌ FAIL: Pages buildId ($SHORTSHA) != commit ($COMMIT_SHA)"
+            echo "Production is serving an OLD deployment. The Pages deploy did not promote to production."
+            echo "This indicates a deployment promotion issue, not a CDN cache issue."
+            exit 1
           fi
       - name: Verify Pages (defer warm-start attrs)
         run: |
