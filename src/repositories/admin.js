@@ -64,6 +64,7 @@ export function createAdminRepository(deps) {
       `);
     } catch (e) {
       console.warn('Admin schema migration warning:', e.message);
+      return; // P2 FIX: don't set _schemaVerified on error — allow retry
     }
     _schemaVerified = true;
   }

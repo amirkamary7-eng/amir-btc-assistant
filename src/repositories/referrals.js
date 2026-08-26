@@ -50,6 +50,7 @@ export function createReferralRepository(deps) {
       await queryDb(env, batchSql);
     } catch (e) {
       console.warn('Referral schema migration warning:', e.message);
+      return; // P2 FIX: don't set _schemaVerified on error — allow retry
     }
     _schemaVerified = true;
   }

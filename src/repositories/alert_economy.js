@@ -79,7 +79,7 @@ export function createAlertEconomyRepository(deps) {
       _schemaVerified = true;
     } catch (e) {
       console.warn('Alert Economy schema migration warning:', e.message);
-      _schemaVerified = true;
+      return; // P2 FIX: don't set _schemaVerified on error — allow retry
     }
   }
 

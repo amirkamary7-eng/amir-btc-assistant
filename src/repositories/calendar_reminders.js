@@ -46,6 +46,7 @@ export function createCalendarReminderRepository(deps) {
       await queryDb(env, sql, [], 1, pool);
     } catch (e) {
       console.warn('Calendar reminder schema migration warning:', e.message);
+      return; // P2 FIX: don't set _schemaVerified on error — allow retry
     }
     _schemaVerified = true;
   }
