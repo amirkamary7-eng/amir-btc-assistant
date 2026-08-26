@@ -40,71 +40,232 @@ export function createWheelHandlers(deps) {
    * GET /api/wheel/status — Get spin inventory + daily spin status + wheel config.
    * Returns segment_count, is_enabled, maintenance_mode from wheel_config so
    * the frontend can render the correct number of wheel segments dynamically.
+   *
+   * TEMPORARY DIAGNOSTIC: When called with ?diag=1, returns step-by-step
+   * diagnostic info instead of the normal response. This is to identify the
+   * exact root cause of 503 errors. Remove after diagnosis is complete.
    */
   async function handleStatus(request, env) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
+
+    // Check for diagnostic mode (?diag=1)
+    const url = new URL(request.url);
+    const isDiag = url.searchParams.get('diag') === '1';
+
     if (!isDatabaseConfigured(env)) {
+      if (isDiag) {
+        return jsonResponse({ status: 'diagnostic', steps: [
+          { step: 'auth', ok: true, user_id: String(authState.user.id) },
+          { step: 'isDatabaseConfigured', ok: false, detail: 'No DATABASE_URL/DIRECT_URL/HYPERDRIVE' },
+        ], final_status: 'error', failed_step: 'isDatabaseConfigured' }, {}, env);
+      }
       return jsonResponse({ status: 'success', daily_spin: { available: false }, premium_spins: 0, config: { is_enabled: true, segment_count: 8, maintenance_mode: false } }, {}, env);
     }
-    try {
-      // ROOT CAUSE FIX for [WHEEL-STATUS] "column spin_date does not exist":
-      // wheelRepo.ensureSchema() was DEFINED but NEVER CALLED from anywhere.
-      // If the wheel_spins table was created by an older code version (before
-      // the spin_date column was added), the column doesn't exist → SQL error
-      // on every query that references spin_date.
-      // ensureSchema runs CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN
-      // IF NOT EXISTS, so it's idempotent and safe to call on every request.
-      if (typeof wheelRepo?.ensureSchema === 'function') {
-        await wheelRepo.ensureSchema(env).catch(() => {});
+
+    if (!isDiag) {
+      // ═══ NORMAL PATH (unchanged) ═══
+      try {
+        if (typeof wheelRepo?.ensureSchema === 'function') {
+          await wheelRepo.ensureSchema(env).catch(() => {});
+        }
+
+        let config = { is_enabled: true, segment_count: 8, maintenance_mode: false, max_spins_per_user: 3 };
+        if (rewardCenterRepo) {
+          config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
+        }
+        const maxSpins = await _getEffectiveMaxSpins(env, authState.user.id);
+
+        const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
+        const availableSpins = await wheelRepo.getAvailableSpins(env, authState.user.id);
+        const premiumCount = availableSpins.spins.filter(s => s.type === 'premium').length;
+
+        let nextResetAt = null;
+        if (typeof wheelRepo.getNextTehranMidnightISO === 'function') {
+          try { nextResetAt = wheelRepo.getNextTehranMidnightISO(); } catch {}
+        }
+
+        return jsonResponse({
+          status: 'success',
+          daily_spin: {
+            available: dailySpins.total_available > 0,
+            spin_id: dailySpins.spins[0]?.id || null,
+          },
+          premium_spins: premiumCount,
+          total_available: availableSpins.spins.length,
+          total_allowed: maxSpins,
+          spins_used: maxSpins - dailySpins.total_available,
+          next_reset_at: nextResetAt,
+          config: {
+            is_enabled: config.is_enabled,
+            segment_count: config.segment_count,
+            maintenance_mode: config.maintenance_mode,
+          },
+        }, {}, env);
+      } catch (error) {
+        console.error('[WHEEL-STATUS] Error:', error?.message || String(error));
+        if (error?.stack) console.error('[WHEEL-STATUS] Stack:', error.stack);
+        console.warn(safeError('wheel-status', error));
+        return safeDbErrorResponse(error, {}, env);
       }
-
-      // ROOT CAUSE FIX (2.1): Read max_spins_per_user from wheel_config
-      // (default 3) and pass to getOrCreateDailySpins so it creates the
-      // correct number of daily spins.
-      let config = { is_enabled: true, segment_count: 8, maintenance_mode: false, max_spins_per_user: 3 };
-      if (rewardCenterRepo) {
-        config = await rewardCenterRepo.getWheelConfig(env).catch(() => config);
-      }
-      // PHASE 3: Override maxSpins with tier-based value (Normal 3, Premium 5)
-      const maxSpins = await _getEffectiveMaxSpins(env, authState.user.id);
-
-      // Create daily spins (up to maxSpins) and get available count
-      const dailySpins = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, maxSpins);
-      const availableSpins = await wheelRepo.getAvailableSpins(env, authState.user.id);
-      const premiumCount = availableSpins.spins.filter(s => s.type === 'premium').length;
-
-      // P0-B FIX: Return next_reset_at (Tehran midnight ISO) so frontend
-      // doesn't guess reset time using local device timezone.
-      let nextResetAt = null;
-      if (typeof wheelRepo.getNextTehranMidnightISO === 'function') {
-        try { nextResetAt = wheelRepo.getNextTehranMidnightISO(); } catch {}
-      }
-
-      return jsonResponse({
-        status: 'success',
-        daily_spin: {
-          available: dailySpins.total_available > 0,
-          spin_id: dailySpins.spins[0]?.id || null,
-        },
-        premium_spins: premiumCount,
-        total_available: availableSpins.spins.length,
-        total_allowed: maxSpins,
-        spins_used: maxSpins - dailySpins.total_available,
-        next_reset_at: nextResetAt,
-        config: {
-          is_enabled: config.is_enabled,
-          segment_count: config.segment_count,
-          maintenance_mode: config.maintenance_mode,
-        },
-      }, {}, env);
-    } catch (error) {
-      // ROOT-CAUSE FIX: Log full stack trace for diagnosis
-      console.error('[WHEEL-STATUS] Error:', error?.message || String(error));
-      if (error?.stack) console.error('[WHEEL-STATUS] Stack:', error.stack);
-      console.warn(safeError('wheel-status', error));
-      return safeDbErrorResponse(error, {}, env);
     }
+
+    // ═══ DIAGNOSTIC PATH (?diag=1) ═══
+    // Runs each step individually, catching errors per-step.
+    // Returns structured diagnostic info. No sensitive data (no SQL, no tokens,
+    // no stack traces). Uses safeError() for error sanitization.
+    const steps = [];
+    let failedStep = null;
+
+    function _extractPgError(e) {
+      // Extract non-sensitive PostgreSQL error metadata
+      const info = { error_type: e?.name || 'Error' };
+      if (e?.code) info.sql_state = String(e.code);
+      if (e?.constraint) info.constraint = String(e.constraint);
+      // Sanitize message via safeError (strips connection strings, tokens, etc.)
+      try {
+        const sanitized = safeError('diag', e);
+        if (sanitized?.message) info.message = String(sanitized.message).slice(0, 200);
+      } catch {
+        info.message = String(e?.message || '').slice(0, 200);
+      }
+      return info;
+    }
+
+    // Step 1: auth (already passed — record it)
+    steps.push({ step: 'auth', ok: true, duration_ms: 0, user_id: String(authState.user.id) });
+
+    // Step 2: isDatabaseConfigured (already passed — record it)
+    steps.push({ step: 'isDatabaseConfigured', ok: true, duration_ms: 0 });
+
+    // Step 3: wheelRepo.ensureSchema
+    {
+      const t0 = Date.now();
+      try {
+        if (typeof wheelRepo?.ensureSchema === 'function') {
+          await wheelRepo.ensureSchema(env);
+        }
+        steps.push({ step: 'wheel_ensureSchema', ok: true, duration_ms: Date.now() - t0 });
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        steps.push({ step: 'wheel_ensureSchema', ok: false, duration_ms: Date.now() - t0, ...errInfo });
+        failedStep = 'wheel_ensureSchema';
+      }
+    }
+
+    // Step 4: rewardCenterRepo.ensureSchema (via getWheelConfig which calls ensureSchema)
+    {
+      const t0 = Date.now();
+      try {
+        if (rewardCenterRepo && typeof rewardCenterRepo.ensureSchema === 'function') {
+          await rewardCenterRepo.ensureSchema(env);
+        }
+        steps.push({ step: 'rewardCenter_ensureSchema', ok: true, duration_ms: Date.now() - t0 });
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        steps.push({ step: 'rewardCenter_ensureSchema', ok: false, duration_ms: Date.now() - t0, ...errInfo });
+        if (!failedStep) failedStep = 'rewardCenter_ensureSchema';
+      }
+    }
+
+    // Step 5: getWheelConfig
+    let diagConfig = { is_enabled: true, segment_count: 8, maintenance_mode: false, max_spins_per_user: 3 };
+    {
+      const t0 = Date.now();
+      try {
+        if (rewardCenterRepo) {
+          diagConfig = await rewardCenterRepo.getWheelConfig(env);
+        }
+        steps.push({ step: 'getWheelConfig', ok: true, duration_ms: Date.now() - t0,
+          config: { is_enabled: diagConfig.is_enabled, maintenance_mode: diagConfig.maintenance_mode, max_spins_per_user: diagConfig.max_spins_per_user } });
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        steps.push({ step: 'getWheelConfig', ok: false, duration_ms: Date.now() - t0, ...errInfo });
+        if (!failedStep) failedStep = 'getWheelConfig';
+      }
+    }
+
+    // Step 6: getEffectiveMaxSpins
+    let diagMaxSpins = 3;
+    {
+      const t0 = Date.now();
+      try {
+        diagMaxSpins = await _getEffectiveMaxSpins(env, authState.user.id);
+        steps.push({ step: 'getEffectiveMaxSpins', ok: true, duration_ms: Date.now() - t0, max_spins: diagMaxSpins });
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        steps.push({ step: 'getEffectiveMaxSpins', ok: false, duration_ms: Date.now() - t0, ...errInfo });
+        if (!failedStep) failedStep = 'getEffectiveMaxSpins';
+      }
+    }
+
+    // Step 7: getOrCreateDailySpins — THE CRITICAL STEP
+    // This is where the duplicate key violation occurs.
+    // We capture detailed info about what happens inside.
+    {
+      const t0 = Date.now();
+      try {
+        if (failedStep) {
+          steps.push({ step: 'getOrCreateDailySpins', ok: false, duration_ms: 0, error_type: 'skipped', message: 'skipped — previous step failed' });
+        } else {
+          // Call getOrCreateDailySpins — this runs the transaction:
+          //   1. pg_advisory_xact_lock
+          //   2. CTE: count existing + conditional INSERT
+          //   3. SELECT available spins
+          // If a unique constraint violation occurs on INSERT, it throws here.
+          const result = await wheelRepo.getOrCreateDailySpins(env, authState.user.id, diagMaxSpins);
+          steps.push({
+            step: 'getOrCreateDailySpins',
+            ok: true,
+            duration_ms: Date.now() - t0,
+            total_available: result.total_available,
+            total_allowed: result.total_allowed,
+            spins_returned: result.spins.length,
+          });
+        }
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        // For duplicate key violations, capture the constraint name
+        // This helps identify WHICH unique index is causing the conflict
+        steps.push({
+          step: 'getOrCreateDailySpins',
+          ok: false,
+          duration_ms: Date.now() - t0,
+          ...errInfo,
+        });
+        if (!failedStep) failedStep = 'getOrCreateDailySpins';
+      }
+    }
+
+    // Step 8: getAvailableSpins
+    {
+      const t0 = Date.now();
+      try {
+        if (failedStep) {
+          steps.push({ step: 'getAvailableSpins', ok: false, duration_ms: 0, error_type: 'skipped', message: 'skipped — previous step failed' });
+        } else {
+          const availResult = await wheelRepo.getAvailableSpins(env, authState.user.id);
+          steps.push({
+            step: 'getAvailableSpins',
+            ok: true,
+            duration_ms: Date.now() - t0,
+            count: availResult.spins.length,
+            types: availResult.spins.map(s => s.type),
+          });
+        }
+      } catch (e) {
+        const errInfo = _extractPgError(e);
+        steps.push({ step: 'getAvailableSpins', ok: false, duration_ms: Date.now() - t0, ...errInfo });
+        if (!failedStep) failedStep = 'getAvailableSpins';
+      }
+    }
+
+    return jsonResponse({
+      status: 'diagnostic',
+      steps,
+      final_status: failedStep ? 'error' : 'success',
+      failed_step: failedStep || null,
+    }, {}, env);
   }
 
   /**
