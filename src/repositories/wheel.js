@@ -131,6 +131,18 @@ export function createWheelRepository(deps) {
       ALTER TABLE wheel_spins ADD COLUMN IF NOT EXISTS spin_date DATE NOT NULL DEFAULT CURRENT_DATE;
       -- Drop the old 1-spin UNIQUE index if it exists (from the previous fix)
       DROP INDEX IF EXISTS idx_wheel_spins_daily_unique;
+      -- ROOT CAUSE FIX (duplicate key 23505): The old UNIQUE constraint on
+      -- (user_id, spin_type, source, created_at) was created by a previous
+      -- schema version. The code above only drops the INDEX
+      -- idx_wheel_spins_daily_unique, but in PostgreSQL a UNIQUE constraint
+      -- creates a SEPARATE auto-named constraint+index
+      -- (wheel_spins_user_id_spin_type_source_created_at_key). Dropping the
+      -- index does NOT drop the constraint. This stale constraint causes
+      -- SQLSTATE 23505 when getOrCreateDailySpins inserts rows that happen
+      -- to share the same created_at timestamp (e.g., generate_series all
+      -- use NOW() → same microsecond → duplicate key).
+      -- Fix: explicitly drop the stale constraint by its auto-generated name.
+      ALTER TABLE wheel_spins DROP CONSTRAINT IF EXISTS wheel_spins_user_id_spin_type_source_created_at_key;
     `;
     try {
       await queryDb(env, batchSql);
@@ -237,6 +249,7 @@ export function createWheelRepository(deps) {
             INSERT INTO wheel_spins (user_id, spin_type, source, status, metadata, created_at, expires_at, spin_date)
             SELECT $1, 'daily', 'daily_free', 'available', '{}', NOW(), $4, $2::date
             FROM to_insert
+            ON CONFLICT DO NOTHING
             RETURNING id
           )
           SELECT
