@@ -4685,7 +4685,10 @@ async function translateToFarsi(text, env) {
   // across multiple news refresh cycles.
   // P0-C FIX: Cache now stores { text, translation_failed } objects so that
   // cached results preserve whether the translation actually succeeded.
-  const cacheKey = text.length > 100 ? text.substring(0, 100) : text;
+  // P3-P2-1 FIX: Use full text as cache key (was first 100 chars — collision risk).
+  // Map can handle large keys efficiently. Most titles are <150 chars so memory
+  // impact is negligible. Eliminates collision risk for long titles sharing prefix.
+  const cacheKey = text;
   // P1-1 FIX: Check TTL on cache read — expired entries are treated as cache miss
   if (_translationCache.has(cacheKey)) {
     const cached = _translationCache.get(cacheKey);
@@ -4827,6 +4830,42 @@ async function translateToFarsi(text, env) {
   // from the Farsi news feed (instead of silently serving English as Farsi).
   if (result === text) {
     translation_failed = true;
+  }
+
+  // PHASE 5 FIX: Validate that the translation output is actually Persian.
+  // Previously, translateToFarsi only checked if the result was non-empty and
+  // different from the input — it did NOT verify the output was Persian. This
+  // meant Chinese/English output from m2m100 or Google Translate would be
+  // silently accepted and served as "Farsi" news titles.
+  //
+  // We use validatePersianOutput with LOWER thresholds than the summary path
+  // (minLength=200) because news titles are short (typically 30-100 chars):
+  //   - minLength: 3 (reject empty/malformed)
+  //   - minPersianRatio: 0.10 (lower — short titles with many tickers)
+  //   - maxCjkRatio: 0.05 (reject Chinese contamination)
+  //   - maxAsciiLetterRatio: 0.80 (higher — allows "Bitcoin ETF تایید شد")
+  //
+  // If the translation fails validation (Chinese/English/malformed), we treat
+  // it as a failed translation (translation_failed=true) and return the
+  // original text. This prevents non-Persian output from reaching the Farsi
+  // news feed.
+  if (!translation_failed && result !== text) {
+    const translationValidation = validatePersianOutput(result, {
+      minLength: 3,
+      minPersianRatio: 0.10,
+      maxCjkRatio: 0.05,
+      maxAsciiLetterRatio: 0.80,
+    });
+    if (!translationValidation.valid) {
+      console.warn('[TRANSLATE] Output failed Persian validation — treating as failed:', {
+        reason: translationValidation.reason,
+        persianRatio: translationValidation.stats?.persianRatio,
+        cjkRatio: translationValidation.stats?.cjkRatio,
+        length: translationValidation.stats?.totalChars,
+      });
+      translation_failed = true;
+      result = text; // revert to original English text
+    }
   }
 
   const cacheEntry = { text: result, translation_failed, _expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS };
@@ -5059,9 +5098,22 @@ function sanitizeNewsSummary(rawSummary) {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
 
+  // P3-P1-2 FIX: Preserve paragraph breaks (\n\n) before sanitizeNewsTitle
+  // collapses all whitespace. sanitizeNewsTitle uses replace(/\s+/g, ' ')
+  // which destroys \n — multi-paragraph summaries would become single block.
+  // Solution: replace \n\n with a placeholder, run sanitizeNewsTitle, then
+  // restore. Single \n (line break within paragraph) is converted to space
+  // (correct — within a paragraph, single \n is just word wrapping).
+  const PARAGRAPH_MARKER = '\x1F'; // Unit Separator — safe, never in AI output
+  summary = summary.replace(/\n{2,}/g, PARAGRAPH_MARKER);
+  summary = summary.replace(/\n/g, ' '); // single \n → space (within-paragraph wrap)
+
   // 4. Apply same duplicate-removal as sanitizeNewsTitle
   //    (reuses the proven logic for repeated words/phrases)
   summary = sanitizeNewsTitle(summary);
+
+  // Restore paragraph breaks
+  summary = summary.replace(new RegExp(PARAGRAPH_MARKER, 'g'), '\n\n');
 
   return summary;
 }
@@ -5069,7 +5121,7 @@ function sanitizeNewsSummary(rawSummary) {
 function classifySentiment(title, description) {
   const text = `${title} ${description}`.toLowerCase();
   const bullish = ['رشد', 'صعود', 'موفق', 'بهبود', 'رکورد', 'پامپ', 'بالا', 'bullish', ' ATH', 'رالی', ' approvals', 'ETF', 'adopt', 'فیض', 'profit', 'surge', 'jump', 'rally', 'gain', 'recovery', 'positive', 'approve'];
-  const bearish = ['سقوط', 'نزول', 'هک', 'کلاهبردی', 'کاهش', 'ریزش', '跌破', 'دانش', 'ban', 'bearish', 'hack', 'crash', 'drop', 'fall', 'decline', 'loss', 'scam', 'fraud', 'warning', 'risk', 'fear', 'sell-off', 'plunge', 'sanction', 'تحریم'];
+  const bearish = ['سقوط', 'نزول', 'هک', 'کلاهبردی', 'کاهش', 'ریزش', 'دانش', 'ban', 'bearish', 'hack', 'crash', 'drop', 'fall', 'decline', 'loss', 'scam', 'fraud', 'warning', 'risk', 'fear', 'sell-off', 'plunge', 'sanction', 'تحریم'];
   const breaking = ['فوری', 'breaking', 'urgent', 'breaking:', 'flash'];
   
   // Check breaking first
@@ -5459,7 +5511,14 @@ async function tryWorkersAI(env, prompt, systemPrompt) {
     // output when Groq + Gemini circuits were OPEN.
     // Fallback to old English prompt ONLY if systemPrompt is not provided (backward compat).
     const effectiveSystemPrompt = systemPrompt || 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.';
-    const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+
+    // P1-C FIX: Wrap env.AI.run() in a 15-second timeout. Previously a hanging
+    // Workers AI request (backend stall) could block the entire News AI batch
+    // indefinitely (no AbortController on bindings — Promise.race is the only
+    // option). The unresolved env.AI.run() promise continues in the background
+    // but its result is discarded; the Worker moves on to the next provider.
+    const WORKERS_AI_TIMEOUT_MS = 15000;
+    const aiPromise = env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
         { role: 'system', content: effectiveSystemPrompt },
         { role: 'user', content: prompt.substring(0, 12000) },
@@ -5467,6 +5526,10 @@ async function tryWorkersAI(env, prompt, systemPrompt) {
       max_tokens: 1024,
       temperature: 0.4,
     });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('workers_ai_timeout')), WORKERS_AI_TIMEOUT_MS);
+    });
+    const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
 
     if (aiResponse?.response && aiResponse.response.trim().length >= 50) {
       return { provider: 'workers-ai', success: true, summary: aiResponse.response.trim(), duration_ms: Date.now() - t0 };
@@ -5477,36 +5540,45 @@ async function tryWorkersAI(env, prompt, systemPrompt) {
     const code = (typeof e?.code === 'number') ? e.code : null;
 
     // P1-B FIX: Explicitly classify Cloudflare Workers AI numeric error codes.
-    // These are NOT HTTP status codes — they are Cloudflare-internal error codes
-    // thrown as JS errors by env.AI.run(). The message contains the code prefix.
-    //
-    // Verified semantics (from Cloudflare docs + production evidence):
     //   4006 = daily free allocation (10K neurons) exhausted → NON-RETRYABLE
     //          Resets at UTC midnight. Probing every 10 min wastes calls.
     //          Production evidence: "4006: you have used up your daily free
     //          allocation of 10,000 neurons, please upgrade to Cloudflare's
     //          Workers Paid plan if..."
-    //   3036 = daily request limit for this model exceeded → NON-RETRYABLE
-    //          Resets at UTC midnight. Same logic as 4006.
-    //   3040 = capacity temporarily unavailable (backend overload) → RETRYABLE
-    //          Transient — retry after short backoff. Already handled by the
-    //          existing regex (matches "capacity"). Keep as retryable.
-    //   5035 = model restricted to Paid plan (July 2026) → NON-RETRYABLE
-    //          Permanent — won't resolve without upgrading. Wastes probes.
-    //
-    // Without this fix, 4006 is classified as retryable (the message doesn't
-    // match the existing non-retryable regex), causing the circuit breaker to
-    // probe every 10 min → 4006 again → OPEN → 10 min → probe → 4006 → repeat
-    // until UTC midnight. This wastes ~144 probe calls/day per isolate.
-
-    // Check numeric code first (most precise)
-    if (code === 4006 || code === 3036) {
+    //   3036 = daily allocation exceeded (Free Plan 10K neurons/day exhausted)
+    //          → non-retryable until UTC midnight reset
+    //   3040 = out of capacity (transient backend overload)
+    //          → retryable (fallback to next provider, try again later)
+    //   5035 = Paid-only model restriction (July 2026 — some models moved to Paid)
+    //          → non-retryable (config issue, not transient)
+    // Preserve existing message-regex behavior for unknown errors.
+    if (code === 4006) {
       return {
         provider: 'workers-ai',
         success: false,
         error: 'daily_quota_exceeded',
         errorType: 'non_retryable',
-        error_detail: `Workers AI code ${code}: daily allocation/request limit exceeded (msg=${msg.substring(0, 80)})`,
+        error_detail: `Workers AI code 4006: daily free allocation exhausted (msg=${msg.substring(0, 80)})`,
+        duration_ms: Date.now() - t0,
+      };
+    }
+    if (code === 3036) {
+      return {
+        provider: 'workers-ai',
+        success: false,
+        error: 'daily_allocation_exceeded',
+        errorType: 'non_retryable',
+        error_detail: `Workers AI code 3036: daily allocation exceeded (msg=${msg.substring(0, 80)})`,
+        duration_ms: Date.now() - t0,
+      };
+    }
+    if (code === 3040) {
+      return {
+        provider: 'workers-ai',
+        success: false,
+        error: 'out_of_capacity',
+        errorType: 'retryable',
+        error_detail: `Workers AI code 3040: out of capacity (msg=${msg.substring(0, 80)})`,
         duration_ms: Date.now() - t0,
       };
     }
@@ -5520,20 +5592,28 @@ async function tryWorkersAI(env, prompt, systemPrompt) {
         duration_ms: Date.now() - t0,
       };
     }
-    // 3040 (capacity) stays retryable — fall through to existing regex.
 
-    // Fallback: classify by message content (for errors without numeric codes)
-    // Also check for 4006/3036/5035 in the message text (some errors embed the code)
-    const msgHasQuotaError = /4006|3036|daily.*allocation|daily.*request.*limit|neurons|5035|paid.*plan|upgrade/i.test(msg);
-    // Non-retryable: model not found, auth/binding issues, quota exhaustion
-    // Retryable: timeout, rate limit (429), capacity (3040), network
-    const isNonRetryable = msgHasQuotaError
-      || (/not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
-          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg));
+    // P1-C: timeout (thrown as 'workers_ai_timeout' by the Promise.race above)
+    if (/workers_ai_timeout/i.test(msg)) {
+      return {
+        provider: 'workers-ai',
+        success: false,
+        error: 'timeout',
+        errorType: 'retryable',
+        error_detail: 'Workers AI request timed out after 15s',
+        duration_ms: Date.now() - t0,
+      };
+    }
+
+    // Workers AI throws JS errors. Classify by message content.
+    // Non-retryable: model not found, auth/binding issues
+    // Retryable: timeout, rate limit, capacity, network
+    const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+      && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
     return {
       provider: 'workers-ai',
       success: false,
-      error: isNonRetryable && msgHasQuotaError ? 'daily_quota_exceeded' : 'runtime_error',
+      error: 'runtime_error',
       errorType: isNonRetryable ? 'non_retryable' : 'retryable',
       error_detail: msg.substring(0, 120),
       duration_ms: Date.now() - t0,
@@ -5901,7 +5981,16 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 
   // Helper: attempt a provider with circuit breaker protection.
   // Returns the attempt result (with 'circuit_skipped' flag if skipped).
-  async function attemptProvider(providerName, tryFn) {
+  //
+  // P0-2 FIX: The validator callback runs BEFORE recordCircuitResult so that
+  // invalid Persian output is recorded as a circuit FAILURE (not success).
+  // Previously the validator ran in the caller AFTER recordCircuitResult had
+  // already recorded success — so providers returning English/Chinese output
+  // never tripped their circuit and were always tried first (wasting calls).
+  // The validator receives the raw provider result and may mutate r.success /
+  // r.error / r.errorType to reflect validation failure before the result is
+  // recorded in the circuit breaker.
+  async function attemptProvider(providerName, tryFn, validator) {
     // Check circuit breaker first
     const circuitCheck = await shouldAttemptProvider(env, providerName);
     if (!circuitCheck.attempt) {
@@ -5925,6 +6014,21 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     attempts.push(r);
     totalDuration += r.duration_ms || 0;
 
+    // P0-2 FIX: Run validator BEFORE recordCircuitResult.
+    // If the provider returned a successful HTTP response but the output fails
+    // Persian validation, mark it as a retryable failure so the circuit breaker
+    // increments its consecutive_failures counter (and eventually trips OPEN).
+    if (r.success && typeof validator === 'function') {
+      const validation = validator(r.summary);
+      if (!validation.valid) {
+        console.warn(`[NEWS-AI-FALLBACK] ⚠️ ${providerName} output failed Persian validation (reason=${validation.reason}, persianRatio=${validation.stats?.persianRatio}, cjkRatio=${validation.stats?.cjkRatio})`);
+        r.success = false;
+        r.error = 'persian_validation_failed';
+        r.errorType = 'retryable';
+        r._validation_failure = true;
+      }
+    }
+
     // Record result in circuit breaker (updates state: CLOSED↔OPEN↔HALF_OPEN)
     try {
       await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
@@ -5943,8 +6047,9 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
   //   3) OpenRouter    (fallback 3)   — NEWS_PROVIDER_OPENROUTER=true (default, free emergency)
   //   4) OpenAI        (fallback 4)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
   //
-  // Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback when
-  // Gemini fails (timeout, quota, invalid response, network error, etc.).
+  // P2-A FIX: Groq is ALWAYS tried first (primary). Gemini is the first
+  // fallback. Workers AI is ONLY used as fallback when Groq + Gemini both
+  // fail (timeout, quota, invalid response, network error, etc.).
   // Each provider is tried ONLY if the previous one failed.
   // Circuit breaker protects each provider independently.
   // No parallel calls — sequential fallback to minimize cost + latency.
@@ -5952,105 +6057,63 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 
   // Provider 0: Groq (primary) — always tried first
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const r = await attemptProvider('groq', () => tryGroq(env, prompt, systemPrompt));
+    const r = await attemptProvider('groq', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
-      // P0-2 FIX: Validate Persian output before accepting
-      const validation = validatePersianOutput(r.summary);
-      if (validation.valid) {
-        summary = r.summary;
-        usedProvider = 'groq';
-        console.log('[NEWS-AI-FALLBACK] ✅ Groq PRIMARY succeeded — no fallback needed');
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq output failed Persian validation (reason=${validation.reason}, persianRatio=${validation.stats?.persianRatio}, cjkRatio=${validation.stats?.cjkRatio}) — falling back to Gemini`);
-        // Mark as failed so circuit breaker records it, and fallback continues
-        r.success = false;
-        r.error = 'persian_validation_failed';
-        r.errorType = 'retryable';
-      }
+      summary = r.summary;
+      usedProvider = 'groq';
+      console.log('[NEWS-AI-FALLBACK] ✅ Groq PRIMARY succeeded — no fallback needed');
     } else {
       console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq failed (error=${r.error}, type=${r.errorType}) — falling back to Gemini`);
     }
   }
 
-  // Provider 1: Gemini (fallback 1) — tried if Groq didn't succeed
-  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
+  // Provider 1: Gemini (fallback 1) — tried ONLY if Groq didn't succeed
+  // P0-1 FIX: Added `!summary &&` guard so Gemini is NEVER called when Groq
+  // already produced a valid summary. Previously the missing guard caused
+  // Gemini to be called on EVERY article (even when Groq succeeded), doubling
+  // AI cost and overwriting the Groq result if Gemini also succeeded.
+  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
     // NEWSSEC-006 FIX: Pass systemPrompt so Gemini uses systemInstruction
     // (system-priority, cannot be overridden by untrusted article text).
-    const r = await attemptProvider('gemini', () => tryGemini(env, prompt, systemPrompt));
+    const r = await attemptProvider('gemini', () => tryGemini(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
-      // P0-2 FIX: Validate Persian output before accepting
-      const validation = validatePersianOutput(r.summary);
-      if (validation.valid) {
-        summary = r.summary;
-        usedProvider = 'gemini';
-        console.log('[NEWS-AI-FALLBACK] ✅ Gemini PRIMARY succeeded — no fallback needed');
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ Gemini output failed Persian validation (reason=${validation.reason}) — falling back to Workers AI`);
-        r.success = false;
-        r.error = 'persian_validation_failed';
-        r.errorType = 'retryable';
-      }
+      summary = r.summary;
+      usedProvider = 'gemini';
+      console.log('[NEWS-AI-FALLBACK] ✅ Gemini fallback succeeded (Groq was unavailable)');
     } else {
       console.warn(`[NEWS-AI-FALLBACK] ⚠️ Gemini failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 100)}) — falling back to Workers AI`);
     }
   }
 
-  // Provider 2: Workers AI (fallback 1) — ONLY if Gemini didn't succeed
+  // Provider 2: Workers AI (fallback 2) — ONLY if Groq + Gemini didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) {
     // P0-1 FIX: Pass systemPrompt to tryWorkersAI (was missing — used hardcoded English prompt)
-    const r = await attemptProvider('workers-ai', () => tryWorkersAI(env, prompt, systemPrompt));
+    const r = await attemptProvider('workers-ai', () => tryWorkersAI(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
-      // P0-2 FIX: Validate Persian output before accepting
-      const validation = validatePersianOutput(r.summary);
-      if (validation.valid) {
-        summary = r.summary;
-        usedProvider = 'workers-ai';
-        console.log('[NEWS-AI-FALLBACK] ⚠️ Workers AI fallback succeeded (Gemini was unavailable)');
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ Workers AI output failed Persian validation (reason=${validation.reason}) — falling back to OpenRouter`);
-        r.success = false;
-        r.error = 'persian_validation_failed';
-        r.errorType = 'retryable';
-      }
+      summary = r.summary;
+      usedProvider = 'workers-ai';
+      console.log('[NEWS-AI-FALLBACK] ⚠️ Workers AI fallback succeeded (Groq + Gemini were unavailable)');
     }
   }
 
-  // Provider 3: OpenRouter (fallback 2, emergency) — only if Groq + Gemini + Workers AI didn't succeed
+  // Provider 3: OpenRouter (fallback 3, emergency) — only if Groq + Gemini + Workers AI didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true)) {
     // P0-1 FIX: Pass systemPrompt to tryOpenRouter (was missing — used hardcoded English prompt)
-    const r = await attemptProvider('openrouter', () => tryOpenRouter(env, prompt, systemPrompt));
+    const r = await attemptProvider('openrouter', () => tryOpenRouter(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
-      // P0-2 FIX: Validate Persian output before accepting
-      const validation = validatePersianOutput(r.summary);
-      if (validation.valid) {
-        summary = r.summary;
-        usedProvider = 'openrouter';
-        console.log('[NEWS-AI-FALLBACK] ⚠️ OpenRouter emergency fallback succeeded');
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ OpenRouter output failed Persian validation (reason=${validation.reason}) — falling back to OpenAI`);
-        r.success = false;
-        r.error = 'persian_validation_failed';
-        r.errorType = 'retryable';
-      }
+      summary = r.summary;
+      usedProvider = 'openrouter';
+      console.log('[NEWS-AI-FALLBACK] ⚠️ OpenRouter emergency fallback succeeded');
     }
   }
 
-  // Provider 4: OpenAI (fallback 3, opt-in) — only if all above didn't succeed
+  // Provider 4: OpenAI (fallback 4, opt-in) — only if all above didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
     // P0-1 FIX: Pass systemPrompt to tryOpenAI (was missing — used hardcoded English prompt)
-    const r = await attemptProvider('openai', () => tryOpenAI(env, prompt, systemPrompt));
+    const r = await attemptProvider('openai', () => tryOpenAI(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
-      // P0-2 FIX: Validate Persian output before accepting
-      const validation = validatePersianOutput(r.summary);
-      if (validation.valid) {
-        summary = r.summary;
-        usedProvider = 'openai';
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ OpenAI output failed Persian validation (reason=${validation.reason}) — all providers exhausted`);
-        r.success = false;
-        r.error = 'persian_validation_failed';
-        r.errorType = 'retryable';
-      }
+      summary = r.summary;
+      usedProvider = 'openai';
     }
   }
 
@@ -6282,8 +6345,11 @@ async function enqueueForSummary(env, articles) {
     // This prevents re-enqueuing and re-processing old articles.
     if (newsArticleRepo) {
       const dbArticle = await newsArticleRepo.findByUrl(env, a.url).catch(() => null);
-      if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
-        // Summary exists in DB — refresh KV cache and skip
+      // P3-P0-1 FIX: Use threshold=200 + validatePersianOutput (same as processOneArticleSummary)
+      if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 200) {
+        const enqueueDbValidation = validatePersianOutput(dbArticle.summary);
+        if (enqueueDbValidation.valid) {
+        // Summary exists in DB and is valid — refresh KV cache and skip
         try {
           const payload = JSON.stringify({
             summary: dbArticle.summary,
@@ -6296,6 +6362,7 @@ async function enqueueForSummary(env, articles) {
         } catch {}
         skipped++;
         continue;
+        } // end if (enqueueDbValidation.valid)
       }
     }
 
@@ -6629,16 +6696,41 @@ async function processOneArticleSummary(env, pool = null) {
   let existingProvider = null;
   if (existingRaw) {
     // Parse JSON format (Phase 10+) or plain string (legacy)
+    // P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) for KV cache too.
+    // Previously used 50 — bad summaries from before Phase 1 could persist in KV
+    // for 7 days and be served without validation.
+    //
+    // P1-A FIX (News AI Root-Cause Audit): Add validatePersianOutput to BOTH KV
+    // lookup paths (JSON + plain string). Previously only length >= 200 was
+    // checked here — a bad KV summary (>=200 chars but English/Chinese) was
+    // accepted as a cache hit, bypassing AI for up to 7 days (KV TTL). Now
+    // matches the DB lookup path (line ~6670) which validates both length AND
+    // language. This completes Phase 3 P3-P0-1 (4th lookup point was missing).
     try {
       const parsed = JSON.parse(existingRaw);
-      if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim().length >= 50) {
-        existingSummary = parsed.summary;
-        existingProvider = parsed.provider || null;
+      if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim().length >= 200) {
+        const kvValidation = validatePersianOutput(parsed.summary);
+        if (kvValidation.valid) {
+          existingSummary = parsed.summary;
+          existingProvider = parsed.provider || null;
+        } else {
+          console.warn('[NEWS-AI] KV (JSON) summary failed Persian validation — will re-process:', {
+            reason: kvValidation.reason,
+            persianRatio: kvValidation.stats?.persianRatio,
+          });
+        }
       }
     } catch {
       // Plain string (legacy format)
-      if (typeof existingRaw === 'string' && existingRaw.trim().length >= 50) {
-        existingSummary = existingRaw;
+      if (typeof existingRaw === 'string' && existingRaw.trim().length >= 200) {
+        const kvValidation = validatePersianOutput(existingRaw);
+        if (kvValidation.valid) {
+          existingSummary = existingRaw;
+        } else {
+          console.warn('[NEWS-AI] KV (plain) summary failed Persian validation — will re-process:', {
+            reason: kvValidation.reason,
+          });
+        }
       }
     }
   }
@@ -6648,20 +6740,36 @@ async function processOneArticleSummary(env, pool = null) {
   // The DB stores summaries permanently — no TTL expiry.
   if (!existingSummary && newsArticleRepo) {
     const dbArticle = await newsArticleRepo.findByUrl(env, article.url, pool).catch(() => null);
-    if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 50) {
-      existingSummary = dbArticle.summary;
-      existingProvider = dbArticle.provider || 'db';
-      // Also refresh KV cache so next check is faster
-      try {
-        const payload = JSON.stringify({
-          summary: dbArticle.summary,
+    // P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) AND run
+    // validatePersianOutput on DB summary. Previously used threshold=50 and
+    // no language validation — bad summaries (English/Chinese/mixed) from
+    // before Phase 1 would leak from DB into KV and be served to users.
+    // Now: only accept DB summaries that pass BOTH length AND language validation.
+    if (dbArticle && dbArticle.summary && dbArticle.summary.trim().length >= 200) {
+      const dbValidation = validatePersianOutput(dbArticle.summary);
+      if (dbValidation.valid) {
+        existingSummary = dbArticle.summary;
+        existingProvider = dbArticle.provider || 'db';
+        // Also refresh KV cache so next check is faster
+        try {
+          const payload = JSON.stringify({
+            summary: dbArticle.summary,
+            provider: dbArticle.provider,
+            attempts: [],
+            generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
+            e2e: {},
+          });
+          await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
+        } catch {}
+      } else {
+        // DB summary is invalid (English/Chinese/mixed/too short after Phase 2).
+        // Do NOT use it — let AI re-process the article to generate a valid summary.
+        console.warn('[NEWS-AI] DB summary failed Persian validation — will re-process:', {
+          url: article.url,
+          reason: dbValidation.reason,
           provider: dbArticle.provider,
-          attempts: [],
-          generated_at: new Date(dbArticle.analyzed_at).getTime() || Date.now(),
-          e2e: {},
         });
-        await writeAppCache(env, aiKey, payload, NEWS_AI_CACHE_TTL);
-      } catch {}
+      }
     }
   }
 
@@ -7667,19 +7775,31 @@ async function enrichNewsWithAISummaries(env, articles) {
           // Phase 10: KV now stores JSON { summary, provider, attempts, generated_at }
           // Backward compat: old entries are plain strings (just the summary text).
           // Try JSON parse first; if it fails or shape is wrong, treat as plain string.
+          let parsedSummary = null;
           try {
             const parsed = JSON.parse(raw);
             if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string') {
-              aiSummary = parsed.summary;
+              parsedSummary = parsed.summary;
               aiProvider = parsed.provider || null;
               aiGeneratedAt = parsed.generated_at || null;
             } else {
               // JSON but not the expected shape — treat as plain string
-              aiSummary = raw;
+              parsedSummary = raw;
             }
           } catch {
             // Not JSON — plain string (old format from before Phase 10)
-            aiSummary = raw;
+            parsedSummary = raw;
+          }
+          // P3-P0-1 FIX: Only accept KV summary if it passes Phase 2 validation.
+          // Previously: any non-null value was accepted, including bad summaries
+          // from before Phase 1. Now: validate length (>=200) AND language.
+          if (parsedSummary && parsedSummary.trim().length >= 200) {
+            const kvValidation = validatePersianOutput(parsedSummary);
+            if (kvValidation.valid) {
+              aiSummary = parsedSummary;
+            }
+            // If invalid: aiSummary stays null → article shows as 'pending'
+            // → will be re-processed by cron on next tick
           }
         }
       } catch (e) { console.warn('[NEWS-AI] enrichNews KV read error:', e?.message); }
@@ -7726,7 +7846,7 @@ async function enrichNewsWithAISummaries(env, articles) {
  *   2) Workers AI    (fallback 2)   — NEWS_PROVIDER_WORKERS_AI=true
  *   3) Rule-based    (fallback 3)   — no AI, uses existing sentiment
  *
- * Gemini is ALWAYS tried first. Workers AI is ONLY used as fallback.
+ * P2-A FIX: Groq is ALWAYS tried first (primary). Workers AI is ONLY used as fallback.
  * 1 AI call replaces 10 individual calls.
  */
 async function batchAnalyzeNews(env, articles) {
@@ -7919,7 +8039,7 @@ ${headlines}`;
       } catch (e) {
         const msg = e?.message || String(e) || '';
         const code = (typeof e?.code === 'number') ? e.code : null;
-        // P1-B FIX: Same classification as tryWorkersAI — 4006/3036/5035 are
+        // P1-B FIX: Same quota classification as tryWorkersAI — 4006/3036/5035 are
         // non-retryable (daily quota / paid-only). 3040 stays retryable (capacity).
         const msgHasQuotaError = code === 4006 || code === 3036 || code === 5035
           || /4006|3036|daily.*allocation|daily.*request.*limit|neurons|5035|paid.*plan|upgrade/i.test(msg);
@@ -11489,6 +11609,89 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
   }
 }
 //#endregion
+
+// ============================================================================
+//#region Presence Durable Object — Online Members
+// ============================================================================
+// Replaces the KV-based session:presence_state read-modify-write pattern
+// (which had race conditions at scale). DO serializes all requests → race-free.
+//
+// Architecture:
+//   - Map<userId, expiresAtMs> in memory (no persistence — accept 180s recovery on eviction)
+//   - Alarm every 60s prunes expired entries
+//   - Worker cache (30s TTL) reduces DO requests for online count
+//   - Feature flag: env.PRESENCE_DO binding → use DO; otherwise fall back to KV
+
+class PresenceDO {
+  constructor(state, env) {
+    this.state = state;
+    this.sessions = new Map(); // userId → expiresAtMs
+    this._alarmSet = false;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action') || '';
+    const userId = url.searchParams.get('userId') || '';
+    const ttl = Number(url.searchParams.get('ttl')) || 240000; // default 240s
+    const now = Date.now();
+
+    // Ensure alarm is set (idempotent)
+    if (!this._alarmSet) {
+      try {
+        const existing = await this.state.storage.getAlarm();
+        if (!existing) {
+          await this.state.storage.setAlarm(now + 60000);
+        }
+        this._alarmSet = true;
+      } catch {}
+    }
+
+    if (action === 'heartbeat') {
+      if (!userId) return Response.json({ error: 'userId required' }, { status: 400 });
+      this.sessions.set(userId, now + ttl);
+      return Response.json({ online_count: this.sessions.size });
+    }
+
+    if (action === 'end') {
+      if (!userId) return Response.json({ error: 'userId required' }, { status: 400 });
+      this.sessions.delete(userId);
+      return Response.json({ online_count: this.sessions.size });
+    }
+
+    if (action === 'count') {
+      // Lazy prune: remove expired entries (in case alarm didn't fire recently)
+      // Only check entries that are definitely expired (cheap O(n) but n is small)
+      for (const [uid, expiresAt] of this.sessions) {
+        if (expiresAt <= now) {
+          this.sessions.delete(uid);
+        }
+      }
+      return Response.json({ count: this.sessions.size });
+    }
+
+    return Response.json({ error: 'unknown action' }, { status: 404 });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    // Full prune: remove all expired entries
+    for (const [userId, expiresAt] of this.sessions) {
+      if (expiresAt <= now) {
+        this.sessions.delete(userId);
+      }
+    }
+    // Reschedule alarm for 60s
+    try {
+      await this.state.storage.setAlarm(now + 60000);
+    } catch {}
+  }
+}
+
+// Wrangler requires Durable Object classes to be NAMED EXPORTS (not properties
+// on the default export). This named export is what makes `class_name: "PresenceDO"`
+// in wrangler.jsonc resolve correctly at deploy time.
+export { PresenceDO };
 
 // ============================================================================
 //#region ورودی اصلی Worker

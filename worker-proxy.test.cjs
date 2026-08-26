@@ -194,7 +194,9 @@ function loadWorker(pgOverride) {
       /import\s+(\w+)\s+from\s+['"](\.\/src\/[^'"]+)['"];?/g,
       (_, name, p) => `const ${name} = require('${p}');`,
     )
-    .replace('export default {', 'module.exports = {');
+    .replace('export default {', 'module.exports = {')
+    // P3: Handle export { PresenceDO } pattern (Durable Object class export)
+    .replace(/export\s+\{\s*(\w+)\s*\};?/g, 'module.exports.$1 = $1;');
 
   const suppressedSource =
     'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' + transformed;

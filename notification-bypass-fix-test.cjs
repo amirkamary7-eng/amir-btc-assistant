@@ -207,13 +207,18 @@ test('DEAD-CAT: Active categories still present in UI', () => {
 
 test('PREMIUM-UPSELL: initHeroSlider checks isPremiumCached', () => {
   const sliderStart = APP_SRC.indexOf('function initHeroSlider');
-  const sliderBlock = APP_SRC.slice(sliderStart, sliderStart + 1000);
+  const sliderBlock = APP_SRC.slice(sliderStart, sliderStart + 1500);
   assert.ok(sliderBlock.includes('isPremiumCached'),
     'initHeroSlider must call MembershipApp.isPremiumCached()');
   assert.ok(sliderBlock.includes("data-slide=\"0\""),
     'initHeroSlider must target the premium upsell slide (data-slide=0)');
-  assert.ok(sliderBlock.includes('style.display = \'none\''),
-    'initHeroSlider must hide the slide for premium users');
+  // FIX 1: The upsell slide is now physically removed (.remove()) instead of
+  // display:none, because display:none left the .active class on slide 0 and
+  // caused a black banner. The test now asserts the fixed behavior.
+  assert.ok(sliderBlock.includes('.remove()'),
+    'initHeroSlider must physically remove the upsell slide for premium users (FIX 1: was display:none which caused black banner)');
+  assert.ok(sliderBlock.includes("data-slide=\"1\"") && sliderBlock.includes('classList.add(\'active\')'),
+    'initHeroSlider must promote slide 1 to active when upsell is removed (FIX 1)');
 });
 
 test('PREMIUM-UPSELL: isPremiumCached exposed in MembershipApp', () => {
@@ -224,11 +229,16 @@ test('PREMIUM-UPSELL: isPremiumCached exposed in MembershipApp', () => {
 });
 
 test('PREMIUM-UPSELL: Telegram channel join banner NOT hidden', () => {
-  // The channel join banner (data-slide="1") should remain visible for all users
+  // The channel join banner (data-slide="1") should remain visible for all users.
+  // FIX 1: We now PROMOTE slide 1 to active (add .active class) when the upsell
+  // is removed — this is the opposite of hiding. The test must verify slide 1
+  // is never given display:none or .remove(), not that it's never referenced.
   const sliderStart = APP_SRC.indexOf('function initHeroSlider');
-  const sliderBlock = APP_SRC.slice(sliderStart, sliderStart + 1000);
-  assert.ok(!sliderBlock.includes('data-slide="1"'),
-    'initHeroSlider must NOT hide the channel join banner (data-slide=1)');
+  const sliderBlock = APP_SRC.slice(sliderStart, sliderStart + 1500);
+  // slide 1 must NOT be hidden (no display:none targeting data-slide="1", no .remove() on it)
+  const slide1HidePattern = /data-slide="1"[^]*?style\.display\s*=\s*['"]none['"]|data-slide="1"[^]*?\.remove\(\)/;
+  assert.ok(!slide1HidePattern.test(sliderBlock),
+    'initHeroSlider must NOT hide or remove the channel join banner (data-slide=1)');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

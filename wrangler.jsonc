@@ -38,6 +38,20 @@
                         "id": "TODO_CREATE_DEV_NAMESPACE"
                 }
         ],
+        "durable_objects": {
+                "bindings": [
+                        {
+                                "name": "PRESENCE_DO",
+                                "class_name": "PresenceDO"
+                        }
+                ]
+        },
+        "migrations": [
+                {
+                        "tag": "v1",
+                        "new_sqlite_classes": ["PresenceDO"]
+                }
+        ],
         "vars": {
                 "APP_ENV": "development",
                 "ALERTS_CRON_ENABLED": "false",
@@ -45,7 +59,7 @@
                 "NEWS_CACHE_TTL": 86400,
                 "CALENDAR_CACHE_TTL": 600,
                 "CHART_EXCHANGE_CACHE_TTL": 3600,
-                "SESSION_TTL": 120,
+                "SESSION_TTL": 240,
                 "AI_DAILY_MESSAGE_LIMIT": 50,
                 "AI_DAILY_IMAGE_LIMIT": 3,
                 "AI_COOLDOWN_SECONDS": 4,
@@ -83,6 +97,20 @@
                                         "id": "6de016b566f3404e832bb98895a60e85"
                                 }
                         ],
+                        "durable_objects": {
+                                "bindings": [
+                                        {
+                                                "name": "PRESENCE_DO",
+                                                "class_name": "PresenceDO"
+                                        }
+                                ]
+                        },
+                        "migrations": [
+                                {
+                                        "tag": "v1",
+                                        "new_sqlite_classes": ["PresenceDO"]
+                                }
+                        ],
                         "vars": {
                                 "APP_ENV": "staging",
                                 "ALERTS_CRON_ENABLED": "false",
@@ -90,7 +118,7 @@
                                 "NEWS_CACHE_TTL": 86400,
                                 "CALENDAR_CACHE_TTL": 600,
                                 "CHART_EXCHANGE_CACHE_TTL": 3600,
-                                "SESSION_TTL": 120,
+                                "SESSION_TTL": 240,
                                 "AI_DAILY_MESSAGE_LIMIT": 50,
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,
@@ -136,6 +164,20 @@
                                         "id": "1ba0ebc1fe8042259ea0824bd3b50b6a"
                                 }
                         ],
+                        "durable_objects": {
+                                "bindings": [
+                                        {
+                                                "name": "PRESENCE_DO",
+                                                "class_name": "PresenceDO"
+                                        }
+                                ]
+                        },
+                        "migrations": [
+                                {
+                                        "tag": "v1",
+                                        "new_sqlite_classes": ["PresenceDO"]
+                                }
+                        ],
                         "vars": {
                                 "APP_ENV": "production",
                                 "ALERTS_CRON_ENABLED": "true",
@@ -143,7 +185,7 @@
                                 "NEWS_CACHE_TTL": 86400,
                                 "CALENDAR_CACHE_TTL": 600,
                                 "CHART_EXCHANGE_CACHE_TTL": 3600,
-                                "SESSION_TTL": 120,
+                                "SESSION_TTL": 240,
                                 "AI_DAILY_MESSAGE_LIMIT": 50,
                                 "AI_DAILY_IMAGE_LIMIT": 3,
                                 "AI_COOLDOWN_SECONDS": 4,

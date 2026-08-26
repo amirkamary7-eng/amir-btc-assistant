@@ -3464,6 +3464,12 @@ async function sendSessionHeartbeat() {
     if (!_appVisible) return;
     const uid = getUserId();
     if (!canRunSessionRequests(uid)) return;
+    // FIX 2: Dedup guard — prevent duplicate concurrent heartbeat calls.
+    // Without this, the immediate call on _startAllPolling() + a visibilitychange
+    // event (which also calls _startAllPolling) could fire two heartbeats within
+    // milliseconds. The guard ensures only one heartbeat is in-flight at a time.
+    if (sendSessionHeartbeat._inFlight) return;
+    sendSessionHeartbeat._inFlight = true;
     try {
         const params = new URLSearchParams({ user_id: uid });
         if (sessionId) params.set('session_id', sessionId);
@@ -3482,6 +3488,9 @@ async function sendSessionHeartbeat() {
         // The dedicated 60s notification poller already handles this. Running it
         // here too caused 2× API calls every 180s (heartbeat interval).
     } catch (e) { console.warn('heartbeat:', e); }
+    finally {
+        sendSessionHeartbeat._inFlight = false;
+    }
 }
 
 /**
@@ -3506,7 +3515,17 @@ function updateOnlineBadge(count) {
     // Online badge removed from profile page — no longer displayed
     // Only update live-count in market page header if it exists
     const liveCountEl = document.getElementById('live-count');
-    if (liveCountEl) liveCountEl.innerText = count > 0 ? count : '—';
+    if (!liveCountEl) return;
+    // FIX B2: Show 0 for a valid zero count (user may be the only one online,
+    // or count legitimately dropped to 0). Show '—' ONLY for null/undefined
+    // (loading/error state). Previously count=0 showed '—', making it
+    // indistinguishable from loading — which caused the badge to appear
+    // "stuck" after refresh when the count was legitimately 0 or 1.
+    if (count === null || count === undefined) {
+        liveCountEl.innerText = '—';
+    } else {
+        liveCountEl.innerText = count;
+    }
 }
 
 /**
@@ -12571,18 +12590,37 @@ function _startAllPolling() {
     }, 60000));
 
     // ── Session heartbeat — 180s ──
+    // FIX B1 (Online count race): Wrap the immediate heartbeat in
+    // ensureTelegramAuthReady() so it fires AFTER auth is ready, not before.
+    // Previously, _startAllPolling() ran before auth was ready (bootstrap
+    // early-returns when isInTelegram() && !isTelegramAuthReady()), causing
+    // sendSessionHeartbeat() to silently no-op at canRunSessionRequests().
+    // No retry was scheduled, so the badge stayed '—' until the 180s interval.
+    // Now: wait for auth (up to 8s), then fire heartbeat + online count.
+    // The dedup guard (_inFlight) prevents duplicates if visibilitychange
+    // triggers _startAllPolling again while this is still pending.
+    ensureTelegramAuthReady(8000).then(() => {
+        if (!_appVisible) return;
+        sendSessionHeartbeat().then(() => {
+            // FIX B1: Only fetch online count AFTER heartbeat completes, so
+            // the count includes the current user (heartbeat registers them
+            // in the PresenceDO before we query the count).
+            if (_appVisible) fetchOnlineCount();
+        });
+    });
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
         sendSessionHeartbeat();
     }, 180000));
 
-    // ── Online count — 600s (only when Profile tab is active) ──
+    // ── Online count — 600s (all pages) ──
+    // FIX B1: The immediate fetchOnlineCount is chained after the heartbeat
+    // above (so it includes the current user). This interval handles periodic
+    // refresh. Removed the Profile-page gate because #live-count is in the
+    // GLOBAL header (index.html), not the profile page.
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
-        const activePage = document.querySelector('.page.active')?.id;
-        if (activePage === 'profile-page') {
-            fetchOnlineCount();
-        }
+        fetchOnlineCount();
     }, 600000));
 }
 
@@ -13641,22 +13679,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Hero Banner Slider — fade transition (400ms), autoplay 5000ms, pause on touch/swipe
     (function initHeroSlider() {
         const slider = document.getElementById('hero-banner-slider');
+
+        // FIX 1 (Premium Banner black/empty): For Premium users, physically remove
+        // the upsell slide + dot BEFORE capturing NodeLists. Previously the code
+        // set display:none but left the .active class on slide 0 — since slide 0
+        // ships with .active in HTML, and display:none overrides opacity, NO slide
+        // was visible and the slider container background (#0B1220, near-black)
+        // showed through. Now the upsell is removed entirely so only slide 1
+        // (channel banner) remains, and it gets .active on init.
+        let _premiumUpsellHidden = false;
+        if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function') {
+          if (window.MembershipApp.isPremiumCached()) {
+            const upsellSlide = document.querySelector('.hero-slide[data-slide="0"]');
+            const upsellDot   = document.querySelector('.hero-dot[data-dot="0"]');
+            if (upsellSlide) {
+              upsellSlide.classList.remove('active'); // drop active so it's not "current"
+              upsellSlide.remove();                   // physically remove from DOM
+            }
+            if (upsellDot) upsellDot.remove();
+            // Promote slide 1 + dot 1 to active so the channel banner shows immediately
+            document.querySelector('.hero-slide[data-slide="1"]')?.classList.add('active');
+            document.querySelector('.hero-dot[data-dot="1"]')?.classList.add('active');
+            _premiumUpsellHidden = true;
+          }
+        }
+
         const slides = document.querySelectorAll('.hero-slide');
         const dots = document.querySelectorAll('.hero-dot');
 
-        // Phase 8: Hide Premium upsell banner for Premium users.
-        // The first slide (data-slide="0") is the Premium upsell banner.
-        // Premium users should not see "فعال‌سازی Premium" (Activate Premium).
-        if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function') {
-          // Check cached membership status (set by loadCard from /api/membership/status)
-          if (window.MembershipApp.isPremiumCached()) {
-            const upsellSlide = document.querySelector('.hero-slide[data-slide="0"]');
-            if (upsellSlide) upsellSlide.style.display = 'none';
-            const upsellDot = document.querySelector('.hero-dot[data-dot="0"]');
-            if (upsellDot) upsellDot.style.display = 'none';
-          }
-        }
-        if (!slides.length || slides.length < 2) return;
+        if (!slides.length) return;
+        // For Free users (upsell not removed), require at least 2 slides for carousel.
+        // For Premium users (upsell removed), 1 slide is fine (no carousel needed).
+        if (!_premiumUpsellHidden && slides.length < 2) return;
         let current = 0;
         let autoTimer = null;
         let pausedUntil = 0; // timestamp until which autoplay is paused
@@ -13665,11 +13719,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         let touchActive = false;
 
         function goTo(idx) {
-            slides.forEach(s => s.classList.remove('active'));
-            dots.forEach(d => d.classList.remove('active'));
-            current = ((idx % slides.length) + slides.length) % slides.length;
-            slides[current].classList.add('active');
-            if (dots[current]) dots[current].classList.add('active');
+            // FIX 1: Only iterate over slides still in the DOM (upsell was removed
+            // for Premium users). This prevents autoplay from re-targeting the
+            // removed slide and causing a black state.
+            const visibleSlides = Array.from(slides).filter(s => s.isConnected);
+            const visibleDots   = Array.from(dots).filter(d => d.isConnected);
+            if (!visibleSlides.length) return;
+            visibleSlides.forEach(s => s.classList.remove('active'));
+            visibleDots.forEach(d => d.classList.remove('active'));
+            const n = visibleSlides.length;
+            current = ((idx % n) + n) % n;
+            visibleSlides[current].classList.add('active');
+            if (visibleDots[current]) visibleDots[current].classList.add('active');
         }
 
         function startAuto() {
