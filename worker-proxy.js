@@ -4768,8 +4768,13 @@ async function translateToFarsi(text, env) {
       } catch (e) {
         // AI unavailable or model error — record failure in circuit breaker
         const msg = e?.message || String(e) || '';
-        const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
-          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+        const code = (typeof e?.code === 'number') ? e.code : null;
+        // P1-B FIX: Same quota classification as tryWorkersAI.
+        const msgHasQuotaError = code === 4006 || code === 3036 || code === 5035
+          || /4006|3036|daily.*allocation|daily.*request.*limit|neurons|5035|paid.*plan|upgrade/i.test(msg);
+        const isNonRetryable = msgHasQuotaError
+          || (/not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+              && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg));
         try { await recordCircuitResult(env, 'translation-workers-ai', false, isNonRetryable ? 'non_retryable' : 'retryable', msg.substring(0, 120)); } catch {}
         console.warn('[TRANSLATE] m2m100 failed (non-fatal):', e?.message);
       }
@@ -5469,15 +5474,66 @@ async function tryWorkersAI(env, prompt, systemPrompt) {
     return { provider: 'workers-ai', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
   } catch (e) {
     const msg = e?.message || String(e) || '';
-    // Workers AI throws JS errors. Classify by message content.
-    // Non-retryable: model not found, auth/binding issues
-    // Retryable: timeout, rate limit, capacity, network
-    const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
-      && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+    const code = (typeof e?.code === 'number') ? e.code : null;
+
+    // P1-B FIX: Explicitly classify Cloudflare Workers AI numeric error codes.
+    // These are NOT HTTP status codes — they are Cloudflare-internal error codes
+    // thrown as JS errors by env.AI.run(). The message contains the code prefix.
+    //
+    // Verified semantics (from Cloudflare docs + production evidence):
+    //   4006 = daily free allocation (10K neurons) exhausted → NON-RETRYABLE
+    //          Resets at UTC midnight. Probing every 10 min wastes calls.
+    //          Production evidence: "4006: you have used up your daily free
+    //          allocation of 10,000 neurons, please upgrade to Cloudflare's
+    //          Workers Paid plan if..."
+    //   3036 = daily request limit for this model exceeded → NON-RETRYABLE
+    //          Resets at UTC midnight. Same logic as 4006.
+    //   3040 = capacity temporarily unavailable (backend overload) → RETRYABLE
+    //          Transient — retry after short backoff. Already handled by the
+    //          existing regex (matches "capacity"). Keep as retryable.
+    //   5035 = model restricted to Paid plan (July 2026) → NON-RETRYABLE
+    //          Permanent — won't resolve without upgrading. Wastes probes.
+    //
+    // Without this fix, 4006 is classified as retryable (the message doesn't
+    // match the existing non-retryable regex), causing the circuit breaker to
+    // probe every 10 min → 4006 again → OPEN → 10 min → probe → 4006 → repeat
+    // until UTC midnight. This wastes ~144 probe calls/day per isolate.
+
+    // Check numeric code first (most precise)
+    if (code === 4006 || code === 3036) {
+      return {
+        provider: 'workers-ai',
+        success: false,
+        error: 'daily_quota_exceeded',
+        errorType: 'non_retryable',
+        error_detail: `Workers AI code ${code}: daily allocation/request limit exceeded (msg=${msg.substring(0, 80)})`,
+        duration_ms: Date.now() - t0,
+      };
+    }
+    if (code === 5035) {
+      return {
+        provider: 'workers-ai',
+        success: false,
+        error: 'paid_only_model',
+        errorType: 'non_retryable',
+        error_detail: `Workers AI code 5035: model restricted to Paid plan (msg=${msg.substring(0, 80)})`,
+        duration_ms: Date.now() - t0,
+      };
+    }
+    // 3040 (capacity) stays retryable — fall through to existing regex.
+
+    // Fallback: classify by message content (for errors without numeric codes)
+    // Also check for 4006/3036/5035 in the message text (some errors embed the code)
+    const msgHasQuotaError = /4006|3036|daily.*allocation|daily.*request.*limit|neurons|5035|paid.*plan|upgrade/i.test(msg);
+    // Non-retryable: model not found, auth/binding issues, quota exhaustion
+    // Retryable: timeout, rate limit (429), capacity (3040), network
+    const isNonRetryable = msgHasQuotaError
+      || (/not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg));
     return {
       provider: 'workers-ai',
       success: false,
-      error: 'runtime_error',
+      error: isNonRetryable && msgHasQuotaError ? 'daily_quota_exceeded' : 'runtime_error',
       errorType: isNonRetryable ? 'non_retryable' : 'retryable',
       error_detail: msg.substring(0, 120),
       duration_ms: Date.now() - t0,
@@ -7862,9 +7918,14 @@ ${headlines}`;
         }
       } catch (e) {
         const msg = e?.message || String(e) || '';
-        // Classify: non-retryable (model not found/auth) vs retryable (429/capacity/timeout)
-        const isNonRetryable = /not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
-          && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg);
+        const code = (typeof e?.code === 'number') ? e.code : null;
+        // P1-B FIX: Same classification as tryWorkersAI — 4006/3036/5035 are
+        // non-retryable (daily quota / paid-only). 3040 stays retryable (capacity).
+        const msgHasQuotaError = code === 4006 || code === 3036 || code === 5035
+          || /4006|3036|daily.*allocation|daily.*request.*limit|neurons|5035|paid.*plan|upgrade/i.test(msg);
+        const isNonRetryable = msgHasQuotaError
+          || (/not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
+              && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg));
         try { await recordCircuitResult(env, 'workers-ai', false, isNonRetryable ? 'non_retryable' : 'retryable', msg.substring(0, 120)); } catch {}
         console.warn('[NEWS-AI-BATCH] Workers AI failed:', msg);
       }
