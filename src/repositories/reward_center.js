@@ -261,7 +261,11 @@ export function createRewardCenterRepository(deps) {
       _schemaVerified = true;
     } catch (e) {
       console.warn('Reward Center schema migration warning:', e.message);
-      _schemaVerified = true; // Don't retry on every call — log and proceed
+      // FIX: Do NOT set _schemaVerified on error — allow the next request
+      // to retry schema verification. Previously _schemaVerified was set to
+      // true inside the catch block, which meant a single transient DB error
+      // would permanently skip schema verification for the isolate's lifetime.
+      return;
     }
   }
 

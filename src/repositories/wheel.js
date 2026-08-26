@@ -158,6 +158,14 @@ export function createWheelRepository(deps) {
       } catch (_) { /* seeding is best-effort — don't block startup */ }
     } catch (e) {
       console.warn('Wheel schema migration warning:', e.message);
+      // FIX: Do NOT set _schemaVerified on error — allow the next request
+      // to retry schema verification. Previously _schemaVerified was set to
+      // true unconditionally (after the catch block), which meant a single
+      // transient DB error (timeout, connection failure) would permanently
+      // skip schema verification for the isolate's lifetime. If the
+      // wheel_spins table or spin_date column didn't exist, all subsequent
+      // queries would throw → 503 → user sees total_available=0.
+      return;
     }
     _schemaVerified = true;
   }
