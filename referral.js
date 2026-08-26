@@ -1271,7 +1271,10 @@ const ReferralApp = (() => {
       const cachedStr = localStorage.getItem('referral_cache');
       if (cachedStr) {
         const cached = JSON.parse(cachedStr);
-        if (cached && cached.ts && cached.data) {
+        // P2 FIX: Check TTL — reject expired cache (forces fresh fetch).
+        // Old cache format (no _expiresAt) is treated as expired.
+        const isExpired = !cached._expiresAt || Date.now() > cached._expiresAt;
+        if (cached && cached.ts && cached.data && !isExpired) {
           historyOffset = (cached.data.history?.length) || 0;
           // force: true — always render on open (signature was just reset)
           renderPage(cached.data, { force: true });
@@ -1326,8 +1329,12 @@ const ReferralApp = (() => {
       renderPage(data);
 
       // Persist to localStorage for instant render on next open
+      // P2 FIX: Add 10-minute TTL matching wallet_state_cache pattern
       try {
-        localStorage.setItem('referral_cache', JSON.stringify({ data, ts: Date.now() }));
+        const _REFERRAL_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+        localStorage.setItem('referral_cache', JSON.stringify({
+          data, ts: Date.now(), _expiresAt: Date.now() + _REFERRAL_CACHE_TTL_MS,
+        }));
       } catch (_) {}
     })();
   }

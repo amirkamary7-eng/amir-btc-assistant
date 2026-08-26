@@ -936,8 +936,14 @@ const WalletApp = (() => {
     if (_walletCache.claim && (Date.now() - _walletCache.claimAt < CLAIM_CACHE_TTL * 1000)) {
       return _walletCache.claim;
     }
+    // P2 FIX: capture mutation seq before API call — reject stale response
+    const myMutationSeq = _walletMutationSeq;
     try {
       const data = await window.apiFetch('/api/wallet/claim');
+      if (myMutationSeq !== _walletMutationSeq) {
+        console.warn('[WALLET] fetchClaimStatus: stale response rejected');
+        return _walletCache.claim || claimStatus;
+      }
       if (data.status === 'success') {
         claimStatus = data;
         _walletCache.claim = data;
@@ -954,8 +960,14 @@ const WalletApp = (() => {
     if (_walletCache.summary && (Date.now() - _walletCache.summaryAt < SUMMARY_CACHE_TTL * 1000)) {
       return _walletCache.summary;
     }
+    // P2 FIX: capture mutation seq before API call — reject stale response
+    const myMutationSeq = _walletMutationSeq;
     try {
       const data = await window.apiFetch('/api/wallet/summary');
+      if (myMutationSeq !== _walletMutationSeq) {
+        console.warn('[WALLET] fetchSummary: stale response rejected');
+        return _walletCache.summary || walletSummary;
+      }
       if (data && data.status === 'success') {
         walletSummary = data;
         _walletCache.summary = data;
