@@ -1595,6 +1595,14 @@ const ReferralApp = (() => {
       const data = await window.apiFetch('/api/wheel/spin', { method: 'POST', body: JSON.stringify({}) });
       if (data && data.status === 'success') {
         spinResult = data;
+        // P1-6a FIX: Increment wallet mutation sequence IMMEDIATELY after POST
+        // resolves, BEFORE the 4.9s animation. Previously this was called inside
+        // the setTimeout (line 1696) — meaning any in-flight fetchWallet() GET
+        // started before the spin could resolve DURING the animation and overwrite
+        // the fresh balance with stale data (4.9s unguarded window).
+        if (typeof window.refreshWalletAfterMutation === 'function') {
+          try { window.refreshWalletAfterMutation(spinResult.new_balance); } catch (_) {}
+        }
       } else {
         throw new Error(data?.message || 'Spin failed');
       }
@@ -1688,14 +1696,9 @@ const ReferralApp = (() => {
       }
       // Refresh wheel status from backend
       refreshWheelStatus();
-      // FA-2 FIX: invalidate wallet cache + refresh balance display after
-      // wheel reward. Previously the wallet UI showed stale balance for up
-      // to 15s (WALLET_CACHE_TTL) because _invalidateCache was never called.
-      // spinResult.new_balance is the authoritative post-reward balance
-      // from the backend (src/controllers/wheel.js:241).
-      if (typeof window.refreshWalletAfterMutation === 'function') {
-        try { window.refreshWalletAfterMutation(spinResult.new_balance); } catch (_) {}
-      }
+      // P1-6a FIX: refreshWalletAfterMutation was already called immediately
+      // after POST resolved (before animation). The balance is already updated.
+      // No need to call it again here — removed duplicate that was redundant.
     }, 4900);
   }
 

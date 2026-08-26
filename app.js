@@ -12594,6 +12594,20 @@ function _startAllPolling() {
         loadNotificationsFromServer().catch(() => {});
     }, 60000));
 
+    // ── Wallet balance sync — 60s ──
+    // P1-3 FIX: Poll wallet balance every 60s to detect cron-credited rewards
+    // (referral/mission/wheel retry crons run every 15 min and credit tokens
+    // server-side with no push mechanism). Without this polling, users see
+    // stale balance for hours until they manually refresh. The poll uses
+    // refreshWalletBalance() which has the mutation seq guard — it won't
+    // overwrite a fresh mutation balance with stale data.
+    _pollingIntervals.push(setInterval(() => {
+        if (!_appVisible) return;
+        if (window.WalletApp && typeof window.WalletApp.refreshWalletBalance === 'function') {
+            try { window.WalletApp.refreshWalletBalance(); } catch (_) {}
+        }
+    }, 60000));
+
     // ── Session heartbeat — 180s ──
     // FIX B1 (Online count race): Wrap the immediate heartbeat in
     // ensureTelegramAuthReady() so it fires AFTER auth is ready, not before.
@@ -13610,13 +13624,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-    // ROOT CAUSE FIX (warm-start speed): Fire data loading IMMEDIATELY —
-    // in parallel with bootstrapUser(). Previously this waited for
-    // bootstrap to complete, adding 200-500ms to the critical path.
-    // Now apiFetch's waitForApiReady handles the auth wait naturally.
-    // Cached data is already rendered above — these calls just refresh.
-    // FIX: gate data loading on maintenance check — don't load if blocked.
-    if (API_BASE && !_maintenanceBlocked) {
+    // P1-1 FIX: _startDataLoading() runs IN PARALLEL with the maintenance
+    // check (.then() above). This is intentional — the APIs called by
+    // _startDataLoading (market, news, calendar, wallet) are NOT maintenance-
+    // gated on the backend, and apiFetch's waitForApiReady handles the auth
+    // wait naturally. Cached data from localStorage is already rendered above;
+    // these calls just refresh from server.
+    // Note: _maintenanceBlocked is always false here because the .then()
+    // hasn't resolved yet. This is OK — maintenance-gated APIs (missions,
+    // alerts) are loaded INSIDE the .then() block above.
+    if (API_BASE) {
         _startDataLoading();
     }
 

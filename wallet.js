@@ -921,6 +921,9 @@ const WalletApp = (() => {
         walletData = data;
         _walletCache.wallet = data;
         _walletCache.walletAt = Date.now();
+        // P1-6b FIX: store mutation seq at cache write time so closeWallet
+        // can detect if a mutation occurred after the cache was written
+        _walletCache._mutationSeq = _walletMutationSeq;
         return data;
       }
     } catch (e) {
@@ -1094,14 +1097,22 @@ const WalletApp = (() => {
     // Without this, the setInterval continues running after the wallet page
     // is closed, consuming battery/CPU on mobile devices.
     _stopWeeklyCountdown();
-    // ROOT CAUSE FIX (O3): Previously closeWallet always called loadProfileCard()
-    // which fires GET /api/wallet — a redundant call since the wallet data was
-    // just fetched on openWallet. Now we skip the re-fetch if walletData is
-    // fresh (< 30s old). The profile card re-renders synchronously from the
-    // cached data, eliminating 1 API round-trip on every wallet close.
+    // P1-6b FIX: Previously closeWallet rendered from cached walletData if
+    // < 15s old — but a cron reward (referral/mission/wheel retry) could have
+    // credited tokens during those 15s, making the cache stale. Now we also
+    // check if the mutation sequence has changed since the cache was written.
+    // If a mutation occurred (even externally via cron polling), we fall
+    // through to loadProfileCard() which fetches fresh data.
     if (walletData && _walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
-      // Render profile card from cached walletData — no API call needed
-      try { renderProfileCard(walletData); } catch (_) { loadProfileCard(); }
+      // P1-6b: check if mutation seq matches the one captured when cache was written
+      const cacheSeq = _walletCache._mutationSeq || 0;
+      if (cacheSeq === _walletMutationSeq) {
+        // Cache is fresh AND no mutation occurred — safe to render from cache
+        try { renderProfileCard(walletData); } catch (_) { loadProfileCard(); }
+      } else {
+        // Mutation occurred since cache was written — fetch fresh data
+        loadProfileCard();
+      }
     } else {
       loadProfileCard();
     }
