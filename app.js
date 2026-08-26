@@ -5939,6 +5939,11 @@ function refreshWalletAfterMutation(newBalance) {
     if (window.WalletApp && typeof window.WalletApp._invalidateCache === 'function') {
         try { window.WalletApp._invalidateCache(); } catch (_) {}
     }
+    // P0-1 FIX: increment mutation sequence so any in-flight GET requests
+    // (fetchWallet / refreshWalletBalance) reject their stale responses.
+    if (window.WalletApp && typeof window.WalletApp._incrementMutationSeq === 'function') {
+        try { window.WalletApp._incrementMutationSeq(); } catch (_) {}
+    }
 
     // 2. Update balance display immediately
     if (typeof newBalance === 'number') {

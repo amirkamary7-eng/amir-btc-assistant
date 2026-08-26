@@ -273,6 +273,12 @@ const WalletApp = (() => {
   let historyLoading = false;
   let historyOffset = 0;
   let _tokenLogo = 'assets/token-logo.png';
+  // P0 RACE FIX: mutation sequence counter — incremented BEFORE any balance
+  // mutation (claim, purchase, reward). fetchWallet and refreshWalletBalance
+  // capture this before their API call and reject stale responses after a
+  // mutation has occurred. This prevents an in-flight GET (started before a
+  // POST mutation) from overwriting the fresh balance with stale data.
+  let _walletMutationSeq = 0;
   // W-STAB-2 FIX: monotonic sequence token to guard loadWalletData against
   // out-of-order promise resolution. Previously, rapid open/close/reopen of
   // the wallet could fire multiple loadWalletData invocations concurrently.
@@ -899,8 +905,18 @@ const WalletApp = (() => {
     if (_walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
       return _walletCache.wallet;
     }
+    // P0 RACE FIX: capture mutation sequence before API call. If a mutation
+    // (claim, purchase) occurs while this GET is in-flight, the seq will have
+    // changed when the response arrives — we must NOT overwrite the fresh
+    // balance with stale data from the pre-mutation GET.
+    const myMutationSeq = _walletMutationSeq;
     try {
       const data = await window.apiFetch('/api/wallet');
+      // P0 RACE FIX: reject stale response if a mutation occurred during the GET
+      if (myMutationSeq !== _walletMutationSeq) {
+        console.warn('[WALLET] fetchWallet: stale response rejected (mutation occurred during GET)');
+        return _walletCache.wallet || walletData;
+      }
       if (data.status === 'success') {
         walletData = data;
         _walletCache.wallet = data;
@@ -1010,7 +1026,10 @@ const WalletApp = (() => {
       const cachedStr = localStorage.getItem('wallet_state_cache');
       if (cachedStr) {
         const cached = JSON.parse(cachedStr);
-        if (cached && cached.data && cached.data.status === 'success') {
+        // P1-7 FIX: check TTL — reject expired cache (forces fresh fetch).
+        // Old cache format (no _expiresAt) is treated as expired.
+        const isExpired = !cached._expiresAt || Date.now() > cached._expiresAt;
+        if (cached && cached.data && cached.data.status === 'success' && !isExpired) {
           // Render from cache immediately — no skeleton
           renderProfileCard(cached.data);
         }
@@ -1027,7 +1046,10 @@ const WalletApp = (() => {
       renderProfileCard(data);
       // Persist to localStorage for instant render on next open
       try {
-        localStorage.setItem('wallet_state_cache', JSON.stringify({ data, ts: Date.now() }));
+        const _WALLET_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+        localStorage.setItem('wallet_state_cache', JSON.stringify({
+          data, ts: Date.now(), _expiresAt: Date.now() + _WALLET_CACHE_TTL_MS,
+        }));
       } catch (_) {}
     } else {
       // API error — show fallback only if no cached data was rendered
@@ -1138,8 +1160,18 @@ const WalletApp = (() => {
           if (!isStale()) renderVpnMarket(false);
         });
         // Persist to localStorage for instant render on next open
+        // P1-7 FIX: Add TTL (10 min) to wallet_state_cache. Previously this
+        // cache had no expiry and could serve stale balance for hours if the
+        // API failed. Now the cache includes a _expiresAt timestamp and is
+        // rejected on read if expired. Old cache format (without _expiresAt)
+        // is safely ignored (treated as expired → forces fresh fetch).
         try {
-          localStorage.setItem('wallet_state_cache', JSON.stringify({ data: walletRes, ts: Date.now() }));
+          const _WALLET_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+          localStorage.setItem('wallet_state_cache', JSON.stringify({
+            data: walletRes,
+            ts: Date.now(),
+            _expiresAt: Date.now() + _WALLET_CACHE_TTL_MS,
+          }));
         } catch (_) {}
       } else {
         // API error — show fallback
@@ -1233,9 +1265,18 @@ const WalletApp = (() => {
   // after _dailyCheckinState + _updateDailyCheckinCard replaced it).
 
   async function claimDaily() {
-    const btn = document.getElementById('daily-claim-btn');
-    // PHASE UX-V2.1: btn may be in modal OR in card. If in modal, disable it.
+    // P0-2 FIX: button selector — check BOTH the card button and modal button.
+    // Previously only looked for #daily-claim-btn but the modal renders .dcm-claim-btn.
+    // If btn is null in the modal path, the claim flow crashes on btn.disabled.
+    const btn = document.getElementById('daily-claim-btn')
+             || document.querySelector('.dcm-claim-btn');
+    // P0-2 FIX: disable immediately + guard against null DOM element
     if (btn) { btn.disabled = true; btn.textContent = WT('claiming'); }
+
+    // P0-1 FIX: increment mutation sequence BEFORE the API call so any in-flight
+    // GET requests (fetchWallet / refreshWalletBalance) will reject their stale
+    // responses when they resolve after this mutation.
+    _walletMutationSeq++;
 
     const result = await claimDailyRewardAPI();
 
@@ -1248,10 +1289,18 @@ const WalletApp = (() => {
         last_claim_date: _getTehranDateString(),
       };
 
-      // PHASE UX-V2.1: Update balance immediately from API response — no extra fetchWallet.
+      // P0-1 FIX: invalidate wallet cache + update balance immediately from API response
       invalidateWalletCache();
       if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
-        const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance');
+        // P0-3 FIX: update _lastKnownBalance so VPN modal and other consumers
+        // see the fresh balance immediately — not stale pre-claim value.
+        _lastKnownBalance = result.newBalance;
+        if (walletData) {
+          walletData.balance = result.newBalance;
+          _walletCache.wallet = walletData;
+          _walletCache.walletAt = Date.now();
+        }
+        const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance, #wallet-balance-amount');
         if (balanceEl) {
           const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
           if (typeof animateBalanceChange === 'function') {
@@ -1260,11 +1309,13 @@ const WalletApp = (() => {
             balanceEl.textContent = result.newBalance.toLocaleString('en-US');
           }
         }
-        if (walletData) {
-          walletData.balance = result.newBalance;
-          _walletCache.wallet = walletData;
-          _walletCache.walletAt = Date.now();
-        }
+      }
+
+      // PHASE 2 FIX: use refreshWalletAfterMutation for consistent post-mutation
+      // behavior (profile card refresh, notification badge, wallet data refresh).
+      // This replaces the inline refresh logic with the shared helper.
+      if (typeof window.refreshWalletAfterMutation === 'function') {
+        try { window.refreshWalletAfterMutation(result.newBalance); } catch (_) {}
       }
 
       // PHASE UX-V2.1: Update daily check-in card summary
@@ -1328,8 +1379,8 @@ const WalletApp = (() => {
       const rewardAmount = result.amount || result.daily_reward || 0;
       tg?.showPopup?.({ title: WT('success'), message: `+${rewardAmount} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
     } else {
-      btn.disabled = false;
-      btn.textContent = WT('claim');
+      // P0-2 FIX: guard against null btn — if the button wasn't found, don't crash
+      if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
       const tg = window.getTg?.();
       try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
       tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
@@ -1796,6 +1847,8 @@ const WalletApp = (() => {
     if (_purchaseInFlight) return;
     _purchaseInFlight = true;
     const fa = detectLang() === 'fa';
+    // P0-1 FIX: increment mutation sequence before the API call
+    _walletMutationSeq++;
     try {
       // FIX 5: Frontend sends ONLY plan_id — price/eligibility are
       // server-side authoritative (backend uses its own catalog price).
@@ -1908,8 +1961,15 @@ const WalletApp = (() => {
   }
 
   async function refreshWalletBalance() {
+    // P0 RACE FIX: capture mutation sequence before API call
+    const myMutationSeq = _walletMutationSeq;
     try {
       const resp = await window.apiFetch('/api/wallet/balance');
+      // P0 RACE FIX: reject stale response if a mutation occurred during the GET
+      if (myMutationSeq !== _walletMutationSeq) {
+        console.warn('[WALLET] refreshWalletBalance: stale response rejected');
+        return;
+      }
       if (resp?.status === 'success') {
         _lastKnownBalance = Number(resp.balance) || 0;
         const el = document.getElementById('wallet-balance-amount');
@@ -1941,6 +2001,9 @@ const WalletApp = (() => {
     closeDailyCheckinModal,
     scrollToSection,
     _invalidateCache: invalidateWalletCache,
+    // P0-1 FIX: expose mutation seq incrementer for external callers
+    // (app.js refreshWalletAfterMutation, referral.js wheel spin, cosmetics.js purchase)
+    _incrementMutationSeq: () => { _walletMutationSeq++; },
     _refreshWalletData: loadWalletData,
     _updateDailyCheckinCard,
     _startWeeklyCountdown,
