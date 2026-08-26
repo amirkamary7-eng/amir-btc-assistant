@@ -20,6 +20,9 @@ const REPO_FILES = [
   'src/repositories/alert_economy.js',
   'src/repositories/wheel.js',
   'src/repositories/reward_center.js',
+  // Phase 1 additions — previously missing from the regression suite:
+  'src/repositories/analyses.js',
+  'src/repositories/notification_platform.js',
 ];
 
 // ============================================================================

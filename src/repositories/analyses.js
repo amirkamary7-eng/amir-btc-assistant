@@ -100,10 +100,20 @@ export function createAnalysisRepository(deps) {
     `;
     try {
       await queryDb(env, batchSql);
+      // FIX (Phase 1): only mark the schema as verified on SUCCESS. Previously
+      // the flag was set unconditionally after the catch block, so a failed
+      // migration (e.g. transient DB timeout, connection failure, or a
+      // partially-applied batchSql) was permanently swallowed for the lifetime
+      // of this isolate — silently skipping schema verification on every
+      // subsequent call. If the analyses table or its columns didn't exist,
+      // all subsequent queries would throw → publish (create) failed while
+      // list endpoints returned empty results. NOT setting the flag here
+      // guarantees the next invocation retries the migration.
+      _schemaVerified = true;
     } catch (e) {
-      console.warn('Analysis schema migration warning:', e.message);
+      console.warn('Analysis schema migration warning (will retry on next invocation):', e.message);
+      return;
     }
-    _schemaVerified = true;
   }
 
   /**

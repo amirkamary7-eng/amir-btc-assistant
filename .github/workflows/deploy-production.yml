@@ -49,10 +49,149 @@ jobs:
       - name: Run worker tests
         run: npm test
 
-  deploy-worker:
-    name: Deploy Worker (Production)
+  # ──────────────────────────────────────────────────────────────────────────
+  # PHASE 1 PRODUCTION MIGRATION
+  # Runs the consolidated idempotent migration (scripts/00-migrate.sql) against
+  # the production Supabase database BEFORE deploying the Worker or Pages.
+  # If migration fails, BOTH deploy-worker AND deploy-pages are blocked
+  # (they declare `needs: [test, migrate-db]` with a strict result check).
+  #
+  # Security:
+  #   - SUPABASE_DATABASE_URL is sourced from GitHub Actions secrets.
+  #   - NEVER printed in logs (psql prints "connection to server" without the URL;
+  #     the URL is passed via env var PGPASSWORD-less / conninfo, never echoed).
+  #   - The step explicitly `unset`s the URL after psql finishes to minimize
+  #     exposure window.
+  # ──────────────────────────────────────────────────────────────────────────
+  migrate-db:
+    name: Migrate Database (Production)
     needs: test
     if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client > /dev/null 2>&1
+          psql --version
+
+      - name: Verify migration file syntax (static checks)
+        run: |
+          set -euo pipefail
+          MIG=scripts/00-migrate.sql
+          test -f "$MIG" || { echo "❌ $MIG not found"; exit 1; }
+          # Non-negotiable safety guardrails
+          if grep -vE '^\s*--' "$MIG" | grep -qE 'DROP TABLE|DROP COLUMN|TRUNCATE|DROP TYPE|DROP SCHEMA'; then
+            echo "❌ FORBIDDEN destructive DDL detected in $MIG"; exit 1
+          fi
+          if grep -vE '^\s*--' "$MIG" | grep -E 'CREATE TABLE ' | grep -qv 'IF NOT EXISTS'; then
+            echo "❌ CREATE TABLE without IF NOT EXISTS detected"; exit 1
+          fi
+          if grep -vE '^\s*--' "$MIG" | grep -E 'ADD COLUMN' | grep -qv 'IF NOT EXISTS'; then
+            echo "❌ ADD COLUMN without IF NOT EXISTS detected"; exit 1
+          fi
+          if grep -vE '^\s*--' "$MIG" | grep -E 'CREATE (UNIQUE )?INDEX' | grep -qv 'IF NOT EXISTS'; then
+            echo "❌ CREATE INDEX without IF NOT EXISTS detected"; exit 1
+          fi
+          if grep -vE '^\s*--' "$MIG" | grep -q 'CONCURRENTLY'; then
+            echo "❌ CREATE INDEX CONCURRENTLY is incompatible with the migration transaction wrapper"; exit 1
+          fi
+          # The ONLY allowed DROP CONSTRAINT is the legacy wheel_spins one
+          DROPS=$(grep -vE '^\s*--' "$MIG" | grep -c 'DROP CONSTRAINT' || true)
+          if [ "$DROPS" -gt 1 ]; then
+            echo "❌ More than 1 DROP CONSTRAINT found (only the wheel_spins legacy one is allowed)"; exit 1
+          fi
+          echo "✅ Static safety checks passed ($DROPS DROP CONSTRAINT — the allowed wheel_spins one)"
+
+      - name: Run migration (idempotent — safe to re-run)
+        env:
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_DATABASE_URL" ]; then
+            echo "❌ SUPABASE_DATABASE_URL secret is empty or missing"
+            exit 1
+          fi
+          # psql reads the connection string from $PGPASSWORD-less conninfo via
+          # the URL directly. ON_ERROR_STOP=1 makes any SQL error abort the run.
+          # -v ON_ERROR_STOP=1 + the file's BEGIN/COMMIT wrapper = atomic.
+          # -q suppresses query echoes; -X disables .psqlrc.
+          # The URL is NEVER echoed (psql's "You are now connected" line does not include it).
+          psql "$SUPABASE_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -X -q \
+            -f scripts/00-migrate.sql
+          echo "✅ Migration applied successfully"
+          # Minimize secret exposure window
+          unset SUPABASE_DATABASE_URL
+
+      - name: Verify schema (all required tables present)
+        env:
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          # The full list of 47 tables the migration must create (from scripts/00-migrate.sql header).
+          # We check that each one exists in the public schema after migration.
+          REQUIRED_TABLES="ad_campaigns ad_channels ad_messages ad_popups admins alert_config alert_quota analyses app_content calendar_reminders campaigns daily_checkin_streaks deleted_users exchange_campaigns membership_admins membership_audit_logs membership_requests membership_requirements membership_rule_acceptances membership_rules membership_users mission_progress mission_rewards news_articles notification_broadcasts notification_queue notification_settings notification_templates notifications price_alerts profile_cosmetics referral_reward_tiers referrals reward_emergency_controls reward_library reward_purchases ticket_replies tickets token_balances token_transactions user_cosmetic_ownership users watchlist_items wheel_config wheel_history wheel_rewards wheel_spins"
+          MISSING=""
+          for t in $REQUIRED_TABLES; do
+            EXISTS=$(psql "$SUPABASE_DATABASE_URL" -X -t -A -c "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='$t'" 2>/dev/null || echo "")
+            if [ "$EXISTS" != "1" ]; then
+              MISSING="$MISSING $t"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "❌ Missing tables after migration:$MISSING"
+            exit 1
+          fi
+          TABLE_COUNT=$(psql "$SUPABASE_DATABASE_URL" -X -t -A -c "SELECT count(*)::int FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")
+          echo "✅ All 47 required tables present. Total tables in public schema: $TABLE_COUNT"
+          unset SUPABASE_DATABASE_URL
+
+      - name: Verify critical Wheel & Wallet constraints
+        env:
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          # 1. The OLD wheel_spins constraint MUST be gone (the migration drops it).
+          OLD_WHEEL=$(psql "$SUPABASE_DATABASE_URL" -X -t -A -c "SELECT count(*)::int FROM information_schema.table_constraints WHERE constraint_name='wheel_spins_user_id_spin_type_source_created_at_key' AND table_name='wheel_spins'" 2>/dev/null || echo "?")
+          if [ "$OLD_WHEEL" != "0" ]; then
+            echo "❌ Old wheel_spins constraint still exists (count=$OLD_WHEEL) — migration did not drop it"
+            exit 1
+          fi
+          echo "✅ Old wheel_spins_user_id_spin_type_source_created_at_key constraint removed"
+          # 2. The wallet token_transactions unique index MUST exist (idempotency guard for credits).
+          WALLET_UX=$(psql "$SUPABASE_DATABASE_URL" -X -t -A -c "SELECT count(*)::int FROM pg_indexes WHERE schemaname='public' AND indexname='idx_token_tx_user_type_ref'" 2>/dev/null || echo "?")
+          if [ "$WALLET_UX" != "1" ]; then
+            echo "❌ Wallet unique index idx_token_tx_user_type_ref missing (count=$WALLET_UX)"
+            exit 1
+          fi
+          echo "✅ Wallet idx_token_tx_user_type_ref unique index present"
+          unset SUPABASE_DATABASE_URL
+
+      - name: Idempotency test (re-run migration — must succeed with no changes)
+        env:
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          # Re-running the migration MUST NOT fail. Every statement is idempotent
+          # (IF NOT EXISTS / DO blocks / ON CONFLICT). If the second run fails,
+          # the migration is NOT idempotent and must be fixed before deploy.
+          psql "$SUPABASE_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -X -q \
+            -f scripts/00-migrate.sql
+          echo "✅ Idempotency test passed — migration safe to re-run"
+          unset SUPABASE_DATABASE_URL
+
+  deploy-worker:
+    name: Deploy Worker (Production)
+    needs: [test, migrate-db]
+    # Both test AND migrate-db must succeed (or skip_tests=true AND migrate-db succeeds).
+    # If migrate-db fails, deploy-worker is BLOCKED.
+    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') && needs.migrate-db.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +208,9 @@ jobs:
 
   deploy-pages:
     name: Deploy Pages (Production)
-    needs: test
-    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') }}
+    needs: [test, migrate-db]
+    # Same gate as deploy-worker: migrate-db MUST succeed.
+    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') && needs.migrate-db.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -341,8 +341,17 @@ export function createNotificationPlatformRepository(deps) {
 
       _schemaVerified = true;
     } catch (e) {
-      console.warn('Notification Platform schema migration warning:', e.message);
-      _schemaVerified = true;
+      console.warn('Notification Platform schema migration warning (will retry on next invocation):', e.message);
+      // FIX (Phase 1): Do NOT set _schemaVerified on error — allow the next
+      // request to retry schema verification. Previously the flag was set to
+      // true unconditionally inside this catch block, so a single transient DB
+      // error (timeout, connection failure) would permanently skip schema
+      // verification for the isolate's lifetime. If the notifications table
+      // extension columns didn't exist, all subsequent sendNotification /
+      // listForUser queries would throw → silent failure of the entire
+      // notification system (used by 5 controllers: advertisements, analyses,
+      // wheel, wallet, membership, notification_platform).
+      return;
     }
   }
 
