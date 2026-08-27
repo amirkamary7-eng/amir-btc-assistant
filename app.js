@@ -13702,27 +13702,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     (function initHeroSlider() {
         const slider = document.getElementById('hero-banner-slider');
 
-        // FIX 1 (Premium Banner black/empty): For Premium users, physically remove
-        // the upsell slide + dot BEFORE capturing NodeLists. Previously the code
-        // set display:none but left the .active class on slide 0 — since slide 0
-        // ships with .active in HTML, and display:none overrides opacity, NO slide
-        // was visible and the slider container background (#0B1220, near-black)
-        // showed through. Now the upsell is removed entirely so only slide 1
-        // (channel banner) remains, and it gets .active on init.
-        let _premiumUpsellHidden = false;
+        // PREMIUM BANNER FIX: The Premium banner (slide 0) must be visible for
+        // BOTH Free and Premium users. Previously, for Premium users, slide 0
+        // was physically removed from the DOM (upsellSlide.remove()) — leaving
+        // only the channel banner (slide 1). Now slide 0 stays for everyone.
+        // The click handler (MembershipApp.open) already routes correctly:
+        //   - Free user  → openActivationPopup (registration form)
+        //   - Premium user → openVipStatusPopup (Premium info/management popup)
+        // The ONLY difference for Premium users is the CTA text: instead of
+        // "فعال‌سازی Premium" (upsell), it shows "✦ عضویت Premium فعال" (status).
+        let _premiumCtaUpdated = false;
         if (window.MembershipApp && typeof window.MembershipApp.isPremiumCached === 'function') {
           if (window.MembershipApp.isPremiumCached()) {
-            const upsellSlide = document.querySelector('.hero-slide[data-slide="0"]');
-            const upsellDot   = document.querySelector('.hero-dot[data-dot="0"]');
-            if (upsellSlide) {
-              upsellSlide.classList.remove('active'); // drop active so it's not "current"
-              upsellSlide.remove();                   // physically remove from DOM
+            const upsellCta = document.querySelector('.hero-slide[data-slide="0"] .hero-cta--premium-v2');
+            if (upsellCta) {
+              upsellCta.textContent = '✦ عضویت Premium فعال';
+              upsellCta.classList.add('hero-cta--premium-active');
+              _premiumCtaUpdated = true;
             }
-            if (upsellDot) upsellDot.remove();
-            // Promote slide 1 + dot 1 to active so the channel banner shows immediately
-            document.querySelector('.hero-slide[data-slide="1"]')?.classList.add('active');
-            document.querySelector('.hero-dot[data-dot="1"]')?.classList.add('active');
-            _premiumUpsellHidden = true;
+            // DO NOT remove slide 0 — keep it visible for Premium users.
+            // The click handler (MembershipApp.open) already routes to
+            // openVipStatusPopup for Premium users.
           }
         }
 
@@ -13730,9 +13730,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const dots = document.querySelectorAll('.hero-dot');
 
         if (!slides.length) return;
-        // For Free users (upsell not removed), require at least 2 slides for carousel.
-        // For Premium users (upsell removed), 1 slide is fine (no carousel needed).
-        if (!_premiumUpsellHidden && slides.length < 2) return;
+        // Both Free and Premium now see 2 slides — carousel works for both.
+        if (slides.length < 2) return;
         let current = 0;
         let autoTimer = null;
         let pausedUntil = 0; // timestamp until which autoplay is paused

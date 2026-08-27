@@ -7203,6 +7203,24 @@ strong.down { color: var(--red); }
     transform: scale(0.96);
 }
 
+/* PREMIUM BANNER FIX: Premium-active CTA style — when a Premium user views
+   the banner, the CTA switches from upsell ("فعال‌سازی Premium") to status
+   ("✦ عضویت Premium فعال"). This style gives it a distinct gold-fill look
+   so Premium users see a "confirmed/active" state, not an upsell button. */
+.hero-cta--premium-active {
+    background: linear-gradient(135deg, #F5A623 0%, #FFCC4D 100%);
+    color: #0B1220;
+    border-color: rgba(255, 204, 77, 0.8);
+    box-shadow: 0 0 20px rgba(245, 166, 35, 0.35);
+    font-weight: 700;
+}
+.hero-cta--premium-active:hover {
+    background: linear-gradient(135deg, #FFCC4D 0%, #F5A623 100%);
+    color: #0B1220;
+    border-color: rgba(255, 204, 77, 1);
+    box-shadow: 0 0 24px rgba(245, 166, 35, 0.5);
+}
+
 /* Channel CTA — exact position matching designed placeholder in channel banner image */
 .hero-cta--channel-v2 {
     left: 9.6%;
