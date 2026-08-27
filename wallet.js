@@ -1286,126 +1286,140 @@ const WalletApp = (() => {
   // PHASE UX-V2.1 FIX: removed dead function updateClaimButton (never called
   // after _dailyCheckinState + _updateDailyCheckinCard replaced it).
 
+  // DAILY CHECK FIX: _isClaiming guard prevents double-click from firing
+  // two POST /api/wallet/claim requests. Previously only btn.disabled was used,
+  // but it fails when btn is null (modal path) or when rapid clicks bypass the
+  // disabled state before JS executes. The flag is independent of the DOM.
+  let _isClaiming = false;
+
   async function claimDaily() {
-    // P0-2 FIX: button selector — check BOTH the card button and modal button.
-    // Previously only looked for #daily-claim-btn but the modal renders .dcm-claim-btn.
-    // If btn is null in the modal path, the claim flow crashes on btn.disabled.
-    const btn = document.getElementById('daily-claim-btn')
-             || document.querySelector('.dcm-claim-btn');
-    // P0-2 FIX: disable immediately + guard against null DOM element
-    if (btn) { btn.disabled = true; btn.textContent = WT('claiming'); }
+    // Guard: if a claim is already in-flight, return immediately.
+    if (_isClaiming) return;
+    _isClaiming = true;
 
-    // P0-1 FIX: increment mutation sequence BEFORE the API call so any in-flight
-    // GET requests (fetchWallet / refreshWalletBalance) will reject their stale
-    // responses when they resolve after this mutation.
-    _walletMutationSeq++;
+    try {
+      // P0-2 FIX: button selector — check BOTH the card button and modal button.
+      // Previously only looked for #daily-claim-btn but the modal renders .dcm-claim-btn.
+      // If btn is null in the modal path, the claim flow crashes on btn.disabled.
+      const btn = document.getElementById('daily-claim-btn')
+               || document.querySelector('.dcm-claim-btn');
+      // P0-2 FIX: disable immediately + guard against null DOM element
+      if (btn) { btn.disabled = true; btn.textContent = WT('claiming'); }
 
-    const result = await claimDailyRewardAPI();
+      // P0-1 FIX: increment mutation sequence BEFORE the API call so any in-flight
+      // GET requests (fetchWallet / refreshWalletBalance) will reject their stale
+      // responses when they resolve after this mutation.
+      _walletMutationSeq++;
 
-    if (result.status === 'success') {
-      // Update cached state from claim response
-      _dailyCheckinState = {
-        streak_day: result.streak_day || 1,
-        streak_rewards: result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
-        claimed_today: true,
-        last_claim_date: _getTehranDateString(),
-      };
+      const result = await claimDailyRewardAPI();
 
-      // P0-1 FIX: invalidate wallet cache + update balance immediately from API response
-      invalidateWalletCache();
-      if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
-        // P0-3 FIX: update _lastKnownBalance so VPN modal and other consumers
-        // see the fresh balance immediately — not stale pre-claim value.
-        _lastKnownBalance = result.newBalance;
-        if (walletData) {
-          walletData.balance = result.newBalance;
-          _walletCache.wallet = walletData;
-          _walletCache.walletAt = Date.now();
-        }
-        const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance, #wallet-balance-amount');
-        if (balanceEl) {
-          const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
-          if (typeof animateBalanceChange === 'function') {
-            animateBalanceChange(balanceEl, currentBalance, result.newBalance);
-          } else {
-            balanceEl.textContent = result.newBalance.toLocaleString('en-US');
-          }
-        }
-      }
+      if (result.status === 'success') {
+        // Update cached state from claim response
+        _dailyCheckinState = {
+          streak_day: result.streak_day || 1,
+          streak_rewards: result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+          claimed_today: true,
+          last_claim_date: _getTehranDateString(),
+        };
 
-      // PHASE 2 FIX: use refreshWalletAfterMutation for consistent post-mutation
-      // behavior (profile card refresh, notification badge, wallet data refresh).
-      // This replaces the inline refresh logic with the shared helper.
-      if (typeof window.refreshWalletAfterMutation === 'function') {
-        try { window.refreshWalletAfterMutation(result.newBalance); } catch (_) {}
-      }
-
-      // PHASE UX-V2.1: Update daily check-in card summary
-      _updateDailyCheckinCard();
-
-      // PHASE UX-V2.1: If modal is open, re-render streak days to show ✓ on today
-      const daysGrid = document.getElementById('dcm-days-grid');
-      if (daysGrid) {
-        daysGrid.innerHTML = _renderStreakDaysHTML(
-          result.streak_day || 1,
-          result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
-          true
-        );
-        // Update reward display + hint
-        const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
-        if (rewardDisplay) {
-          rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
-        }
-        const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
-        if (!hintEl) {
-          const hint = document.createElement('div');
-          hint.className = 'dcm-hint';
-          hint.textContent = detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow!';
-          daysGrid.parentElement.appendChild(hint);
-        }
-        // Remove claim button from modal
-        const claimBtn = daysGrid.parentElement.querySelector('.dcm-claim-btn');
-        if (claimBtn) claimBtn.remove();
-      }
-
-      // PHASE UX-V2.1: Update notification badge immediately
-      if (typeof updateNotifBadge === 'function') {
-        try { updateNotifBadge(); } catch (_) {}
-      }
-
-      // FA-9 FIX: refresh transaction history after successful daily claim.
-      // Previously the new daily_claim transaction didn't appear in the UI
-      // until the user closed and reopened the wallet. Now we fetch fresh
-      // history (offset 0 = most recent) and prepend to the list if the
-      // wallet page is open. Safe no-op if the list element doesn't exist
-      // (wallet closed) — the next openWallet will fetch fresh data anyway.
-      try {
-        const freshHistory = await fetchHistory(0);
-        if (freshHistory && freshHistory.transactions && freshHistory.transactions.length > 0) {
-          // Update cached walletData.history so showFullHistory/loadMoreHistory use fresh data
+        // P0-1 FIX: invalidate wallet cache + update balance immediately from API response
+        invalidateWalletCache();
+        if (typeof result.newBalance === 'number' && result.newBalance >= 0) {
+          // P0-3 FIX: update _lastKnownBalance so VPN modal and other consumers
+          // see the fresh balance immediately — not stale pre-claim value.
+          _lastKnownBalance = result.newBalance;
           if (walletData) {
-            walletData.history = freshHistory.transactions;
+            walletData.balance = result.newBalance;
+            _walletCache.wallet = walletData;
+            _walletCache.walletAt = Date.now();
           }
-          // Re-render the visible list if wallet page is open
-          const txList = document.getElementById('wallet-tx-list');
-          const walletPage = document.getElementById('wallet-full-page');
-          if (txList && walletPage && walletPage.classList.contains('open')) {
-            txList.innerHTML = freshHistory.transactions.slice(0, 5).map(tx => buildTxItemHTML(tx)).join('');
+          const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance, #wallet-balance-amount');
+          if (balanceEl) {
+            const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
+            if (typeof animateBalanceChange === 'function') {
+              animateBalanceChange(balanceEl, currentBalance, result.newBalance);
+            } else {
+              balanceEl.textContent = result.newBalance.toLocaleString('en-US');
+            }
           }
         }
-      } catch (_) { /* non-fatal — history will refresh on next wallet open */ }
 
-      // Show success popup — use actual amount from API
-      const tg = window.getTg?.();
-      try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
-      const rewardAmount = result.amount || result.daily_reward || 0;
-      tg?.showPopup?.({ title: WT('success'), message: `+${rewardAmount} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
-    } else {
-      // P0-2 FIX: guard against null btn — if the button wasn't found, don't crash
-      if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
-      const tg = window.getTg?.();
-      try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
-      tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
+        // PHASE 2 FIX: use refreshWalletAfterMutation for consistent post-mutation
+        // behavior (profile card refresh, notification badge, wallet data refresh).
+        // This replaces the inline refresh logic with the shared helper.
+        if (typeof window.refreshWalletAfterMutation === 'function') {
+          try { window.refreshWalletAfterMutation(result.newBalance); } catch (_) {}
+        }
+
+        // PHASE UX-V2.1: Update daily check-in card summary
+        _updateDailyCheckinCard();
+
+        // PHASE UX-V2.1: If modal is open, re-render streak days to show ✓ on today
+        const daysGrid = document.getElementById('dcm-days-grid');
+        if (daysGrid) {
+          daysGrid.innerHTML = _renderStreakDaysHTML(
+            result.streak_day || 1,
+            result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+            true
+          );
+          // Update reward display + hint
+          const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
+          if (rewardDisplay) {
+            rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
+          }
+          const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
+          if (!hintEl) {
+            const hint = document.createElement('div');
+            hint.className = 'dcm-hint';
+            hint.textContent = detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow!';
+            daysGrid.parentElement.appendChild(hint);
+          }
+          // Remove claim button from modal
+          const claimBtn = daysGrid.parentElement.querySelector('.dcm-claim-btn');
+          if (claimBtn) claimBtn.remove();
+        }
+
+        // PHASE UX-V2.1: Update notification badge immediately
+        if (typeof updateNotifBadge === 'function') {
+          try { updateNotifBadge(); } catch (_) {}
+        }
+
+        // FA-9 FIX: refresh transaction history after successful daily claim.
+        // DAILY CHECK FIX: fire-and-forget (non-blocking) — previously this was
+        // `await fetchHistory(0)` which blocked the success popup by 200-500ms.
+        // The popup now shows immediately after the POST completes. The history
+        // list updates in the background when the GET resolves.
+        fetchHistory(0).then(freshHistory => {
+          if (freshHistory && freshHistory.transactions && freshHistory.transactions.length > 0) {
+            if (walletData) {
+              walletData.history = freshHistory.transactions;
+            }
+            const txList = document.getElementById('wallet-tx-list');
+            const walletPage = document.getElementById('wallet-full-page');
+            if (txList && walletPage && walletPage.classList.contains('open')) {
+              txList.innerHTML = freshHistory.transactions.slice(0, 5).map(tx => buildTxItemHTML(tx)).join('');
+            }
+          }
+        }).catch(() => { /* non-fatal — history will refresh on next wallet open */ });
+
+        // Show success popup — use actual amount from API
+        // DAILY CHECK FIX: popup shows immediately now (no longer blocked by fetchHistory)
+        const tg = window.getTg?.();
+        try { tg?.HapticFeedback?.notificationOccurred?.('success'); } catch (_) {}
+        const rewardAmount = result.amount || result.daily_reward || 0;
+        tg?.showPopup?.({ title: WT('success'), message: `+${rewardAmount} AB — ${WT('claim_success')}`, buttons: [{ type: 'ok' }] });
+      } else {
+        // P0-2 FIX: guard against null btn — if the button wasn't found, don't crash
+        if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
+        const tg = window.getTg?.();
+        try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
+        tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
+      }
+    } finally {
+      // DAILY CHECK FIX: always reset the claiming flag so the user can retry
+      // after an error or timeout. Without this, a network failure would leave
+      // _isClaiming=true forever, permanently locking the claim button.
+      _isClaiming = false;
     }
   }
 
