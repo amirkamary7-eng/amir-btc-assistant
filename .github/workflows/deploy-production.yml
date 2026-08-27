@@ -306,7 +306,7 @@ jobs:
           echo "$DEPLOY_OUTPUT"
 
           # Extract deployment URL for logging
-          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oP 'https://[a-f0-9]+\.amir-btc-assistant\.pages\.dev' | head -1)
+          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oP 'https://[a-f0-9]+\.amir-btc-assistant-pages\.pages\.dev' | head -1)
           echo "Deployment URL: $DEPLOY_URL"
           if [ -z "$DEPLOY_URL" ]; then
             echo "❌ FAIL: Could not extract deployment URL from wrangler output"
