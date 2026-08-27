@@ -28,6 +28,8 @@ export function createRewardCenterHandlers(deps) {
     rewardCenterRepo,
     // NEW-1 FIX: Rate limiting for admin mutations
     isUserRateLimited,
+    // WALLET-CONSISTENCY H1 FIX: invalidate reward-per-invite cache after tier mutations
+    invalidateRewardPerInviteCache,
   } = deps;
 
   // NEW-1 FIX: Check admin rate limit for reward center mutations
@@ -248,6 +250,8 @@ export function createRewardCenterHandlers(deps) {
     if (bodyResult.error) return bodyResult.error;
     try {
       const tier = await rewardCenterRepo.createReferralTier(env, bodyResult.payload);
+      // WALLET-CONSISTENCY H1 FIX: invalidate cache so new referrals get the updated reward amount immediately
+      if (typeof invalidateRewardPerInviteCache === 'function') invalidateRewardPerInviteCache();
       await _log(env, admin, 'create_referral_tier', 'referral_tier', tier?.id, bodyResult.payload);
       return jsonResponse({ status: 'success', tier }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
@@ -262,6 +266,8 @@ export function createRewardCenterHandlers(deps) {
     try {
       const tier = await rewardCenterRepo.updateReferralTier(env, tierId, bodyResult.payload);
       if (!tier) return jsonResponse({ status: 'error', message: 'Tier not found' }, { status: 404 }, env);
+      // WALLET-CONSISTENCY H1 FIX: invalidate cache so new referrals get the updated reward amount immediately
+      if (typeof invalidateRewardPerInviteCache === 'function') invalidateRewardPerInviteCache();
       await _log(env, admin, 'update_referral_tier', 'referral_tier', tierId, bodyResult.payload);
       return jsonResponse({ status: 'success', tier }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
@@ -274,6 +280,8 @@ export function createRewardCenterHandlers(deps) {
     try {
       const ok = await rewardCenterRepo.deleteReferralTier(env, tierId);
       if (!ok) return jsonResponse({ status: 'error', message: 'Tier not found' }, { status: 404 }, env);
+      // WALLET-CONSISTENCY H1 FIX: invalidate cache so new referrals get the updated reward amount immediately
+      if (typeof invalidateRewardPerInviteCache === 'function') invalidateRewardPerInviteCache();
       await _log(env, admin, 'delete_referral_tier', 'referral_tier', tierId, {});
       return jsonResponse({ status: 'success' }, {}, env);
     } catch (e) { return safeDbErrorResponse(e, {}, env); }

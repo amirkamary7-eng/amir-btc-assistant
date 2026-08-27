@@ -2308,6 +2308,20 @@ async function getReferralRewardPerInvite(env) {
   return fallback;
 }
 
+/**
+ * Invalidate the referral reward-per-invite cache.
+ *
+ * FIX (WALLET-CONSISTENCY H1): Previously, when an admin updated/created/deleted
+ * a referral reward tier, the _rewardPerInviteCache would serve the STALE reward
+ * amount for up to 60 seconds. This meant new referrals credited the old amount
+ * for up to a minute after an admin change. Now the reward_center controller
+ * calls this function after any tier mutation (create/update/delete) to ensure
+ * the next getReferralRewardPerInvite() call fetches fresh data from the DB.
+ */
+function invalidateRewardPerInviteCache() {
+  _rewardPerInviteCache = { value: null, expiresAt: 0 };
+}
+
 // ── PER-CALL POOL (NO module-level state) ──────────────────────────────────
 // ROOT-CAUSE FIX for "A promise was resolved from a different request context":
 //
@@ -9421,6 +9435,8 @@ const rewardCenterHandlers = createRewardCenterHandlers({
   rewardCenterRepo,
   // NEW-1 FIX: Rate limiting for admin mutations
   isUserRateLimited,
+  // WALLET-CONSISTENCY H1 FIX: invalidate reward-per-invite cache after tier mutations
+  invalidateRewardPerInviteCache,
 });
 //#endregion
 

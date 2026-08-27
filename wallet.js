@@ -1109,24 +1109,23 @@ const WalletApp = (() => {
     // Without this, the setInterval continues running after the wallet page
     // is closed, consuming battery/CPU on mobile devices.
     _stopWeeklyCountdown();
-    // P1-6b FIX: Previously closeWallet rendered from cached walletData if
-    // < 15s old — but a cron reward (referral/mission/wheel retry) could have
-    // credited tokens during those 15s, making the cache stale. Now we also
-    // check if the mutation sequence has changed since the cache was written.
-    // If a mutation occurred (even externally via cron polling), we fall
-    // through to loadProfileCard() which fetches fresh data.
-    if (walletData && _walletCache.wallet && (Date.now() - _walletCache.walletAt < WALLET_CACHE_TTL * 1000)) {
-      // P1-6b: check if mutation seq matches the one captured when cache was written
-      const cacheSeq = _walletCache._mutationSeq || 0;
-      if (cacheSeq === _walletMutationSeq) {
-        // Cache is fresh AND no mutation occurred — safe to render from cache
-        try { renderProfileCard(walletData); } catch (_) { loadProfileCard(); }
-      } else {
-        // Mutation occurred since cache was written — fetch fresh data
-        loadProfileCard();
-      }
-    } else {
-      loadProfileCard();
+    // WALLET/CRON H1 FIX: Previously closeWallet rendered from cached walletData
+    // if < 15s old — but a cron reward (referral/mission/wheel retry) could have
+    // credited tokens during those 15s, making the cache stale. The mutation seq
+    // guard (P1-6b) only catches frontend-initiated mutations — cron runs
+    // server-side and CANNOT increment the frontend seq. So if the wallet was
+    // open for any time, the cache may be stale. Fix: invalidate the wallet cache
+    // on close so the NEXT openWallet/loadProfileCard fetches fresh data from the
+    // API. This adds 1 API call on the next open (not on close), ensuring the
+    // profile card always shows the current balance.
+    if (_walletCache.wallet) {
+      _walletCache.wallet = null;
+      _walletCache.walletAt = 0;
+    }
+    // Still render the profile card (from walletData if available, or skeleton)
+    // so the UI doesn't flash empty while the next fetch is in-flight.
+    if (walletData) {
+      try { renderProfileCard(walletData); } catch (_) {}
     }
   }
 

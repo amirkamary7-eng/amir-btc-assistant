@@ -112,19 +112,35 @@ async function minifySource(filePath) {
   }
 }
 
-async function copyWithHash() {
+async function copyWithHash(assetRenameMap) {
   const renameMap = new Map();
   for (const basename of hashedFiles) {
     const source = path.join(projectRoot, basename);
     // TASK 3: minify before hashing so the hash reflects the MINIFIED content
     // (this is critical — if we hashed the source then wrote minified content
     // under that hash, the hash would be wrong and cache-busting would break).
-    const minified = await minifySource(source);
-    const hash = createHash('sha256').update(minified).digest('hex').slice(0, 8);
+    let content = await minifySource(source);
+
+    // HASH MISMATCH FIX: replace asset references (e.g. 'assets/market/bull.webp'
+    // → 'assets/aeabf93b.webp') BEFORE computing the content hash. Previously
+    // this replacement happened AFTER the file was already written under its
+    // hashed name, so the file's content no longer matched the hash in its
+    // filename — breaking cache-busting guarantees. Now the hash is computed
+    // on the FINAL content (minified + asset-referenced), so the filename
+    // always matches the file body.
+    for (const [original, hashed] of assetRenameMap) {
+      const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(escaped, 'g');
+      if (pattern.test(content)) {
+        content = content.replace(pattern, hashed);
+      }
+    }
+
+    const hash = createHash('sha256').update(content).digest('hex').slice(0, 8);
     const parsed = path.parse(basename);
     const hashedName = `${parsed.name}.${hash}${parsed.ext}`;
     const target = path.join(outputDir, hashedName);
-    await writeFile(target, minified, 'utf8');
+    await writeFile(target, content, 'utf8');
     renameMap.set(basename, hashedName);
     console.log(`  ${basename} → ${hashedName}`);
   }
@@ -320,8 +336,15 @@ async function main() {
   await ensureCleanOutput();
   console.log('  Cleaned output directory');
 
-  const jsRenameMap = await copyWithHash();
-  console.log('  Copied & hashed JS/CSS files');
+  // HASH MISMATCH FIX: process assets FIRST so the assetRenameMap is available
+  // when copyWithHash() runs. copyWithHash() now replaces asset references in
+  // JS/CSS content BEFORE computing the content hash, so the hash always
+  // matches the final file body.
+  const assetRenameMap = await copyAssetsWithHash();
+  console.log('  Copied & hashed assets');
+
+  const jsRenameMap = await copyWithHash(assetRenameMap);
+  console.log('  Copied & hashed JS/CSS files (with asset references resolved)');
 
   await copyIndexHtml();
   console.log('  Copied index.html');
@@ -333,9 +356,6 @@ async function main() {
   } catch {
     console.log('  calendar-data.json not found — skipping');
   }
-
-  const assetRenameMap = await copyAssetsWithHash();
-  console.log('  Copied & hashed assets');
 
   let indexHtml = await readFile(path.join(outputDir, 'index.html'), 'utf8');
   indexHtml = replaceReferences(indexHtml, jsRenameMap, assetRenameMap);
@@ -358,22 +378,10 @@ async function main() {
   await writeFile(path.join(outputDir, 'index.html'), indexHtml, 'utf8');
   console.log('  Updated references, API_BASE, and BUILD_ID in index.html');
 
-  // Replace asset references in built JS files (e.g., 'assets/trend-bull.png' in app.js)
-  for (const [original, hashed] of assetRenameMap) {
-    const escaped = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(escaped, 'g');
-    for (const [jsOriginal, jsHashed] of jsRenameMap) {
-      const jsPath = path.join(outputDir, jsHashed);
-      try {
-        let jsContent = await readFile(jsPath, 'utf8');
-        if (pattern.test(jsContent)) {
-          jsContent = jsContent.replace(pattern, hashed);
-          await writeFile(jsPath, jsContent, 'utf8');
-          console.log(`  Replaced ${original} → ${hashed} in ${jsHashed}`);
-        }
-      } catch (_) { /* file might not exist */ }
-    }
-  }
+  // HASH MISMATCH FIX: the old asset-reference replacement loop that ran HERE
+  // (after files were already written under their hashed names) has been
+  // removed. Asset references are now replaced INSIDE copyWithHash() BEFORE
+  // the hash is computed, so the filename always matches the file content.
 
   await writeVersionJson(buildId);
 
