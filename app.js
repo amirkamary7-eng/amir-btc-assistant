@@ -12620,12 +12620,15 @@ function _startAllPolling() {
     // triggers _startAllPolling again while this is still pending.
     ensureTelegramAuthReady(8000).then(() => {
         if (!_appVisible) return;
-        sendSessionHeartbeat().then(() => {
-            // FIX B1: Only fetch online count AFTER heartbeat completes, so
-            // the count includes the current user (heartbeat registers them
-            // in the PresenceDO before we query the count).
-            if (_appVisible) fetchOnlineCount();
-        });
+        // ONLINE COUNT FIX: sendSessionHeartbeat() already calls
+        // updateOnlineBadge(data.online_count) with the count returned
+        // from the PresenceDO (always correct, includes current user).
+        // Previously, a redundant fetchOnlineCount() was chained here —
+        // but GET /api/sessions/online can hit a DIFFERENT Worker isolate
+        // whose _onlineCountCache (30s TTL, per-isolate) is stale,
+        // returning 0 and overwriting the correct count from the heartbeat.
+        // The 600s online-count interval (below) still refreshes periodically.
+        sendSessionHeartbeat();
     });
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
