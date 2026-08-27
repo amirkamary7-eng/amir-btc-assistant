@@ -199,8 +199,8 @@ test('CONCURRENCY-1: Mark Read during pending GET — stale GET discarded', asyn
   const stateAfterMutation = sandbox.__getState();
   assert.equal(stateAfterMutation.notifications.find(n => n.id === 'n1').read, true,
     'n1 must be marked read locally after mutation');
-  assert.equal(stateAfterMutation._notifReqSeq, 2,
-    'mutation must have bumped seq to 2 (so GET with mySeq=1 will be discarded)');
+  assert.equal(stateAfterMutation._notifReqSeq, 3,
+    'mutation must have bumped seq to 3 (double-bump: before await + after mutation) (so GET with mySeq=1 will be discarded)');
 
   // T3: Release the GET — it resolves with STALE data (n1 still unread per server)
   gate.releaseGet();
@@ -242,7 +242,7 @@ test('CONCURRENCY-2: Delete during pending GET — stale GET discarded', async (
   assert.equal(stateAfterMutation.notifications.length, 1, 'n1 must be removed locally');
   assert.equal(stateAfterMutation.notifications.find(n => n.id === 'n1'), undefined,
     'n1 must be gone from local state');
-  assert.equal(stateAfterMutation._notifReqSeq, 2, 'mutation must have bumped seq to 2');
+  assert.equal(stateAfterMutation._notifReqSeq, 3, 'mutation must have bumped seq to 3 (double-bump)');
 
   // T3: Release the GET — server response still includes n1 (stale)
   gate.releaseGet();
@@ -425,11 +425,11 @@ test('CONCURRENCY-6: Multiple mutations during pending GET — GET discarded', a
   await new Promise(r => setImmediate(r));
 
   // Two mutations while GET is pending
-  await sandbox.markNotifRead('n1');     // seq → 2
-  await sandbox.deleteNotification('n2'); // seq → 3
+  await sandbox.markNotifRead('n1');     // seq → 3 (double-bump: 1→2→3)
+  await sandbox.deleteNotification('n2'); // seq → 5 (double-bump: 3→4→5)
 
   const stateAfterMutations = sandbox.__getState();
-  assert.equal(stateAfterMutations._notifReqSeq, 3, 'two mutations → seq 3');
+  assert.equal(stateAfterMutations._notifReqSeq, 5, 'two mutations → seq 5 (each double-bumps)');
   assert.equal(stateAfterMutations.notifications.length, 1, 'only n1 remains (n2 deleted)');
   assert.equal(stateAfterMutations.notifications[0].read, true, 'n1 is read');
 

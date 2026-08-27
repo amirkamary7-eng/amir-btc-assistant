@@ -9697,6 +9697,9 @@ async function markAllRead() {
             if (res && res.status === 'success') {
                 notifications.forEach(n => n.read = true);
                 // P0-4 FIX: compute badge locally — no redundant GET
+                // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
+                // that started DURING this await (stale unread data).
+                _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
                 showMiniToast(t('done') || 'Done');
@@ -9753,6 +9756,9 @@ async function clearAllNotifications() {
             if (res && res.status === 'success') {
                 notifications = [];
                 // P0-4 FIX: compute badge locally — no redundant GET
+                // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
+                // that started DURING this await (stale data with all notifications).
+                _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
                 closeNotifModal();
@@ -9810,6 +9816,10 @@ async function deleteNotification(id) {
             if (res && res.status === 'success') {
                 notifications = notifications.filter(n => n.id !== id);
                 // P0-4 FIX: compute badge locally — no redundant GET
+                // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
+                // that started DURING this await (its DB query ran before the
+                // DELETE committed → stale data with notification still present).
+                _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
                 _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: true, newSeq: _notifReqSeq });
@@ -10041,6 +10051,11 @@ async function markNotifRead(id) {
                 if (n) n.read = true;
                 // P0-4 FIX: Compute badge locally instead of calling updateNotifBadge()
                 // which would fire a redundant GET /api/notifications.
+                // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
+                // that started DURING this await (its DB query ran before the
+                // mark-read committed → stale unread data). Without this bump,
+                // the poll's mySeq would match and overwrite read=true with false.
+                _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
             } else {

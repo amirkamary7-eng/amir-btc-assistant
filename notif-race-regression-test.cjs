@@ -84,16 +84,17 @@ for (const fnName of MUTATION_FNS) {
 }
 
 for (const fnName of MUTATION_FNS) {
-  test(`${fnName}: _notifReqSeq++ appears exactly ONCE (not in success/error/catch branches)`, () => {
+  test(`${fnName}: _notifReqSeq++ appears exactly TWICE (before await + after mutation)`, () => {
     const body = getFunctionBody(fnName);
     assert.ok(body, `${fnName} function not found`);
 
     // Count all _notifReqSeq++ occurrences in the function body
+    // TOCTOU FIX: now uses double-bump (before await + after local mutation)
     const matches = body.match(/_notifReqSeq\+\+/g) || [];
-    assert.equal(matches.length, 1,
-      `${fnName}: _notifReqSeq++ must appear exactly once (before the await). Found ${matches.length}. ` +
-      'Multiple bumps (in success/error/catch branches) were the old pattern — now there is a single ' +
-      'bump before the await that covers all branches.');
+    assert.ok(matches.length >= 2,
+      `${fnName}: _notifReqSeq++ must appear at least twice (before await + after mutation). Found ${matches.length}. ` +
+      'The first bump invalidates polls from before the mutation. ' +
+      'The second bump invalidates polls that started DURING the await (TOCTOU fix).');
   });
 }
 
@@ -252,17 +253,19 @@ test('DYN-4: concurrent polling + mutation (3 rapid mutations)', async () => {
     'All 3 notifications should be read — mutations applied and the stale poll was dropped');
 });
 
-test('DYN-5: _notifReqSeq increments exactly once per mutation', async () => {
+test('DYN-5: _notifReqSeq increments twice per successful mutation (double-bump)', async () => {
   let _notifReqSeq = 0;
 
   async function simulateMutation(delayMs) {
     const seqBefore = _notifReqSeq;
-    _notifReqSeq++;  // single bump before await
+    _notifReqSeq++;  // bump 1: before await
     await new Promise(r => setTimeout(r, delayMs));
+    _notifReqSeq++;  // bump 2: after local mutation (TOCTOU fix)
     return { seqBefore, seqAfter: _notifReqSeq };
   }
 
   const r = await simulateMutation(10);
-  assert.equal(r.seqAfter, r.seqBefore + 1,
-    '_notifReqSeq must increment exactly once per mutation (was ' + r.seqBefore + ', now ' + r.seqAfter + ')');
+  assert.equal(r.seqAfter, r.seqBefore + 2,
+    '_notifReqSeq must increment twice per successful mutation (double-bump: before await + after mutation). ' +
+    'Was ' + r.seqBefore + ', now ' + r.seqAfter + ', expected ' + (r.seqBefore + 2));
 });

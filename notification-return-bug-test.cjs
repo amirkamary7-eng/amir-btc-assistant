@@ -365,7 +365,7 @@ test('NOTIF-RETURN-E1: successful mutation bumps seq (stale-response guard preco
   const after = __getState();
   // The mutation must have bumped seq to 2 → the in-flight poll (mySeq=1)
   // will be discarded by the guard at app.js:9610.
-  assert.equal(after._notifReqSeq, 2, 'seq must be bumped to 2 (so the in-flight poll is discarded)');
+  assert.equal(after._notifReqSeq, 3, 'seq must be bumped to 3 (double-bump: before await + after mutation) (so the in-flight poll is discarded)');
   assert.equal(after.notifications.find(n => n.id === 'n1').read, true, 'n1 must be marked read');
 });
 
