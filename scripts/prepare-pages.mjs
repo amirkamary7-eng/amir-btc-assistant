@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// TASK 3 (Asset Performance): esbuild is used to minify JS & CSS before hashing.
+// It is already installed as a transitive dependency of wrangler — no new dep needed.
+// esbuild.transform() runs in process-safe mode (no bundle, no identifier mangling
+// of window.* properties), so all global function names referenced by inline HTML
+// event handlers (onclick="toggleNotificationPanel()", etc.) remain callable.
+import esbuild from 'esbuild';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,22 +53,80 @@ async function ensureCleanOutput() {
   await mkdir(outputDir, { recursive: true });
 }
 
-async function contentHash(filePath) {
-  const data = await readFile(filePath);
-  const hash = createHash('sha256').update(data).digest('hex').slice(0, 8);
-  const parsed = path.parse(filePath);
-  return `${parsed.name}.${hash}${parsed.ext}`;
+/**
+ * TASK 3 (Asset Performance): Minify a JS or CSS source file with esbuild.
+ *
+ * Uses esbuild.transform() (NOT build/bundle) — this means:
+ *   - No module resolution, no bundling, no tree-shaking
+ *   - No source architecture changes (globals, top-level functions, window
+ *     assignments all preserved exactly)
+ *
+ * CRITICAL: For JS, we use minifyWhitespace + minifySyntax (NOT minify: true).
+ * esbuild's full `minify: true` runs identifier mangling which collides multiple
+ * top-level let/const vars to the same short name (e.g. "je"), causing
+ * "Identifier 'je' has already been declared" SyntaxErrors. The
+ * minifyIdentifiers: false flag is ignored when minify: true is set in esbuild
+ * 0.28.x, so we use the granular flags. This preserves ALL variable/function
+ * names verbatim while still stripping whitespace + comments + minifying syntax.
+ *
+ * This is safe for the app's pattern where inline HTML event handlers call
+ * global functions by name (onclick="toggleNotificationPanel()") — function
+ * names are never mangled, so globals remain directly callable.
+ *
+ * CSS uses full `minify: true` (no identifier collision risk in CSS).
+ *
+ * If minification fails for any reason, the original source is used as a
+ * fallback (build never breaks due to minify errors).
+ */
+async function minifySource(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const src = await readFile(filePath, 'utf8');
+  const beforeBytes = Buffer.byteLength(src);
+
+  // Non-hashed files and tiny files (< 500 bytes) are not worth minifying.
+  if (beforeBytes < 500) return src;
+
+  try {
+    const isCss = ext === '.css';
+    // Use minifyWhitespace + minifySyntax (NOT minify: true) because esbuild's
+    // full `minify: true` also runs identifier mangling, which collides multiple
+    // top-level let/const vars to the same short name (e.g. "je") causing
+    // "Identifier 'je' has already been declared" SyntaxErrors. The
+    // minifyIdentifiers: false flag is ignored when minify: true is set in
+    // esbuild 0.28.x, so we use the granular flags instead. This preserves ALL
+    // variable/function names verbatim (so inline HTML onclick="funcName()"
+    // handlers keep working) while still stripping whitespace + comments +
+    // minifying syntax (e.g. if(false){} → removed, object literal shorthand).
+    const opts = isCss
+      ? { minify: true, loader: 'css', target: 'es2020', legalComments: 'none', sourcemap: false }
+      : { minifyWhitespace: true, minifySyntax: true, format: 'esm', target: 'es2020', legalComments: 'none', sourcemap: false };
+    const result = await esbuild.transform(src, opts);
+    const afterBytes = Buffer.byteLength(result.code);
+    const reduction = ((1 - afterBytes / beforeBytes) * 100).toFixed(1);
+    console.log(`    minify: ${(beforeBytes / 1024).toFixed(1)} KB → ${(afterBytes / 1024).toFixed(1)} KB (-${reduction}%)`);
+    return result.code;
+  } catch (e) {
+    // Fallback: use original source if esbuild fails. Build must not break.
+    console.warn(`    ⚠️  minify failed for ${path.basename(filePath)}: ${e.message} — using original`);
+    return src;
+  }
 }
 
 async function copyWithHash() {
   const renameMap = new Map();
   for (const basename of hashedFiles) {
     const source = path.join(projectRoot, basename);
-    const hashed = await contentHash(source);
-    const target = path.join(outputDir, hashed);
-    await copyFile(source, target);
-    renameMap.set(basename, hashed);
-    console.log(`  ${basename} → ${hashed}`);
+    // TASK 3: minify before hashing so the hash reflects the MINIFIED content
+    // (this is critical — if we hashed the source then wrote minified content
+    // under that hash, the hash would be wrong and cache-busting would break).
+    const minified = await minifySource(source);
+    const hash = createHash('sha256').update(minified).digest('hex').slice(0, 8);
+    const parsed = path.parse(basename);
+    const hashedName = `${parsed.name}.${hash}${parsed.ext}`;
+    const target = path.join(outputDir, hashedName);
+    await writeFile(target, minified, 'utf8');
+    renameMap.set(basename, hashedName);
+    console.log(`  ${basename} → ${hashedName}`);
   }
   return renameMap;
 }

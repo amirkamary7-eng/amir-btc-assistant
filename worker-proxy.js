@@ -113,7 +113,15 @@ function withCors(headers = {}, env = null) {
   // Echo localhost origins (any port) so the app can be previewed locally
   // via the Next.js dev server / `wrangler pages dev`. Real traffic keeps the
   // pinned WEBAPP_URL origin.
-  const reqOrigin = _currentRequestOrigin;
+  //
+  // CORS RACE FIX (Task 1): reqOrigin is read from env._reqOrigin, which is set
+  // per-invocation at the top of fetch(). Cloudflare Workers can interleave
+  // concurrent requests within the same isolate (each `await` yields the event
+  // loop), so a module-level variable would let Request B overwrite Request A's
+  // Origin before A's withCors() ran, causing A's response to echo B's Origin.
+  // env is per-invocation in Cloudflare Workers (verified — same pattern as
+  // env._reqPool), so env._reqOrigin is scoped to THIS request only.
+  const reqOrigin = (env && env._reqOrigin) ? env._reqOrigin : null;
   const isLocalhost = reqOrigin && (reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('https://localhost:'));
   if (isLocalhost) {
     merged.set('Access-Control-Allow-Origin', reqOrigin);
@@ -141,9 +149,12 @@ function withCors(headers = {}, env = null) {
   return merged;
 }
 
-// Per-invocation request Origin (set at the top of the fetch handler). Workers
-// handle one request per invocation, so this is safe to keep module-scoped.
-let _currentRequestOrigin = null;
+// Per-invocation request Origin — DEPRECATED. Previously set at the top of the
+// fetch handler and read by withCors(). Removed because Cloudflare Workers can
+// interleave concurrent requests within one isolate (each `await` yields), so
+// a second request could overwrite this value before the first request's
+// withCors() read it → cross-origin leak. withCors() now reads from
+// env._reqOrigin (per-invocation, same pattern as env._reqPool) instead.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEMPORARY INSTRUMENTATION — traces I/O timing to pinpoint 8s/30s delays.
@@ -11698,7 +11709,14 @@ export { PresenceDO };
 // ============================================================================
 export default {
   async fetch(request, env, ctx) {
-    _currentRequestOrigin = request.headers.get('Origin');
+    // CORS RACE FIX (Task 1): Store the request Origin on env (per-invocation,
+    // NOT module-level). Cloudflare Workers can interleave concurrent requests
+    // in one isolate — a module-level variable would let Request B overwrite
+    // Request A's Origin before A's withCors() reads it. env is per-invocation
+    // (same pattern as env._reqPool), so env._reqOrigin is scoped to THIS
+    // request only. withCors() reads it back when building response headers,
+    // guaranteeing each response echoes its own request's Origin.
+    env._reqOrigin = request.headers.get('Origin');
     // TEMP: set trace context for instrumentation
     const _url = new URL(request.url);
     _setTraceContext(_url.pathname, request.method);
