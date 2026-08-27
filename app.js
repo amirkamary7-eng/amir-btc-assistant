@@ -9689,6 +9689,9 @@ async function markAllRead() {
     const isGuest = UserContext.isGuest();
     try {
         if (API_BASE && !isGuest) {
+            // NOTIF RACE FIX: bump _notifReqSeq BEFORE the await so any in-flight
+            // poll is immediately invalidated (see markNotifRead for full explanation).
+            _notifReqSeq++;
             const res = await apiFetch('/api/notifications/read-all', { method: 'POST' });
             // Only update local state if API succeeded
             if (res && res.status === 'success') {
@@ -9697,15 +9700,10 @@ async function markAllRead() {
                 _updateBadgeFromLocal();
                 renderNotifications();
                 showMiniToast(t('done') || 'Done');
-                // Bump sequence so any in-flight poll (with stale unread data)
-                // is discarded and doesn't overwrite the "all read" state.
-                _notifReqSeq++;
                 _logNotifEvent('MARK_ALL_READ_END', { reqId, success: true, newSeq: _notifReqSeq });
             } else {
                 console.warn('markAllRead: API returned non-success', res);
                 _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: 'non-success' });
-                // Bump seq so any in-flight poll is discarded; do NOT mutate local state.
-                _notifReqSeq++;
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
@@ -9715,7 +9713,6 @@ async function markAllRead() {
         _logNotifEvent('MARK_ALL_READ_END', { reqId, success: false, error: e?.message });
         // Do NOT fall through to the guest fallback for an authenticated user.
         if (!isGuest) {
-            _notifReqSeq++;
             showMiniToast(t('error_generic') || 'Error');
             return;
         }
@@ -9749,6 +9746,9 @@ async function clearAllNotifications() {
     const isGuest = UserContext.isGuest();
     try {
         if (API_BASE && !isGuest) {
+            // NOTIF RACE FIX: bump _notifReqSeq BEFORE the await so any in-flight
+            // poll is immediately invalidated (see markNotifRead for full explanation).
+            _notifReqSeq++;
             const res = await apiFetch('/api/notifications', { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = [];
@@ -9757,17 +9757,10 @@ async function clearAllNotifications() {
                 renderNotifications();
                 closeNotifModal();
                 showMiniToast(t('done') || 'Cleared');
-                // Bump sequence so any in-flight poll (with stale data from
-                // before the delete) is discarded and doesn't overwrite the
-                // empty array. This is the ROOT CAUSE FIX for "notifications
-                // reappear after delete".
-                _notifReqSeq++;
                 _logNotifEvent('DELETE_ALL_END', { reqId, success: true, newSeq: _notifReqSeq, deleted: res.deleted_count });
             } else {
                 console.warn('clearAllNotifications: API returned non-success', res);
                 _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: 'non-success' });
-                // Bump seq so any in-flight poll is discarded; do NOT mutate local state.
-                _notifReqSeq++;
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
@@ -9777,7 +9770,6 @@ async function clearAllNotifications() {
         _logNotifEvent('DELETE_ALL_END', { reqId, success: false, error: e?.message });
         // Do NOT fall through to the guest fallback for an authenticated user.
         if (!isGuest) {
-            _notifReqSeq++;
             showMiniToast(t('error_generic') || 'Error');
             return;
         }
@@ -9811,19 +9803,18 @@ async function deleteNotification(id) {
     const isGuest = UserContext.isGuest();
     try {
         if (API_BASE && !isGuest) {
+            // NOTIF RACE FIX: bump _notifReqSeq BEFORE the await so any in-flight
+            // poll is immediately invalidated (see markNotifRead for full explanation).
+            _notifReqSeq++;
             const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' });
             if (res && res.status === 'success') {
                 notifications = notifications.filter(n => n.id !== id);
                 // P0-4 FIX: compute badge locally — no redundant GET
                 _updateBadgeFromLocal();
                 renderNotifications();
-                // Bump sequence so in-flight poll doesn't overwrite
-                _notifReqSeq++;
                 _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: true, newSeq: _notifReqSeq });
             } else {
-                // Non-success response (e.g. 404 not-found). Do NOT mutate local
-                // state. Bump seq so any in-flight poll is discarded.
-                _notifReqSeq++;
+                // Non-success response (e.g. 404 not-found). Do NOT mutate local state.
                 _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: false, error: 'non-success' });
                 showMiniToast(t('error_generic') || 'Error');
             }
@@ -9834,7 +9825,6 @@ async function deleteNotification(id) {
         _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: false, error: e?.message });
         // Do NOT fall through to the guest fallback for an authenticated user.
         if (!isGuest) {
-            _notifReqSeq++;
             showMiniToast(t('error_generic') || 'Error');
             return;
         }
@@ -10038,24 +10028,25 @@ async function markNotifRead(id) {
     const isGuest = UserContext.isGuest();
     try {
         if (API_BASE && !isGuest) {
+            // NOTIF RACE FIX: bump _notifReqSeq BEFORE the await so any in-flight
+            // poll (GET /api/notifications) is immediately invalidated. Previously
+            // the bump happened AFTER the await — leaving a window where a poll
+            // response could arrive during the POST and overwrite local state with
+            // stale (unread) data. Now the poll's mySeq check will fail and the
+            // stale response is dropped.
+            _notifReqSeq++;
             const res = await apiFetch(`/api/notifications/${id}/read`, { method: 'POST' });
             if (res && res.status === 'success') {
                 const n = notifications.find(x => x.id === id);
                 if (n) n.read = true;
-                // P0-3 FIX: Bump _notifReqSeq so any in-flight poll (with stale
-                // unread state from BEFORE the mark-read) is discarded and doesn't
-                // revert the just-read notification back to unread.
                 // P0-4 FIX: Compute badge locally instead of calling updateNotifBadge()
                 // which would fire a redundant GET /api/notifications.
-                _notifReqSeq++;
                 _updateBadgeFromLocal();
                 renderNotifications();
             } else {
                 // Non-success response (e.g. 404 not-found, {status:'error'}).
                 // Do NOT mutate local state — the server did not confirm the
-                // mutation. Bump seq so any in-flight poll is discarded; the
-                // next poll will fetch server truth.
-                _notifReqSeq++;
+                // mutation. The next poll will fetch server truth.
                 showMiniToast(t('error_generic') || 'Error');
             }
             return;
@@ -10063,10 +10054,8 @@ async function markNotifRead(id) {
     } catch (e) {
         console.warn('markNotifRead API failed:', e);
         // Do NOT fall through to the guest fallback for an authenticated user.
-        // Bump seq so any in-flight poll (with stale data) is discarded, and
-        // let the next poll fetch fresh truth. Show an error toast.
+        // Local state is NOT mutated on failure — the next poll fetches truth.
         if (!isGuest) {
-            _notifReqSeq++;
             showMiniToast(t('error_generic') || 'Error');
             return;
         }
