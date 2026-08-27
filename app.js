@@ -13716,7 +13716,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (window.MembershipApp.isPremiumCached()) {
             const upsellCta = document.querySelector('.hero-slide[data-slide="0"] .hero-cta--premium-v2');
             if (upsellCta) {
-              upsellCta.textContent = '✦ عضویت Premium فعال';
+              upsellCta.textContent = 'عضویت Premium';
               upsellCta.classList.add('hero-cta--premium-active');
               _premiumCtaUpdated = true;
             }
