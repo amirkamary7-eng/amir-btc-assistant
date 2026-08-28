@@ -1,0 +1,509 @@
+/* ============================================================
+   coin-detail.css — Coin Detail page styles (Phase 6 extraction)
+   ============================================================
+   Extracted from style.css. Contains ONLY .cd-* prefixed selectors
+   used on the Coin Detail fullscreen page.
+   MUST load AFTER base.css + components.css + dashboard.css +
+   market.css + news.css and BEFORE style.css.
+   ============================================================ */
+
+/* ════════════════════════════════════════════════════════════════════
+   CD — Coin Detail Page (Premium Rebuild)
+   Colors: bg #020611, cards #0B1220, accent #F5A623
+   ════════════════════════════════════════════════════════════════════ */
+
+.cd-fullscreen {
+    position: fixed; inset: 0; z-index: 10000;
+    background: #020611; display: flex; flex-direction: column;
+    overflow: hidden; /* BUG 2 fix: prevent content bleed/overlap on small screens */
+    animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cd-fullscreen.slide-up {
+    animation: cdSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cd-fullscreen.slide-down {
+    animation: cdSlideOut 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes cdSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes cdSlideOut { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+/* ── Top Bar (Premium Exchange-Style Header) ── */
+.cd-top-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+    background: #0B1220;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+}
+
+/* Left column: logo + (title row + price row) */
+.cd-identity {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.cd-coin-logo {
+    width: 40px; height: 40px; border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: #131C2A;
+    object-fit: cover;
+}
+
+/* Text column: title row on top, price row below — both aligned to grid */
+.cd-identity-text {
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 4px;
+    min-width: 0;
+}
+.cd-identity-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.cd-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #FFFFFF;
+    margin: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.2px;
+}
+.cd-rank-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: #F5A623;
+    background: rgba(245,166,35,0.12);
+    border: 1px solid rgba(245,166,35,0.2);
+    padding: 2px 7px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    line-height: 1.1;
+}
+
+.cd-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+.cd-price {
+    font-size: 18px;
+    font-weight: 800;
+    color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    line-height: 1.2;
+    /* min-width prevents layout shift when price changes from $100 to $100000 */
+    min-width: 0;
+    white-space: nowrap;
+}
+.cd-change {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    line-height: 1.2;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.cd-change.up { color: #22C55E; }
+.cd-change.down { color: #EF4444; }
+
+/* Right column: action buttons */
+.cd-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    align-items: center;
+}
+.cd-action-btn {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #A5B4C7;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.cd-action-btn:hover { background: rgba(245,166,35,0.1); color: #F5A623; }
+.cd-action-btn:active { transform: scale(0.92); }
+
+/* Responsive: tighter spacing on very narrow screens */
+@media (max-width: 360px) {
+    .cd-top-bar { gap: 8px; padding: 10px 12px; }
+    .cd-identity { grid-template-columns: 32px minmax(0, 1fr); gap: 8px; }
+    .cd-coin-logo { width: 32px; height: 32px; }
+    .cd-title { font-size: 14px; }
+    .cd-price { font-size: 16px; }
+    .cd-change { font-size: 11px; }
+    .cd-action-btn { width: 32px; height: 32px; }
+    .cd-actions { gap: 4px; }
+}
+.cd-action-btn.active { color: #F5A623; background: rgba(245,166,35,0.12); }
+
+/* ── Scrollable Content ── */
+.cd-content {
+    flex: 1;
+    min-height: 0; /* BUG 2 fix: critical — without this iOS Safari flexbox refuses to scroll and the alert/stats sections get clipped/overlapped */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain; /* prevent scroll-chaining to background */
+    padding: 16px 16px 28px; /* BUG 2 fix: was 80px bottom — wasted space & pushed content off-screen on short viewports */
+}
+
+/* ── Chart Section ── */
+.cd-chart-section { margin-bottom: 18px; }
+.cd-tf-bar {
+    display: flex; gap: 4px; margin-bottom: 8px;
+    overflow-x: auto; scrollbar-width: none;
+}
+.cd-tf-bar::-webkit-scrollbar { display: none; }
+.cd-tf-btn {
+    flex: 1; min-width: 0; padding: 7px 4px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06); background: #0B1220;
+    color: #6B7A8D; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s ease; font-family: inherit;
+    text-align: center;
+}
+.cd-tf-btn:active { transform: scale(0.94); }
+.cd-tf-btn.active {
+    background: rgba(245,166,35,0.12); border-color: rgba(245,166,35,0.3);
+    color: #F5A623;
+}
+.cd-chart {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; height: 340px !important; overflow: hidden;
+    /* !important locks the height against TradingView's inline height:100% (autosize),
+       which otherwise expands the container to fill the parent and causes the chart
+       to overlap the alert/stats sections on mobile. */
+}
+.cd-chart-section { margin-bottom: 18px; height: auto !important; /* override TradingView's inline height:100% on the section wrapper */ }
+
+/* ── Chart Loading States (Bug 5: skeleton loader + fallback card) ── */
+.cd-chart-skeleton {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 16px; height: 100%; box-sizing: border-box;
+}
+.cd-chart-skeleton-bar {
+    height: 12px; border-radius: 6px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+    background-size: 200% 100%;
+    animation: cdChartShimmer 1.4s ease-in-out infinite;
+}
+.cd-chart-skeleton-bar:nth-child(1) { width: 40%; height: 16px; margin-bottom: 4px; }
+.cd-chart-skeleton-bar:nth-child(2) { width: 100%; }
+.cd-chart-skeleton-bar:nth-child(3) { width: 75%; }
+.cd-chart-skeleton-canvas {
+    flex: 1; margin-top: 8px; border-radius: 8px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+    background-size: 200% 100%;
+    animation: cdChartShimmer 1.4s ease-in-out infinite;
+    position: relative;
+}
+.cd-chart-skeleton-canvas::after {
+    content: ''; position: absolute; left: 10%; right: 10%; bottom: 20%; height: 45%;
+    background: linear-gradient(90deg, transparent, rgba(245,166,35,0.08), transparent);
+    background-size: 200% 100%;
+    animation: cdChartShimmer 1.8s ease-in-out infinite;
+    border-radius: 4px;
+    clip-path: polygon(0% 60%, 10% 45%, 20% 55%, 30% 30%, 40% 40%, 50% 20%, 60% 35%, 70% 15%, 80% 25%, 90% 10%, 100% 30%, 100% 100%, 0% 100%);
+}
+@keyframes cdChartShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+.cd-chart-status {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 30px 20px; height: 100%; box-sizing: border-box; text-align: center;
+}
+.cd-chart-status-icon {
+    width: 56px; height: 56px; border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.18);
+    color: #F5A623;
+}
+.cd-chart-status-icon.error {
+    background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.18); color: #EF4444;
+}
+.cd-chart-status-title { font-size: 14px; font-weight: 700; color: #FFFFFF; }
+.cd-chart-status-sub { font-size: 12px; color: #6B7A8D; max-width: 240px; line-height: 1.5; }
+.cd-chart-fallback-search {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: #F5A623; font-weight: 600;
+    background: rgba(245,166,35,0.08); padding: 6px 12px; border-radius: 8px;
+    border: 1px solid rgba(245,166,35,0.15);
+}
+.cd-chart-fallback-search .cd-chart-mini-spinner {
+    width: 12px; height: 12px; border: 2px solid rgba(245,166,35,0.2);
+    border-top-color: #F5A623; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+/* ── Section ── */
+.cd-section { margin-bottom: 16px; }
+.cd-section-title {
+    font-size: 14px; font-weight: 700; color: #FFFFFF;
+    margin: 0 0 10px;
+}
+
+/* ── Market Stats Grid ── */
+.cd-stats-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+.cd-stat-item {
+    background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 14px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.cd-stat-label { font-size: 11px; color: #6B7A8D; font-weight: 600; }
+.cd-stat-value { font-size: 16px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
+/* Daily-change stat value colors (used by forex/metals detail Daily Change card) */
+.cd-stat-value-up { color: #22C55E !important; }
+.cd-stat-value-down { color: #EF4444 !important; }
+/* Subtle pulse highlight when a stat value updates in real-time (live price refresh) */
+.cd-stat-value.pulse-up { animation: cdStatPulseUp 0.8s ease-out; }
+.cd-stat-value.pulse-down { animation: cdStatPulseDown 0.8s ease-out; }
+@keyframes cdStatPulseUp {
+    0% { color: #22C55E; text-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    100% { color: #FFFFFF; text-shadow: none; }
+}
+@keyframes cdStatPulseDown {
+    0% { color: #EF4444; text-shadow: 0 0 8px rgba(239,68,68,0.5); }
+    100% { color: #FFFFFF; text-shadow: none; }
+}
+
+/* ── Alert Card (PREMIUM REDESIGN) ── */
+.cd-alert-card {
+    background: linear-gradient(180deg, #0E1623 0%, #0B1220 100%);
+    border: 1px solid rgba(245,166,35,0.12);
+    border-radius: 18px; padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.cd-alert-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.cd-alert-status { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cd-alert-status-icon {
+    width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+    background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.18);
+    color: #F5A623; display: flex; align-items: center; justify-content: center;
+    transition: all 0.25s ease;
+}
+.cd-alert-status-icon.active {
+    background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25);
+    color: #22C55E;
+    animation: cdAlertPulse 2s ease-in-out infinite;
+}
+@keyframes cdAlertPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+}
+.cd-alert-status-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cd-alert-status-label {
+    font-size: 10px; color: #6B7A8D; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.cd-alert-status-value {
+    font-size: 13px; font-weight: 700; color: #A5B4C7;
+    transition: color 0.25s ease;
+}
+.cd-alert-status-value.active { color: #22C55E; }
+.cd-alert-count-badge {
+    display: flex; flex-direction: column; align-items: center;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 6px 12px; min-width: 56px;
+    transition: all 0.25s ease;
+}
+.cd-alert-count-badge.has-alerts {
+    background: rgba(245,166,35,0.08); border-color: rgba(245,166,35,0.25);
+}
+.cd-alert-count-num {
+    font-size: 18px; font-weight: 800; color: #FFFFFF;
+    font-variant-numeric: tabular-nums; line-height: 1;
+}
+.cd-alert-count-badge.has-alerts .cd-alert-count-num { color: #F5A623; }
+.cd-alert-count-label {
+    font-size: 9px; color: #6B7A8D; font-weight: 600;
+    margin-top: 3px; white-space: nowrap;
+}
+
+.cd-alert-current {
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 12px; padding: 10px 14px;
+}
+.cd-alert-current-label {
+    font-size: 11px; color: #6B7A8D; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.cd-alert-current-value {
+    font-size: 16px; font-weight: 800; color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+}
+
+.cd-alert-direction-group {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.cd-alert-dir-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 8px; border-radius: 10px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    color: #6B7A8D; font-size: 11px; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: all 0.2s ease;
+}
+.cd-alert-dir-btn:hover { background: rgba(255,255,255,0.05); color: #A5B4C7; }
+.cd-alert-dir-btn:active { transform: scale(0.97); }
+.cd-alert-dir-btn.active[data-direction="above"] {
+    background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.3); color: #22C55E;
+}
+.cd-alert-dir-btn.active[data-direction="below"] {
+    background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3); color: #EF4444;
+}
+
+.cd-alert-form { display: flex; gap: 8px; }
+.cd-alert-input-wrap { position: relative; flex: 1; }
+.cd-alert-prefix {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    color: #6B7A8D; font-weight: 700; pointer-events: none;
+}
+.cd-alert-input {
+    width: 100%; height: 44px; border-radius: 12px;
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08);
+    color: #FFFFFF; font-size: 15px; font-weight: 600; outline: none;
+    padding: 0 28px 0 14px; font-family: inherit;
+    transition: all 0.2s ease;
+}
+.cd-alert-input::placeholder { color: #4A5468; font-weight: 500; }
+.cd-alert-input:focus {
+    border-color: rgba(245,166,35,0.4);
+    background: rgba(0,0,0,0.5);
+    box-shadow: 0 0 0 3px rgba(245,166,35,0.08);
+}
+.cd-alert-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 0 18px; height: 44px; border-radius: 12px; border: none;
+    background: linear-gradient(135deg, #F5A623, #E0941A);
+    color: #0B1220; font-size: 13px; font-weight: 700; cursor: pointer;
+    font-family: inherit; transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(245,166,35,0.25);
+    white-space: nowrap;
+}
+.cd-alert-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(245,166,35,0.35);
+}
+.cd-alert-btn:active { transform: scale(0.97); }
+
+/* ── Crossing Alert Label (replaces Quick Preset buttons) ── */
+.cd-alert-crossing-label {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 10px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.cd-alert-list {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-top: 4px;
+}
+.cd-alert-item {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 10px 12px;
+    transition: all 0.2s ease;
+}
+.cd-alert-item:hover { background: rgba(255,255,255,0.05); }
+.cd-alert-item-dir {
+    width: 24px; height: 24px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+.cd-alert-item-dir.above {
+    background: rgba(34,197,94,0.1); color: #22C55E;
+}
+.cd-alert-item-dir.below {
+    background: rgba(239,68,68,0.1); color: #EF4444;
+}
+.cd-alert-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cd-alert-item-price {
+    font-size: 14px; font-weight: 700; color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+}
+.cd-alert-item-meta { font-size: 10px; color: #6B7A8D; font-weight: 500; }
+.cd-alert-item-delete {
+    width: 28px; height: 28px; border-radius: 8px; border: none;
+    background: rgba(239,68,68,0.08); color: #EF4444;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.2s ease; flex-shrink: 0;
+}
+.cd-alert-item-delete:hover {
+    background: rgba(239,68,68,0.18); transform: scale(1.05);
+}
+.cd-alert-item-delete:active { transform: scale(0.92); }
+.cd-alert-empty {
+    text-align: center; padding: 16px 12px;
+    color: #6B7A8D; font-size: 12px; font-weight: 500;
+}
+.cd-alert-empty-icon {
+    margin: 0 auto 6px; width: 32px; height: 32px; opacity: 0.4;
+}
+
+/* ── AI Card ── */
+.cd-ai-card {
+    background: linear-gradient(135deg, rgba(245,166,35,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(245,166,35,0.12);
+    border-radius: 14px; padding: 14px;
+    font-size: 13px; line-height: 1.6; color: #A5B4C7;
+}
+
+/* ── Close Button (Back to Market) ── */
+.cd-close-btn {
+    background: rgba(245,166,35,0.1) !important;
+    border-color: rgba(245,166,35,0.25) !important;
+    color: #F5A623 !important;
+}
+.cd-close-btn:hover {
+    background: rgba(245,166,35,0.18) !important;
+}
+
+/* ── Responsive ── */
+/* BUG 2 fix: chart heights tuned per breakpoint so chart + alert + stats all fit
+   without overlap on 320/360/390/412/430px viewports. Combined with min-height:0
+   on .cd-content (which enables proper flex scrolling) nothing is clipped. */
+@media (max-width: 360px) {
+    .cd-chart { height: 280px !important; }
+    .cd-stats-grid { gap: 8px; }
+    .cd-stat-item { padding: 12px; }
+    .cd-stat-value { font-size: 15px; }
+    .cd-tf-btn { font-size: 11px; padding: 6px 2px; }
+    .cd-content { padding: 12px 12px 24px; }
+    .cd-alert-card { padding: 14px; gap: 12px; }
+    .cd-section { margin-bottom: 14px; }
+}
+@media (min-width: 361px) and (max-width: 411px) {
+    .cd-chart { height: 320px !important; }
+}
+@media (min-width: 412px) {
+    .cd-chart { height: 380px !important; }
+    .cd-stat-item { padding: 16px; }
+}
