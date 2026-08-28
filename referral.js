@@ -39,10 +39,7 @@ const ReferralApp = (() => {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function formatNumber(n) {
-    if (n == null || isNaN(n)) return '0';
-    return Number(n).toLocaleString('en-US');
-  }
+  // formatNumber is now loaded from shared-utils.js (loaded before referral.js)
 
   function formatTime(isoStr) {
     if (!isoStr) return '';

@@ -1,21 +1,22 @@
 // ============================================================
-// shared-utils.js — Tier display utilities shared between modules
+// shared-utils.js — Shared utilities between wallet.js and referral.js
 // ============================================================
 //
-// This file contains ONLY the tier utilities that were duplicated
-// identically between wallet.js and referral.js:
+// This file contains ONLY functions that were duplicated IDENTICALLY
+// between wallet.js and referral.js:
 //   - TIER_DATA (tier color/rgb lookup table)
 //   - getTierKey(name) — normalizes tier name to a lookup key
 //   - getTierColor(name) — returns hex color for a tier
 //   - getTierRgb(name) — returns RGB string for a tier
 //   - applyTierVars(el, name) — sets --tier-color and --tier-rgb CSS vars
+//   - formatNumber(n) — formats a number with en-US locale
 //
 // MUST be loaded BEFORE wallet.js and referral.js (see index.html script order).
 // These are global functions (no module system) — they attach to window.* via
 // the default global scope, matching the existing vanilla JS pattern.
 //
-// Do NOT add any other functions to this file — it is intentionally minimal
-// to keep the extraction scope tight and regression-safe.
+// NOTE: cosmetics.js has its OWN formatNumber implementation (different
+// null/NaN handling) — do NOT unify it without a separate audit.
 // ============================================================
 
 const TIER_DATA = {
@@ -49,4 +50,9 @@ function applyTierVars(el, name) {
   if (!el) return;
   el.style.setProperty('--tier-color', getTierColor(name));
   el.style.setProperty('--tier-rgb', getTierRgb(name));
+}
+
+function formatNumber(n) {
+  if (n == null || isNaN(n)) return '0';
+  return Number(n).toLocaleString('en-US');
 }
