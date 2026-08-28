@@ -11,6 +11,7 @@ const path = require('node:path');
 
 const tkSrc = fs.readFileSync(path.join(__dirname, 'tickets.css'), 'utf8');
 const styleSrc = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+const mbSrc = fs.readFileSync(path.join(__dirname, 'membership.css'), 'utf8');
 const baseSrc = fs.readFileSync(path.join(__dirname, 'base.css'), 'utf8');
 const compSrc = fs.readFileSync(path.join(__dirname, 'components.css'), 'utf8');
 const htmlSrc = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
@@ -36,9 +37,12 @@ test('STYLE: style.css has 0 .tk- selectors', () => {
   assert.equal(tkDefs.length, 0, `style.css must NOT define any .tk- selectors — found ${tkDefs.length}`);
 });
 
-// body.jl-locked stays in style.css
-test('KEEP: style.css still has body.jl-locked', () => {
-  assert.ok(styleSrc.includes('body.jl-locked'), 'style.css must keep body.jl-locked (membership lock)');
+// body.jl-locked moved to membership.css (Phase 8)
+test('KEEP: membership.css has body.jl-locked', () => {
+  assert.ok(mbSrc.includes('body.jl-locked'), 'membership.css must have body.jl-locked (moved from style.css in Phase 8)');
+});
+test('MOVED: style.css no longer has body.jl-locked', () => {
+  assert.ok(!styleSrc.includes('body.jl-locked'), 'style.css must NOT have body.jl-locked (moved to membership.css in Phase 8)');
 });
 
 // .market-ticker stays
@@ -46,9 +50,12 @@ test('KEEP: style.css still has .market-ticker', () => {
   assert.match(styleSrc, /\.market-ticker\s*\{/);
 });
 
-// .join-status-bar stays
-test('KEEP: style.css still has .join-status-bar', () => {
-  assert.ok(styleSrc.includes('.join-status-bar'), 'style.css must keep .join-status-bar');
+// .join-status-bar moved to membership.css (Phase 8)
+test('KEEP: membership.css has .join-status-bar', () => {
+  assert.ok(mbSrc.includes('.join-status-bar'), 'membership.css must have .join-status-bar (moved from style.css in Phase 8)');
+});
+test('MOVED: style.css no longer has .join-status-bar', () => {
+  assert.ok(!styleSrc.includes('.join-status-bar'), 'style.css must NOT have .join-status-bar (moved to membership.css in Phase 8)');
 });
 
 // No duplication with base/components

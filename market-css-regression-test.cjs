@@ -11,6 +11,7 @@ const path = require('node:path');
 
 const marketSrc = fs.readFileSync(path.join(__dirname, 'market.css'), 'utf8');
 const styleSrc = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+const mbSrc = fs.readFileSync(path.join(__dirname, 'membership.css'), 'utf8');
 const baseSrc = fs.readFileSync(path.join(__dirname, 'base.css'), 'utf8');
 const compSrc = fs.readFileSync(path.join(__dirname, 'components.css'), 'utf8');
 const dashSrc = fs.readFileSync(path.join(__dirname, 'dashboard.css'), 'utf8');
@@ -42,10 +43,15 @@ test('KEEP: style.css still has .market-ticker', () => {
     'style.css must keep .market-ticker (shared between Dashboard and Market)');
 });
 
-// .cd- (coin detail) must STAY in style.css
-test('KEEP: style.css still has .cd-fullscreen', () => {
-  assert.match(styleSrc, /\.cd-fullscreen\s*\{/,
-    'style.css must keep .cd-fullscreen (coin-detail, not market)');
+// .cd-fullscreen base is in coin-detail.css; body.jl-locked .cd-fullscreen override
+// moved to membership.css (Phase 8). style.css no longer has .cd-fullscreen.
+test('KEEP: .cd-fullscreen NOT in market.css (coin-detail namespace)', () => {
+  assert.ok(!/\.cd-fullscreen\s*\{/.test(marketSrc),
+    'market.css must NOT have .cd-fullscreen — it belongs to coin-detail, not market');
+});
+test('MOVED: body.jl-locked .cd-fullscreen override in membership.css (Phase 8)', () => {
+  assert.ok(mbSrc.includes('body.jl-locked .cd-fullscreen'),
+    'membership.css must have body.jl-locked .cd-fullscreen (moved from style.css in Phase 8)');
 });
 
 // No duplication with other CSS files

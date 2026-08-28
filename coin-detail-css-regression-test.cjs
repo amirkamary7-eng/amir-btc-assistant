@@ -11,6 +11,7 @@ const path = require('node:path');
 
 const cdSrc = fs.readFileSync(path.join(__dirname, 'coin-detail.css'), 'utf8');
 const styleSrc = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+const mbSrc = fs.readFileSync(path.join(__dirname, 'membership.css'), 'utf8');
 const baseSrc = fs.readFileSync(path.join(__dirname, 'base.css'), 'utf8');
 const compSrc = fs.readFileSync(path.join(__dirname, 'components.css'), 'utf8');
 const htmlSrc = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
@@ -30,15 +31,18 @@ for (const sel of CD_SELECTORS) {
   });
 }
 
-// style.css must NOT have .cd- definitions (except body.jl-locked override)
-test('STYLE: style.css has only body.jl-locked .cd- override (no definitions)', () => {
+// style.css must NOT have .cd- definitions
+// (body.jl-locked .cd-fullscreen override moved to membership.css in Phase 8)
+test('STYLE: style.css has 0 .cd- definitions', () => {
   const cdDefs = styleSrc.match(/^\.cd-/gm) || [];
   assert.equal(cdDefs.length, 0, `style.css must NOT define any .cd- selectors — found ${cdDefs.length}`);
 });
 
-test('STYLE: style.css keeps body.jl-locked .cd-fullscreen override', () => {
-  assert.ok(styleSrc.includes('body.jl-locked .cd-fullscreen'),
-    'style.css must keep the body.jl-locked .cd-fullscreen override');
+test('MOVED: body.jl-locked .cd-fullscreen override in membership.css (Phase 8)', () => {
+  assert.ok(mbSrc.includes('body.jl-locked .cd-fullscreen'),
+    'membership.css must have body.jl-locked .cd-fullscreen (moved from style.css in Phase 8)');
+  assert.ok(!styleSrc.includes('body.jl-locked .cd-fullscreen'),
+    'style.css must NOT have body.jl-locked .cd-fullscreen (moved to membership.css in Phase 8)');
 });
 
 // .tk- (tickets) was extracted to tickets.css in Phase 7

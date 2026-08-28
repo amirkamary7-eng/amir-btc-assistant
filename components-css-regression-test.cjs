@@ -14,6 +14,7 @@ const path = require('node:path');
 
 const componentsSrc = fs.readFileSync(path.join(__dirname, 'components.css'), 'utf8');
 const styleSrc = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+const mbSrc = fs.readFileSync(path.join(__dirname, 'membership.css'), 'utf8');
 const baseSrc = fs.readFileSync(path.join(__dirname, 'base.css'), 'utf8');
 const htmlSrc = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const buildSrc = fs.readFileSync(path.join(__dirname, 'scripts/prepare-pages.mjs'), 'utf8');
@@ -115,9 +116,11 @@ test('OVERRIDE-1: .modal-box @media override stays in style.css', () => {
     'style.css must KEEP the .modal-box @media override (later in cascade)');
 });
 
-test('OVERRIDE-2: body.jl-locked .bottom-nav override stays in style.css', () => {
-  assert.match(styleSrc, /body\.jl-locked\s+\.bottom-nav/,
-    'style.css must KEEP the body.jl-locked .bottom-nav override');
+test('OVERRIDE-2: body.jl-locked .bottom-nav override moved to membership.css (Phase 8)', () => {
+  assert.match(mbSrc, /body\.jl-locked\s+\.bottom-nav/,
+    'membership.css must have the body.jl-locked .bottom-nav override (moved from style.css in Phase 8)');
+  assert.ok(!/body\.jl-locked\s+\.bottom-nav/.test(styleSrc),
+    'style.css must NOT have body.jl-locked .bottom-nav (moved to membership.css in Phase 8)');
 });
 
 test('OVERRIDE-3: .tk-list .empty-state moved to tickets.css (Phase 7)', () => {
