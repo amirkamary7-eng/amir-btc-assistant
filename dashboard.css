@@ -1,0 +1,1204 @@
+/* ============================================================
+   dashboard.css — Dashboard-specific styles (Phase 3 extraction)
+   ============================================================
+   Extracted from style.css. Contains ONLY selectors used on the
+   Dashboard page (#dashboard-page, .hero-banner-slider, .dms-*,
+   .dashboard-market-status, watchlist on dashboard, etc.).
+   MUST load AFTER base.css + components.css and BEFORE style.css.
+   ============================================================ */
+
+/* ---- Dashboard root container: aligns sections with proper RTL spacing ---- */
+#dashboard-page {
+    padding: 12px 16px 24px;
+    overflow-x: hidden;
+}
+#dashboard-page .section-header {
+    padding: 20px 0 14px; /* 14px gap from header to cards below */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+/* First section-header after ticker: tighter top padding for balanced rhythm */
+#dashboard-page .market-ticker + .section-header {
+    padding-top: 14px; /* 14px gap from ticker to section title (overrides 20px) */
+}
+#dashboard-page .section-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #FFFFFF;
+    letter-spacing: 0.3px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+#dashboard-page .section-icon {
+    color: #F5A623;
+    stroke: #F5A623;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+#dashboard-page .section-more {
+    font-size: 12px;
+    color: #A5B4C7;
+    cursor: pointer;
+    transition: color 0.2s;
+    flex-shrink: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#dashboard-page .section-more:active { color: #F5A623; }
+
+.dashboard-bottom-spacer { height: 24px; }
+
+/* ============================================================================
+   1. HERO SLIDER — image-based banner slides, aspect-ratio for CLS=0
+   ========================================================================== */
+.hero-banner-slider {
+    margin: 0 0 22px; /* 22px gap to ticker */
+    border-radius: 24px;
+    position: relative;
+    overflow: hidden; /* CRITICAL: no overflow, no bleed */
+    aspect-ratio: 2 / 1; /* Match banner image aspect ratio (1200x590 ≈ 2:1) */
+    width: 100%;
+    border: 1px solid rgba(245, 166, 35, 0.12);
+    background: #0B1220;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.hero-slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.hero-slide.active {
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+.hero-slide-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+}
+/* New banners: fill container exactly (container aspect-ratio matches image) */
+.hero-slide-img--cover {
+    object-fit: fill; /* container is 2:1, images are 2:1 → perfect fit, no crop */
+    object-position: center;
+}
+/* ─── Unified Banner CTA Component ──────────────────────────────────────────
+   Both buttons use the SAME base styles (same width/height/radius/padding/position).
+   Only the position (left/top/width/height) differs — matching the designed
+   placeholder rectangle in each banner image (VLM-verified exact coordinates).
+
+   Because the container aspect-ratio (2:1) matches the image aspect-ratio,
+   and object-fit: fill is used, percentage positions map EXACTLY to image pixels
+   at ALL screen sizes. Buttons stay perfectly aligned on any mobile/desktop.
+
+   Premium banner button (banner-premium.webp): Left 16.5%, Top 80.3%, Right 42.4%, Bottom 88.0%
+   Channel banner button (banner-channel.webp): Left 9.6%, Top 82.8%, Right 44.7%, Bottom 91.8%
+   ─────────────────────────────────────────────────────────────────────────── */
+.hero-cta--channel-v2,
+.hero-cta--premium-v2 {
+    position: absolute;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 1.5px solid rgba(245, 158, 11, 0.4);
+    border-radius: 6px;
+    color: #FCD34D;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 3;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
+    /* Override ALL base .hero-cta props that would break exact-fit positioning */
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
+    box-shadow: none;
+    flex-shrink: 1;
+    pointer-events: auto;
+}
+.hero-cta--channel-v2:hover,
+.hero-cta--premium-v2:hover {
+    border-color: rgba(252, 211, 77, 0.65);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
+    color: #FFCC4D;
+}
+.hero-cta--channel-v2:active,
+.hero-cta--premium-v2:active {
+    transform: scale(0.96);
+}
+
+/* PREMIUM BANNER FIX: Premium-active CTA style — when a Premium user views
+   the banner, the CTA switches from upsell ("فعال‌سازی Premium") to status
+   ("✦ عضویت Premium فعال"). This style gives it a distinct gold-fill look
+   so Premium users see a "confirmed/active" state, not an upsell button. */
+.hero-cta--premium-active {
+    background: linear-gradient(135deg, #F5A623 0%, #FFCC4D 100%);
+    color: #0B1220;
+    border-color: rgba(255, 204, 77, 0.8);
+    box-shadow: 0 0 20px rgba(245, 166, 35, 0.35);
+    font-weight: 700;
+}
+.hero-cta--premium-active:hover {
+    background: linear-gradient(135deg, #FFCC4D 0%, #F5A623 100%);
+    color: #0B1220;
+    border-color: rgba(255, 204, 77, 1);
+    box-shadow: 0 0 24px rgba(245, 166, 35, 0.5);
+}
+
+/* Channel CTA — exact position matching designed placeholder in channel banner image */
+.hero-cta--channel-v2 {
+    left: 9.6%;
+    top: 81.0%;
+    width: calc(45.9% - 9.6%);
+    height: calc(92.0% - 81.0%);
+}
+
+/* Premium CTA — exact position matching designed placeholder in premium banner image */
+.hero-cta--premium-v2 {
+    left: 16.5%;
+    top: 78.0%;
+    width: calc(43.6% - 16.5%);
+    height: calc(89.0% - 78.0%);
+}
+
+/* Ripple animation for both CTAs */
+.hero-cta--channel-v2 .ripple,
+.hero-cta--premium-v2 .ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(252, 211, 77, 0.25);
+    transform: scale(0);
+    animation: hero-ripple 0.6s ease-out;
+    pointer-events: none;
+}
+@keyframes hero-ripple {
+    to { transform: scale(2.5); opacity: 0; }
+}
+
+.hero-slider-dots {
+    position: absolute;
+    top: 12px;
+    right: 14px; /* moved to TOP-right so they NEVER collide with bottom CTAs
+                    (channel CTA = bottom-center, Bitunix CTA = bottom-right) */
+    display: flex;
+    gap: 6px;
+    z-index: 3;
+}
+.hero-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.35);
+    transition: all 0.3s;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.hero-dot.active {
+    background: #F5A623;
+    width: 18px;
+    border-radius: 4px;
+    box-shadow: 0 0 8px rgba(245, 166, 35, 0.5);
+}
+
+/* ============================================================================
+
+/* ============================================================================
+   2. MARKET STATUS — Fear & Greed (left) + Market Trend (right), equal columns
+   ========================================================================== */
+.dashboard-market-status {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: stretch;
+}
+.dms-card {
+    background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 14px;
+    min-height: 132px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+}
+.dms-card::before {
+    content: '';
+    position: absolute;
+    top: -30px;
+    inset-inline-end: -30px;
+    width: 90px;
+    height: 90px;
+    background: radial-gradient(circle, rgba(245, 166, 35, 0.06), transparent 70%);
+    pointer-events: none;
+}
+.dms-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #A5B4C7;
+    letter-spacing: 0.3px;
+}
+.dms-card-header svg {
+    width: 14px;
+    height: 14px;
+    color: #F5A623;
+    stroke: #F5A623;
+    flex-shrink: 0;
+}
+
+/* Fear & Greed card */
+.dms-fg-body {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    justify-content: center;
+}
+.dms-fg-gauge {
+    width: 90px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.dms-fg-gauge svg {
+    width: 90px;
+    height: 50px;
+    display: block;
+}
+.dms-fg-score {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1;
+    gap: 1px;
+}
+.dms-fg-score-num {
+    font-size: 24px;
+    font-weight: 900;
+    color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+.dms-fg-score-label {
+    font-size: 8px;
+    color: #A5B4C7;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1;
+}
+.dms-fg-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+    justify-content: center;
+}
+.dms-fg-class {
+    font-size: 14px;
+    font-weight: 800;
+    color: #FFFFFF;
+    line-height: 1.2;
+    text-align: center;
+}
+.dms-fg-class.fg-extreme-fear { color: #EF4444; }
+.dms-fg-class.fg-fear { color: #F97316; }
+.dms-fg-class.fg-neutral { color: #A5B4C7; }
+.dms-fg-class.fg-greed { color: #84CC16; }
+.dms-fg-class.fg-extreme-greed { color: #22C55E; }
+.dms-fg-source { display: none; }
+
+/* Market Trend card — Bull/Bear graphic indicator */
+.dms-trend-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+.dms-trend-graphic {
+    width: 90px;
+    height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin: 0 auto 2px;
+}
+.dms-trend-graphic svg.trend-bull-bear {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+}
+.dms-trend-graphic::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.12);
+    /* backdrop-filter: blur removed — unnecessary and may interfere with img rendering */
+    border: 1px solid rgba(255,255,255,0.18);
+}
+.dms-trend-graphic.bullish svg.trend-bull-bear {
+    /* filter: drop-shadow removed — causes blur on downcaled images */
+}
+.dms-trend-graphic.bullish::before {
+    background: rgba(34,197,94,0.18);
+    border-color: rgba(34,197,94,0.35);
+}
+.dms-trend-graphic.bearish svg.trend-bull-bear {
+    /* filter: drop-shadow removed — causes blur on downcaled images */
+}
+.dms-trend-graphic.bearish::before {
+    background: rgba(239,68,68,0.18);
+    border-color: rgba(239,68,68,0.35);
+}
+.dms-trend-graphic.neutral svg.trend-bull-bear {
+    /* filter: drop-shadow removed — causes blur on downcaled images */
+}
+.dms-trend-graphic.neutral::before {
+    background: rgba(245,166,35,0.18);
+    border-color: rgba(245,166,35,0.35);
+}
+.dms-trend-label-big {
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+.dms-trend-label-big.bullish { color: #22C55E; }
+.dms-trend-label-big.bearish { color: #EF4444; }
+.dms-trend-label-big.neutral { color: #F5A623; }
+.dms-trend-sub {
+    font-size: 10px;
+    color: #6B7A8D;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.dms-trend-sub .up { color: #22C55E; font-weight: 700; }
+.dms-trend-sub .down { color: #EF4444; font-weight: 700; }
+
+/* Market status skeleton */
+.dms-skeleton {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+}
+.dms-skel-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.08) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dms-skel-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+.dms-skel-line {
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.08) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dms-skel-line.w-60 { width: 60%; }
+.dms-skel-line.w-40 { width: 40%; height: 9px; }
+
+/* ============================================================================
+   3. WATCHLIST — Max 5 coins + Add Coin card, horizontal scroll, sparkline
+   ========================================================================== */
+#dashboard-page .watchlist-grid {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    padding: 0;
+    margin: 0 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+#dashboard-page .watchlist-grid::-webkit-scrollbar { display: none; }
+
+.watch-card {
+    flex: 0 0 120px;
+    scroll-snap-align: start;
+    background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+    cursor: pointer;
+    position: relative;
+    transition: transform 0.15s ease, border-color 0.2s ease;
+    min-height: 130px;
+    overflow: hidden;
+}
+.watch-card:active {
+    transform: scale(0.97);
+    border-color: rgba(245, 166, 35, 0.3);
+}
+.watch-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 2px;
+    width: 100%;
+}
+.watch-card-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+}
+.watch-card-remove {
+    position: absolute;
+    top: 10px;
+    inset-inline-end: 10px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(239, 68, 68, 0.12);
+    color: #EF4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+    z-index: 2;
+}
+.watch-card-remove:hover { background: rgba(239, 68, 68, 0.25); }
+.watch-card-remove svg { width: 10px; height: 10px; }
+.watch-card-symbol {
+    font-size: 13px;
+    font-weight: 800;
+    color: #FFFFFF;
+    letter-spacing: 0.3px;
+    margin-top: 2px;
+}
+.watch-card-name {
+    font-size: 9px;
+    color: #6B7A8D;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.watch-card-price {
+    font-size: 12px;
+    font-weight: 700;
+    color: #FFFFFF;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+    line-height: 1.2;
+}
+.watch-card-change {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 6px;
+    border-radius: 8px;
+    width: fit-content;
+    margin: 2px auto 0;
+    line-height: 1.2;
+}
+.watch-card-change.up { color: #22C55E; background: rgba(34, 197, 94, 0.1); }
+.watch-card-change.down { color: #EF4444; background: rgba(239, 68, 68, 0.1); }
+.watch-card-change svg { width: 9px; height: 9px; }
+
+/* Mini trend sparkline (SVG) */
+.watch-card-trend {
+    height: 28px;
+    width: 100%;
+    margin-top: auto;
+    display: flex;
+    align-items: flex-end;
+}
+.watch-card-trend svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Add Coin card */
+.watch-card-add {
+    flex: 0 0 92px;
+    scroll-snap-align: start;
+    background: transparent;
+    border: 1.5px dashed rgba(245, 166, 35, 0.3);
+    border-radius: 18px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    color: #F5A623;
+    transition: all 0.2s ease;
+    min-height: 138px;
+}
+.watch-card-add:active { transform: scale(0.97); }
+.watch-card-add:hover {
+    background: rgba(245, 166, 35, 0.05);
+    border-color: rgba(245, 166, 35, 0.5);
+}
+.watch-card-add-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(245, 166, 35, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.watch-card-add-icon svg { width: 16px; height: 16px; }
+.watch-card-add-text {
+    font-size: 10px;
+    font-weight: 700;
+    color: #F5A623;
+    text-align: center;
+    line-height: 1.2;
+}
+
+/* Watchlist skeleton */
+#dashboard-page .watchlist-skeleton {
+    display: flex;
+    gap: 10px;
+    padding: 0;
+    grid-template-columns: none;
+}
+#dashboard-page .watchlist-skeleton-item {
+    flex: 0 0 122px;
+    min-height: 138px;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
+    background: #0B1220;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+}
+
+/* ============================================================================
+   4. MARKET ANALYSIS — horizontal scrollable cards (max 5), regular + VIP
+   ========================================================================== */
+.dashboard-featured-analysis-wrap {
+    margin: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 4px;
+}
+.dashboard-featured-analysis-wrap::-webkit-scrollbar { display: none; }
+.dma-row {
+    display: flex;
+    gap: 12px;
+    scroll-snap-align: start;
+}
+.dma-card {
+    flex: 0 0 220px;
+    scroll-snap-align: start;
+    position: relative;
+    border-radius: 18px;
+    overflow: hidden;
+    cursor: pointer;
+    background: #0B1220;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    height: 200px;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.15s ease;
+}
+.dma-card:active { transform: scale(0.98); }
+.dma-card-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 1;
+}
+.dma-card-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(2, 6, 17, 0) 0%, rgba(2, 6, 17, 0.4) 45%, rgba(2, 6, 17, 0.92) 88%, rgba(2, 6, 17, 0.98) 100%);
+    z-index: 2;
+}
+.dma-card-content {
+    position: relative;
+    z-index: 3;
+    margin-top: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.dma-card-top-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.dma-vip-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: linear-gradient(135deg, #F5A623, #FFD700);
+    color: #020611;
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+    letter-spacing: 0.3px;
+    box-shadow: 0 2px 6px rgba(245, 166, 35, 0.35);
+    line-height: 1;
+}
+.dma-vip-badge svg { width: 9px; height: 9px; }
+.dma-coin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    line-height: 1;
+}
+.dma-tf-badge {
+    font-size: 9px;
+    color: #A5B4C7;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-weight: 600;
+    line-height: 1;
+}
+.dma-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #FFFFFF;
+    line-height: 1.3;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+.dma-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 9px;
+    color: #A5B4C7;
+}
+.dma-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+.dma-meta-item svg { width: 9px; height: 9px; }
+
+/* Market Analysis skeleton */
+.dfa-skeleton-row {
+    display: flex;
+    gap: 12px;
+    overflow: hidden;
+}
+.dfa-skel-card {
+    flex: 0 0 220px;
+    height: 200px;
+    border-radius: 18px;
+    background: #0B1220;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.dfa-skel-img {
+    height: 110px;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.06) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dfa-skel-content {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+.dfa-skel-line {
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.06) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dfa-skel-line.w-60 { width: 60%; }
+.dfa-skel-line.w-90 { width: 90%; height: 12px; }
+
+/* Empty state for Market Analysis */
+.dfa-empty {
+    border-radius: 18px;
+    background: #0B1220;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    padding: 28px 16px;
+    text-align: center;
+    color: #6B7A8D;
+    font-size: 12px;
+}
+
+/* ============================================================================
+   5. BREAKING NEWS — Max 3 items, priority sort, 64x64 thumbnails, 2-line clamp
+   ========================================================================== */
+.important-news-list {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.important-news-item {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-inline-start: 3px solid #F5A623;
+    padding: 12px;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.2s ease;
+    animation: newsFadeIn 0.4s ease both;
+    min-height: 88px;
+}
+.important-news-item:active { transform: scale(0.99); }
+.important-news-item.priority-urgent { border-inline-start-color: #EF4444; }
+.important-news-item.priority-important { border-inline-start-color: #F5A623; }
+.important-news-item.priority-latest { border-inline-start-color: #6B7A8D; }
+.important-news-img {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #0B1220;
+}
+.important-news-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+}
+.important-news-priority {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 5px;
+    width: fit-content;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    line-height: 1;
+}
+.important-news-priority.priority-urgent {
+    background: rgba(239, 68, 68, 0.15);
+    color: #EF4444;
+}
+.important-news-priority.priority-important {
+    background: rgba(245, 166, 35, 0.15);
+    color: #F5A623;
+}
+.important-news-priority.priority-latest {
+    background: rgba(255, 255, 255, 0.06);
+    color: #A5B4C7;
+}
+.important-news-priority svg { width: 9px; height: 9px; }
+.important-news-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #FFFFFF;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+    min-height: 33px;
+}
+.important-news-source {
+    font-size: 10px;
+    color: #6B7A8D;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.important-news-source svg { width: 10px; height: 10px; flex-shrink: 0; }
+
+@keyframes newsFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* News skeleton */
+.important-news-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.important-news-skeleton-item {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    background: #0B1220;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    min-height: 88px;
+}
+.important-news-skeleton-img {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.06) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.important-news-skeleton-text {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+}
+.important-news-skeleton-line {
+    height: 11px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.06) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.important-news-skeleton-line:nth-child(1) { width: 85%; }
+.important-news-skeleton-line:nth-child(2) { width: 50%; height: 9px; }
+
+/* ============================================================================
+   6. ECONOMIC CALENDAR — Next 3 upcoming, structured top/middle/bottom cards
+   ========================================================================== */
+.dashboard-calendar {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 4px;
+}
+.dashboard-calendar::-webkit-scrollbar { display: none; }
+.dc-card {
+    flex: 0 0 210px;
+    scroll-snap-align: start;
+    background: linear-gradient(180deg, #0E1626 0%, #0B1220 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-inline-start: 3px solid #F5A623;
+    border-radius: 16px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 134px;
+    position: relative;
+}
+.dc-card.impact-high { border-inline-start-color: #EF4444; }
+.dc-card.impact-medium { border-inline-start-color: #F5A623; }
+.dc-card.impact-low { border-inline-start-color: #22C55E; }
+.dc-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.dc-card-country {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #FFFFFF;
+    overflow: hidden;
+}
+.dc-card-flag {
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.dc-card-country-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dc-card-impact {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.dc-card-impact.impact-high { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
+.dc-card-impact.impact-medium { background: rgba(245, 166, 35, 0.15); color: #F5A623; }
+.dc-card-impact.impact-low { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
+.dc-card-impact svg { width: 9px; height: 9px; }
+.dc-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #FFFFFF;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex: 1;
+    word-break: break-word;
+}
+.dc-card-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: #A5B4C7;
+    font-variant-numeric: tabular-nums;
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.dc-card-bottom svg {
+    width: 11px;
+    height: 11px;
+    color: #F5A623;
+    stroke: #F5A623;
+    flex-shrink: 0;
+}
+.dc-card-time-day {
+    font-weight: 700;
+    color: #FFFFFF;
+}
+.dc-card-time-sep {
+    color: #6B7A8D;
+}
+
+/* Calendar skeleton */
+.dc-skeleton {
+    display: flex;
+    gap: 10px;
+    overflow: hidden;
+}
+.dc-skel-card {
+    flex: 0 0 210px;
+    height: 134px;
+    border-radius: 16px;
+    background: linear-gradient(90deg, #0B1220 25%, rgba(255, 255, 255, 0.06) 50%, #0B1220 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.dc-empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: #6B7A8D;
+    font-size: 12px;
+    border-radius: 16px;
+    background: #0B1220;
+    border: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+/* Dashboard calendar skeleton — shown while calendar data is loading */
+.dc-skeleton-calendar {
+    display: flex;
+    gap: 10px;
+    padding: 4px 0;
+    overflow: hidden;
+}
+.dc-skeleton-item {
+    flex: 0 0 140px;
+    height: 80px;
+    border-radius: 14px;
+    background: linear-gradient(90deg, #0B1220 0%, #131E2E 50%, #0B1220 100%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* ============================================================================
+   RESPONSIVE — 320 / 360 / 390 / 412 / 430
+   ========================================================================== */
+@media (max-width: 360px) {
+    #dashboard-page { padding: 10px 12px 20px; }
+    .hero-banner-slider { border-radius: 18px; }
+    .hero-slider-dots { top: 8px; right: 10px; }
+    .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }
+    .dms-fg-gauge { width: 64px; }
+    .dms-fg-gauge svg { width: 64px; height: 36px; }
+    .dms-fg-score-num { font-size: 15px; }
+    .dms-fg-class { font-size: 12px; }
+    .dms-trend-arrow { width: 38px; height: 38px; }
+    .dms-trend-arrow svg { width: 19px; height: 19px; }
+    .dms-trend-label-big { font-size: 13px; }
+    .watch-card-add { flex: 0 0 80px; min-height: 130px; }
+    .dma-card { flex: 0 0 190px; height: 184px; }
+    .dfa-skel-card { flex: 0 0 190px; height: 184px; }
+    .important-news-img { width: 56px; height: 56px; }
+    .important-news-skeleton-img { width: 56px; height: 56px; }
+    .important-news-title { font-size: 11px; }
+    .dc-card { flex: 0 0 188px; padding: 10px; min-height: 128px; }
+    .dc-skel-card { flex: 0 0 188px; height: 128px; }
+}
+
+@media (min-width: 412px) {
+    .dma-card { flex: 0 0 240px; height: 210px; }
+    .dfa-skel-card { flex: 0 0 240px; height: 210px; }
+    .dc-card { flex: 0 0 224px; min-height: 140px; }
+    .dc-skel-card { flex: 0 0 224px; height: 140px; }
+}
+
+@media (min-width: 430px) {
+    .watch-card { flex: 0 0 134px; }
+    .dma-card { flex: 0 0 252px; }
+    .dfa-skel-card { flex: 0 0 252px; }
+}
+
+/* RTL safety — ensure dashboard respects RTL on icon-first rows */
+html[dir="rtl"] #dashboard-page,
+body[dir="rtl"] #dashboard-page {
+    direction: rtl;
+}
+html[dir="rtl"] .important-news-item { border-inline-start: 3px solid #F5A623; }
+html[dir="rtl"] .important-news-item.priority-urgent { border-inline-start-color: #EF4444; }
+html[dir="rtl"] .important-news-item.priority-important { border-inline-start-color: #F5A623; }
+html[dir="rtl"] .important-news-item.priority-latest { border-inline-start-color: #6B7A8D; }
+html[dir="rtl"] .dc-card { border-inline-start: 3px solid #F5A623; }
+html[dir="rtl"] .dc-card.impact-high { border-inline-start-color: #EF4444; }
+html[dir="rtl"] .dc-card.impact-medium { border-inline-start-color: #F5A623; }
+html[dir="rtl"] .dc-card.impact-low { border-inline-start-color: #22C55E; }
+
+/* #endregion Dashboard Polish */
+
+/* ============================================================
+   Dashboard Polish — Bull/Bear Graphics, Sparkline Glow, Watchlist Alignment
+   ============================================================ */
+
+/* ── Market Trend: Bull/Bear Graphics ── */
+/* ── Market Trend: Image-based Bull/Bear graphics ── */
+.dms-trend-graphic img.trend-bull-bear-img {
+    width: 90px;
+    height: 90px;
+    object-fit: contain;
+    position: relative;
+    z-index: 1;
+    border-radius: 50%;
+    image-rendering: auto;
+}
+.dms-trend-graphic.bullish img.trend-bull-bear-img {
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
+}
+.dms-trend-graphic.bearish img.trend-bull-bear-img {
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
+}
+.dms-trend-graphic.neutral img.trend-bull-bear-img {
+    /* filter: drop-shadow removed — it applies Gaussian blur to entire image */
+}
+@media (max-width: 430px) {
+    .dms-trend-graphic img.trend-bull-bear-img {
+        width: 72px;
+        height: 72px;
+    }
+    .dms-trend-graphic {
+        width: 72px;
+        height: 72px;
+    }
+}
+
+/* ── Trend image fallback emoji ── */
+.trend-fallback {
+    font-size: 48px;
+    line-height: 90px;
+    display: block;
+    text-align: center;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   MKT — Market Page Rebuild (Premium Dark Crypto Interface)
+   All new classes use .mkt- prefix
+   Colors: bg #020611, cards #0B1220, accent #F5A623
+   ════════════════════════════════════════════════════════════════════ */
+

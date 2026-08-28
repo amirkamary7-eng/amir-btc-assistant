@@ -20,6 +20,7 @@ const hashedFiles = [
   'app.js',
   'base.css',
   'components.css',
+  'dashboard.css',
   'style.css',
   'assistant.js',
   'notifications.js',
