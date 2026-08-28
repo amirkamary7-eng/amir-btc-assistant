@@ -19,6 +19,7 @@ const hashedFiles = [
   'shared-utils.js',
   'app.js',
   'base.css',
+  'components.css',
   'style.css',
   'assistant.js',
   'notifications.js',
