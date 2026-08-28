@@ -24,34 +24,12 @@ const ReferralApp = (() => {
   let wheelConfettiTimer = null;
 
   // =============================================
-  // Tier System (mirror of WalletApp — keeps single source of truth for colors)
+  // Tier System
   // =============================================
-  const TIER_DATA = {
-    bronze:   { hex: '#CD7F32', rgb: '205, 127, 50' },
-    silver:   { hex: '#C0C0C0', rgb: '192, 192, 192' },
-    gold:     { hex: '#FFD700', rgb: '255, 215, 0' },
-    platinum: { hex: '#6CB4EE', rgb: '108, 180, 238' },
-    diamond:  { hex: '#00CED1', rgb: '0, 206, 209' },
-  };
-
-  function getTierKey(name) {
-    if (!name) return 'bronze';
-    const n = String(name).toLowerCase().trim();
-    if (n.includes('diamond')) return 'diamond';
-    if (n.includes('platinum')) return 'platinum';
-    if (n.includes('gold')) return 'gold';
-    if (n.includes('silver')) return 'silver';
-    if (n.includes('bronze')) return 'bronze';
-    return 'bronze';
-  }
-  function getTierColor(name) { return TIER_DATA[getTierKey(name)].hex; }
-  function getTierRgb(name) { return TIER_DATA[getTierKey(name)].rgb; }
+  // TIER_DATA, getTierKey, getTierColor, getTierRgb, applyTierVars
+  // are now loaded from shared-utils.js (loaded before referral.js).
+  // displayTier remains here (uses RT() which is referral-specific).
   function displayTier(name) { return RT('tier_' + getTierKey(name)); }
-  function applyTierVars(el, name) {
-    if (!el) return;
-    el.style.setProperty('--tier-color', getTierColor(name));
-    el.style.setProperty('--tier-rgb', getTierRgb(name));
-  }
 
   // =============================================
   // Helpers

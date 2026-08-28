@@ -16,6 +16,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const outputDir = path.join(projectRoot, 'webapp', 'pages-dist');
 
 const hashedFiles = [
+  'shared-utils.js',
   'app.js',
   'style.css',
   'assistant.js',
