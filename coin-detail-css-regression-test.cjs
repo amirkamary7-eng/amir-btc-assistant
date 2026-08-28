@@ -41,9 +41,10 @@ test('STYLE: style.css keeps body.jl-locked .cd-fullscreen override', () => {
     'style.css must keep the body.jl-locked .cd-fullscreen override');
 });
 
-// .tk- (tickets) stays in style.css
-test('KEEP: style.css still has .tk-overlay', () => {
-  assert.match(styleSrc, /\.tk-overlay\s*\{/);
+// .tk- (tickets) was extracted to tickets.css in Phase 7
+test('KEEP: .tk-overlay is in tickets.css, not style.css (Phase 7)', () => {
+  assert.ok(!/\.tk-overlay\s*\{/.test(styleSrc),
+    'style.css should NOT have .tk-overlay — it was extracted to tickets.css in Phase 7');
 });
 
 // No duplication with base/components

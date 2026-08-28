@@ -24,6 +24,7 @@ const hashedFiles = [
   'market.css',
   'news.css',
   'coin-detail.css',
+  'tickets.css',
   'style.css',
   'assistant.js',
   'notifications.js',

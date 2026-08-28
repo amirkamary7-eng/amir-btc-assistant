@@ -120,9 +120,11 @@ test('OVERRIDE-2: body.jl-locked .bottom-nav override stays in style.css', () =>
     'style.css must KEEP the body.jl-locked .bottom-nav override');
 });
 
-test('OVERRIDE-3: .tk-list .empty-state override stays in style.css', () => {
-  assert.match(styleSrc, /\.tk-list\s+\.empty-state/,
-    'style.css must KEEP the .tk-list .empty-state override (tickets-specific)');
+test('OVERRIDE-3: .tk-list .empty-state moved to tickets.css (Phase 7)', () => {
+  // This was in style.css during Phase 2, but Phase 7 extracted all .tk-* to tickets.css.
+  // Now it should be in tickets.css, not style.css.
+  assert.ok(!/\.tk-list\s+\.empty-state/.test(styleSrc),
+    'style.css should NOT have .tk-list .empty-state — it was extracted to tickets.css in Phase 7');
 });
 
 // ============================================================================
