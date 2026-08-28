@@ -71,13 +71,12 @@
 /* #region اخبار مهم */
 /* این بخش استایل‌های مرتبط با "اخبار مهم" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.important-news-list { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 8px; }
-.important-news-item { display: flex; gap: 10px; border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); border-left: 2px solid var(--accent); padding: 14px; cursor: pointer; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; animation: newsFadeIn 0.4s ease both; }
+/* NOTE: Base .important-news-* styles moved to dashboard.css (Phase 3 extraction).
+   Only the :hover interaction remains here — it was always in the legacy block
+   and is NOT duplicated in dashboard.css. The enhanced base styles in
+   dashboard.css (min-height:88px, gap:12px, border-radius:16px, priority variants)
+   load BEFORE style.css, so this :hover rule adds the hover interaction on top. */
 .important-news-item:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.12); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
-.important-news-img { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
-.important-news-content { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-.important-news-title { font-size: 13px; font-weight: 700; line-height: 1.3; }
-.important-news-source { font-size: 11px; color: var(--text-sub); }
 
 /* #endregion */
 
@@ -5662,6 +5661,7 @@ strong.down { color: var(--red); }
    Spacing: 16px screen padding, 24px between sections, 16px card padding, 12px internal gap
    ========================================================================== */
 
+/* ============================================================================
    1b. MARKET TICKER — Pro exchange-style horizontal price strip
    Single horizontal row, infinite loop, GPU-friendly transform: translateX.
    Each item: logo + symbol + price + 24h change% with colored arrow.
