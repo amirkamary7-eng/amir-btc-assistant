@@ -55,33 +55,33 @@ test('REMOVED: style.css has 0 @keyframes pubShimmer', () => {
 });
 
 // ============================================================================
-// REMOVED: Beta-popup Block 2 (duplicate of Block 1)
+// REMOVED: Beta-popup Block 2 (duplicate of Block 1) — Phase 10
+// Phase 3 UPDATE: All beta-popup CSS moved to announcement.css
 // ============================================================================
 
-test('REMOVED: style.css has exactly 1 .beta-popup-overlay definition (was 2)', () => {
+test('REMOVED: style.css has 0 .beta-popup-overlay (moved to announcement.css in Phase 3)', () => {
   const defs = styleSrc.match(/\.beta-popup-overlay\s*\{/g) || [];
-  assert.equal(defs.length, 1, `Expected 1 .beta-popup-overlay definition, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 .beta-popup-overlay (moved to announcement.css), found ${defs.length}`);
 });
-test('REMOVED: style.css has exactly 1 base .beta-popup-card definition (was 2)', () => {
-  // Only count the base definition (not .beta-popup-closing .beta-popup-card or @media variants)
+test('REMOVED: style.css has 0 .beta-popup-card (moved to announcement.css)', () => {
   const defs = styleSrc.match(/^\.beta-popup-card\s*\{/gm) || [];
-  assert.equal(defs.length, 1, `Expected 1 base .beta-popup-card definition, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 .beta-popup-card, found ${defs.length}`);
 });
-test('REMOVED: style.css has exactly 1 @keyframes beta-overlay-in (was 2)', () => {
+test('REMOVED: style.css has 0 @keyframes beta-overlay-in (moved to announcement.css)', () => {
   const defs = styleSrc.match(/@keyframes\s+beta-overlay-in/g) || [];
-  assert.equal(defs.length, 1, `Expected 1 @keyframes beta-overlay-in, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 @keyframes beta-overlay-in, found ${defs.length}`);
 });
-test('REMOVED: style.css has exactly 1 @keyframes beta-card-in (was 2)', () => {
+test('REMOVED: style.css has 0 @keyframes beta-card-in (moved to announcement.css)', () => {
   const defs = styleSrc.match(/@keyframes\s+beta-card-in/g) || [];
-  assert.equal(defs.length, 1, `Expected 1 @keyframes beta-card-in, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 @keyframes beta-card-in, found ${defs.length}`);
 });
-test('REMOVED: style.css has exactly 1 @keyframes beta-glow-pulse (was 2)', () => {
+test('REMOVED: style.css has 0 @keyframes beta-glow-pulse (moved to announcement.css)', () => {
   const defs = styleSrc.match(/@keyframes\s+beta-glow-pulse/g) || [];
-  assert.equal(defs.length, 1, `Expected 1 @keyframes beta-glow-pulse, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 @keyframes beta-glow-pulse, found ${defs.length}`);
 });
-test('REMOVED: style.css has exactly 1 BETA LAUNCH POPUP comment (was 2)', () => {
+test('REMOVED: style.css has 0 BETA LAUNCH POPUP (moved to announcement.css)', () => {
   const defs = styleSrc.match(/BETA LAUNCH POPUP/g) || [];
-  assert.equal(defs.length, 1, `Expected 1 BETA LAUNCH POPUP comment, found ${defs.length}`);
+  assert.equal(defs.length, 0, `style.css must have 0 BETA LAUNCH POPUP, found ${defs.length}`);
 });
 
 // ============================================================================
@@ -152,14 +152,18 @@ test('KEPT: .summary-divider still present (shared with wallet.js)', () => {
 });
 
 // ============================================================================
-// KEPT: Beta-popup Block 1 (the live block)
+// Phase 3: Beta-popup moved to announcement.css (was KEPT in style.css in Phase 10)
 // ============================================================================
 
-test('KEPT: .beta-popup-overlay still has valid definition', () => {
-  assert.match(styleSrc, /\.beta-popup-overlay\s*\{[^}]*position:\s*fixed/);
+test('MOVED: .beta-popup-overlay now in announcement.css (not style.css)', () => {
+  const annSrc = fs.readFileSync(path.join(__dirname, 'announcement.css'), 'utf8');
+  assert.match(annSrc, /\.beta-popup-overlay\s*\{[^}]*position:\s*fixed/);
+  assert.ok(!/\.beta-popup-overlay\s*\{/.test(styleSrc), 'style.css must NOT have .beta-popup-overlay');
 });
-test('KEPT: .beta-popup-card still has valid definition', () => {
-  assert.match(styleSrc, /\.beta-popup-card\s*\{/);
+test('MOVED: .beta-popup-card now in announcement.css', () => {
+  const annSrc = fs.readFileSync(path.join(__dirname, 'announcement.css'), 'utf8');
+  assert.match(annSrc, /\.beta-popup-card\s*\{/);
+  assert.ok(!/\.beta-popup-card\s*\{/.test(styleSrc), 'style.css must NOT have .beta-popup-card');
 });
 
 // ============================================================================
@@ -175,7 +179,7 @@ test('INTEGRITY: style.css braces are balanced', () => {
 test('INTEGRITY: style.css has fewer lines than before removal', () => {
   const lineCount = styleSrc.split('\n').length;
   assert.ok(lineCount < 8968, `style.css should be < 8968 lines (was 8968 before Phase 10), has ${lineCount}`);
-  assert.ok(lineCount > 7000, `style.css should still be > 7000 lines (sanity check), has ${lineCount}`);
+  assert.ok(lineCount > 6000, `style.css should still be > 6000 lines (sanity check after Phases 1-3), has ${lineCount}`);
 });
 
 // ============================================================================
