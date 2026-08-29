@@ -179,7 +179,7 @@ test('INTEGRITY: style.css braces are balanced', () => {
 test('INTEGRITY: style.css has fewer lines than before removal', () => {
   const lineCount = styleSrc.split('\n').length;
   assert.ok(lineCount < 8968, `style.css should be < 8968 lines (was 8968 before Phase 10), has ${lineCount}`);
-  assert.ok(lineCount > 6000, `style.css should still be > 6000 lines (sanity check after Phases 1-3), has ${lineCount}`);
+  assert.ok(lineCount > 5000, `style.css should still be > 5000 lines (sanity check after Phases 1-5), has ${lineCount}`);
 });
 
 // ============================================================================
