@@ -27,6 +27,7 @@ const hashedFiles = [
   'tickets.css',
   'membership.css',
   'ai.css',
+  'maintenance.css',
   'style.css',
   'assistant.js',
   'notifications.js',
