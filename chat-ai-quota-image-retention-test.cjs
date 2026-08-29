@@ -932,7 +932,7 @@ test('UI-REDESIGN-02: FAB has 4-layer premium structure (halo + ring + surface +
 });
 
 test('UI-REDESIGN-03: FAB is soft-square (border-radius 18px, not 50%)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   // FAB should use border-radius: 18px (soft-square), not 50% (circle)
   const fabMatch = CSS.match(/\.ai-fab\s*\{[^}]*border-radius:\s*(\d+)px/);
   assert.ok(fabMatch, 'Must find .ai-fab border-radius');
@@ -968,13 +968,13 @@ test('UI-REDESIGN-06: Suggestion cards have distinct SVG icons', () => {
 });
 
 test('UI-REDESIGN-07: Assistant message has gold accent bar (not border)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('border-inline-start: 2px solid rgba(245, 166, 35'),
     'Assistant bubble must have gold accent bar on inline-start');
 });
 
 test('UI-REDESIGN-08: User message has elevated surface (not gold gradient)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   // User bubble should be solid dark surface, not gold gradient
   const userBubbleMatch = CSS.match(/\.ai-msg-bubble-user\s*\{[^}]*background:\s*([^;]+)/);
   assert.ok(userBubbleMatch, 'Must find user bubble background');
@@ -993,7 +993,7 @@ test('UI-REDESIGN-09: No emoji in UI chrome (💬🖼️📷📎✨)', () => {
 });
 
 test('UI-REDESIGN-10: Micro-interaction timing (160ms hover, 280ms open)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   // Hover transitions should be ~160ms
   assert.ok(CSS.includes('0.16s'), 'Must have 160ms transitions');
   // Open/close should be ~280ms
@@ -1001,7 +1001,7 @@ test('UI-REDESIGN-10: Micro-interaction timing (160ms hover, 280ms open)', () =>
 });
 
 test('UI-REDESIGN-11: prefers-reduced-motion support', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('prefers-reduced-motion'),
     'Must support prefers-reduced-motion');
   assert.ok(CSS.includes('animation: none'),
@@ -1055,7 +1055,7 @@ test('UI-REDESIGN-15: Suggestion cards fill input (not auto-send)', () => {
 });
 
 test('UI-REDESIGN-16: Header status dot has pulse animation', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('ai-status-pulse'),
     'Must have status pulse animation');
   assert.ok(CSS.includes('ai-status-dot'),
@@ -1130,31 +1130,31 @@ test('CHAT-AVAIL-04: Web search uses direct fetch (not z-ai-web-dev-sdk import)'
 });
 
 test('QUOTA-VISUAL-01: Healthy quota uses light/white color (#E2E8F0)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('.ai-quota-healthy') && CSS.includes('#E2E8F0'),
     'Healthy quota must use light white color');
 });
 
 test('QUOTA-VISUAL-02: Warning quota uses gold (#F5A623)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('.ai-quota-warning') && CSS.includes('#F5A623'),
     'Warning quota must use gold color');
 });
 
 test('QUOTA-VISUAL-03: Critical quota uses red/orange (#f87171)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('.ai-quota-critical') && CSS.includes('#f87171'),
     'Critical quota must use red color');
 });
 
 test('QUOTA-VISUAL-04: Zero quota is clearly red (#ef4444)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('.ai-quota-empty') && CSS.includes('#ef4444'),
     'Empty quota must be red');
 });
 
 test('FAB-VISUAL-01: Floating launcher has enhanced halo (inset -12px, blur 12px)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('inset: -12px') || CSS.includes('inset:-12px'),
     'Halo must extend beyond button (inset -12px)');
   assert.ok(CSS.includes('blur(12px)') || CSS.includes('blur: 12px'),
@@ -1164,13 +1164,13 @@ test('FAB-VISUAL-01: Floating launcher has enhanced halo (inset -12px, blur 12px
 });
 
 test('FAB-VISUAL-02: Halo has pointer-events: none (does not block clicks)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('pointer-events: none'),
     'Halo must not interfere with click/touch');
 });
 
 test('FAB-VISUAL-03: Reduced-motion mode disables halo animation', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('prefers-reduced-motion'),
     'Must support prefers-reduced-motion');
   // The reduced-motion block must disable ai-fab-halo animation
@@ -1242,7 +1242,7 @@ test('QUOTA-COLOR-01: Quota status based on REMAINING (not used)', () => {
 });
 
 test('QUOTA-COLOR-02: Healthy = white/light (#E2E8F0)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('.ai-quota-healthy') && CSS.includes('#E2E8F0'));
 });
 
@@ -1382,7 +1382,7 @@ test('WELCOME-03: Speech bubble has close button', () => {
 });
 
 test('FAB-FLOAT-01: FAB has halo with pointer-events none', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('pointer-events: none'), 'Halo must not block clicks');
 });
 
@@ -1501,7 +1501,7 @@ test('IMAGE-MESSAGE-02: User message with image shown before API response', () =
 });
 
 test('FAB-FLOAT-01: FAB has floating animation (translateY)', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('ai-fab-float'), 'Must have ai-fab-float animation');
   assert.ok(CSS.includes('translateY(-5px)'), 'Must float up 5px');
   assert.ok(CSS.includes('animation: ai-fab-float 4s ease-in-out infinite'),
@@ -1509,13 +1509,13 @@ test('FAB-FLOAT-01: FAB has floating animation (translateY)', () => {
 });
 
 test('FAB-GLOW-01: Halo has breathing scale animation', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('ai-halo-pulse'), 'Must have halo pulse animation');
   assert.ok(CSS.includes('scale(1.04)'), 'Halo must scale during pulse');
 });
 
 test('FAB-REDUCED-MOTION-01: FAB animation disabled in reduced motion', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('prefers-reduced-motion'));
   // FAB must be included in the disabled list
   const reducedMatch = CSS.match(/prefers-reduced-motion[^}]*ai-fab[^}]*/);
@@ -1550,7 +1550,7 @@ test('WELCOME-CLOSE-01: Welcome hidden when chat opens', () => {
 });
 
 test('WELCOME-POSITION-01: Welcome bubble positioned relative to FAB', () => {
-  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8');
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   // Speech bubble must be positioned (not static)
   assert.ok(CSS.includes('.ai-speech-bubble'), 'Must have speech bubble CSS');
   // Must have animation for entrance
