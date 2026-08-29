@@ -901,10 +901,13 @@
 }
 .important-news-source svg { width: 10px; height: 10px; flex-shrink: 0; }
 
-@keyframes newsFadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+/* NOTE: @keyframes newsFadeIn moved to style.css to fix cascade inversion regression.
+   At baseline f92f158, the dashboard version (translateY 6px) came after the news
+   version (translateY 12px) in the same file and won. After Phase 3 extraction,
+   the dashboard version moved here (dashboard.css, pos 3) and the news version
+   stayed in news.css (pos 5). Since news.css loads after dashboard.css, the 12px
+   version won — causing a regression. Moving this to style.css (pos 9, loads after
+   news.css) restores the baseline cascade order. */
 
 /* News skeleton */
 .important-news-skeleton {

@@ -147,11 +147,77 @@ test('ORDER: dashboard.css loads BEFORE style.css', () => {
 });
 
 // ============================================================================
+// Bug 3: .important-news-skeleton-* cascade inversion (same pattern as Bug 2)
+// ============================================================================
+
+test('SKEL-1: style.css does NOT have legacy .important-news-skeleton base rule', () => {
+  assert.ok(!/\.important-news-skeleton\s*\{/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton base rule (moved to dashboard.css)');
+});
+test('SKEL-2: style.css does NOT have legacy .important-news-skeleton-item base rule', () => {
+  assert.ok(!/\.important-news-skeleton-item\s*\{/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton-item base rule');
+});
+test('SKEL-3: style.css does NOT have legacy .important-news-skeleton-img base rule', () => {
+  assert.ok(!/\.important-news-skeleton-img\s*\{/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton-img base rule');
+});
+test('SKEL-4: style.css does NOT have legacy .important-news-skeleton-text base rule', () => {
+  assert.ok(!/\.important-news-skeleton-text\s*\{/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton-text base rule');
+});
+test('SKEL-5: style.css does NOT have legacy .important-news-skeleton-line base rule', () => {
+  assert.ok(!/\.important-news-skeleton-line\s*\{/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton-line base rule');
+});
+test('SKEL-6: style.css does NOT have legacy .important-news-skeleton-line:nth-child rules', () => {
+  assert.ok(!/\.important-news-skeleton-line:nth-child/.test(styleSrc),
+    'style.css must NOT have .important-news-skeleton-line:nth-child rules');
+});
+test('SKEL-7: dashboard.css has enhanced .important-news-skeleton with gap:10px', () => {
+  assert.match(dashSrc, /\.important-news-skeleton\s*\{[^}]*gap:\s*10px/);
+});
+test('SKEL-8: dashboard.css has enhanced .important-news-skeleton-item with min-height:88px', () => {
+  assert.match(dashSrc, /\.important-news-skeleton-item\s*\{[^}]*min-height:\s*88px/);
+});
+test('SKEL-9: dashboard.css has enhanced .important-news-skeleton-img with width:64px', () => {
+  assert.match(dashSrc, /\.important-news-skeleton-img\s*\{[^}]*width:\s*64px/);
+});
+
+// ============================================================================
+// Bug 4: @keyframes newsFadeIn cascade inversion
+// ============================================================================
+
+test('KF-1: style.css has @keyframes newsFadeIn with translateY(6px)', () => {
+  assert.match(styleSrc, /@keyframes\s+newsFadeIn\s*\{[^}]*translateY\(6px\)/,
+    'style.css must have @keyframes newsFadeIn with translateY(6px) (dashboard version, moved to win cascade)');
+});
+test('KF-2: dashboard.css does NOT have @keyframes newsFadeIn definition', () => {
+  // The definition was moved to style.css; only a NOTE comment may remain
+  assert.ok(!/@keyframes\s+newsFadeIn\s*\{/.test(dashSrc),
+    'dashboard.css must NOT have @keyframes newsFadeIn definition (moved to style.css)');
+});
+test('KF-3: news.css still has @keyframes newsFadeIn with translateY(12px)', () => {
+  const newsSrc = fs.readFileSync(path.join(__dirname, 'news.css'), 'utf8');
+  assert.match(newsSrc, /@keyframes\s+newsFadeIn\s*\{[^}]*translateY\(12px\)/,
+    'news.css must still have @keyframes newsFadeIn with translateY(12px) (unchanged)');
+});
+test('KF-4: style.css loads AFTER news.css (cascade order)', () => {
+  assert.ok(htmlSrc.indexOf('news.css') < htmlSrc.indexOf('style.css'),
+    'style.css must load AFTER news.css so the 6px version wins (matching baseline)');
+});
+
+// ============================================================================
 // CSS integrity
 // ============================================================================
 
 test('INTEGRITY: style.css braces balanced', () => {
   let open = 0, close = 0;
   for (const ch of styleSrc) { if (ch === '{') open++; if (ch === '}') close++; }
+  assert.equal(open, close, `Brace mismatch: ${open} open vs ${close} close`);
+});
+test('INTEGRITY: dashboard.css braces balanced', () => {
+  let open = 0, close = 0;
+  for (const ch of dashSrc) { if (ch === '{') open++; if (ch === '}') close++; }
   assert.equal(open, close, `Brace mismatch: ${open} open vs ${close} close`);
 });

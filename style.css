@@ -175,6 +175,16 @@
 @keyframes coinFadeOut { to { opacity: 0; transform: translateY(6px); } }
 @keyframes coinFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
+/* Moved from dashboard.css to fix cascade inversion regression (Phase 3 extraction).
+   At baseline f92f158, this came AFTER the news.css version (translateY 12px) and won.
+   After extraction, news.css (pos 5) loads after dashboard.css (pos 3), so the 12px
+   version won. Placing this in style.css (pos 9, loads after news.css) restores the
+   baseline cascade order — both .important-news-item and .news-card use 6px. */
+@keyframes newsFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .coin-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 0%; }
 .coin-identity { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .coin-rank { font-size: 10px; color: var(--text-sub); width: 20px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; opacity: 0.35; font-weight: 500; }
@@ -1279,14 +1289,9 @@ strong.down { color: var(--red); }
 .watchlist-skeleton-line:nth-child(1) { width: 40px; }
 .watchlist-skeleton-line:nth-child(2) { width: 60px; height: 9px; }
 
-/* Loading skeleton for dashboard important-news (race-condition fix) */
-.important-news-skeleton { display: flex; flex-direction: column; gap: 10px; }
-.important-news-skeleton-item { display: flex; gap: 12px; align-items: center; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; }
-.important-news-skeleton-img { width: 50px; height: 50px; border-radius: 10px; flex-shrink: 0; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
-.important-news-skeleton-text { display: flex; flex-direction: column; gap: 8px; flex: 1; }
-.important-news-skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 50%, var(--bg-secondary) 75%); background-size: 200% 100%; animation: skeleton-shimmer 1.5s ease-in-out infinite; }
-.important-news-skeleton-line:nth-child(1) { width: 85%; }
-.important-news-skeleton-line:nth-child(2) { width: 50%; height: 10px; }
+/* NOTE: .important-news-skeleton-* base styles moved to dashboard.css (Phase 3 extraction).
+   Legacy definitions removed to fix cascade inversion regression — the enhanced
+   versions in dashboard.css now win as intended (matching baseline f92f158 behavior). */
 
 .summary-item {
   flex: 1;
