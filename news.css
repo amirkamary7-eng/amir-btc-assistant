@@ -295,9 +295,12 @@
     padding: 3px 10px;
     border-radius: 8px;
 }
-.impact-high { background: rgba(255,77,77,0.15); color: #ff6b6b; }
-.impact-medium { background: rgba(255,200,0,0.15); color: #ffc800; }
-.impact-low { background: rgba(0,200,150,0.15); color: var(--green); }
+/* NOTE: .impact-high/medium/low moved to base.css to fix cascade inversion regression.
+   At baseline f92f158, these rules were in style.css (line 889, loaded early) and .dc-card
+   was later in style.css (line 8228) — .dc-card won. After Phase 3+5 extraction, .impact-*
+   moved to news.css (pos 5) and .dc-card moved to dashboard.css (pos 3). Since news.css
+   loads after dashboard.css, .impact-* overrode .dc-card background/color. Moving to
+   base.css (pos 1, loads before all) restores the baseline cascade order. */
 .cal-event-major {
     position: absolute;
     top: 10px;

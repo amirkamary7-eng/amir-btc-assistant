@@ -269,3 +269,18 @@ body.user-loading .profile-loading-target.skeleton-text {
 
 /* #endregion */
 
+/* ============================================================================
+   Impact level utility classes (moved from news.css to fix cascade inversion)
+   These are standalone utility classes used by .cal-event-impact (legacy),
+   .dc-card (dashboard calendar), and .ni-cal-event (news calendar).
+   MUST load BEFORE dashboard.css and news.css so that:
+   - .dc-card (dashboard.css, pos 3) overrides background/color for calendar cards
+   - .dc-card-impact.impact-* (dashboard.css, pos 3, specificity 0,2,0) overrides for badges
+   - .ni-cal-event.impact-*::before (news.css, pos 5, specificity 0,2,1) overrides for news events
+   At baseline f92f158, these were at style.css line 889 (early) and .dc-card was at
+   line 8228 (late) — .dc-card won. Moving here restores that cascade order.
+   ============================================================================ */
+.impact-high { background: rgba(255,77,77,0.15); color: #ff6b6b; }
+.impact-medium { background: rgba(255,200,0,0.15); color: #ffc800; }
+.impact-low { background: rgba(0,200,150,0.15); color: var(--green); }
+

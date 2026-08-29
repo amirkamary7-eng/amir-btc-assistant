@@ -221,3 +221,65 @@ test('INTEGRITY: dashboard.css braces balanced', () => {
   for (const ch of dashSrc) { if (ch === '{') open++; if (ch === '}') close++; }
   assert.equal(open, close, `Brace mismatch: ${open} open vs ${close} close`);
 });
+
+// ============================================================================
+// Bug 5: .impact-* cascade inversion — Calendar cards (dc-card) background/color
+// ============================================================================
+
+const baseSrc = fs.readFileSync(path.join(__dirname, 'base.css'), 'utf8');
+const newsSrc = fs.readFileSync(path.join(__dirname, 'news.css'), 'utf8');
+
+test('IMPACT-1: base.css has .impact-high with correct values', () => {
+  assert.match(baseSrc, /^\.impact-high\s*\{\s*background:\s*rgba\(255,77,77,0\.15\);\s*color:\s*#ff6b6b;\s*\}/m,
+    'base.css must have .impact-high with exact baseline values');
+});
+test('IMPACT-2: base.css has .impact-medium with correct values', () => {
+  assert.match(baseSrc, /^\.impact-medium\s*\{\s*background:\s*rgba\(255,200,0,0\.15\);\s*color:\s*#ffc800;\s*\}/m,
+    'base.css must have .impact-medium with exact baseline values');
+});
+test('IMPACT-3: base.css has .impact-low with correct values', () => {
+  assert.match(baseSrc, /^\.impact-low\s*\{\s*background:\s*rgba\(0,200,150,0\.15\);\s*color:\s*var\(--green\);\s*\}/m,
+    'base.css must have .impact-low with exact baseline values');
+});
+test('IMPACT-4: news.css does NOT have standalone .impact-high/medium/low', () => {
+  // The NOTE comment may mention them, but the actual rule definitions must be gone
+  assert.ok(!/^\.impact-high\s*\{/m.test(newsSrc),
+    'news.css must NOT have .impact-high rule definition (moved to base.css)');
+  assert.ok(!/^\.impact-medium\s*\{/m.test(newsSrc),
+    'news.css must NOT have .impact-medium rule definition');
+  assert.ok(!/^\.impact-low\s*\{/m.test(newsSrc),
+    'news.css must NOT have .impact-low rule definition');
+});
+test('IMPACT-5: base.css loads BEFORE dashboard.css (cascade order)', () => {
+  assert.ok(htmlSrc.indexOf('base.css') < htmlSrc.indexOf('dashboard.css'),
+    'base.css must load BEFORE dashboard.css so .dc-card overrides .impact-*');
+});
+test('IMPACT-6: base.css loads BEFORE news.css (cascade order)', () => {
+  assert.ok(htmlSrc.indexOf('base.css') < htmlSrc.indexOf('news.css'),
+    'base.css must load BEFORE news.css');
+});
+test('IMPACT-7: dashboard.css still has .dc-card.impact-* (border color overrides)', () => {
+  assert.match(dashSrc, /\.dc-card\.impact-high\s*\{/);
+  assert.match(dashSrc, /\.dc-card\.impact-medium\s*\{/);
+  assert.match(dashSrc, /\.dc-card\.impact-low\s*\{/);
+});
+test('IMPACT-8: dashboard.css still has .dc-card-impact.impact-* (badge overrides)', () => {
+  assert.match(dashSrc, /\.dc-card-impact\.impact-high\s*\{/);
+  assert.match(dashSrc, /\.dc-card-impact\.impact-medium\s*\{/);
+  assert.match(dashSrc, /\.dc-card-impact\.impact-low\s*\{/);
+});
+test('IMPACT-9: news.css still has .ni-cal-event.impact-*::before (pseudo-element overrides)', () => {
+  assert.match(newsSrc, /\.ni-cal-event\.impact-high::before\s*\{/);
+  assert.match(newsSrc, /\.ni-cal-event\.impact-medium::before\s*\{/);
+  assert.match(newsSrc, /\.ni-cal-event\.impact-low::before\s*\{/);
+});
+test('INTEGRITY: base.css braces balanced', () => {
+  let open = 0, close = 0;
+  for (const ch of baseSrc) { if (ch === '{') open++; if (ch === '}') close++; }
+  assert.equal(open, close, `Brace mismatch: ${open} open vs ${close} close`);
+});
+test('INTEGRITY: news.css braces balanced', () => {
+  let open = 0, close = 0;
+  for (const ch of newsSrc) { if (ch === '{') open++; if (ch === '}') close++; }
+  assert.equal(open, close, `Brace mismatch: ${open} open vs ${close} close`);
+});
