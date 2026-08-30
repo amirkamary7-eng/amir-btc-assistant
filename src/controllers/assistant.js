@@ -846,7 +846,15 @@ export function createAssistantHandlers(deps) {
     );
     const groqResult = dbResult.rows[0]?.result || {};
 
-    // Record this request in the global coordinator (non-blocking)
+    // Parse result FIRST — only record in coordinator if Groq actually succeeded
+    let result;
+    if (typeof groqResult === 'string') {
+      try { const parsed = JSON.parse(groqResult); result = _parseGroqResult(parsed); } catch { result = _parseGroqResult(groqResult); }
+    } else {
+      result = _parseGroqResult(groqResult);
+    }
+
+    // Record this request in the global coordinator ONLY on success (non-blocking)
     if (typeof recordGroqRequest === 'function') {
       try {
         const estTokens = typeof estimateGroqTokens === 'function'
@@ -856,10 +864,7 @@ export function createAssistantHandlers(deps) {
       } catch {}
     }
 
-    if (typeof groqResult === 'string') {
-      try { const parsed = JSON.parse(groqResult); return _parseGroqResult(parsed); } catch {}
-    }
-    return _parseGroqResult(groqResult);
+    return result;
   }
 
   function _parseGroqResult(result) {
