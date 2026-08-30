@@ -1920,8 +1920,10 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
   const PROTECTED = new Set([
     // News AI — provider chain (NOT processOneArticleSummary, NOT translateToFarsi,
     // NOT generateSummaryWithFallback — all intentionally modified with P0-1/P0-2/P1-B fixes)
+    // NOTE: processNewsAIBatch REMOVED — intentionally modified (Phase 3: batch translation)
+    // NOTE: buildFarsiNewsArticles NOT protected — intentionally modified (Phase 3: batch translation)
     'fetchAllNewsRss',
-    'processNewsAIBatch', 'publishArticleToFarsiNews',
+    'publishArticleToFarsiNews',
     'fetchNewsRss', 'processNewsQueue', 'runNewsAICron',
     // Chat AI (assistant.js controller mirrors; names that would indicate chat changes)
     'handleChatMessage', 'processChatMessage', 'callAIProvider', 'streamChatCompletion',

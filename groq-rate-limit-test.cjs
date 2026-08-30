@@ -1,5 +1,9 @@
 /**
- * Test: Groq translation batch size is 1 (sequential, not parallel).
+ * Test: Groq rate limiting — batch translation replaces sequential individual calls.
+ *
+ * PHASE 3 UPDATE: The old TRANSLATION_BATCH_SIZE=1 (sequential one-at-a-time)
+ * approach has been replaced with batchTranslateToFarsi(), which sends all
+ * headlines in 1-2 Groq requests instead of 21 individual calls.
  *
  * Run: node --test groq-rate-limit-test.cjs
  */
@@ -11,25 +15,27 @@ const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 
-test('GROQ-RL-001: TRANSLATION_BATCH_SIZE is 1 (sequential, not parallel)', () => {
-  assert.ok(WORKER_SRC.includes('TRANSLATION_BATCH_SIZE = 1'),
-    'TRANSLATION_BATCH_SIZE must be 1 (was 3)');
+test('GROQ-RL-001: batchTranslateToFarsi replaces individual sequential calls', () => {
+  // The old TRANSLATION_BATCH_SIZE approach is gone — replaced by batchTranslateToFarsi
+  assert.ok(!WORKER_SRC.includes('TRANSLATION_BATCH_SIZE = 1'),
+    'Old TRANSLATION_BATCH_SIZE = 1 must be removed (replaced by batchTranslateToFarsi)');
   assert.ok(!WORKER_SRC.includes('TRANSLATION_BATCH_SIZE = 3'),
-    'old TRANSLATION_BATCH_SIZE = 3 must be removed');
+    'Old TRANSLATION_BATCH_SIZE = 3 must be removed');
+  assert.ok(WORKER_SRC.includes('batchTranslateToFarsi'),
+    'batchTranslateToFarsi must be used for translations');
 });
 
-test('GROQ-RL-002: batch size 1 means Promise.all receives only 1 item (no parallel Groq calls)', () => {
-  // With batch size 1, Promise.all receives a single-element array
-  // → only 1 translateToFarsi call per iteration → sequential, not parallel
-  const batchSizeIdx = WORKER_SRC.indexOf('TRANSLATION_BATCH_SIZE = 1');
-  const loopBlock = WORKER_SRC.slice(batchSizeIdx, batchSizeIdx + 300);
-  assert.ok(loopBlock.includes('for (let i = 0; i < titlesToTranslate.length; i += TRANSLATION_BATCH_SIZE)'),
-    'loop must iterate by TRANSLATION_BATCH_SIZE');
-  assert.ok(loopBlock.includes('Promise.all'),
-    'Promise.all still used (with 1-item array = sequential)');
+test('GROQ-RL-002: batchTranslateToFarsi sends multiple headlines in 1 Groq call', () => {
+  // Verify batch approach: sends multiple headlines in a single Groq request
+  assert.ok(WORKER_SRC.includes('BATCH_TRANSLATION_MAX_BATCH'),
+    'Must have BATCH_TRANSLATION_MAX_BATCH constant');
+  assert.ok(WORKER_SRC.includes('batchTexts.map((t, i) =>'),
+    'Must build numbered headline list for batch request');
+  assert.ok(WORKER_SRC.includes('JSON array'),
+    'Must ask for JSON array response');
 });
 
-test('GROQ-RL-003: no other Groq changes (model, prompt, circuit, fallback unchanged)', () => {
+test('GROQ-RL-003: Groq model, circuit, fallback chain unchanged', () => {
   // Model must still be openai/gpt-oss-120b
   assert.ok(WORKER_SRC.includes("'openai/gpt-oss-120b'"),
     'Groq model must be unchanged');
@@ -42,9 +48,16 @@ test('GROQ-RL-003: no other Groq changes (model, prompt, circuit, fallback uncha
           WORKER_SRC.includes("attemptProvider('workers-ai'") &&
           WORKER_SRC.includes("attemptProvider('openrouter'"),
     'Provider fallback chain must be unchanged');
-  // max_tokens must be unchanged
+  // max_tokens for summary (1024) and batch analysis (2048) must be unchanged
   assert.ok(WORKER_SRC.includes('groq_generate') &&
           WORKER_SRC.includes('1024') &&
           WORKER_SRC.includes('2048'),
     'max_tokens for summary (1024) and batch (2048) must be unchanged');
+});
+
+test('GROQ-RL-004: batchTranslateToFarsi falls back to individual on failure', () => {
+  assert.ok(WORKER_SRC.includes('Falling back to individual translation'),
+    'Must have fallback to individual translateToFarsi');
+  assert.ok(WORKER_SRC.includes('translateToFarsi(batchTexts[i], env)'),
+    'Must call translateToFarsi for individual fallback');
 });

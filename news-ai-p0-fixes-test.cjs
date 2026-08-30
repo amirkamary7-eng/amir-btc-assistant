@@ -198,10 +198,16 @@ test('P0-2-6: buildFarsiNewsArticles translation batch size reduced to 3', () =>
   const fnEnd = src.indexOf('\n}', src.indexOf('return articles.filter', fnStart));
   const fnSrc = src.slice(fnStart, fnEnd);
 
-  // The batch size must be 3 (was 10)
+  // PHASE 3 UPDATE: buildFarsiNewsArticles now uses batchTranslateToFarsi
+  // instead of individual TRANSLATION_BATCH_SIZE loop.
+  // This replaces 21 individual Groq calls with 1-2 batch calls.
   assert.ok(
-    /TRANSLATION_BATCH_SIZE\s*=\s*3/.test(fnSrc),
-    'buildFarsiNewsArticles must use TRANSLATION_BATCH_SIZE = 3 (was 10)'
+    /batchTranslateToFarsi/.test(fnSrc),
+    'buildFarsiNewsArticles must use batchTranslateToFarsi (replaces individual calls)'
+  );
+  assert.ok(
+    !/TRANSLATION_BATCH_SIZE\s*=\s*[13]/.test(fnSrc),
+    'Old TRANSLATION_BATCH_SIZE must be removed (replaced by batchTranslateToFarsi)'
   );
 });
 
