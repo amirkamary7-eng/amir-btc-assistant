@@ -6,11 +6,12 @@
  *   POST /api/assistant/chat    — send message to AI with provider fallback
  *
  * Provider chain (reuses News AI circuit breaker infrastructure):
- *   1. Groq          (primary)    — groq_generate() DB function, openai/gpt-oss-120b
- *   2. Gemini        (fallback 1) — gemini_generate() DB function, gemini-3.5-flash
- *   3. OpenRouter    (fallback 2) — nvidia/nemotron-3-super-120b-a12b:free
- *   4. Workers AI    (fallback 3) — @cf/meta/llama-3.3-70b-instruct-fp8-fast
- *   5. OpenAI        (fallback 4) — opt-in, paid (gpt-4o-mini)
+ *   1. Groq Primary    (primary)    — groq_generate() DB function, openai/gpt-oss-120b (Vault key)
+ *   2. Groq Secondary  (fallback 1) — direct HTTP with GROQ_API_KEY_1, openai/gpt-oss-120b (Cloudflare secret)
+ *   3. Gemini          (fallback 2) — gemini_generate() DB function, gemini-3.5-flash
+ *   4. OpenRouter      (fallback 3) — nvidia/nemotron-3-super-120b-a12b:free
+ *   5. Workers AI      (fallback 4) — @cf/meta/llama-3.3-70b-instruct-fp8-fast
+ *   6. OpenAI          (fallback 5) — opt-in, paid (gpt-4o-mini)
  *
  * DeepSeek removed (was dead code — DEEPSEEK_API_KEY not configured).
  *
@@ -884,6 +885,52 @@ export function createAssistantHandlers(deps) {
     return text.trim();
   }
 
+  // ── Groq Secondary (fallback 0b) — direct HTTP call with GROQ_API_KEY_1 ──
+  // INDEPENDENT from Groq Primary:
+  //   - Uses env.GROQ_API_KEY_1 (Cloudflare secret), NOT the Vault-stored GROQ_API_KEY
+  //   - Does NOT use the Groq Coordinator (secondary key has its own quota)
+  //   - Same model (openai/gpt-oss-120b), same prompt, same max_tokens/temperature
+  //   - 15s timeout (same as OpenRouter/OpenAI chat fallbacks)
+  async function callGroqSecondaryChat(env, prompt) {
+    const apiKey = normalizeOptionalString(env.GROQ_API_KEY_1);
+    if (!apiKey) {
+      throw { message: 'Groq Secondary not configured', errorType: 'non_retryable', _isProviderError: true };
+    }
+    const messages = [
+      { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: CHAT_GROQ_MODEL,
+          messages,
+          max_tokens: 1024,
+          temperature: 0.4,
+        }),
+        signal: controller.signal,
+      });
+    } finally { clearTimeout(timer); }
+    if (!response.ok) {
+      const errorType = classifyHttpError(response.status);
+      throw { message: `Groq Secondary failed: HTTP ${response.status}`, errorType, _isProviderError: true };
+    }
+    const data = await readJsonResponseSafe(response);
+    const reply = data?.choices?.[0]?.message?.content;
+    if (typeof reply !== 'string' || !reply.trim()) {
+      throw { message: 'Empty Groq Secondary response', errorType: 'retryable', _isProviderError: true };
+    }
+    return reply.trim();
+  }
+
   async function callGeminiChat(env, prompt, imageBase64) {
     const parts = [{ text: prompt }];
     if (imageBase64) {
@@ -1070,15 +1117,17 @@ export function createAssistantHandlers(deps) {
     //   - Gemini (via DB gateway, inline_data format)
     //   - OpenAI gpt-4o-mini (opt-in, disabled by default — does NOT currently pass image)
     //
-    // Text-only path (NO image): Groq → Gemini → OpenRouter → Workers AI → OpenAI (unchanged)
+    // Text-only path (NO image): Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
     const hasImage = Boolean(imageBase64);
     const providers = hasImage ? [
       // VISION-ONLY providers when image is present
       // NO text-only fallback — if vision fails, return clear error
       ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
     ] : [
-      // Text-only path (original chain — unchanged)
+      // Text-only path — failover chain per spec:
+      //   groq → groq-secondary → gemini → openrouter → workers-ai → openai(opt-in)
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
+      ['groq-secondary', () => callGroqSecondaryChat(env, prompt), (isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true) && Boolean(env.GROQ_API_KEY_1)],
       ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
       ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
       ['workers-ai', () => callWorkersAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) : true],

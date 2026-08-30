@@ -543,19 +543,23 @@ test('WS-REG-04: Real Groq E2E — SKIPPED (no production Groq credential in tes
 // PHASE 12: Provider Chain Unchanged
 // ============================================================================
 
-test('PROVIDER-CHAIN-01: Groq→Gemini→OpenRouter→Workers AI→OpenAI order unchanged', () => {
+test('PROVIDER-CHAIN-01: Groq→Groq-Secondary→Gemini→OpenRouter→Workers AI→OpenAI order', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 1000) : SRC;
+  const textPathIdx = SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 2000) : SRC;
   const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers, 'Must have providers array');
   const block = providers[1];
   const groqIdx = block.indexOf("'groq'");
+  const groqSecIdx = block.indexOf("'groq-secondary'");
   const geminiIdx = block.indexOf("'gemini'");
   const orIdx = block.indexOf("'openrouter'");
   const waIdx = block.indexOf("'workers-ai'");
   const oaiIdx = block.indexOf("'openai'");
-  assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
+  assert.ok(groqIdx > -1, 'Groq must exist');
+  assert.ok(groqSecIdx > -1, 'Groq Secondary must exist');
+  assert.ok(groqIdx < groqSecIdx, 'Groq before Groq Secondary');
+  assert.ok(groqSecIdx < geminiIdx, 'Groq Secondary before Gemini');
   assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
   assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
   assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
@@ -1198,20 +1202,22 @@ test('REGRESSION-02: Image attachment pipeline still works', () => {
   assert.ok(JS.includes('status: \'processing\''), 'processing state intact');
 });
 
-test('REGRESSION-03: Provider chain preserved (Groq→Gemini→OpenRouter→Workers AI→OpenAI)', () => {
+test('REGRESSION-03: Provider chain preserved (Groq→Groq-Secondary→Gemini→OpenRouter→Workers AI→OpenAI)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 1000) : SRC;
+  const textPathIdx = SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 2000) : SRC;
   const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers);
   const block = providers[1];
   const groqIdx = block.indexOf("'groq'");
+  const groqSecIdx = block.indexOf("'groq-secondary'");
   const geminiIdx = block.indexOf("'gemini'");
   const orIdx = block.indexOf("'openrouter'");
   const waIdx = block.indexOf("'workers-ai'");
   const oaiIdx = block.indexOf("'openai'");
-  assert.ok(groqIdx < geminiIdx && geminiIdx < orIdx && orIdx < waIdx && waIdx < oaiIdx,
-    'Provider chain order preserved');
+  assert.ok(groqIdx > -1 && groqSecIdx > -1, 'Groq + Groq Secondary must exist');
+  assert.ok(groqIdx < groqSecIdx && groqSecIdx < geminiIdx && geminiIdx < orIdx && orIdx < waIdx && waIdx < oaiIdx,
+    'Provider chain order preserved: Groq→Groq-Secondary→Gemini→OpenRouter→Workers AI→OpenAI');
 });
 
 test('REGRESSION-04: Quotas NOT changed (Free=10, Premium=100, Free images=3, Premium images=10)', () => {
@@ -1295,12 +1301,18 @@ test('VISION-01: Vision-capable routing when image present (Gemini first)', () =
 
 test('VISION-02: Text-only chain preserved when no image', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(SRC.includes('Text-only path (original chain'),
+  assert.ok(SRC.includes('Text-only path'),
     'Must have text-only path comment');
-  const textIdx = SRC.indexOf('Text-only path (original chain');
-  const textBlock = SRC.slice(textIdx, textIdx + 500);
+  const textIdx = SRC.indexOf('Text-only path — failover chain');
+  const textBlock = SRC.slice(textIdx, textIdx + 1000);
   assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
     'Groq must be first in text-only path');
+  assert.ok(textBlock.indexOf("'groq-secondary'") > -1,
+    'Groq Secondary must be in text-only path');
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'groq-secondary'"),
+    'Groq before Groq Secondary');
+  assert.ok(textBlock.indexOf("'groq-secondary'") < textBlock.indexOf("'gemini'"),
+    'Groq Secondary before Gemini');
 });
 
 test('VISION-03: Gemini receives imageBase64 (inline_data)', () => {
@@ -1648,12 +1660,16 @@ test('VISION-PROD-07: Text-only providers forbidden as fallback for image reques
     'Must explicitly forbid text-only fallback for image requests');
 });
 
-test('VISION-PROD-08: Text-only requests preserve Groq→Gemini→OpenRouter→Workers AI→OpenAI', () => {
+test('VISION-PROD-08: Text-only requests preserve Groq→Groq-Secondary→Gemini→OpenRouter→Workers AI→OpenAI', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 500) : SRC;
+  const textPathIdx = SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? SRC.slice(textPathIdx, textPathIdx + 1000) : SRC;
   assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
     'Groq before Gemini in text-only path');
+  assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'groq-secondary'"),
+    'Groq before Groq Secondary in text-only path');
+  assert.ok(textBlock.indexOf("'groq-secondary'") < textBlock.indexOf("'gemini'"),
+    'Groq Secondary before Gemini in text-only path');
   assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
     'Gemini before OpenRouter in text-only path');
 });
@@ -2054,12 +2070,14 @@ test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () =
 
 test('GEMINI-429-04: Text-only chat still works (Groq primary)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = SRC.indexOf('Text-only path (original chain');
-  const textBlock = SRC.slice(textPathIdx, textPathIdx + 500);
+  const textPathIdx = SRC.indexOf('Text-only path — failover chain');
+  const textBlock = SRC.slice(textPathIdx, textPathIdx + 1000);
   assert.ok(textBlock.indexOf("'groq'") < textBlock.indexOf("'gemini'"),
     'Groq must be first in text-only path');
   assert.ok(textBlock.indexOf("'gemini'") < textBlock.indexOf("'openrouter'"),
     'Gemini before OpenRouter in text-only path');
+  assert.ok(textBlock.indexOf("'groq-secondary'") > -1,
+    'Groq Secondary must exist in text-only path');
 });
 
 test('GEMINI-ERROR-01: Gemini 400 handled as non_retryable', () => {

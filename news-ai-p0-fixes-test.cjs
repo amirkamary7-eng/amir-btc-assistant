@@ -618,10 +618,11 @@ test('GROQ-12: No hardcoded Groq API key', () => {
 
 test('GROQ-13: Groq falls back to Gemini on failure', () => {
   // Find the integration point (not the function definition comment)
-  const fnStart = src.indexOf('// Provider 0: Groq (primary) — always tried first');
+  const fnStart = src.indexOf('// Provider 0: Groq Primary (primary) — always tried first');
   assert.ok(fnStart > -1, 'Groq summary integration must exist');
   // P0-2 FIX: Increased window from 1500 to 2500 to account for validatePersianOutput code
-  const afterGroq = src.slice(fnStart, fnStart + 2500);
+  // NOTE: Groq Secondary is now between Groq Primary and Gemini, so the window must cover both
+  const afterGroq = src.slice(fnStart, fnStart + 3500);
   assert.ok(/falling back to Gemini/.test(afterGroq), 'Groq failure must log "falling back to Gemini"');
   assert.ok(/!summary/.test(afterGroq), 'Gemini must be gated on !summary (only if Groq failed)');
 });
