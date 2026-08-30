@@ -9325,7 +9325,7 @@ async function fetchCalendarEvents(env) {
           env,
           CALENDAR_CACHE_KEY,
           JSON.stringify(events),
-          getNumericEnv(env, 'CALENDAR_CACHE_TTL', 600),
+          getNumericEnv(env, 'CALENDAR_CACHE_TTL', 1800),
         );
         console.log('[CALENDAR] KV write: success (' + events.length + ' events)');
       } catch (kvErr) {
