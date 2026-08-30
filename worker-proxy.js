@@ -520,6 +520,214 @@ async function diagLog(env, entry) { /* no-op: diagnostic logging removed */ }
 async function flushDiagLog(env) { /* no-op */ }
 function diagLogSync(env, entry) { /* no-op */ }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL GROQ RATE/TOKEN COORDINATOR (Phase 4)
+// ═══════════════════════════════════════════════════════════════════════════
+// Tracks RPM (requests per minute) and TPM (tokens per minute) across ALL
+// Groq consumers (News translation, News summary, News batch analysis, Chat AI).
+//
+// Circuit breaker keys remain SEPARATE:
+//   - News: 'groq' (shared across translation + summary + batch analysis)
+//   - Chat: 'chat-groq' (separate from News)
+//
+// The coordinator does NOT replace circuit breakers — it adds a PRE-FLIGHT
+// capacity check that prevents sending requests when we're near the rate limit.
+//
+// KV keys (in APP_CACHE):
+//   groq:global:rpm  — JSON array of timestamps (ms) in current minute window
+//   groq:global:tpm  — JSON { tokens: number, windowStart: number }
+//
+// Config (via env, with safe defaults for free tier):
+//   GROQ_RPM_LIMIT (default: 30) — requests per minute
+//   GROQ_TPM_LIMIT (default: 14000) — tokens per minute
+//   GROQ_SAFETY_MARGIN (default: 0.85) — use only 85% of limit before backing off
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GROQ_RPM_KEY = 'groq:global:rpm';
+const GROQ_TPM_KEY = 'groq:global:tpm';
+const GROQ_COORDINATOR_TTL = 120; // 2 minutes (slightly longer than 1-min window)
+
+/**
+ * Get the effective Groq RPM limit (from env or default).
+ * Free tier: 30 RPM. Developer tier: 60 RPM. Scale to your plan.
+ */
+function getGroqRpmLimit(env) {
+  return Math.max(1, parseInt(env?.GROQ_RPM_LIMIT || '30', 10));
+}
+
+/**
+ * Get the effective Groq TPM limit (from env or default).
+ * Free tier: 14,400 TPM. Developer tier: 30,000 TPM.
+ */
+function getGroqTpmLimit(env) {
+  return Math.max(1000, parseInt(env?.GROQ_TPM_LIMIT || '14000', 10));
+}
+
+/**
+ * Get the safety margin (fraction of limit to use before backing off).
+ * 0.85 = use only 85% of the limit, leave 15% headroom.
+ */
+function getGroqSafetyMargin(env) {
+  return Math.max(0.5, Math.min(0.99, parseFloat(env?.GROQ_SAFETY_MARGIN || '0.85')));
+}
+
+/**
+ * Check if Groq has capacity for a new request.
+ * Returns { allowed: boolean, rpmCount: number, tpmCount: number, reason: string }
+ *
+ * @param {object} env - Worker environment
+ * @param {number} estimatedTokens - estimated tokens for this request (prompt + max_tokens)
+ * @returns {Promise<{allowed: boolean, rpmCount: number, tpmCount: number, reason: string}>}
+ */
+async function checkGroqCapacity(env, estimatedTokens = 500) {
+  try {
+    const now = Date.now();
+    const windowMs = 60 * 1000; // 1 minute window
+    const windowStart = now - windowMs;
+
+    // Read RPM data (array of timestamps)
+    let rpmTimestamps = [];
+    try {
+      const rpmRaw = await readAppCache(env, GROQ_RPM_KEY);
+      if (rpmRaw) {
+        rpmTimestamps = JSON.parse(rpmRaw);
+        if (!Array.isArray(rpmTimestamps)) rpmTimestamps = [];
+      }
+    } catch { rpmTimestamps = []; }
+
+    // Filter to only timestamps in current window
+    rpmTimestamps = rpmTimestamps.filter(ts => ts > windowStart);
+
+    // Read TPM data
+    let tpmData = { tokens: 0, windowStart: now };
+    try {
+      const tpmRaw = await readAppCache(env, GROQ_TPM_KEY);
+      if (tpmRaw) {
+        tpmData = JSON.parse(tpmRaw);
+        if (!tpmData.tokens) tpmData = { tokens: 0, windowStart: now };
+      }
+    } catch { tpmData = { tokens: 0, windowStart: now }; }
+
+    // Reset TPM window if it's stale (older than 1 minute)
+    if (tpmData.windowStart < windowStart) {
+      tpmData = { tokens: 0, windowStart: now };
+    }
+
+    const rpmLimit = getGroqRpmLimit(env);
+    const tpmLimit = getGroqTpmLimit(env);
+    const margin = getGroqSafetyMargin(env);
+
+    const effectiveRpmLimit = Math.floor(rpmLimit * margin);
+    const effectiveTpmLimit = Math.floor(tpmLimit * margin);
+
+    const currentRpm = rpmTimestamps.length;
+    const currentTpm = tpmData.tokens;
+
+    // Check RPM
+    if (currentRpm >= effectiveRpmLimit) {
+      return {
+        allowed: false,
+        rpmCount: currentRpm,
+        tpmCount: currentTpm,
+        reason: `rpm_limit (${currentRpm}/${effectiveRpmLimit})`,
+      };
+    }
+
+    // Check TPM
+    if (currentTpm + estimatedTokens > effectiveTpmLimit) {
+      return {
+        allowed: false,
+        rpmCount: currentRpm,
+        tpmCount: currentTpm,
+        reason: `tpm_limit (${currentTpm + estimatedTokens}/${effectiveTpmLimit})`,
+      };
+    }
+
+    return {
+      allowed: true,
+      rpmCount: currentRpm,
+      tpmCount: currentTpm,
+      reason: 'ok',
+    };
+  } catch (e) {
+    // Non-fatal: if KV read fails, allow the request (circuit breaker will catch failures)
+    console.warn('[GROQ-COORD] Capacity check failed (non-fatal):', e?.message);
+    return { allowed: true, rpmCount: 0, tpmCount: 0, reason: 'check_failed' };
+  }
+}
+
+/**
+ * Record a Groq request after it's sent (or before — doesn't matter for counting).
+ * This increments the RPM counter and adds estimated tokens to the TPM counter.
+ *
+ * @param {object} env - Worker environment
+ * @param {number} estimatedTokens - estimated tokens for this request
+ */
+async function recordGroqRequest(env, estimatedTokens = 500) {
+  try {
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+
+    // Update RPM (append timestamp, filter old, write back)
+    let rpmTimestamps = [];
+    try {
+      const rpmRaw = await readAppCache(env, GROQ_RPM_KEY);
+      if (rpmRaw) {
+        rpmTimestamps = JSON.parse(rpmRaw);
+        if (!Array.isArray(rpmTimestamps)) rpmTimestamps = [];
+      }
+    } catch { rpmTimestamps = []; }
+
+    rpmTimestamps = rpmTimestamps.filter(ts => ts > now - windowMs);
+    rpmTimestamps.push(now);
+
+    // Keep array small (max 100 entries — prevents unbounded growth)
+    if (rpmTimestamps.length > 100) {
+      rpmTimestamps = rpmTimestamps.slice(-100);
+    }
+
+    await writeAppCache(env, GROQ_RPM_KEY, JSON.stringify(rpmTimestamps), GROQ_COORDINATOR_TTL);
+
+    // Update TPM
+    let tpmData = { tokens: 0, windowStart: now };
+    try {
+      const tpmRaw = await readAppCache(env, GROQ_TPM_KEY);
+      if (tpmRaw) {
+        tpmData = JSON.parse(tpmRaw);
+        if (!tpmData.tokens) tpmData = { tokens: 0, windowStart: now };
+      }
+    } catch { tpmData = { tokens: 0, windowStart: now }; }
+
+    // Reset TPM window if stale
+    if (tpmData.windowStart < now - windowMs) {
+      tpmData = { tokens: 0, windowStart: now };
+    }
+
+    tpmData.tokens += estimatedTokens;
+    await writeAppCache(env, GROQ_TPM_KEY, JSON.stringify(tpmData), GROQ_COORDINATOR_TTL);
+  } catch (e) {
+    // Non-fatal: tracking failure shouldn't block requests
+    console.warn('[GROQ-COORD] Record request failed (non-fatal):', e?.message);
+  }
+}
+
+/**
+ * Estimate tokens for a Groq request.
+ * Rough heuristic: ~4 chars per token for English, ~2 chars per token for Persian.
+ * Uses average of 3 chars per token as a safe middle ground.
+ *
+ * @param {string} prompt - the user prompt text
+ * @param {string} systemPrompt - the system prompt text
+ * @param {number} maxTokens - max_tokens parameter
+ * @returns {number} estimated total tokens
+ */
+function estimateGroqTokens(prompt, systemPrompt, maxTokens) {
+  const promptChars = (prompt || '').length;
+  const systemChars = (systemPrompt || '').length;
+  const inputTokens = Math.ceil((promptChars + systemChars) / 3);
+  return inputTokens + (maxTokens || 500);
+}
+
 // ============================================================================
 // [START-E2E] Diagnostic logging — /start-specific
 // ============================================================================
@@ -4837,13 +5045,22 @@ async function batchTranslateToFarsi(texts, env) {
       const cbGroq = await shouldAttemptProvider(env, 'groq');
       if (cbGroq.attempt) {
         try {
+          // ── Global Groq Coordinator: pre-flight capacity check ──
+          const batchPrompt = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
+          const batchSystemPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
+          const maxTokens = Math.min(4000, batchTexts.length * 200);
+          const estTokens = estimateGroqTokens(batchPrompt, batchSystemPrompt, maxTokens);
+          const capacity = await checkGroqCapacity(env, estTokens);
+          if (!capacity.allowed) {
+            console.warn(`[GROQ-COORD] batchTranslate skipped — ${capacity.reason}`);
+            // Fall through to individual translation (which also checks capacity)
+          } else {
           // Build numbered list of headlines
           const numberedHeadlines = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
           const messages = [
-            { role: 'system', content: 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.' },
+            { role: 'system', content: batchSystemPrompt },
             { role: 'user', content: `Translate these ${batchTexts.length} headlines to Persian. Return a JSON array of ${batchTexts.length} strings:\n\n${numberedHeadlines}` }
           ];
-          const maxTokens = Math.min(4000, batchTexts.length * 200);
           const dbResult = await queryDb(env,
             `SELECT public.groq_generate($1::text, $2::jsonb, $3, 0.3) AS result`,
             ['openai/gpt-oss-120b', JSON.stringify(messages), maxTokens]
@@ -4891,6 +5108,7 @@ async function batchTranslateToFarsi(texts, env) {
                     }
                     batchSuccess = true;
                     try { await recordCircuitResult(env, 'groq', true); } catch {}
+                    try { await recordGroqRequest(env, estTokens); } catch {}
                     console.log(`[BATCH-TRANSLATE] ✅ Batch of ${batchTexts.length} translated in 1 Groq call`);
                   } else {
                     console.warn('[BATCH-TRANSLATE] ⚠️ Some translations failed validation — falling back to individual');
@@ -4913,6 +5131,7 @@ async function batchTranslateToFarsi(texts, env) {
             try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
             console.warn(`[BATCH-TRANSLATE] ⚠️ Groq failed (HTTP ${groqResult.status_code}) — falling back to individual`);
           }
+          } // end of capacity.allowed else block
         } catch (e) {
           try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.name === 'AbortError' ? 'timeout' : 'network_error'); } catch {}
           console.warn('[BATCH-TRANSLATE] ⚠️ Groq exception:', e?.message, '— falling back to individual');
@@ -4975,8 +5194,16 @@ async function translateToFarsi(text, env) {
     const cbGroq = await shouldAttemptProvider(env, 'groq');
     if (cbGroq.attempt) {
       try {
+        // ── Global Groq Coordinator: pre-flight capacity check ──
+        const indSysPrompt = 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل, Bitcoin → بیت‌کوین. 4) Numbers can stay as-is.';
+        const indEstTokens = estimateGroqTokens(text, indSysPrompt, 500);
+        const indCapacity = await checkGroqCapacity(env, indEstTokens);
+        if (!indCapacity.allowed) {
+          console.warn(`[GROQ-COORD] translateToFarsi skipped — ${indCapacity.reason}`);
+          // Fall through to Workers AI / Google Translate fallback
+        } else {
         const messages = [
-          { role: 'system', content: 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل, Bitcoin → بیت‌کوین. 4) Numbers can stay as-is.' },
+          { role: 'system', content: indSysPrompt },
           { role: 'user', content: text }
         ];
         const dbResult = await queryDb(env,
@@ -4991,6 +5218,7 @@ async function translateToFarsi(text, env) {
             result = translated.trim();
             translation_failed = false;
             try { await recordCircuitResult(env, 'groq', true); } catch {}
+            try { await recordGroqRequest(env, indEstTokens); } catch {}
           } else {
             try { await recordCircuitResult(env, 'groq', false, 'retryable', 'empty_response'); } catch {}
           }
@@ -4999,6 +5227,7 @@ async function translateToFarsi(text, env) {
           try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
           console.warn('[TRANSLATE] Groq failed (non-fatal):', `HTTP ${groqResult.status_code}`);
         }
+        } // end of capacity.allowed else block
       } catch (e) {
         try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.message?.substring(0, 120)); } catch {}
         console.warn('[TRANSLATE] Groq failed (non-fatal):', e?.message);
@@ -5630,6 +5859,14 @@ function classifyHttpError(status) {
 async function tryGroq(env, prompt, systemPrompt) {
   const t0 = Date.now();
   try {
+    // ── Global Groq Coordinator: pre-flight capacity check ──
+    const estTokens = estimateGroqTokens(prompt, systemPrompt, 1024);
+    const capacity = await checkGroqCapacity(env, estTokens);
+    if (!capacity.allowed) {
+      console.warn(`[GROQ-COORD] tryGroq skipped — ${capacity.reason}`);
+      return { provider: 'groq', success: false, error: 'rate_limited', errorType: 'retryable', error_detail: capacity.reason, duration_ms: Date.now() - t0, coordinator_skipped: true };
+    }
+
     const messages = [];
     if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
       messages.push({ role: 'system', content: systemPrompt });
@@ -5664,6 +5901,8 @@ async function tryGroq(env, prompt, systemPrompt) {
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
+      // Record this request in the global coordinator (non-blocking)
+      try { await recordGroqRequest(env, estTokens); } catch {}
       return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
     }
     return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
@@ -8175,8 +8414,16 @@ ${headlines}`;
     const cbGroq = await shouldAttemptProvider(env, 'groq');
     if (cbGroq.attempt) {
       try {
+        // ── Global Groq Coordinator: pre-flight capacity check ──
+        const batchAnalysisSysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
+        const batchEstTokens = estimateGroqTokens(prompt, batchAnalysisSysPrompt, 2048);
+        const batchCapacity = await checkGroqCapacity(env, batchEstTokens);
+        if (!batchCapacity.allowed) {
+          console.warn(`[GROQ-COORD] batchAnalyzeNews skipped — ${batchCapacity.reason}`);
+          // Fall through to Gemini / Workers AI / rule-based fallback
+        } else {
         const messages = [
-          { role: 'system', content: 'You are a crypto market analyst. Return ONLY a JSON array, no other text.' },
+          { role: 'system', content: batchAnalysisSysPrompt },
           { role: 'user', content: prompt }
         ];
         const dbResult = await queryDb(env,
@@ -8193,6 +8440,7 @@ ${headlines}`;
           const parsed = parseBatchResult(text);
           if (parsed && Object.keys(parsed).length > 0) {
             try { await recordCircuitResult(env, 'groq', true); } catch {}
+            try { await recordGroqRequest(env, batchEstTokens); } catch {}
             console.log('[NEWS-AI-BATCH] ✅ Groq PRIMARY succeeded — no fallback needed');
             return parsed;
           }
@@ -8203,6 +8451,7 @@ ${headlines}`;
           try { await recordCircuitResult(env, 'groq', false, errorType, `http_${statusCode}`); } catch {}
           console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}) — falling back to Gemini`);
         }
+        } // end of capacity.allowed else block
       } catch (e) {
         try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.name === 'AbortError' ? 'timeout' : 'network_error'); } catch {}
         console.warn('[NEWS-AI-BATCH] ⚠️ Groq failed:', e?.message, '— falling back to Gemini');
@@ -9612,6 +9861,10 @@ const assistantHandlers = createAssistantHandlers({
   recordCircuitResult,
   classifyHttpError,
   isNewsProviderEnabled,
+  // Phase 4: Global Groq Rate/Token Coordinator
+  checkGroqCapacity,
+  recordGroqRequest,
+  estimateGroqTokens,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({

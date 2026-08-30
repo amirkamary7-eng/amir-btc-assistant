@@ -240,7 +240,7 @@ test('BEHAVIORAL-8-CHAIN: Provider fallback chain exists in correct order', () =
 test('BEHAVIORAL-9-GROQ: Groq uses DB function groq_generate with correct params', () => {
   const groqSection = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function tryGroq'),
-    WORKER_SRC.indexOf('async function tryGroq') + 1000
+    WORKER_SRC.indexOf('async function tryGroq') + 2000
   );
   assert.ok(groqSection.includes('groq_generate'), 'Groq must use groq_generate DB function');
   assert.ok(groqSection.includes('queryDb'), 'Groq must use queryDb');

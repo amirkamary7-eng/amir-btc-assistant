@@ -37,6 +37,10 @@ export function createAssistantHandlers(deps) {
     recordCircuitResult,
     classifyHttpError,
     isNewsProviderEnabled,
+    // Phase 4: Global Groq Rate/Token Coordinator
+    checkGroqCapacity,
+    recordGroqRequest,
+    estimateGroqTokens,
   } = deps;
 
   // ── Constants ──────────────────────────────────────────────────────────────
@@ -821,6 +825,17 @@ export function createAssistantHandlers(deps) {
   // ── AI Providers (with circuit breaker) ─────────────────────────────────────
 
   async function callGroqChat(env, prompt) {
+    // ── Global Groq Coordinator: pre-flight capacity check ──
+    if (typeof checkGroqCapacity === 'function') {
+      const estTokens = typeof estimateGroqTokens === 'function'
+        ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
+        : 1500;
+      const capacity = await checkGroqCapacity(env, estTokens);
+      if (!capacity.allowed) {
+        throw { message: `Groq rate limited: ${capacity.reason}`, errorType: 'retryable', _isProviderError: true, _coordinatorSkipped: true };
+      }
+    }
+
     const messages = [
       { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
@@ -830,6 +845,17 @@ export function createAssistantHandlers(deps) {
       [CHAT_GROQ_MODEL, JSON.stringify(messages)]
     );
     const groqResult = dbResult.rows[0]?.result || {};
+
+    // Record this request in the global coordinator (non-blocking)
+    if (typeof recordGroqRequest === 'function') {
+      try {
+        const estTokens = typeof estimateGroqTokens === 'function'
+          ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
+          : 1500;
+        await recordGroqRequest(env, estTokens);
+      } catch {}
+    }
+
     if (typeof groqResult === 'string') {
       try { const parsed = JSON.parse(groqResult); return _parseGroqResult(parsed); } catch {}
     }
