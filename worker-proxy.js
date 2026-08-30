@@ -5008,6 +5008,79 @@ const _translationCache = new Map();
 const TRANSLATION_CACHE_MAX = 500;
 const TRANSLATION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// ─── m2m100 Daily Quota Suppression (FIX 2) ──────────────────────────
+// When Cloudflare Workers AI returns error code 4006 ("daily free allocation
+// exhausted"), the quota resets at UTC midnight. Retrying m2m100 for every
+// headline in every cron tick wastes subrequests and produces 21+ redundant
+// 4006 errors per tick.
+//
+// This suppression is SEPARATE from the circuit breaker:
+//   - Circuit breaker: for transient failures (retryable errors)
+//   - Daily quota suppression: for permanent-until-midnight failures (4006)
+//
+// State: in-memory isolate flag (_m2m100QuotaExhausted + _m2m100QuotaResetAt)
+// Plus KV-backed state for cross-isolate propagation.
+// Reset: automatically at UTC midnight (calculated from current time).
+const M2M100_QUOTA_KV_KEY = 'wai:m2m100:quota_exhausted';
+let _m2m100QuotaExhausted = false;
+let _m2m100QuotaResetAt = 0; // ms timestamp when quota resets (UTC midnight)
+
+/**
+ * Check if m2m100 daily quota is exhausted.
+ * Checks in-memory flag first (fast), then KV (for cross-isolate).
+ * @returns {Promise<boolean>} true if quota exhausted (skip m2m100)
+ */
+async function isM2m100QuotaExhausted(env) {
+  // Fast path: in-memory check
+  if (_m2m100QuotaExhausted && Date.now() < _m2m100QuotaResetAt) {
+    return true;
+  }
+  // Check if reset time has passed
+  if (_m2m100QuotaExhausted && Date.now() >= _m2m100QuotaResetAt) {
+    _m2m100QuotaExhausted = false;
+    _m2m100QuotaResetAt = 0;
+    // Don't bother deleting KV — it will expire naturally
+  }
+  // KV check for cross-isolate propagation
+  if (env?.APP_CACHE) {
+    try {
+      const kvState = await readAppCache(env, M2M100_QUOTA_KV_KEY);
+      if (kvState) {
+        const parsed = JSON.parse(kvState);
+        if (parsed.resetAt && Date.now() < parsed.resetAt) {
+          _m2m100QuotaExhausted = true;
+          _m2m100QuotaResetAt = parsed.resetAt;
+          return true;
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+  return false;
+}
+
+/**
+ * Mark m2m100 daily quota as exhausted.
+ * Sets in-memory flag + writes to KV for cross-isolate propagation.
+ * Reset time: next UTC midnight.
+ */
+async function markM2m100QuotaExhausted(env) {
+  // Calculate next UTC midnight
+  const now = new Date();
+  const nextMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+  const resetAt = nextMidnight.getTime();
+  const ttlSeconds = Math.max(60, Math.floor((resetAt - Date.now()) / 1000));
+
+  _m2m100QuotaExhausted = true;
+  _m2m100QuotaResetAt = resetAt;
+
+  if (env?.APP_CACHE) {
+    try {
+      await writeAppCache(env, M2M100_QUOTA_KV_KEY, JSON.stringify({ resetAt }), ttlSeconds);
+    } catch { /* non-fatal */ }
+  }
+  console.warn(`[TRANSLATE] m2m100 daily quota exhausted (4006). Suppressed until UTC midnight (${new Date(resetAt).toISOString()}). TTL=${ttlSeconds}s`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // BATCH TRANSLATION — reduces 21 individual Groq calls to 1-2 calls
 // ═══════════════════════════════════════════════════════════════════════
@@ -5244,6 +5317,13 @@ async function translateToFarsi(text, env) {
   // quota limits. When circuit is OPEN, skip Workers AI entirely and fall
   // through to Google Translate (if allowed) or original text.
   if (env?.AI) {
+    // FIX 2: Check daily quota suppression BEFORE circuit breaker.
+    // If m2m100 returned 4006 earlier today, skip it entirely — no wasted subrequest.
+    const m2m100QuotaExhausted = await isM2m100QuotaExhausted(env);
+    if (m2m100QuotaExhausted) {
+      // Quota exhausted — skip m2m100, fall through to Google Translate
+      // (No log here to avoid 21× repetition — the initial 4006 already logged)
+    } else {
     const cbTranslation = await shouldAttemptProvider(env, 'translation-workers-ai');
     if (cbTranslation.attempt) {
       try {
@@ -5273,12 +5353,20 @@ async function translateToFarsi(text, env) {
           || (/not found|unauthorized|forbidden|invalid (model|binding|argument)/i.test(msg)
               && !/timeout|rate|429|capacity|network|temporarily|overloaded/i.test(msg));
         try { await recordCircuitResult(env, 'translation-workers-ai', false, isNonRetryable ? 'non_retryable' : 'retryable', msg.substring(0, 120)); } catch {}
+
+        // FIX 2: If 4006 (daily quota exhausted), mark for suppression until UTC midnight.
+        // This prevents 21× redundant m2m100 calls in the same cron tick + future ticks.
+        if (msgHasQuotaError) {
+          try { await markM2m100QuotaExhausted(env); } catch {}
+        }
+
         console.warn('[TRANSLATE] m2m100 failed (non-fatal):', e?.message);
       }
     } else {
       // Circuit OPEN — skip Workers AI, fall through to Google Translate
       console.warn('[TRANSLATE] m2m100 circuit OPEN — skipping to Google fallback');
     }
+    } // end of m2m100QuotaExhausted else block
   }
 
   // ── Fallback: Google Translate (unofficial) ───────────────────────
@@ -6526,10 +6614,14 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     }
 
     // Record result in circuit breaker (updates state: CLOSED↔OPEN↔HALF_OPEN)
-    try {
-      await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
-    } catch (e) {
-      console.warn(`[CIRCUIT] recordResult(${providerName}) failed:`, e?.message);
+    // FIX: Coordinator denial is a proactive rate limit, NOT a provider failure.
+    // It must NOT trip the circuit — the provider itself didn't fail.
+    if (!r.coordinator_skipped) {
+      try {
+        await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
+      } catch (e) {
+        console.warn(`[CIRCUIT] recordResult(${providerName}) failed:`, e?.message);
+      }
     }
 
     return r;

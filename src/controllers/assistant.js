@@ -1050,7 +1050,9 @@ export function createAssistantHandlers(deps) {
       // Previously: `prompt?.length` → ReferenceError: prompt is not defined
       // Now: only log provider name + error (which IS in scope)
       console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)}`);
-      if (recordCircuitResult && errorType === 'retryable') {
+      // FIX: Coordinator denial (_coordinatorSkipped) is a proactive rate limit,
+      // NOT a provider failure. It must NOT trip the circuit.
+      if (recordCircuitResult && errorType === 'retryable' && !error?._coordinatorSkipped) {
         try { await recordCircuitResult(env, chatCircuitKey, false, errorType, errorMsg.slice(0, 120)); } catch {}
       }
       return { success: false, error: errorMsg, errorType };
