@@ -7006,7 +7006,7 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
       usedProvider = 'groq-secondary';
       console.log('[NEWS-AI-FALLBACK] ✅ Groq Secondary succeeded (Groq Primary was unavailable)');
     } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Secondary failed (error=${r.error}, type=${r.errorType}) — falling back to Gemini`);
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Secondary failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 200)}) — falling back to Gemini`);
     }
   }
 
