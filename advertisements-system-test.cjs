@@ -1798,15 +1798,17 @@ test('OR-08: tryOpenRouter uses classifyHttpError', () => {
     'tryOpenRouter must use classifyHttpError for error classification');
 });
 
-// OR-09: Inserted in fallback chain after Workers AI, before OpenAI
-test('OR-09: OpenRouter fallback inserted after Workers AI, before OpenAI', () => {
-  const workersAiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_WORKERS_AI', true)");
+// OR-09: OpenRouter in News Summary fallback chain BEFORE Workers AI, BEFORE OpenAI
+// Updated for Groq Secondary failover chain spec:
+//   News Summary: groq → groq-secondary → gemini → openrouter → workers-ai → openai
+test('OR-09: OpenRouter fallback inserted BEFORE Workers AI, before OpenAI', () => {
   const openRouterIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
+  const workersAiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_WORKERS_AI', true)");
   const openaiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENAI', false)");
-  assert.ok(workersAiIdx > 0 && openRouterIdx > 0 && openaiIdx > 0,
+  assert.ok(openRouterIdx > 0 && workersAiIdx > 0 && openaiIdx > 0,
     'all three providers must exist in fallback chain');
-  assert.ok(workersAiIdx < openRouterIdx,
-    'OpenRouter must come AFTER Workers AI in fallback chain');
+  assert.ok(openRouterIdx < workersAiIdx,
+    'OpenRouter must come BEFORE Workers AI in News Summary fallback chain (per Groq Secondary spec)');
   assert.ok(openRouterIdx < openaiIdx,
     'OpenRouter must come BEFORE OpenAI in fallback chain');
 });
@@ -1882,16 +1884,22 @@ console.log('✅ All OpenRouter tests loaded.');
 // Chat AI Redesign — Implementation Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-// CA-01: Groq is primary provider
+// CA-01: Groq is primary provider, Groq Secondary is fallback #2, Gemini is fallback #3
+// Updated for Groq Secondary failover chain spec:
+//   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
 test('CA-01: Groq is first in TEXT-ONLY Chat AI provider chain', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  // Check text-only path (after 'Text-only path' comment) where Groq is primary
-  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  // Search from the text-only failover chain comment (which is AFTER the vision path's ['gemini',])
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1500) : ASSISTANT_SRC;
   const groqIdx = textBlock.indexOf("['groq'");
+  const groqSecIdx = textBlock.indexOf("['groq-secondary'");
   const geminiIdx = textBlock.indexOf("['gemini'");
-  assert.ok(groqIdx > 0 && geminiIdx > 0, 'Groq and Gemini must exist in text-only provider chain');
-  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini in text-only path');
+  assert.ok(groqIdx > 0, 'Groq must exist in text-only provider chain');
+  assert.ok(geminiIdx > 0, 'Gemini must exist in text-only provider chain');
+  assert.ok(groqSecIdx > 0, 'Groq Secondary must exist in text-only provider chain');
+  assert.ok(groqIdx < groqSecIdx, 'Groq must come before Groq Secondary in text-only path');
+  assert.ok(groqSecIdx < geminiIdx, 'Groq Secondary must come before Gemini in text-only path');
 });
 
 // CA-02: OpenRouter uses correct model
@@ -2027,20 +2035,31 @@ test('CA-13: Chat AI OpenRouter has HTTP-Referer + X-Title headers', () => {
     'Chat OpenRouter must include X-Title header');
 });
 
-// CA-14: Provider chain order: Groq → Gemini → OpenRouter → Workers AI → OpenAI
+// CA-14: Provider chain order: Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
+// Updated for Groq Secondary failover chain spec:
+//   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
 test('CA-14: Provider chain order is correct (text-only path)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  // Search from the text-only failover chain comment (which is AFTER the vision path's ['gemini',])
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1500) : ASSISTANT_SRC;
   const groqIdx = textBlock.indexOf("['groq'");
+  const groqSecIdx = textBlock.indexOf("['groq-secondary'");
   const geminiIdx = textBlock.indexOf("['gemini'");
   const orIdx = textBlock.indexOf("['openrouter'");
   const waIdx = textBlock.indexOf("['workers-ai'");
   const oaiIdx = textBlock.indexOf("['openai'");
-  assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
-  assert.ok(geminiIdx > -1 && geminiIdx < orIdx, 'Gemini before OpenRouter');
-  assert.ok(orIdx > -1 && orIdx < waIdx, 'OpenRouter before Workers AI');
-  assert.ok(waIdx > -1 && waIdx < oaiIdx, 'Workers AI before OpenAI');
+  assert.ok(groqIdx > -1, 'Groq must exist');
+  assert.ok(groqSecIdx > -1, 'Groq Secondary must exist');
+  assert.ok(geminiIdx > -1, 'Gemini must exist');
+  assert.ok(orIdx > -1, 'OpenRouter must exist');
+  assert.ok(waIdx > -1, 'Workers AI must exist');
+  assert.ok(oaiIdx > -1, 'OpenAI must exist');
+  assert.ok(groqIdx < groqSecIdx, 'Groq before Groq Secondary');
+  assert.ok(groqSecIdx < geminiIdx, 'Groq Secondary before Gemini');
+  assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
+  assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
+  assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
 });
 
 // CA-15: Workers AI is fallback (not primary)
@@ -2314,20 +2333,30 @@ test('RT-35: No external search for non-external intents', () => {
     'News context only for NEWS');
 });
 
-// RT-36: Provider chain UNTOUCHED (Groq→Gemini→OpenRouter→Workers AI→OpenAI)
-test('RT-36: Provider chain order unchanged', () => {
+// RT-36: Provider chain order: Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
+// Updated for Groq Secondary failover chain spec:
+//   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
+test('RT-36: Provider chain order with Groq Secondary inserted', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path (original chain');
-  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 1000) : ASSISTANT_SRC;
+  const textPathIdx = ASSISTANT_SRC.indexOf('Text-only path — failover chain');
+  const textBlock = textPathIdx > -1 ? ASSISTANT_SRC.slice(textPathIdx, textPathIdx + 2000) : ASSISTANT_SRC;
   const providers = textBlock.match(/\[([\s\S]*?openai[\s\S]*?)\];/);
   assert.ok(providers, 'Must have providers array');
   const block = providers[1];
   const groqIdx = block.indexOf("'groq'");
+  const groqSecIdx = block.indexOf("'groq-secondary'");
   const geminiIdx = block.indexOf("'gemini'");
   const orIdx = block.indexOf("'openrouter'");
-  const waIdx = block.indexOf("'workers-ai'");
+  const waIdx = block.indexOf("'workers-ai'")
   const oaiIdx = block.indexOf("'openai'");
-  assert.ok(groqIdx > -1 && groqIdx < geminiIdx, 'Groq before Gemini');
+  assert.ok(groqIdx > -1, 'Groq must exist');
+  assert.ok(groqSecIdx > -1, 'Groq Secondary must exist');
+  assert.ok(geminiIdx > -1, 'Gemini must exist');
+  assert.ok(orIdx > -1, 'OpenRouter must exist');
+  assert.ok(waIdx > -1, 'Workers AI must exist');
+  assert.ok(oaiIdx > -1, 'OpenAI must exist');
+  assert.ok(groqIdx < groqSecIdx, 'Groq before Groq Secondary');
+  assert.ok(groqSecIdx < geminiIdx, 'Groq Secondary before Gemini');
   assert.ok(geminiIdx < orIdx, 'Gemini before OpenRouter');
   assert.ok(orIdx < waIdx, 'OpenRouter before Workers AI');
   assert.ok(waIdx < oaiIdx, 'Workers AI before OpenAI');
