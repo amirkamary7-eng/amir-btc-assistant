@@ -8750,12 +8750,13 @@ ${headlines}`;
   // Method 0: Groq via DB gateway (primary) — always tried first
   // Routes through Supabase EU to bypass geo-restriction.
   // Model: openai/gpt-oss-120b
+  // Hoist batchAnalysisSysPrompt to function scope so Groq Secondary block can access it
+  const batchAnalysisSysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
     const cbGroq = await shouldAttemptProvider(env, 'groq');
     if (cbGroq.attempt) {
       try {
         // ── Global Groq Coordinator: pre-flight capacity check ──
-        const batchAnalysisSysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
         const batchEstTokens = estimateGroqTokens(prompt, batchAnalysisSysPrompt, 2048);
         const batchCapacity = await checkGroqCapacity(env, batchEstTokens);
         if (!batchCapacity.allowed) {
@@ -8809,7 +8810,7 @@ ${headlines}`;
     if (cbGroqSec.attempt) {
       try {
         const secMessages = [
-          { role: 'system', content: batchAnalysisSysPrompt || 'You are a crypto market analyst. Return ONLY a JSON array, no other text.' },
+          { role: 'system', content: batchAnalysisSysPrompt },
           { role: 'user', content: prompt }
         ];
         const controller = new AbortController();
