@@ -547,6 +547,17 @@ const GROQ_RPM_KEY = 'groq:global:rpm';
 const GROQ_TPM_KEY = 'groq:global:tpm';
 const GROQ_COORDINATOR_TTL = 120; // 2 minutes (slightly longer than 1-min window)
 
+// ── In-memory fallback for Groq Coordinator (KV-exhaustion resilience) ──
+// ROOT CAUSE: Free Plan KV has 1,000 writes/day limit. When exhausted,
+// recordGroqRequest cannot write RPM/TPM data → checkGroqCapacity reads
+// stale/empty data → coordinator always allows → requests hit real 429.
+// FIX: Track RPM/TPM in module-level memory as a FALLBACK when KV writes
+// fail. This is per-isolate (not cross-isolate) but far better than blind.
+// The KV path is still tried FIRST (for cross-isolate accuracy); in-memory
+// is merged in as a safety net.
+let _groqRpmInMemory = []; // array of timestamps (ms)
+let _groqTpmInMemory = { tokens: 0, windowStart: 0 };
+
 /**
  * Get the effective Groq RPM limit (from env or default).
  * Free tier: 30 RPM. Developer tier: 60 RPM. Scale to your plan.
@@ -585,32 +596,51 @@ async function checkGroqCapacity(env, estimatedTokens = 500) {
     const windowMs = 60 * 1000; // 1 minute window
     const windowStart = now - windowMs;
 
-    // Read RPM data (array of timestamps)
-    let rpmTimestamps = [];
+    // Read RPM data from KV (cross-isolate, but may be stale if KV writes are exhausted)
+    let kvRpmTimestamps = [];
     try {
       const rpmRaw = await readAppCache(env, GROQ_RPM_KEY);
       if (rpmRaw) {
-        rpmTimestamps = JSON.parse(rpmRaw);
-        if (!Array.isArray(rpmTimestamps)) rpmTimestamps = [];
+        kvRpmTimestamps = JSON.parse(rpmRaw);
+        if (!Array.isArray(kvRpmTimestamps)) kvRpmTimestamps = [];
       }
-    } catch { rpmTimestamps = []; }
+    } catch { kvRpmTimestamps = []; }
 
-    // Filter to only timestamps in current window
-    rpmTimestamps = rpmTimestamps.filter(ts => ts > windowStart);
+    // Filter KV RPM to current window
+    kvRpmTimestamps = kvRpmTimestamps.filter(ts => ts > windowStart);
 
-    // Read TPM data
-    let tpmData = { tokens: 0, windowStart: now };
+    // Merge with in-memory RPM (current isolate, always accurate for this isolate)
+    const memRpmTimestamps = _groqRpmInMemory.filter(ts => ts > windowStart);
+    // Union of KV + in-memory timestamps (dedup by value)
+    const rpmSet = new Set([...kvRpmTimestamps, ...memRpmTimestamps]);
+    const rpmTimestamps = [...rpmSet];
+
+    // Read TPM data from KV
+    let kvTpmData = { tokens: 0, windowStart: now };
     try {
       const tpmRaw = await readAppCache(env, GROQ_TPM_KEY);
       if (tpmRaw) {
-        tpmData = JSON.parse(tpmRaw);
-        if (!tpmData.tokens) tpmData = { tokens: 0, windowStart: now };
+        kvTpmData = JSON.parse(tpmRaw);
+        if (!kvTpmData.tokens) kvTpmData = { tokens: 0, windowStart: now };
       }
-    } catch { tpmData = { tokens: 0, windowStart: now }; }
+    } catch { kvTpmData = { tokens: 0, windowStart: now }; }
 
-    // Reset TPM window if it's stale (older than 1 minute)
-    if (tpmData.windowStart < windowStart) {
-      tpmData = { tokens: 0, windowStart: now };
+    // Reset KV TPM window if it's stale (older than 1 minute)
+    if (kvTpmData.windowStart < windowStart) {
+      kvTpmData = { tokens: 0, windowStart: now };
+    }
+
+    // Merge with in-memory TPM (use the one with the more recent window, or sum if same window)
+    let tpmData;
+    if (_groqTpmInMemory.windowStart > windowStart && _groqTpmInMemory.windowStart >= kvTpmData.windowStart) {
+      // In-memory is fresher — use it (but add KV's contribution if same window)
+      if (kvTpmData.windowStart > windowStart && kvTpmData.windowStart === _groqTpmInMemory.windowStart) {
+        tpmData = { tokens: Math.max(kvTpmData.tokens, _groqTpmInMemory.tokens), windowStart: _groqTpmInMemory.windowStart };
+      } else {
+        tpmData = _groqTpmInMemory;
+      }
+    } else {
+      tpmData = kvTpmData;
     }
 
     const rpmLimit = getGroqRpmLimit(env);
@@ -621,7 +651,7 @@ async function checkGroqCapacity(env, estimatedTokens = 500) {
     const effectiveTpmLimit = Math.floor(tpmLimit * margin);
 
     const currentRpm = rpmTimestamps.length;
-    const currentTpm = tpmData.tokens;
+    const currentTpm = tpmData.tokens || 0;
 
     // Check RPM
     if (currentRpm >= effectiveRpmLimit) {
@@ -664,10 +694,26 @@ async function checkGroqCapacity(env, estimatedTokens = 500) {
  * @param {number} estimatedTokens - estimated tokens for this request
  */
 async function recordGroqRequest(env, estimatedTokens = 500) {
-  try {
-    const now = Date.now();
-    const windowMs = 60 * 1000;
+  const now = Date.now();
+  const windowMs = 60 * 1000;
 
+  // ── Always update in-memory trackers (works even when KV writes are exhausted) ──
+  // Filter old timestamps
+  _groqRpmInMemory = _groqRpmInMemory.filter(ts => ts > now - windowMs);
+  _groqRpmInMemory.push(now);
+  // Keep array small (max 100 entries)
+  if (_groqRpmInMemory.length > 100) {
+    _groqRpmInMemory = _groqRpmInMemory.slice(-100);
+  }
+
+  // Reset in-memory TPM window if stale
+  if (_groqTpmInMemory.windowStart < now - windowMs) {
+    _groqTpmInMemory = { tokens: 0, windowStart: now };
+  }
+  _groqTpmInMemory.tokens += estimatedTokens;
+
+  // ── Also try to write to KV (best-effort — may fail silently if KV writes exhausted) ──
+  try {
     // Update RPM (append timestamp, filter old, write back)
     let rpmTimestamps = [];
     try {
@@ -706,10 +752,18 @@ async function recordGroqRequest(env, estimatedTokens = 500) {
     tpmData.tokens += estimatedTokens;
     await writeAppCache(env, GROQ_TPM_KEY, JSON.stringify(tpmData), GROQ_COORDINATOR_TTL);
   } catch (e) {
-    // Non-fatal: tracking failure shouldn't block requests
-    console.warn('[GROQ-COORD] Record request failed (non-fatal):', e?.message);
+    // Non-fatal: KV write failure is expected when Free Plan quota is exhausted.
+    // In-memory trackers are already updated above, so the coordinator still works.
+    // Only log once per isolate to avoid spamming (first failure only).
+    if (!_groqKvWriteFailedLogged) {
+      console.warn('[GROQ-COORD] KV write failed (using in-memory fallback):', e?.message);
+      _groqKvWriteFailedLogged = true;
+    }
   }
 }
+
+// One-shot flag to avoid logging the same KV-exhaustion warning repeatedly
+let _groqKvWriteFailedLogged = false;
 
 /**
  * Estimate tokens for a Groq request.
