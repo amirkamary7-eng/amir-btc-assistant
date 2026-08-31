@@ -746,22 +746,11 @@ test('AI Chat: missing message field returns 422', async () => {
 test('AI Chat: with mocked Gemini returns reply', async () => {
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
-  // Chat AI now uses Groq as primary → Gemini as fallback.
-  // Mock the DB pool to handle groq_generate calls (Groq is primary).
+  // MIGRATION: Groq Primary now uses direct HTTP (groqPrimaryGenerate) instead of groq_generate() DB function.
+  // Mock fetch for Groq API calls + keep DB pool mock for Gemini fallback.
+  const origFetch = globalThis.fetch;
   const mockPool = {
     query: async (sql, params) => {
-      if (sql.includes('groq_generate')) {
-        return {
-          rows: [{
-            result: {
-              status_code: 200,
-              response_body: JSON.stringify({
-                choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }],
-              }),
-            }
-          }]
-        };
-      }
       if (sql.includes('gemini_generate')) {
         return {
           rows: [{
@@ -784,9 +773,25 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
   const env = createEnv({
     RATE_LIMITS: rateLimits,
     GEMINI_API_KEY: 'fake-key',
+    GROQ_API_KEY: 'fake-groq-key',
     _reqPool: mockPool,
     DATABASE_URL: '',
   });
+  // Mock fetch for Groq Primary direct HTTP calls
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('api.groq.com')) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }],
+        }),
+        json: async () => ({ choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }] }),
+      };
+    }
+    // Fall through to original fetch for other URLs
+    return origFetch(url, opts);
+  };
   const user = { id: 999888, first_name: 'Test' };
   const initData = buildInitData('test-bot-token', user);
 
@@ -797,12 +802,12 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.status, 'success');
-    // Groq is now primary — should succeed via groq_generate
+    // Groq is now primary — should succeed via direct HTTP (groqPrimaryGenerate)
     assert.equal(res.body.provider, 'groq');
     assert.ok(res.body.reply);
     assert.ok(res.body.reply.includes('Bitcoin'));
   } finally {
-    // cleanup
+    globalThis.fetch = origFetch;
   }
 });
 

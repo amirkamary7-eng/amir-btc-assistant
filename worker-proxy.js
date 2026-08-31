@@ -5188,11 +5188,8 @@ async function batchTranslateToFarsi(texts, env) {
             { role: 'system', content: batchSystemPrompt },
             { role: 'user', content: `Translate these ${batchTexts.length} headlines to Persian. Return a JSON array of ${batchTexts.length} strings:\n\n${numberedHeadlines}` }
           ];
-          const dbResult = await queryDb(env,
-            `SELECT public.groq_generate($1::text, $2::jsonb, $3, 0.3) AS result`,
-            ['openai/gpt-oss-120b', JSON.stringify(messages), maxTokens]
-          );
-          const groqResult = dbResult.rows[0]?.result || {};
+          // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
+          const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, maxTokens, 0.3);
           if (groqResult.status_code === 200) {
             const data = JSON.parse(groqResult.response_body);
             const content = data?.choices?.[0]?.message?.content || '';
@@ -5431,11 +5428,8 @@ async function translateToFarsi(text, env) {
           { role: 'system', content: indSysPrompt },
           { role: 'user', content: text }
         ];
-        const dbResult = await queryDb(env,
-          `SELECT public.groq_generate($1::text, $2::jsonb, 500, 0.3) AS result`,
-          ['openai/gpt-oss-120b', JSON.stringify(messages)]
-        );
-        const groqResult = dbResult.rows[0]?.result || {};
+        // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
+        const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 500, 0.3);
         if (groqResult.status_code === 200) {
           const data = JSON.parse(groqResult.response_body);
           const translated = data?.choices?.[0]?.message?.content;
@@ -6152,7 +6146,66 @@ function classifyHttpError(status) {
 }
 
 /**
- * Provider 0: Groq (primary) — routes through Supabase EU DB gateway.
+ * Groq Primary direct HTTP helper — uses env.GROQ_API_KEY (Cloudflare secret).
+ *
+ * MIGRATION: Previously Primary used the groq_generate() DB function which read
+ * GROQ_API_KEY from Supabase Vault. Now Primary uses the same direct-HTTP pattern
+ * as Secondary (tryGroqSecondary), reading env.GROQ_API_KEY (Cloudflare secret).
+ *
+ * Returns the SAME shape as the DB function: { status_code, response_body }
+ * so all call-site parsing remains unchanged.
+ *
+ * SECURITY: The API key is in the Authorization header, NEVER in the URL or body.
+ * The key value is never logged.
+ *
+ * @param {object} env - Worker environment (must have env.GROQ_API_KEY)
+ * @param {string} model - Groq model name (e.g. 'openai/gpt-oss-120b')
+ * @param {Array} messages - OpenAI-compatible messages array
+ * @param {number} maxTokens - max_tokens parameter
+ * @param {number} temperature - temperature parameter
+ * @returns {Promise<{status_code: number, response_body: string}>}
+ */
+async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature) {
+  const apiKey = env.GROQ_API_KEY;
+  if (!apiKey) {
+    return {
+      status_code: 503,
+      response_body: '{"error":{"message":"GROQ_API_KEY not configured as Cloudflare secret","status":"UNAVAILABLE"}}',
+    };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30s — matches DB function statement_timeout
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const response_body = await res.text();
+    return { status_code: res.status, response_body };
+  } catch (e) {
+    clearTimeout(timeout);
+    // Network error / timeout — return a shape that call sites classify as retryable
+    const isAbort = e?.name === 'AbortError';
+    return {
+      status_code: 0, // 0 = network/timeout (call sites treat non-200 as error, classifyHttpError(0||500) = retryable)
+      response_body: JSON.stringify({ error: { message: isAbort ? 'timeout' : 'network_error', detail: (e?.message || '').substring(0, 120) } }),
+    };
+  }
+}
+
+/**
+ * Provider 0: Groq (primary) — direct HTTP with env.GROQ_API_KEY (Cloudflare secret).
  * Uses openai/gpt-oss-120b via OpenAI-compatible API.
  * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
  */
@@ -6173,17 +6226,8 @@ async function tryGroq(env, prompt, systemPrompt) {
     }
     messages.push({ role: 'user', content: prompt });
 
-    const dbResult = await queryDb(env,
-      `SELECT public.groq_generate(
-        $1::text,
-        $2::jsonb,
-        1024,
-        0.4
-      ) AS result`,
-      ['openai/gpt-oss-120b', JSON.stringify(messages)]
-    );
-
-    const result = dbResult.rows[0]?.result || {};
+    // MIGRATION: direct HTTP with env.GROQ_API_KEY (Cloudflare secret) — was groq_generate() DB function
+    const result = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 1024, 0.4);
     const statusCode = result.status_code;
     const responseBody = result.response_body || '';
 
@@ -8835,11 +8879,8 @@ ${headlines}`;
           { role: 'system', content: batchAnalysisSysPrompt },
           { role: 'user', content: prompt }
         ];
-        const dbResult = await queryDb(env,
-          `SELECT public.groq_generate($1::text, $2::jsonb, 2048, 0.2) AS result`,
-          ['openai/gpt-oss-120b', JSON.stringify(messages)]
-        );
-        const groqResult = dbResult.rows[0]?.result || {};
+        // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
+        const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 2048, 0.2);
         const statusCode = groqResult.status_code;
         const responseBody = groqResult.response_body || '';
 
@@ -10335,6 +10376,8 @@ const assistantHandlers = createAssistantHandlers({
   checkGroqCapacity,
   recordGroqRequest,
   estimateGroqTokens,
+  // MIGRATION: Groq Primary direct HTTP helper (uses env.GROQ_API_KEY Cloudflare secret)
+  groqPrimaryGenerate,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({

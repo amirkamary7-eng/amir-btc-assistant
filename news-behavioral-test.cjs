@@ -237,14 +237,15 @@ test('BEHAVIORAL-8-CHAIN: Provider fallback chain exists in correct order', () =
 // ============================================================================
 // Source-level: Groq verification
 // ============================================================================
-test('BEHAVIORAL-9-GROQ: Groq uses DB function groq_generate with correct params', () => {
+test('BEHAVIORAL-9-GROQ: Groq uses direct HTTP with groqPrimaryGenerate + correct params', () => {
   const groqSection = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function tryGroq'),
     WORKER_SRC.indexOf('async function tryGroq') + 2000
   );
-  assert.ok(groqSection.includes('groq_generate'), 'Groq must use groq_generate DB function');
-  assert.ok(groqSection.includes('queryDb'), 'Groq must use queryDb');
-  assert.ok(groqSection.includes('status_code'), 'Groq must check status_code from DB result');
+  // MIGRATION: Groq Primary now uses direct HTTP via groqPrimaryGenerate (env.GROQ_API_KEY Cloudflare secret)
+  // instead of the groq_generate() DB function (which read from Supabase Vault)
+  assert.ok(groqSection.includes('groqPrimaryGenerate'), 'Groq must use groqPrimaryGenerate direct HTTP helper');
+  assert.ok(groqSection.includes('status_code'), 'Groq must check status_code from result');
   assert.ok(groqSection.includes('classifyHttpError'), 'Groq must classify HTTP errors');
   assert.ok(groqSection.includes('provider: \'groq\''), 'Groq must identify itself as provider');
 });

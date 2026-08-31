@@ -508,17 +508,22 @@ test('GS-029: wrangler.jsonc does NOT contain GROQ_API_KEY_1 in vars (must be a 
     'GROQ_API_KEY must NOT be in wrangler.jsonc vars either (it is in Supabase Vault)');
 });
 
-test('GS-030: Original GROQ_API_KEY path is untouched (Vault → groq_generate)', () => {
-  // The groq_generate DB function must still read from vault.GROQ_API_KEY
+test('GS-030: GROQ_API_KEY migrated from Vault to Cloudflare secret (direct HTTP)', () => {
+  // MIGRATION: Groq Primary now uses env.GROQ_API_KEY (Cloudflare secret) via direct HTTP
+  // (groqPrimaryGenerate helper), NOT the groq_generate() DB function (which read from Vault).
+  // The groq_generate() DB function still exists in SQL for backward compatibility but is no longer called.
   const groqSql = fs.readFileSync(path.join(__dirname, 'scripts/groq-model-update.sql'), 'utf8');
   assert.ok(groqSql.includes("WHERE name = 'GROQ_API_KEY'"),
-    'groq_generate must still read GROQ_API_KEY from vault (unchanged)');
-  // The Worker must NOT reference env.GROQ_API_KEY (the primary key is in Vault, not Worker env)
-  // env.GROQ_API_KEY_1 is the secondary — that is fine
+    'groq_generate DB function still reads GROQ_API_KEY from vault (unchanged — backward compat)');
+  // The Worker MUST now reference env.GROQ_API_KEY (migrated from Vault to Cloudflare secret)
   const groqApiKeyRefs = (WORKER.match(/env\.GROQ_API_KEY(?!_1)/g) || []).length;
-  assert.equal(groqApiKeyRefs, 0,
-    `Worker must NOT reference env.GROQ_API_KEY (primary key is in Vault) — found ${groqApiKeyRefs} references`);
-  const assistantGroqApiKeyRefs = (ASSISTANT.match(/env\.GROQ_API_KEY(?!_1)/g) || []).length;
-  assert.equal(assistantGroqApiKeyRefs, 0,
-    `assistant.js must NOT reference env.GROQ_API_KEY (primary key is in Vault) — found ${assistantGroqApiKeyRefs} references`);
+  assert.ok(groqApiKeyRefs > 0,
+    `Worker MUST reference env.GROQ_API_KEY (migrated to Cloudflare secret) — found ${groqApiKeyRefs} references`);
+  // The groqPrimaryGenerate helper must exist and use env.GROQ_API_KEY
+  assert.ok(WORKER.includes('async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)'),
+    'groqPrimaryGenerate helper must be defined');
+  // No active groq_generate() DB function calls in Worker (migrated to direct HTTP)
+  const activeGroqGenerateCalls = (WORKER.match(/queryDb\(env,\s*\n?\s*`SELECT public\.groq_generate/g) || []).length;
+  assert.equal(activeGroqGenerateCalls, 0,
+    `Worker must NOT have active groq_generate() DB function calls (migrated to groqPrimaryGenerate) — found ${activeGroqGenerateCalls}`);
 });

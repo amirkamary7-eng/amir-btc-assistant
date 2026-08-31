@@ -287,12 +287,12 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
   // This test uses a MOCK web search (not real) to verify the pipeline logic.
   // We mock the z-ai-web-dev-sdk import to return conflicting results.
   const worker = loadWorker();
-  const env = createEnv({});
+  const env = createEnv({ GROQ_API_KEY: 'fake-groq-key' });
 
-  // Track what gets injected into the prompt
+  // MIGRATION: Groq Primary now uses direct HTTP (groqPrimaryGenerate) instead of groq_generate() DB function.
+  // Mock fetch to intercept Groq API calls and capture the prompt.
+  const origFetch = globalThis.fetch;
   let capturedPrompt = null;
-  const origQueryDb = env._reqPool;
-  // We need to intercept the Groq call to capture the prompt
   const mockPool = {
     query: async (sql, params) => {
       const sl = (sql||'').toLowerCase();
@@ -301,16 +301,25 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
       if (sl.includes('from watchlist_items') || sl.includes('from referrals') || sl.includes('from token_balances') || sl.includes('from token_transactions') || sl.includes('from price_alerts') || sl.includes('from notifications') || sl.includes('from notification_settings') || sl.includes('from analyses') || sl.includes('from tickets') || sl.includes('from admins')) return { rows: [] };
       if (sl.includes('insert into watchlist_items')) return { rows: [] };
       if (sl.includes('on conflict') && sl.includes('do nothing')) return { rows: [] };
-      if (sl.includes('groq_generate')) {
-        capturedPrompt = String(params?.[1] || '');
-        // Return a reply that would be correct (mentions Warsh)
-        return { rows: [{ result: { status_code: 200, response_body: JSON.stringify({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }) } }] };
-      }
       return { rows: [] };
     },
     end: async () => {}, on: () => {},
   };
   env._reqPool = mockPool;
+  // Mock fetch for Groq Primary direct HTTP — capture the prompt from the request body
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('api.groq.com')) {
+      const body = JSON.parse(opts?.body || '{}');
+      const messages = body.messages || [];
+      capturedPrompt = messages.map(m => m.content).join('\n');
+      return {
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }),
+        json: async () => ({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }),
+      };
+    }
+    return origFetch(url, opts);
+  };
 
   // Mock the web search by pre-populating cache with conflicting fixture
   // (This simulates what performWebSearch would produce with conflicting results)
@@ -369,6 +378,8 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
   assert.ok(capturedPrompt.includes('Powell'), 'Prompt must contain old Powell result');
   assert.ok(capturedPrompt.includes('Warsh'), 'Prompt must contain new Warsh result');
   assert.ok(capturedPrompt.includes('MOST RECENT'), 'Prompt must have MOST RECENT instruction');
+
+  globalThis.fetch = origFetch;
 });
 
 // ============================================================================
@@ -377,8 +388,10 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
 
 test('WS-REG-02: All irrelevant results → context still injected (model decides no-data)', async () => {
   const worker = loadWorker();
-  const env = createEnv({});
+  const env = createEnv({ GROQ_API_KEY: 'fake-groq-key' });
   let capturedPrompt = null;
+  // MIGRATION: Groq Primary now uses direct HTTP (groqPrimaryGenerate) instead of groq_generate() DB function.
+  const origFetch = globalThis.fetch;
   const mockPool = {
     query: async (sql, params) => {
       const sl = (sql||'').toLowerCase();
@@ -387,16 +400,26 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
       if (sl.includes('from watchlist_items') || sl.includes('from referrals') || sl.includes('from token_balances') || sl.includes('from token_transactions') || sl.includes('from price_alerts') || sl.includes('from notifications') || sl.includes('from notification_settings') || sl.includes('from analyses') || sl.includes('from tickets') || sl.includes('from admins')) return { rows: [] };
       if (sl.includes('insert into watchlist_items')) return { rows: [] };
       if (sl.includes('on conflict') && sl.includes('do nothing')) return { rows: [] };
-      if (sl.includes('groq_generate')) {
-        capturedPrompt = String(params?.[1] || '');
-        // Model SHOULD return no-data when all results are irrelevant
-        return { rows: [{ result: { status_code: 200, response_body: JSON.stringify({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }) } }] };
-      }
       return { rows: [] };
     },
     end: async () => {}, on: () => {},
   };
   env._reqPool = mockPool;
+  // Mock fetch for Groq Primary direct HTTP — capture the prompt from the request body
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('api.groq.com')) {
+      const body = JSON.parse(opts?.body || '{}');
+      const messages = body.messages || [];
+      capturedPrompt = messages.map(m => m.content).join('\n');
+      // Model SHOULD return no-data when all results are irrelevant
+      return {
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }),
+        json: async () => ({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }),
+      };
+    }
+    return origFetch(url, opts);
+  };
 
   // Pre-populate with IRRELEVANT results (no Fed chair info)
   const irrelevantFixture = [
@@ -444,6 +467,8 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
   // Verify the prompt contains irrelevant results (no Powell/Warsh)
   assert.ok(!capturedPrompt.includes('Powell') && !capturedPrompt.includes('Warsh'),
     'Prompt must NOT contain Fed chair data (all results irrelevant)');
+
+  globalThis.fetch = origFetch;
 });
 
 // ============================================================================

@@ -42,6 +42,8 @@ export function createAssistantHandlers(deps) {
     checkGroqCapacity,
     recordGroqRequest,
     estimateGroqTokens,
+    // MIGRATION: Groq Primary direct HTTP helper (uses env.GROQ_API_KEY Cloudflare secret)
+    groqPrimaryGenerate,
   } = deps;
 
   // ── Constants ──────────────────────────────────────────────────────────────
@@ -841,11 +843,8 @@ export function createAssistantHandlers(deps) {
       { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ];
-    const dbResult = await queryDb(env,
-      `SELECT public.groq_generate($1::text, $2::jsonb, 1024, 0.4) AS result`,
-      [CHAT_GROQ_MODEL, JSON.stringify(messages)]
-    );
-    const groqResult = dbResult.rows[0]?.result || {};
+    // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
+    const groqResult = await groqPrimaryGenerate(env, CHAT_GROQ_MODEL, messages, 1024, 0.4);
 
     // Fix 1: If Groq returned 429, record it in the coordinator BEFORE _parseGroqResult throws.
     // The request DID reach Groq and consumed quota — must be counted to prevent subsequent 429s.
