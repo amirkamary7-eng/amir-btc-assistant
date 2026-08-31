@@ -5256,6 +5256,10 @@ async function batchTranslateToFarsi(texts, env) {
           } else {
             const errorType = classifyHttpError(groqResult.status_code || 500);
             try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
+            // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
+            if (groqResult.status_code === 429) {
+              try { await recordGroqRequest(env, estTokens); } catch {}
+            }
             console.warn(`[BATCH-TRANSLATE] ⚠️ Groq failed (HTTP ${groqResult.status_code}) — falling back to individual`);
           }
           } // end of capacity.allowed else block
@@ -5446,6 +5450,10 @@ async function translateToFarsi(text, env) {
         } else {
           const errorType = classifyHttpError(groqResult.status_code || 500);
           try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
+          // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
+          if (groqResult.status_code === 429) {
+            try { await recordGroqRequest(env, indEstTokens); } catch {}
+          }
           console.warn('[TRANSLATE] Groq failed (non-fatal):', `HTTP ${groqResult.status_code}`);
         }
         } // end of capacity.allowed else block
@@ -6181,6 +6189,12 @@ async function tryGroq(env, prompt, systemPrompt) {
 
     if (statusCode !== 200) {
       const errorType = classifyHttpError(statusCode || 500);
+      // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
+      // This prevents subsequent requests in the same window from also hitting 429.
+      // Only record for 429 (real rate limit); other HTTP errors (4xx/5xx) may not consume quota.
+      if (statusCode === 429) {
+        try { await recordGroqRequest(env, estTokens); } catch {}
+      }
       return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0 };
     }
 
@@ -8844,6 +8858,10 @@ ${headlines}`;
         } else {
           const errorType = classifyHttpError(statusCode || 500);
           try { await recordCircuitResult(env, 'groq', false, errorType, `http_${statusCode}`); } catch {}
+          // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
+          if (statusCode === 429) {
+            try { await recordGroqRequest(env, batchEstTokens); } catch {}
+          }
           console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}) — falling back to Gemini`);
         }
         } // end of capacity.allowed else block

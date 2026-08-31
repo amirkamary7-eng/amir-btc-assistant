@@ -847,6 +847,18 @@ export function createAssistantHandlers(deps) {
     );
     const groqResult = dbResult.rows[0]?.result || {};
 
+    // Fix 1: If Groq returned 429, record it in the coordinator BEFORE _parseGroqResult throws.
+    // The request DID reach Groq and consumed quota — must be counted to prevent subsequent 429s.
+    const _groqStatusCode = (typeof groqResult === 'object' && groqResult) ? groqResult.status_code : null;
+    if (_groqStatusCode === 429 && typeof recordGroqRequest === 'function') {
+      try {
+        const _estTokens = typeof estimateGroqTokens === 'function'
+          ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
+          : 1500;
+        await recordGroqRequest(env, _estTokens);
+      } catch {}
+    }
+
     // Parse result FIRST — only record in coordinator if Groq actually succeeded
     let result;
     if (typeof groqResult === 'string') {
