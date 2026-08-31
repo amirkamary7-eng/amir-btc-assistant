@@ -15287,7 +15287,13 @@ export default {
       //     (no wasted subrequests)
       // If queue is empty, processOneArticleSummary returns immediately (no extra work).
       // Feature flags respected inside processOneArticleSummary (NEWS_SUMMARY_ENABLED).
-      if (isEvery5Min) {
+      // OPTION A: Skip on */15 overlap to avoid Groq burst. At :00/:15/:30/:45, the */15 cron
+      // already runs processNewsAIBatch (batchTranslate + batchAnalyze = 2 Groq calls). Running
+      // processOneArticleSummary (up to 4 more Groq calls) in the same instant creates a 6-request
+      // burst that trips Groq's 30 RPM limit. Skipping here reduces the burst to 2 requests on
+      // overlap minutes. Articles stay in the KV queue (TTL 24h) and are processed on the next
+      // non-overlap */5 tick (max 5-minute delay).
+      if (isEvery5Min && !isEvery15Min) {
         const MAX_SUMMARIES_PER_TICK = 4;
         for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
