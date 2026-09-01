@@ -15725,7 +15725,14 @@ Headlines:
       // burst that trips Groq's 30 RPM limit. Skipping here reduces the burst to 2 requests on
       // overlap minutes. Articles stay in the KV queue (TTL 24h) and are processed on the next
       // non-overlap */5 tick (max 5-minute delay).
-      if (isEvery5Min && !isEvery15Min) {
+      //
+      // FIX (Priority 3): isEvery15Min is derived from controller.cron (per-invocation), so it
+      // is ALWAYS false on a */5 invocation. The original condition `isEvery5Min && !isEvery15Min`
+      // was always true on */5, causing Phase 1d to run at :00/:15/:30/:45 (overlap minutes).
+      // Now we check the current UTC minute to detect overlap with */15.
+      const _phase1dCurrentMinute = new Date().getUTCMinutes();
+      const _phase1dIsOverlapWith15Min = _phase1dCurrentMinute % 15 === 0;
+      if (isEvery5Min && !_phase1dIsOverlapWith15Min) {
         const MAX_SUMMARIES_PER_TICK = 4;
         for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
