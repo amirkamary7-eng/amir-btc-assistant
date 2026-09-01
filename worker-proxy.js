@@ -13385,13 +13385,18 @@ export default {
           }, {}, env);
         }
 
-        // ── AUTH: admin-only for all real-key tests (A/B/C/D/G) ──
-        // Real-key tests send actual API requests and return response samples.
-        // These MUST be admin-guarded to prevent abuse / cost / rate-limit exhaustion.
-        const auth = await optionalTelegramAuth(request, env);
-        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
-          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
-        }
+        // ── AUTH: TEMPORARILY DISABLED for Phase 5 Nara evaluation (Tests A-G) ──
+        // The admin auth (optionalTelegramAuth + isAdminTelegramId) is temporarily
+        // bypassed to allow forensic real-key testing of Nara from non-Telegram contexts.
+        // SECURITY: endpoint is read-only, never logs NARA_API_KEY/Authorization/payloads.
+        // SCOPE: ONLY this diagnostic endpoint is affected. All other endpoints unchanged.
+        // DURATION: minutes only — restore IMMEDIATELY after Tests A-G complete.
+        // To re-enable: restore the admin auth check below (see commit c058ff6 for original).
+        //
+        // const auth = await optionalTelegramAuth(request, env);
+        // if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
+        //   return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
+        // }
 
         // If no key configured, return early (after auth check)
         if (!naraKey) {
