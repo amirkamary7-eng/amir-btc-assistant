@@ -6021,12 +6021,12 @@ function _groqRouteKey(input, isBatch, batchOffset) {
  * @param {Array} messages - OpenAI-compatible messages
  * @param {number} maxTokens - max_tokens
  * @param {number} temperature - temperature
- * @returns {Promise<{status_code: number, response_body: string, key_slot: number}>}
+ * @returns {Promise<{status_code: number, response_body: string, key_slot: number, rate_limit: object|null, usage: object|null}>}
  */
 async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, temperature) {
   const apiKey = keySlot === 0 ? env.GROQ_API_KEY : env.GROQ_API_KEY_1;
   if (!apiKey) {
-    return { status_code: 503, response_body: '{"error":{"message":"Groq API key not configured","status":"UNAVAILABLE"}}', key_slot: keySlot };
+    return { status_code: 503, response_body: '{"error":{"message":"Groq API key not configured","status":"UNAVAILABLE"}}', key_slot: keySlot, rate_limit: null, usage: null };
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -6046,8 +6046,39 @@ async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, tempe
       signal: controller.signal,
     });
     clearTimeout(timeout);
+
+    // ── PHASE 1 DIAGNOSTIC: capture rate-limit headers BEFORE consuming body ──
+    // Headers are available on res.headers without consuming the body stream.
+    // SECURITY: only standard rate-limit headers are read. Authorization is NEVER read/logged.
+    const rate_limit = {
+      retry_after: res.headers.get('retry-after'),
+      limit_requests: res.headers.get('x-ratelimit-limit-requests'),
+      remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
+      reset_requests: res.headers.get('x-ratelimit-reset-requests'),
+      limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
+      remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
+      reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
+    };
+
     const response_body = await res.text();
-    return { status_code: res.status, response_body, key_slot: keySlot };
+
+    // ── PHASE 1 DIAGNOSTIC: parse token usage on HTTP 200 ──
+    let usage = null;
+    if (res.status === 200) {
+      try {
+        const parsed = JSON.parse(response_body);
+        const u = parsed?.usage;
+        if (u && typeof u === 'object') {
+          usage = {
+            prompt_tokens: typeof u.prompt_tokens === 'number' ? u.prompt_tokens : null,
+            completion_tokens: typeof u.completion_tokens === 'number' ? u.completion_tokens : null,
+            total_tokens: typeof u.total_tokens === 'number' ? u.total_tokens : null,
+          };
+        }
+      } catch { /* non-JSON body — usage stays null */ }
+    }
+
+    return { status_code: res.status, response_body, key_slot: keySlot, rate_limit, usage };
   } catch (e) {
     clearTimeout(timeout);
     const isAbort = e?.name === 'AbortError';
@@ -6055,6 +6086,8 @@ async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, tempe
       status_code: 0,
       response_body: JSON.stringify({ error: { message: isAbort ? 'timeout' : 'network_error', detail: (e?.message || '').substring(0, 120) } }),
       key_slot: keySlot,
+      rate_limit: null,
+      usage: null,
     };
   }
 }
@@ -6135,24 +6168,39 @@ async function tryGroq(env, prompt, systemPrompt) {
     const statusCode = result.status_code;
     const responseBody = result.response_body || '';
     const keySlot = result.key_slot;
+    const rateLimit = result.rate_limit || null;
+    const usage = result.usage || null;
 
     if (statusCode !== 200) {
       const errorType = classifyHttpError(statusCode || 500);
-      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0, key_slot: keySlot };
+      // ── PHASE 1 DIAGNOSTIC: log 429 rate-limit headers + bounded error body ──
+      // SECURITY: no API key, no Authorization header, no full request payload.
+      // Only standard rate-limit headers + truncated (300 char) error body.
+      if (statusCode === 429) {
+        const rl = rateLimit || {};
+        console.warn(`[GROQ-429] key=${keySlot} keys_tried=${JSON.stringify(result.tried_keys||[])} retry_after=${rl.retry_after||'n/a'} rpm=${rl.remaining_requests||'?'}/${rl.limit_requests||'?' } tpm=${rl.remaining_tokens||'?'}/${rl.limit_tokens||'?'} reset_req=${rl.reset_requests||'n/a'} reset_tok=${rl.reset_tokens||'n/a'} body=${responseBody.substring(0, 300)}`);
+      } else {
+        console.warn(`[GROQ-ERR] key=${keySlot} status=${statusCode} keys_tried=${JSON.stringify(result.tried_keys||[])} body=${responseBody.substring(0, 300)}`);
+      }
+      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 300), duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
     }
 
     let data;
     try {
       data = JSON.parse(responseBody);
     } catch (e) {
-      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
+      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
     }
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
-      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0, key_slot: keySlot };
+      // ── PHASE 1 DIAGNOSTIC: log token usage on success ──
+      if (usage) {
+        console.log(`[GROQ-OK] key=${keySlot} usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} rpm_remaining=${rateLimit?.remaining_requests||'?'}/${rateLimit?.limit_requests||'?'} tpm_remaining=${rateLimit?.remaining_tokens||'?'}/${rateLimit?.limit_tokens||'?'} duration=${Date.now() - t0}ms`);
+      }
+      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage };
     }
-    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
+    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
     return {
@@ -6210,27 +6258,56 @@ async function tryGroqSecondary(env, prompt, systemPrompt) {
     });
     clearTimeout(timeout);
 
+    // ── PHASE 1 DIAGNOSTIC: capture rate-limit headers BEFORE consuming body ──
+    // SECURITY: only standard rate-limit headers. Authorization NEVER read/logged.
+    const rate_limit = {
+      retry_after: res.headers.get('retry-after'),
+      limit_requests: res.headers.get('x-ratelimit-limit-requests'),
+      remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
+      reset_requests: res.headers.get('x-ratelimit-reset-requests'),
+      limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
+      remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
+      reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
+    };
+
     if (!res.ok) {
       const errorType = classifyHttpError(res.status);
       let errorBody = '';
-      try { errorBody = (await res.text()).substring(0, 200); } catch {}
+      try { errorBody = (await res.text()).substring(0, 300); } catch {}
       // SECURITY: errorBody may contain Groq API error JSON — it must NOT include the API key.
       // The Authorization header is never included in error bodies. Safe to log status + truncated body.
-      return { provider: 'groq-secondary', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
+      // ── PHASE 1 DIAGNOSTIC: log 429 rate-limit headers + bounded error body ──
+      if (res.status === 429) {
+        console.warn(`[GROQ-SEC-429] key=1 retry_after=${rate_limit.retry_after||'n/a'} rpm=${rate_limit.remaining_requests||'?'}/${rate_limit.limit_requests||'?'} tpm=${rate_limit.remaining_tokens||'?'}/${rate_limit.limit_tokens||'?'} reset_req=${rate_limit.reset_requests||'n/a'} reset_tok=${rate_limit.reset_tokens||'n/a'} body=${errorBody}`);
+      } else {
+        console.warn(`[GROQ-SEC-ERR] key=1 status=${res.status} body=${errorBody}`);
+      }
+      return { provider: 'groq-secondary', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0, rate_limit, usage: null };
     }
 
     let data;
     try {
       data = await res.json();
     } catch (e) {
-      return { provider: 'groq-secondary', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+      return { provider: 'groq-secondary', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit, usage: null };
     }
+
+    // ── PHASE 1 DIAGNOSTIC: parse token usage on success ──
+    const u = data?.usage;
+    const usage = (u && typeof u === 'object') ? {
+      prompt_tokens: typeof u.prompt_tokens === 'number' ? u.prompt_tokens : null,
+      completion_tokens: typeof u.completion_tokens === 'number' ? u.completion_tokens : null,
+      total_tokens: typeof u.total_tokens === 'number' ? u.total_tokens : null,
+    } : null;
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
-      return { provider: 'groq-secondary', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+      if (usage) {
+        console.log(`[GROQ-SEC-OK] key=1 usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} rpm_remaining=${rate_limit.remaining_requests||'?'}/${rate_limit.limit_requests||'?'} tpm_remaining=${rate_limit.remaining_tokens||'?'}/${rate_limit.limit_tokens||'?'} duration=${Date.now() - t0}ms`);
+      }
+      return { provider: 'groq-secondary', success: true, summary: text.trim(), duration_ms: Date.now() - t0, rate_limit, usage };
     }
-    return { provider: 'groq-secondary', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    return { provider: 'groq-secondary', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit, usage: null };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
     return {
