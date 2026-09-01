@@ -75,29 +75,29 @@ test('GROQ-GW-003: callGroqSecondaryChat must call groq_generate_with_key DB fun
 // ════════════════════════════════════════════════════════════════════════════
 // TEST 4: DB gateway function passes API key as PARAMETER (not from Vault)
 // ════════════════════════════════════════════════════════════════════════════
-test('GROQ-GW-004: All 3 Groq DB gateway calls must pass API key as 5th parameter ($5::text)', () => {
+test('GROQ-GW-004: All 3 Groq DB gateway calls must pass API key as 3rd parameter ($3::text)', () => {
   // _groqFetchWithKey
   const fetchStart = workerSrc.indexOf('async function _groqFetchWithKey(');
   const fetchBody = workerSrc.substring(fetchStart, fetchStart + 2000);
   assert.ok(
-    fetchBody.includes('$5::text') && fetchBody.includes('apiKey'),
-    '_groqFetchWithKey must pass apiKey as $5::text parameter to groq_generate_with_key'
+    fetchBody.includes('$3::text') && fetchBody.includes('apiKey'),
+    '_groqFetchWithKey must pass apiKey as $3::text parameter to groq_generate_with_key'
   );
 
   // groqPrimaryGenerate
   const primStart = workerSrc.indexOf('async function groqPrimaryGenerate(');
   const primBody = workerSrc.substring(primStart, primStart + 1500);
   assert.ok(
-    primBody.includes('$5::text') && primBody.includes('apiKey'),
-    'groqPrimaryGenerate must pass apiKey as $5::text parameter to groq_generate_with_key'
+    primBody.includes('$3::text') && primBody.includes('apiKey'),
+    'groqPrimaryGenerate must pass apiKey as $3::text parameter to groq_generate_with_key'
   );
 
   // callGroqSecondaryChat
   const secStart = assistantSrc.indexOf('async function callGroqSecondaryChat(');
   const secBody = assistantSrc.substring(secStart, secStart + 1500);
   assert.ok(
-    secBody.includes('$5::text') && secBody.includes('apiKey'),
-    'callGroqSecondaryChat must pass apiKey as $5::text parameter to groq_generate_with_key'
+    secBody.includes('$3::text') && secBody.includes('apiKey'),
+    'callGroqSecondaryChat must pass apiKey as $3::text parameter to groq_generate_with_key'
   );
 });
 

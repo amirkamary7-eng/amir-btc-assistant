@@ -919,8 +919,8 @@ export function createAssistantHandlers(deps) {
     let dbResult;
     try {
       dbResult = await queryDb(env,
-        `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
-        [CHAT_GROQ_MODEL, JSON.stringify(messages), 1024, 0.4, apiKey]
+        `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
+        [CHAT_GROQ_MODEL, JSON.stringify(messages), apiKey, 1024, 0.4]
       );
     } catch (dbErr) {
       console.error(`[ChatAI] Groq Secondary DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);

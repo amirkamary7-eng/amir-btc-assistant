@@ -5948,8 +5948,8 @@ async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)
   // The API key is passed as a parameter (stays in Cloudflare secret).
   try {
     const dbResult = await queryDb(env,
-      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
-      [model, JSON.stringify(messages), maxTokens, temperature, apiKey]
+      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
+      [model, JSON.stringify(messages), apiKey, maxTokens, temperature]
     );
     const result = dbResult.rows[0]?.result || {};
     const status_code = typeof result.status_code === 'number' ? result.status_code : 0;
@@ -6036,8 +6036,8 @@ async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, tempe
   // from the response body on HTTP 200.
   try {
     const dbResult = await queryDb(env,
-      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
-      [model, JSON.stringify(messages), maxTokens, temperature, apiKey]
+      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
+      [model, JSON.stringify(messages), apiKey, maxTokens, temperature]
     );
     const result = dbResult.rows[0]?.result || {};
     const status_code = typeof result.status_code === 'number' ? result.status_code : 0;

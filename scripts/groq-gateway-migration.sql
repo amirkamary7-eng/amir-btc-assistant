@@ -32,9 +32,9 @@
 CREATE OR REPLACE FUNCTION public.groq_generate_with_key(
   p_model text,
   p_messages jsonb,
+  p_api_key text,
   p_max_tokens integer DEFAULT 1024,
-  p_temperature double precision DEFAULT 0.4,
-  p_api_key text
+  p_temperature double precision DEFAULT 0.4
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -103,4 +103,4 @@ AS $function$
 -- Grant execute to the application role (anon/authenticated if used by Worker)
 -- The Worker connects via the service role / postgres user, which has access.
 -- ═══════════════════════════════════════════════════════════════════════════
-GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, integer, double precision, text) TO PUBLIC;
+GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO PUBLIC;
