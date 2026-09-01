@@ -13493,6 +13493,26 @@ export default {
         let result;
 
         // ─────────────────────────────────────────────────────────────────
+        // TEST RAW — Raw call with full body (for debugging 403/429 errors)
+        // ─────────────────────────────────────────────────────────────────
+        if (testType === 'raw' || testType === 'RAW') {
+          const raw = await callNara(NARA_MODEL, [
+            { role: 'user', content: 'Hello' },
+          ], 100, 0.3, 15000);
+          return jsonResponse({
+            status: 'success',
+            test: 'raw',
+            model: NARA_MODEL,
+            status_code: raw.status_code,
+            elapsed_ms: raw.elapsed_ms,
+            rate_limit: raw.rate_limit,
+            raw_body_full: raw.body_preview,
+            body_length: raw.body_length,
+            error: raw.error,
+          }, {}, env);
+        }
+
+        // ─────────────────────────────────────────────────────────────────
         // TEST A — Persian translation (single headline)
         // ─────────────────────────────────────────────────────────────────
         if (testType === 'A' || testType === 'a') {
