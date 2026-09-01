@@ -6930,11 +6930,38 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     // Record result in circuit breaker (updates state: CLOSED↔OPEN↔HALF_OPEN)
     // FIX: Coordinator denial is a proactive rate limit, NOT a provider failure.
     // It must NOT trip the circuit — the provider itself didn't fail.
+    //
+    // F7/F8 FIX: Avoid double-recording for Groq dual-key routed calls.
+    // _groqRoutedFetch (inner layer) already recorded per-key transport failures.
+    // The outer layer should only record:
+    //   - SUCCESS (idempotent — closes circuit, no harm in double-recording)
+    //   - SEMANTIC failures (HTTP 200 but invalid_json/empty_response/Persian validation)
+    //     — with REAL key_slot for attribution (F8 fix)
+    // The outer layer should SKIP:
+    //   - TRANSPORT failures (HTTP non-200, key_slot >= 0, error starts with 'http_')
+    //     — already recorded by inner layer
+    //   - NO KEY TRIED (key_slot === -1, both circuits OPEN) — don't attribute to wrong key
     if (!r.coordinator_skipped) {
-      try {
-        await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
-      } catch (e) {
-        console.warn(`[CIRCUIT] recordResult(${providerName}) failed:`, e?.message);
+      const isGroqRouted = r.key_slot !== undefined && r.key_slot !== null;
+      const isTransportFailure = isGroqRouted && !r.success && r.key_slot >= 0
+        && r.error && String(r.error).startsWith('http_');
+      const noKeyTried = isGroqRouted && r.key_slot === -1;
+
+      if (isTransportFailure || noKeyTried) {
+        // Skip — inner layer already recorded transport failure, or no key was tried.
+        // This prevents double-recording (F7) and wrong-key attribution (F8).
+      } else {
+        // Success OR semantic failure (invalid_json/empty_response/persian_validation_failed)
+        // OR non-Groq provider (Gemini/OpenRouter/Workers AI/OpenAI — no key_slot).
+        // For Groq, use real key_slot for attribution (F8 fix).
+        const circuitKey = (isGroqRouted && r.key_slot >= 0)
+          ? `groq-key${r.key_slot}`
+          : providerName;
+        try {
+          await recordCircuitResult(env, circuitKey, r.success, r.errorType, r.error || r.error_detail);
+        } catch (e) {
+          console.warn(`[CIRCUIT] recordResult(${circuitKey}) failed:`, e?.message);
+        }
       }
     }
 
