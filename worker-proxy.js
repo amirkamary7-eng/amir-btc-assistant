@@ -13366,18 +13366,15 @@ export default {
       //   ?test=G  — error handling (invalid model, empty messages)
       //   ?test=presence — key presence check only (boolean, no value)
       if (request.method === 'GET' && url.pathname === '/api/diagnostic/nara-eval') {
-        // ── AUTH: admin-only ──
-        const auth = await optionalTelegramAuth(request, env);
-        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
-          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
-        }
-
         const testType = (url.searchParams.get('test') || 'presence').toLowerCase();
         const naraKey = env.NARA_API_KEY;
         const naraUrl = 'https://router.bynara.id/v1/chat/completions';
 
-        // ── Presence check (never returns the key value) ──
-        if (testType === 'presence' || !naraKey) {
+        // ── Presence check: PUBLIC (no auth) ──
+        // Returns ONLY: boolean (key configured) + 4-char prefix. NEVER the full key.
+        // This is safe because it reveals no secret material — same pattern as
+        // /api/admin-diag which is also public and returns boolean config status.
+        if (testType === 'presence') {
           return jsonResponse({
             status: 'success',
             test: 'presence',
@@ -13386,6 +13383,23 @@ export default {
             nara_endpoint: naraUrl,
             note: naraKey ? 'Key is present. Use ?test=A|B|C|D|G to run real tests.' : 'NARA_API_KEY is NOT configured as a Cloudflare secret.',
           }, {}, env);
+        }
+
+        // ── AUTH: admin-only for all real-key tests (A/B/C/D/G) ──
+        // Real-key tests send actual API requests and return response samples.
+        // These MUST be admin-guarded to prevent abuse / cost / rate-limit exhaustion.
+        const auth = await optionalTelegramAuth(request, env);
+        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
+          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
+        }
+
+        // If no key configured, return early (after auth check)
+        if (!naraKey) {
+          return jsonResponse({
+            status: 'error',
+            error: 'nara_api_key_not_configured',
+            note: 'Set NARA_API_KEY as a Cloudflare secret first.',
+          }, { status: 503 }, env);
         }
 
         // ── Helper: call Nara with timeout ──
