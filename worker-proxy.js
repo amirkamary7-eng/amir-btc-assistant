@@ -13830,6 +13830,59 @@ Headlines:
           15000
         );
 
+        // Test 5: POST with REAL Key0 (env.GROQ_API_KEY) — minimal request, capture full result.
+        // SECURITY: uses the real key internally (same as production _groqFetchWithKey), but
+        // NEVER returns the key value. Only returns: HTTP status, elapsed_ms, body preview,
+        // rate-limit headers, and full error object if fetch throws.
+        // PURPOSE: determine if real key gets 403 (WAF), 401 (invalid key), 200 (works),
+        // or HTTP 0 (network error — reproducing the production issue).
+        if (env.GROQ_API_KEY) {
+          results.test5_real_key0 = await runFetchTest(
+            'POST /openai/v1/chat/completions (REAL Key0, minimal request)',
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${env.GROQ_API_KEY}`,
+              },
+              body: JSON.stringify({
+                model: 'openai/gpt-oss-120b',
+                messages: [{ role: 'user', content: 'Say hello in one word.' }],
+                max_tokens: 10,
+                temperature: 0.3,
+              }),
+            },
+            30000
+          );
+        } else {
+          results.test5_real_key0 = { skipped: 'GROQ_API_KEY not configured' };
+        }
+
+        // Test 6: POST with REAL Key1 (env.GROQ_API_KEY_1) — same test with Key1
+        if (env.GROQ_API_KEY_1) {
+          results.test6_real_key1 = await runFetchTest(
+            'POST /openai/v1/chat/completions (REAL Key1, minimal request)',
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${env.GROQ_API_KEY_1}`,
+              },
+              body: JSON.stringify({
+                model: 'openai/gpt-oss-120b',
+                messages: [{ role: 'user', content: 'Say hello in one word.' }],
+                max_tokens: 10,
+                temperature: 0.3,
+              }),
+            },
+            30000
+          );
+        } else {
+          results.test6_real_key1 = { skipped: 'GROQ_API_KEY_1 not configured' };
+        }
+
         return jsonResponse({ status: 'success', results }, {}, env);
       }
 
