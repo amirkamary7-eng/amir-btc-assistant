@@ -130,21 +130,38 @@ test('GS-006: tryGroqSecondary does NOT use Groq Coordinator (independent quota)
 // Phase 2 — generateSummaryWithFallback chain order
 // ============================================================================
 
-test('GS-007: generateSummaryWithFallback has groq-secondary between groq and gemini', () => {
-  // Use indexOf on the full WORKER source (function boundaries are hard to extract with regex due to nesting)
+test('GS-007: generateSummaryWithFallback uses dual-key routed tryGroq (no redundant tryGroqSecondary)', () => {
+  // PHASE 2 FIX: tryGroqSecondary was removed from generateSummaryWithFallback
+  // because tryGroq → _groqRoutedFetch already covers BOTH keys (preferred →
+  // fallback to other key). The previous explicit tryGroqSecondary() call was
+  // redundant — it re-fetched Key 1 even though _groqRoutedFetch had already
+  // tried it. This test now asserts the CORRECTED behavior.
   const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
   assert.ok(fnStart >= 0, 'generateSummaryWithFallback not found');
-  // Find the next top-level function or end of file as the boundary
   const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
   const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
-  const groqPos = body.indexOf("attemptProvider('groq',");
-  const groqSecPos = body.indexOf("attemptProvider('groq-secondary',");
-  const geminiPos = body.indexOf("attemptProvider('gemini',");
-  assert.ok(groqPos >= 0, 'groq must be in chain');
-  assert.ok(groqSecPos >= 0, 'groq-secondary must be in chain');
+
+  // tryGroq MUST be present (primary, dual-key routed via _groqRoutedFetch)
+  const tryGroqPos = body.indexOf("() => tryGroq(env, prompt, systemPrompt)");
+  assert.ok(tryGroqPos >= 0, 'tryGroq must be called in summary fallback chain');
+
+  // tryGroqSecondary MUST NOT be called from generateSummaryWithFallback anymore
+  // (it's still defined as a function, just not invoked from this path)
+  const tryGroqSecondaryPos = body.indexOf("() => tryGroqSecondary(env, prompt, systemPrompt)");
+  assert.ok(tryGroqSecondaryPos === -1,
+    'tryGroqSecondary must NOT be called from generateSummaryWithFallback (redundant — _groqRoutedFetch already covers both keys)');
+
+  // Gemini MUST still be the next fallback after Groq
+  const geminiPos = body.indexOf("() => tryGemini(env, prompt, systemPrompt)");
   assert.ok(geminiPos >= 0, 'gemini must be in chain');
-  assert.ok(groqPos < groqSecPos, 'groq must come BEFORE groq-secondary');
-  assert.ok(groqSecPos < geminiPos, 'groq-secondary must come BEFORE gemini');
+  assert.ok(tryGroqPos < geminiPos, 'tryGroq must come BEFORE gemini');
+
+  // OpenRouter must still be before Workers AI (unchanged)
+  const openrouterPos = body.indexOf("() => tryOpenRouter(env, prompt, systemPrompt)");
+  const workersAiPos = body.indexOf("() => tryWorkersAI(env, prompt, systemPrompt)");
+  assert.ok(openrouterPos >= 0, 'openrouter must be in chain');
+  assert.ok(workersAiPos >= 0, 'workers-ai must be in chain');
+  assert.ok(openrouterPos < workersAiPos, 'openrouter must come BEFORE workers-ai');
 });
 
 test('GS-008: generateSummaryWithFallback has OpenRouter BEFORE Workers AI (reordered)', () => {

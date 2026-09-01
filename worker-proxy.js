@@ -6943,16 +6943,21 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 
   // ────────────────────────────────────────────────────────────────────────────
   // FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request)
-  //   0)  Groq Primary    (primary)      — NEWS_PROVIDER_GROQ=true (default), Vault key
-  //   0b) Groq Secondary  (fallback 0b)  — GROQ_API_KEY_1 Cloudflare secret, independent circuit
+  //   0)  Groq            (primary)      — NEWS_PROVIDER_GROQ=true (default), dual-key routed
   //   1)  Gemini          (fallback 1)   — NEWS_PROVIDER_GEMINI=true (default)
   //   2)  OpenRouter      (fallback 2)   — NEWS_PROVIDER_OPENROUTER=true (default, free emergency)
   //   3)  Workers AI      (fallback 3)   — NEWS_PROVIDER_WORKERS_AI=true (default)
   //   4)  OpenAI          (fallback 4)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
   //
-  // P2-A FIX: Groq is ALWAYS tried first (primary). Groq Secondary is the first
-  // fallback (independent key + circuit). Gemini is the second fallback.
-  // OpenRouter is the third fallback. Workers AI is the fourth fallback.
+  // PHASE 2 FIX: tryGroq already covers BOTH keys via _groqRoutedFetch (preferred key
+  // → fallback to other key on non-200 or circuit-skip). The previous explicit
+  // tryGroqSecondary() call here was REDUNDANT — it re-fetched Key 1 even though
+  // _groqRoutedFetch had already tried it. Worst case was Key0=1, Key1=2 calls per
+  // summary. Removed the redundant invocation; _groqRoutedFetch's internal dual-key
+  // fallback is sufficient.
+  //
+  // P2-A: Groq is ALWAYS tried first. Gemini is the first fallback.
+  // OpenRouter is the second fallback. Workers AI is the third fallback.
   // Each provider is tried ONLY if the previous one failed.
   // Circuit breaker protects each provider independently.
   // No parallel calls — sequential fallback to minimize cost + latency.
@@ -6960,30 +6965,19 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 
   // Provider 0: Groq — DUAL-KEY ROUTED via tryGroq (hash routing + fallback to other key)
   // tryGroq internally uses _groqRoutedFetch which handles both Key 0 and Key 1.
-  // Circuit keys: groq-key0 and groq-key1 (independent per key).
+  // Circuit keys: groq-key0 and groq-key1 (independent per key, managed inside _groqRoutedFetch).
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
     const r = await attemptProvider('groq-key0', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
-    if (!r.success && env.GROQ_API_KEY_1) {
-      // If Key 0 failed, try Key 1 via the same tryGroq (which may route to Key 1 on hash)
-      // But also try tryGroqSecondary as explicit Key 1 fallback
-      const r2 = await attemptProvider('groq-key1', () => tryGroqSecondary(env, prompt, systemPrompt), validatePersianOutput);
-      if (r2.success) {
-        summary = r2.summary;
-        usedProvider = 'groq';
-        console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded (dual-key fallback)');
-      } else {
-        console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq dual-key failed (key0=${r.error}, key1=${r2.error}) — falling back to Gemini`);
-      }
-    } else if (r.success) {
+    if (r.success) {
       summary = r.summary;
       usedProvider = 'groq';
-      console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded — no fallback needed');
+      console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded (dual-key routed via _groqRoutedFetch)');
     } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Key 0 failed (error=${r.error}) — no Key 1 configured, falling back to Gemini`);
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq failed (error=${r.error}) — falling back to next provider`);
     }
   }
 
-  // Provider 1: Gemini (fallback 1) — tried ONLY if Groq Primary + Secondary didn't succeed
+  // Provider 1: Gemini (fallback 1) — tried ONLY if Groq (both keys via _groqRoutedFetch) didn't succeed
   // P0-1 FIX: Added `!summary &&` guard so Gemini is NEVER called when Groq
   // already produced a valid summary. Previously the missing guard caused
   // Gemini to be called on EVERY article (even when Groq succeeded), doubling
@@ -6995,7 +6989,7 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     if (r.success) {
       summary = r.summary;
       usedProvider = 'gemini';
-      console.log('[NEWS-AI-FALLBACK] ✅ Gemini fallback succeeded (Groq Primary + Secondary were unavailable)');
+      console.log('[NEWS-AI-FALLBACK] ✅ Gemini fallback succeeded (Groq was unavailable)');
     } else {
       console.warn(`[NEWS-AI-FALLBACK] ⚠️ Gemini failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 100)}) — falling back to OpenRouter`);
     }
