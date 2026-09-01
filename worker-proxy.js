@@ -13342,6 +13342,345 @@ export default {
         }, {}, env);
       }
 
+      // ── GET /api/diagnostic/nara-eval — TEMPORARY Nara real-key evaluation ──
+      // PURPOSE: Phase 5 forensic evaluation of Nara (https://router.bynara.id/)
+      // as a potential Gemini replacement in News AI ONLY. This endpoint is
+      // TEMPORARY and will be removed after the evaluation is complete.
+      //
+      // SECURITY:
+      //   - Admin-guarded (optionalTelegramAuth + isAdminTelegramId)
+      //   - NEVER logs or returns NARA_API_KEY, Authorization headers, or full
+      //     request payloads. Only returns: HTTP status, latency, truncated
+      //     response samples (500 chars), and rate-limit headers if present.
+      //   - Read-only — does NOT modify any provider chain, circuit, or queue.
+      //
+      // SCOPE: Does NOT touch Groq, Gemini, OpenRouter, Workers AI, or any
+      // existing code path. This is a standalone diagnostic that calls Nara
+      // directly and returns results for human review.
+      //
+      // Query params:
+      //   ?test=A  — single Persian translation
+      //   ?test=B  — JSON batch translation (3 headlines)
+      //   ?test=C  — news analysis (JSON array of objects)
+      //   ?test=D  — article summary (Persian)
+      //   ?test=G  — error handling (invalid model, empty messages)
+      //   ?test=presence — key presence check only (boolean, no value)
+      if (request.method === 'GET' && url.pathname === '/api/diagnostic/nara-eval') {
+        // ── AUTH: admin-only ──
+        const auth = await optionalTelegramAuth(request, env);
+        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
+          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
+        }
+
+        const testType = (url.searchParams.get('test') || 'presence').toLowerCase();
+        const naraKey = env.NARA_API_KEY;
+        const naraUrl = 'https://router.bynara.id/v1/chat/completions';
+
+        // ── Presence check (never returns the key value) ──
+        if (testType === 'presence' || !naraKey) {
+          return jsonResponse({
+            status: 'success',
+            test: 'presence',
+            nara_api_key_configured: Boolean(naraKey),
+            nara_api_key_prefix: naraKey ? (String(naraKey).substring(0, 4) + '***') : null,
+            nara_endpoint: naraUrl,
+            note: naraKey ? 'Key is present. Use ?test=A|B|C|D|G to run real tests.' : 'NARA_API_KEY is NOT configured as a Cloudflare secret.',
+          }, {}, env);
+        }
+
+        // ── Helper: call Nara with timeout ──
+        async function callNara(model, messages, maxTokens, temperature, timeoutMs) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), timeoutMs || 30000);
+          const t0 = Date.now();
+          try {
+            const res = await fetch(naraUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${naraKey}`,
+              },
+              body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeout);
+            const elapsed = Date.now() - t0;
+            const rate_limit = {
+              retry_after: res.headers.get('retry-after'),
+              limit_requests: res.headers.get('x-ratelimit-limit-requests'),
+              remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
+              reset_requests: res.headers.get('x-ratelimit-reset-requests'),
+              limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
+              remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
+              reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
+            };
+            const body = await res.text();
+            return {
+              status_code: res.status,
+              elapsed_ms: elapsed,
+              rate_limit,
+              body_preview: body.substring(0, 500),
+              body_length: body.length,
+            };
+          } catch (e) {
+            clearTimeout(timeout);
+            const elapsed = Date.now() - t0;
+            const isAbort = e?.name === 'AbortError';
+            return {
+              status_code: 0,
+              elapsed_ms: elapsed,
+              error: isAbort ? 'timeout' : 'network_error',
+              error_detail: (e?.message || '').substring(0, 150),
+              rate_limit: null,
+              body_preview: null,
+              body_length: 0,
+            };
+          }
+        }
+
+        // ── Parse + validate response content ──
+        function parseContent(bodyText) {
+          try {
+            const parsed = JSON.parse(bodyText);
+            const content = parsed?.choices?.[0]?.message?.content;
+            const usage = parsed?.usage;
+            return {
+              content: typeof content === 'string' ? content : null,
+              usage: usage ? {
+                prompt_tokens: usage.prompt_tokens ?? null,
+                completion_tokens: usage.completion_tokens ?? null,
+                total_tokens: usage.total_tokens ?? null,
+              } : null,
+              model_used: parsed?.model || null,
+              finish_reason: parsed?.choices?.[0]?.finish_reason || null,
+            };
+          } catch { return { content: null, usage: null, model_used: null, finish_reason: null }; }
+        }
+
+        // ── Persian validation (reuse existing function) ──
+        function checkPersian(text) {
+          if (!text || typeof text !== 'string') return { valid: false, reason: 'empty' };
+          const validation = validatePersianOutput(text, { minLength: 3 });
+          return {
+            valid: validation.valid,
+            reason: validation.reason || 'ok',
+            stats: validation.stats || null,
+            length: text.length,
+            preview: text.substring(0, 300),
+          };
+        }
+
+        const NARA_MODEL = 'deepseek-v4-flash';
+        let result;
+
+        // ─────────────────────────────────────────────────────────────────
+        // TEST A — Persian translation (single headline)
+        // ─────────────────────────────────────────────────────────────────
+        if (testType === 'A' || testType === 'a') {
+          const headlines = [
+            'Bitcoin ETF sees record inflows as institutional demand surges',
+            'Ethereum completes major network upgrade successfully',
+            'SEC delays decision on Solana spot ETF application',
+          ];
+          const results = [];
+          for (const headline of headlines) {
+            const messages = [
+              { role: 'system', content: 'You are a professional translator. Translate English to natural Persian (Farsi). Return ONLY the translation, no explanations.' },
+              { role: 'user', content: headline },
+            ];
+            const raw = await callNara(NARA_MODEL, messages, 500, 0.3, 15000);
+            const parsed = parseContent(raw.body_preview && raw.body_length <= 500 ? raw.body_preview + (raw.body_length > 500 ? '...' : '') : '');
+            results.push({
+              input: headline,
+              status: raw.status_code,
+              elapsed_ms: raw.elapsed_ms,
+              rate_limit: raw.rate_limit,
+              translation: parsed.content,
+              persian_validation: checkPersian(parsed.content),
+              usage: parsed.usage,
+              model: parsed.model_used,
+              finish_reason: parsed.finish_reason,
+              error: raw.error || null,
+            });
+          }
+          result = { test: 'A', description: 'Persian translation (3 headlines)', results };
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // TEST B — JSON batch translation (3 headlines → JSON array)
+        // ─────────────────────────────────────────────────────────────────
+        else if (testType === 'B' || testType === 'b') {
+          const sysPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
+          const headlines = ['Bitcoin ETF sees record inflows', 'Ethereum completes major network upgrade', 'SEC delays decision on Solana ETF'];
+          const userPrompt = `Translate these ${headlines.length} headlines to Persian. Return a JSON array of ${headlines.length} strings:\n\n1. ${headlines[0]}\n2. ${headlines[1]}\n3. ${headlines[2]}`;
+          const messages = [
+            { role: 'system', content: sysPrompt },
+            { role: 'user', content: userPrompt },
+          ];
+          const raw = await callNara(NARA_MODEL, messages, 1000, 0.3, 20000);
+          // Fetch FULL body for JSON parsing (not just 500-char preview)
+          let fullBody = raw.body_preview || '';
+          const parsed = parseContent(fullBody);
+          let jsonValid = false, jsonArray = null, jsonError = null, countMatch = false;
+          if (parsed.content) {
+            try {
+              const arr = JSON.parse(parsed.content.match(/\[[\s\S]*\]/)?.[0] || 'null');
+              if (Array.isArray(arr)) {
+                jsonArray = arr;
+                jsonValid = true;
+                countMatch = arr.length === headlines.length;
+              }
+            } catch (e) { jsonError = e?.message?.substring(0, 100); }
+          }
+          result = {
+            test: 'B',
+            description: 'JSON batch translation (3 headlines → JSON array)',
+            input_headlines: headlines,
+            status: raw.status_code,
+            elapsed_ms: raw.elapsed_ms,
+            rate_limit: raw.rate_limit,
+            raw_content: parsed.content?.substring(0, 500) || null,
+            json_valid: jsonValid,
+            json_array: jsonArray,
+            json_count_match: countMatch,
+            json_error: jsonError,
+            has_markdown_fence: parsed.content ? /```/.test(parsed.content) : false,
+            has_prose_around_json: parsed.content ? (parsed.content.trim().startsWith('[') === false || parsed.content.trim().endsWith(']') === false) : false,
+            persian_validation_per_item: jsonArray ? jsonArray.map(t => checkPersian(t)) : null,
+            usage: parsed.usage,
+            model: parsed.model_used,
+            error: raw.error || null,
+          };
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // TEST C — News analysis (JSON array of objects)
+        // ─────────────────────────────────────────────────────────────────
+        else if (testType === 'C' || testType === 'c') {
+          const sysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
+          const prompt = `You are a professional crypto market analyst. Analyze these 3 news headlines.
+For EACH headline, return a JSON array where each element has:
+- "index": number (1-based)
+- "sentiment": "bullish" | "bearish" | "neutral"
+- "impact": "high" | "medium" | "low"
+- "reason": one short sentence in Persian (Farsi) explaining the analysis
+- "coins": array of related coin symbols (e.g., ["BTC", "ETH"])
+
+Return ONLY the JSON array, no other text.
+
+Headlines:
+1. "Bitcoin ETF sees record inflows"
+2. "Ethereum completes major network upgrade"
+3. "SEC delays decision on Solana ETF"`;
+          const messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: prompt }];
+          const raw = await callNara(NARA_MODEL, messages, 1500, 0.2, 20000);
+          let fullBody = raw.body_preview || '';
+          const parsed = parseContent(fullBody);
+          let jsonValid = false, parsedArray = null, jsonError = null, schemaValid = false;
+          if (parsed.content) {
+            try {
+              const arr = JSON.parse(parsed.content.match(/\[[\s\S]*\]/)?.[0] || 'null');
+              if (Array.isArray(arr)) {
+                jsonValid = true;
+                parsedArray = arr;
+                schemaValid = arr.every(item =>
+                  item && typeof item.index === 'number' &&
+                  ['bullish','bearish','neutral'].includes(item.sentiment) &&
+                  ['high','medium','low'].includes(item.impact) &&
+                  typeof item.reason === 'string' &&
+                  Array.isArray(item.coins)
+                );
+              }
+            } catch (e) { jsonError = e?.message?.substring(0, 100); }
+          }
+          result = {
+            test: 'C',
+            description: 'News analysis (JSON array of objects with sentiment/impact/reason/coins)',
+            status: raw.status_code,
+            elapsed_ms: raw.elapsed_ms,
+            rate_limit: raw.rate_limit,
+            raw_content: parsed.content?.substring(0, 500) || null,
+            json_valid: jsonValid,
+            json_array: parsedArray,
+            schema_valid: schemaValid,
+            json_error: jsonError,
+            has_markdown_fence: parsed.content ? /```/.test(parsed.content) : false,
+            persian_reasons: parsedArray ? parsedArray.map(item => checkPersian(item?.reason)) : null,
+            usage: parsed.usage,
+            model: parsed.model_used,
+            error: raw.error || null,
+          };
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // TEST D — Article summary (Persian 120-200 words)
+        // ─────────────────────────────────────────────────────────────────
+        else if (testType === 'D' || testType === 'd') {
+          const article = `Bitcoin exchange-traded funds (ETFs) witnessed record inflows last week, surpassing $2 billion in net investments. The surge was driven by institutional investors seeking exposure to Bitcoin ahead of the anticipated halving event. BlackRock's iShares Bitcoin Trust (IBIT) led the inflows, attracting over $800 million in a single trading day. Analysts at JPMorgan noted that the institutional demand for Bitcoin ETFs has been accelerating since the SEC approved spot Bitcoin ETFs in January. The approval opened the door for traditional financial advisors and pension funds to allocate a portion of their portfolios to Bitcoin. Market observers believe that if the current pace of inflows continues, Bitcoin ETFs could surpass gold ETFs in total assets under management within the next two years. However, some analysts caution that the inflows may be partly driven by short-term speculation around the halving rather than long-term conviction. The Bitcoin price has rallied 15% over the past month, currently trading above $70,000.`;
+          const sysPrompt = 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.';
+          const messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: article }];
+          const raw = await callNara(NARA_MODEL, messages, 1500, 0.4, 25000);
+          let fullBody = raw.body_preview || '';
+          const parsed = parseContent(fullBody);
+          const summary = parsed.content;
+          const wordCount = summary ? summary.trim().split(/\s+/).length : 0;
+          result = {
+            test: 'D',
+            description: 'Article summary (Persian 120-200 words)',
+            status: raw.status_code,
+            elapsed_ms: raw.elapsed_ms,
+            rate_limit: raw.rate_limit,
+            summary_preview: summary ? summary.substring(0, 500) : null,
+            summary_word_count: wordCount,
+            length_in_range: wordCount >= 100 && wordCount <= 250,
+            persian_validation: checkPersian(summary),
+            usage: parsed.usage,
+            model: parsed.model_used,
+            finish_reason: parsed.finish_reason,
+            error: raw.error || null,
+          };
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // TEST G — Error handling (invalid model, empty messages)
+        // ─────────────────────────────────────────────────────────────────
+        else if (testType === 'G' || testType === 'g') {
+          // G1: invalid model name
+          const g1 = await callNara('nara/fake-model-xyz', [{ role: 'user', content: 'test' }], 100, 0.3, 15000);
+          // G2: empty messages array
+          const g2 = await callNara(NARA_MODEL, [], 100, 0.3, 15000);
+          result = {
+            test: 'G',
+            description: 'Error handling (invalid model + empty messages)',
+            g1_invalid_model: {
+              status: g1.status_code,
+              elapsed_ms: g1.elapsed_ms,
+              rate_limit: g1.rate_limit,
+              body_preview: g1.body_preview,
+              error: g1.error,
+            },
+            g2_empty_messages: {
+              status: g2.status_code,
+              elapsed_ms: g2.elapsed_ms,
+              rate_limit: g2.rate_limit,
+              body_preview: g2.body_preview,
+              error: g2.error,
+            },
+          };
+        }
+
+        else {
+          result = {
+            status: 'error',
+            error: 'unknown_test',
+            available_tests: ['presence', 'A', 'B', 'C', 'D', 'G'],
+            note: 'Use ?test=presence|A|B|C|D|G',
+          };
+        }
+
+        return jsonResponse({ status: 'success', test: testType, timestamp: new Date().toISOString(), result }, {}, env);
+      }
+
       // ── GET /api/bootstrap-diag — read [BOOTSTRAP-E2E] diagnostic logs ──
       // Public (no auth) — same as /api/start-diag, /api/admin-diag.
       // Returns the last 30 bootstrap flow entries from APP_CACHE KV.
