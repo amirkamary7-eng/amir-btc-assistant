@@ -896,12 +896,17 @@ export function createAssistantHandlers(deps) {
     return text.trim();
   }
 
-  // ── Groq Secondary (fallback 0b) — direct HTTP call with GROQ_API_KEY_1 ──
+  // ── Groq Secondary (fallback 0b) — DB gateway call with GROQ_API_KEY_1 ──
   // INDEPENDENT from Groq Primary:
   //   - Uses env.GROQ_API_KEY_1 (Cloudflare secret), NOT the Vault-stored GROQ_API_KEY
   //   - Does NOT use the Groq Coordinator (secondary key has its own quota)
   //   - Same model (openai/gpt-oss-120b), same prompt, same max_tokens/temperature
-  //   - 15s timeout (same as OpenRouter/OpenAI chat fallbacks)
+  //
+  // GROQ DB GATEWAY (Worker Egress WAF Bypass):
+  //   Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge.
+  //   Route through Supabase DB gateway (public.groq_generate_with_key), same
+  //   as callGroqChat (Primary) and callGeminiChat. The API key is passed as
+  //   a parameter (stays in Cloudflare secret).
   async function callGroqSecondaryChat(env, prompt) {
     const apiKey = normalizeOptionalString(env.GROQ_API_KEY_1);
     if (!apiKey) {
@@ -911,30 +916,26 @@ export function createAssistantHandlers(deps) {
       { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-    let response;
+    let dbResult;
     try {
-      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: CHAT_GROQ_MODEL,
-          messages,
-          max_tokens: 1024,
-          temperature: 0.4,
-        }),
-        signal: controller.signal,
-      });
-    } finally { clearTimeout(timer); }
-    if (!response.ok) {
-      const errorType = classifyHttpError(response.status);
-      throw { message: `Groq Secondary failed: HTTP ${response.status}`, errorType, _isProviderError: true };
+      dbResult = await queryDb(env,
+        `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
+        [CHAT_GROQ_MODEL, JSON.stringify(messages), 1024, 0.4, apiKey]
+      );
+    } catch (dbErr) {
+      console.error(`[ChatAI] Groq Secondary DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);
+      throw { message: `Groq Secondary DB gateway error: ${dbErr?.message || 'unknown'}`, errorType: 'retryable', _isProviderError: true };
     }
-    const data = await readJsonResponseSafe(response);
+    const groqResult = dbResult.rows[0]?.result || {};
+    const statusCode = groqResult.status_code;
+    const responseBody = groqResult.response_body || '';
+    if (statusCode !== 200) {
+      const errorType = classifyHttpError(statusCode || 500);
+      throw { message: `Groq Secondary failed: HTTP ${statusCode}`, errorType, _isProviderError: true };
+    }
+    let data;
+    try { data = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody; }
+    catch { throw { message: 'Invalid Groq Secondary response JSON', errorType: 'retryable', _isProviderError: true }; }
     const reply = data?.choices?.[0]?.message?.content;
     if (typeof reply !== 'string' || !reply.trim()) {
       throw { message: 'Empty Groq Secondary response', errorType: 'retryable', _isProviderError: true };

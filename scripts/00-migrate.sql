@@ -1463,5 +1463,88 @@ BEGIN
 END $$;
 
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECTION: Groq DB Gateway Function (Worker Egress WAF Bypass)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PROBLEM: Cloudflare Worker → api.groq.com returns HTTP 403 Forbidden from
+-- server:cloudflare (WAF edge). Both Groq keys (Key0 + Key1) blocked equally.
+-- Root cause: Groq's Cloudflare WAF blocks Cloudflare Worker egress IPs.
+--
+-- SOLUTION: Route Groq calls through Supabase DB gateway (same pattern as
+-- public.gemini_generate()). Supabase's IP makes the outbound HTTP call to
+-- api.groq.com, bypassing the Worker egress WAF block.
+--
+-- This NEW function takes the API key as a PARAMETER (passed from Worker's
+-- env.GROQ_API_KEY / env.GROQ_API_KEY_1). Keys stay in Cloudflare secrets.
+-- The existing public.groq_generate() (reads from Vault) is UNCHANGED.
+--
+-- SECURITY: SECURITY DEFINER, search_path locked, API key never stored/logged.
+-- Idempotent (CREATE OR REPLACE).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION public.groq_generate_with_key(
+  p_model text,
+  p_messages jsonb,
+  p_max_tokens integer DEFAULT 1024,
+  p_temperature double precision DEFAULT 0.4,
+  p_api_key text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'vault', 'extensions'
+AS $function$
+        DECLARE
+          v_request_body jsonb;
+          v_status int;
+          v_content text;
+        BEGIN
+          PERFORM set_config('statement_timeout', '30000', true);
+
+          IF p_api_key IS NULL OR p_api_key = '' THEN
+            RETURN jsonb_build_object('status_code', 503, 'response_body', '{"error":{"message":"Groq API key not provided as parameter","status":"UNAVAILABLE"}}');
+          END IF;
+
+          IF p_model NOT IN ('openai/gpt-oss-120b') THEN
+            RETURN jsonb_build_object('status_code', 400, 'response_body', '{"error":{"message":"Invalid model: only openai/gpt-oss-120b is supported","status":"INVALID_ARGUMENT"}}');
+          END IF;
+
+          v_request_body := jsonb_build_object(
+            'model', p_model,
+            'messages', p_messages,
+            'max_tokens', p_max_tokens,
+            'temperature', p_temperature
+          );
+
+          SELECT status, content INTO v_status, v_content
+          FROM http((
+            'POST',
+            'https://api.groq.com/openai/v1/chat/completions',
+            ARRAY[
+              http_header('Authorization', 'Bearer ' || p_api_key),
+              http_header('Content-Type', 'application/json')
+            ],
+            'application/json',
+            v_request_body::text
+          )::http_request);
+
+          RETURN jsonb_build_object('status_code', v_status, 'response_body', v_content);
+        EXCEPTION
+          WHEN OTHERS THEN
+            RETURN jsonb_build_object(
+              'status_code', 0,
+              'response_body', jsonb_build_object(
+                'error', jsonb_build_object(
+                  'message', 'db_gateway_error',
+                  'detail', substring(SQLERRM, 1, 200)
+                )
+              )::text
+            );
+        END;
+        $function$;
+
+GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, integer, double precision, text) TO PUBLIC;
+
+
 -- Migration complete
 COMMIT;

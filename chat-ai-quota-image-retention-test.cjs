@@ -296,6 +296,14 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
   const mockPool = {
     query: async (sql, params) => {
       const sl = (sql||'').toLowerCase();
+      // Groq DB gateway mock — capture the prompt from messages param
+      if (sl.includes('groq_generate_with_key')) {
+        try {
+          const msgs = JSON.parse(params[1] || '[]');
+          capturedPrompt = msgs.map(m => m.content).join('\n');
+        } catch {}
+        return { rows: [{ result: { status_code: 200, response_body: JSON.stringify({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }) } }] };
+      }
       if (sl.includes('insert into users') && sl.includes('returning')) return { rows: [{ telegram_id: '888001', username: null, first_name: 'Test', last_name: null, lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
       if (sl.includes('select') && sl.includes('from users') && sl.includes('where telegram_id')) return { rows: [] };
       if (sl.includes('from watchlist_items') || sl.includes('from referrals') || sl.includes('from token_balances') || sl.includes('from token_transactions') || sl.includes('from price_alerts') || sl.includes('from notifications') || sl.includes('from notification_settings') || sl.includes('from analyses') || sl.includes('from tickets') || sl.includes('from admins')) return { rows: [] };
@@ -306,20 +314,7 @@ test('WS-REG-01: Conflicting fixture (Powell old + Warsh new) → context contai
     end: async () => {}, on: () => {},
   };
   env._reqPool = mockPool;
-  // Mock fetch for Groq Primary direct HTTP — capture the prompt from the request body
-  globalThis.fetch = async (url, opts) => {
-    if (String(url).includes('api.groq.com')) {
-      const body = JSON.parse(opts?.body || '{}');
-      const messages = body.messages || [];
-      capturedPrompt = messages.map(m => m.content).join('\n');
-      return {
-        ok: true, status: 200,
-        text: async () => JSON.stringify({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }),
-        json: async () => ({ choices: [{ message: { content: 'رئیس فعلی فدرال رزرو کوین وارش است که از ۲۲ مه ۲۰۲۶ به این سمت منصوب شده است.' } }] }),
-      };
-    }
-    return origFetch(url, opts);
-  };
+  // No fetch mock needed — Groq now goes through DB gateway (pool.query mock above)
 
   // Mock the web search by pre-populating cache with conflicting fixture
   // (This simulates what performWebSearch would produce with conflicting results)
@@ -390,11 +385,20 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
   const worker = loadWorker();
   const env = createEnv({ GROQ_API_KEY: 'fake-groq-key' });
   let capturedPrompt = null;
-  // MIGRATION: Groq Primary now uses direct HTTP (groqPrimaryGenerate) instead of groq_generate() DB function.
+  // MIGRATION: Groq Primary now uses DB gateway (groq_generate_with_key) instead of direct HTTP.
   const origFetch = globalThis.fetch;
   const mockPool = {
     query: async (sql, params) => {
       const sl = (sql||'').toLowerCase();
+      // Groq DB gateway mock — capture the prompt from messages param
+      if (sl.includes('groq_generate_with_key')) {
+        try {
+          const msgs = JSON.parse(params[1] || '[]');
+          capturedPrompt = msgs.map(m => m.content).join('\n');
+        } catch {}
+        // Model SHOULD return no-data when all results are irrelevant
+        return { rows: [{ result: { status_code: 200, response_body: JSON.stringify({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }) } }] };
+      }
       if (sl.includes('insert into users') && sl.includes('returning')) return { rows: [{ telegram_id: '888002', username: null, first_name: 'Test', last_name: null, lang: 'fa', channel_joined: false, channel_verified_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }] };
       if (sl.includes('select') && sl.includes('from users') && sl.includes('where telegram_id')) return { rows: [] };
       if (sl.includes('from watchlist_items') || sl.includes('from referrals') || sl.includes('from token_balances') || sl.includes('from token_transactions') || sl.includes('from price_alerts') || sl.includes('from notifications') || sl.includes('from notification_settings') || sl.includes('from analyses') || sl.includes('from tickets') || sl.includes('from admins')) return { rows: [] };
@@ -405,21 +409,7 @@ test('WS-REG-02: All irrelevant results → context still injected (model decide
     end: async () => {}, on: () => {},
   };
   env._reqPool = mockPool;
-  // Mock fetch for Groq Primary direct HTTP — capture the prompt from the request body
-  globalThis.fetch = async (url, opts) => {
-    if (String(url).includes('api.groq.com')) {
-      const body = JSON.parse(opts?.body || '{}');
-      const messages = body.messages || [];
-      capturedPrompt = messages.map(m => m.content).join('\n');
-      // Model SHOULD return no-data when all results are irrelevant
-      return {
-        ok: true, status: 200,
-        text: async () => JSON.stringify({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }),
-        json: async () => ({ choices: [{ message: { content: 'اطلاعات به‌روز قابل تأیید پیدا نشد — لطفاً به منابع خبری معتبر مراجعه کنید.' } }] }),
-      };
-    }
-    return origFetch(url, opts);
-  };
+  // No fetch mock needed — Groq now goes through DB gateway (pool.query mock above)
 
   // Pre-populate with IRRELEVANT results (no Fed chair info)
   const irrelevantFixture = [

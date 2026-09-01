@@ -746,11 +746,25 @@ test('AI Chat: missing message field returns 422', async () => {
 test('AI Chat: with mocked Gemini returns reply', async () => {
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
-  // MIGRATION: Groq Primary now uses direct HTTP (groqPrimaryGenerate) instead of groq_generate() DB function.
-  // Mock fetch for Groq API calls + keep DB pool mock for Gemini fallback.
+  // MIGRATION: Groq Primary now uses DB gateway (groq_generate_with_key) instead of direct HTTP.
+  // Mock pool.query to intercept BOTH Groq (groq_generate_with_key) AND Gemini (gemini_generate) calls.
   const origFetch = globalThis.fetch;
   const mockPool = {
     query: async (sql, params) => {
+      // Groq DB gateway mock (Primary path — should succeed first)
+      if (sql.includes('groq_generate_with_key')) {
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }],
+              }),
+            }
+          }]
+        };
+      }
+      // Gemini DB gateway mock (fallback — kept for safety)
       if (sql.includes('gemini_generate')) {
         return {
           rows: [{
@@ -777,21 +791,7 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     _reqPool: mockPool,
     DATABASE_URL: '',
   });
-  // Mock fetch for Groq Primary direct HTTP calls
-  globalThis.fetch = async (url, opts) => {
-    if (String(url).includes('api.groq.com')) {
-      return {
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({
-          choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }],
-        }),
-        json: async () => ({ choices: [{ message: { content: 'Bitcoin is a decentralized digital currency.' } }] }),
-      };
-    }
-    // Fall through to original fetch for other URLs
-    return origFetch(url, opts);
-  };
+  // No fetch mock needed — Groq now goes through DB gateway (pool.query mock above)
   const user = { id: 999888, first_name: 'Test' };
   const initData = buildInitData('test-bot-token', user);
 
@@ -802,7 +802,7 @@ test('AI Chat: with mocked Gemini returns reply', async () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.status, 'success');
-    // Groq is now primary — should succeed via direct HTTP (groqPrimaryGenerate)
+    // Groq is primary — should succeed via DB gateway (groq_generate_with_key)
     assert.equal(res.body.provider, 'groq');
     assert.ok(res.body.reply);
     assert.ok(res.body.reply.includes('Bitcoin'));

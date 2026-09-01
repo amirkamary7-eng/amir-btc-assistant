@@ -5942,33 +5942,24 @@ async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)
       response_body: '{"error":{"message":"GROQ_API_KEY not configured as Cloudflare secret","status":"UNAVAILABLE"}}',
     };
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000); // 30s — matches DB function statement_timeout
+  // ── GROQ DB GATEWAY (Worker Egress WAF Bypass) ──
+  // Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge.
+  // Route through Supabase DB gateway (same as _groqFetchWithKey + Gemini).
+  // The API key is passed as a parameter (stays in Cloudflare secret).
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    const response_body = await res.text();
-    return { status_code: res.status, response_body };
+    const dbResult = await queryDb(env,
+      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
+      [model, JSON.stringify(messages), maxTokens, temperature, apiKey]
+    );
+    const result = dbResult.rows[0]?.result || {};
+    const status_code = typeof result.status_code === 'number' ? result.status_code : 0;
+    const response_body = typeof result.response_body === 'string' ? result.response_body : JSON.stringify(result.response_body || {});
+    return { status_code, response_body };
   } catch (e) {
-    clearTimeout(timeout);
-    // Network error / timeout — return a shape that call sites classify as retryable
-    const isAbort = e?.name === 'AbortError';
+    // DB gateway error — return shape that call sites classify as retryable
     return {
       status_code: 0, // 0 = network/timeout (call sites treat non-200 as error, classifyHttpError(0||500) = retryable)
-      response_body: JSON.stringify({ error: { message: isAbort ? 'timeout' : 'network_error', detail: (e?.message || '').substring(0, 120) } }),
+      response_body: JSON.stringify({ error: { message: 'db_gateway_error', detail: (e?.message || '').substring(0, 120) } }),
     };
   }
 }
@@ -6028,43 +6019,33 @@ async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, tempe
   if (!apiKey) {
     return { status_code: 503, response_body: '{"error":{"message":"Groq API key not configured","status":"UNAVAILABLE"}}', key_slot: keySlot, rate_limit: null, usage: null };
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  // ── GROQ DB GATEWAY (Worker Egress WAF Bypass) ──
+  // Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge
+  // (server:cloudflare, cf-ray present, 3-5ms latency = edge block, not origin).
+  // Both Groq keys blocked equally; Worker egress to other services works fine.
+  // Root cause: Groq's Cloudflare WAF blocks Cloudflare Worker egress IPs.
+  //
+  // FIX: Route through Supabase DB gateway (public.groq_generate_with_key).
+  // Supabase's IP makes the outbound HTTP call to api.groq.com, bypassing the
+  // Worker egress WAF block. Same pattern as public.gemini_generate().
+  //
+  // The API key is passed as a PARAMETER (stays in Cloudflare secrets, never
+  // stored in DB). The function returns {status_code, response_body}.
+  // NOTE: DB gateway strips HTTP headers, so rate_limit is null (unlike direct
+  // fetch which captured x-ratelimit-* headers). Token usage is still parsed
+  // from the response body on HTTP 200.
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    const dbResult = await queryDb(env,
+      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::integer, $4::double precision, $5::text) AS result`,
+      [model, JSON.stringify(messages), maxTokens, temperature, apiKey]
+    );
+    const result = dbResult.rows[0]?.result || {};
+    const status_code = typeof result.status_code === 'number' ? result.status_code : 0;
+    const response_body = typeof result.response_body === 'string' ? result.response_body : JSON.stringify(result.response_body || {});
 
-    // ── PHASE 1 DIAGNOSTIC: capture rate-limit headers BEFORE consuming body ──
-    // Headers are available on res.headers without consuming the body stream.
-    // SECURITY: only standard rate-limit headers are read. Authorization is NEVER read/logged.
-    const rate_limit = {
-      retry_after: res.headers.get('retry-after'),
-      limit_requests: res.headers.get('x-ratelimit-limit-requests'),
-      remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
-      reset_requests: res.headers.get('x-ratelimit-reset-requests'),
-      limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
-      remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
-      reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
-    };
-
-    const response_body = await res.text();
-
-    // ── PHASE 1 DIAGNOSTIC: parse token usage on HTTP 200 ──
+    // Parse token usage from response body on HTTP 200 (same as before)
     let usage = null;
-    if (res.status === 200) {
+    if (status_code === 200) {
       try {
         const parsed = JSON.parse(response_body);
         const u = parsed?.usage;
@@ -6078,13 +6059,12 @@ async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, tempe
       } catch { /* non-JSON body — usage stays null */ }
     }
 
-    return { status_code: res.status, response_body, key_slot: keySlot, rate_limit, usage };
+    return { status_code, response_body, key_slot: keySlot, rate_limit: null, usage };
   } catch (e) {
-    clearTimeout(timeout);
-    const isAbort = e?.name === 'AbortError';
+    // DB gateway error (connection failure, function not found, etc.)
     return {
       status_code: 0,
-      response_body: JSON.stringify({ error: { message: isAbort ? 'timeout' : 'network_error', detail: (e?.message || '').substring(0, 120) } }),
+      response_body: JSON.stringify({ error: { message: 'db_gateway_error', detail: (e?.message || '').substring(0, 120) } }),
       key_slot: keySlot,
       rate_limit: null,
       usage: null,
@@ -6222,7 +6202,11 @@ async function tryGroq(env, prompt, systemPrompt) {
  *   - Has its OWN circuit breaker key: 'groq-secondary' (tripping primary does NOT trip secondary)
  *   - Does NOT use the Global Groq Coordinator (checkGroqCapacity/recordGroqRequest)
  *     because the coordinator tracks the primary key's rate limits
- *   - Makes a direct fetch() to api.groq.com (no DB gateway) — same pattern as tryOpenRouter
+ *   - Uses DB gateway (groq_generate_with_key) — same as tryGroq, NOT direct fetch
+ *
+ * NOTE: This function is DEAD CODE (Phase 2 removed the only caller from
+ * generateSummaryWithFallback). Kept for backward compatibility. Now routes
+ * through DB gateway for consistency (would work if re-enabled).
  *
  * Returns same shape as tryGroq():
  *   { provider: 'groq-secondary', success, summary?, error?, errorType, error_detail?, duration_ms }
@@ -6240,74 +6224,40 @@ async function tryGroqSecondary(env, prompt, systemPrompt) {
     }
     messages.push({ role: 'user', content: prompt });
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY_1}`,
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-oss-120b',
-        messages,
-        max_tokens: 1024,
-        temperature: 0.4,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    // GROQ DB GATEWAY (Worker Egress WAF Bypass) — uses Key 1 (keySlot=1)
+    const result = await _groqFetchWithKey(env, 1, 'openai/gpt-oss-120b', messages, 1024, 0.4);
+    const statusCode = result.status_code;
+    const responseBody = result.response_body || '';
+    const rateLimit = result.rate_limit || null;
+    const usage = result.usage || null;
 
-    // ── PHASE 1 DIAGNOSTIC: capture rate-limit headers BEFORE consuming body ──
-    // SECURITY: only standard rate-limit headers. Authorization NEVER read/logged.
-    const rate_limit = {
-      retry_after: res.headers.get('retry-after'),
-      limit_requests: res.headers.get('x-ratelimit-limit-requests'),
-      remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
-      reset_requests: res.headers.get('x-ratelimit-reset-requests'),
-      limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
-      remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
-      reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
-    };
-
-    if (!res.ok) {
-      const errorType = classifyHttpError(res.status);
-      let errorBody = '';
-      try { errorBody = (await res.text()).substring(0, 300); } catch {}
-      // SECURITY: errorBody may contain Groq API error JSON — it must NOT include the API key.
-      // The Authorization header is never included in error bodies. Safe to log status + truncated body.
-      // ── PHASE 1 DIAGNOSTIC: log 429 rate-limit headers + bounded error body ──
-      if (res.status === 429) {
-        console.warn(`[GROQ-SEC-429] key=1 retry_after=${rate_limit.retry_after||'n/a'} rpm=${rate_limit.remaining_requests||'?'}/${rate_limit.limit_requests||'?'} tpm=${rate_limit.remaining_tokens||'?'}/${rate_limit.limit_tokens||'?'} reset_req=${rate_limit.reset_requests||'n/a'} reset_tok=${rate_limit.reset_tokens||'n/a'} body=${errorBody}`);
+    if (statusCode !== 200) {
+      const errorType = classifyHttpError(statusCode || 500);
+      const errorBody = responseBody.substring(0, 300);
+      if (statusCode === 429) {
+        const rl = rateLimit || {};
+        console.warn(`[GROQ-SEC-429] key=1 retry_after=${rl.retry_after||'n/a'} body=${errorBody}`);
       } else {
-        console.warn(`[GROQ-SEC-ERR] key=1 status=${res.status} body=${errorBody}`);
+        console.warn(`[GROQ-SEC-ERR] key=1 status=${statusCode} body=${errorBody}`);
       }
-      return { provider: 'groq-secondary', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0, rate_limit, usage: null };
+      return { provider: 'groq-secondary', success: false, error: `http_${statusCode}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
     }
 
     let data;
     try {
-      data = await res.json();
+      data = JSON.parse(responseBody);
     } catch (e) {
-      return { provider: 'groq-secondary', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit, usage: null };
+      return { provider: 'groq-secondary', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
     }
-
-    // ── PHASE 1 DIAGNOSTIC: parse token usage on success ──
-    const u = data?.usage;
-    const usage = (u && typeof u === 'object') ? {
-      prompt_tokens: typeof u.prompt_tokens === 'number' ? u.prompt_tokens : null,
-      completion_tokens: typeof u.completion_tokens === 'number' ? u.completion_tokens : null,
-      total_tokens: typeof u.total_tokens === 'number' ? u.total_tokens : null,
-    } : null;
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
       if (usage) {
-        console.log(`[GROQ-SEC-OK] key=1 usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} rpm_remaining=${rate_limit.remaining_requests||'?'}/${rate_limit.limit_requests||'?'} tpm_remaining=${rate_limit.remaining_tokens||'?'}/${rate_limit.limit_tokens||'?'} duration=${Date.now() - t0}ms`);
+        console.log(`[GROQ-SEC-OK] key=1 usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} duration=${Date.now() - t0}ms`);
       }
-      return { provider: 'groq-secondary', success: true, summary: text.trim(), duration_ms: Date.now() - t0, rate_limit, usage };
+      return { provider: 'groq-secondary', success: true, summary: text.trim(), duration_ms: Date.now() - t0, rate_limit: rateLimit, usage };
     }
-    return { provider: 'groq-secondary', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit, usage: null };
+    return { provider: 'groq-secondary', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
     return {
