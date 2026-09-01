@@ -13715,6 +13715,119 @@ Headlines:
         return jsonResponse({ status: 'success', test: testType, timestamp: new Date().toISOString(), result }, {}, env);
       }
 
+      // ── GET /api/diagnostic/groq-connectivity — TEMPORARY Groq reachability diagnostic ──
+      // PURPOSE: Determine why Groq fetch() returns HTTP 0 from production Worker.
+      //          Captures full error objects (including e.cause) that the production
+      //          _groqFetchWithKey catch block does NOT capture.
+      // SECURITY:
+      //   - Admin-guarded (optionalTelegramAuth + isAdminTelegramId)
+      //   - NEVER uses real GROQ_API_KEY/GROQ_API_KEY_1. Tests use NO auth or a
+      //     dummy 'INVALID_CONNECTIVITY_TEST_KEY' bearer. No real key is ever sent.
+      //   - Only reports key PRESENCE (boolean) + 6-char prefix, never the full key.
+      //   - Read-only — does NOT modify any provider chain, circuit, or queue.
+      // SCOPE: Standalone diagnostic. Does NOT touch Groq/Gemini/OpenRouter/Workers AI.
+      if (request.method === 'GET' && url.pathname === '/api/diagnostic/groq-connectivity') {
+        const auth = await optionalTelegramAuth(request, env);
+        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
+          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
+        }
+
+        const results = {
+          timestamp: new Date().toISOString(),
+          groq_key0_configured: Boolean(env.GROQ_API_KEY),
+          groq_key1_configured: Boolean(env.GROQ_API_KEY_1),
+          groq_key0_prefix: env.GROQ_API_KEY ? (String(env.GROQ_API_KEY).substring(0, 6) + '***') : null,
+          groq_key1_prefix: env.GROQ_API_KEY_1 ? (String(env.GROQ_API_KEY_1).substring(0, 6) + '***') : null,
+        };
+
+        // Helper: run a fetch test with full error capture (including e.cause)
+        async function runFetchTest(label, urlStr, options, timeoutMs) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), timeoutMs || 15000);
+          const t0 = Date.now();
+          try {
+            const res = await fetch(urlStr, { ...options, signal: controller.signal });
+            clearTimeout(timeout);
+            const elapsed = Date.now() - t0;
+            const body = await res.text();
+            return {
+              label,
+              status: res.status,
+              status_text: res.statusText,
+              elapsed_ms: elapsed,
+              response_headers: {
+                'content-type': res.headers.get('content-type'),
+                'server': res.headers.get('server'),
+                'cf-ray': res.headers.get('cf-ray'),
+                'cf-cache-status': res.headers.get('cf-cache-status'),
+              },
+              body_preview: body.substring(0, 300),
+              body_length: body.length,
+            };
+          } catch (e) {
+            clearTimeout(timeout);
+            const elapsed = Date.now() - t0;
+            const isAbort = e?.name === 'AbortError';
+            return {
+              label,
+              error_name: e?.name || 'Unknown',
+              error_message: (e?.message || '').substring(0, 400),
+              error_cause: e?.cause ? String(e?.cause).substring(0, 400) : null,
+              error_stack: e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
+              is_abort: isAbort,
+              interpreted_as: isAbort ? 'timeout' : 'network_error',
+              elapsed_ms: elapsed,
+              status: 0,
+            };
+          }
+        }
+
+        // Test 1: Plain GET to api.groq.com root (NO auth) — tests DNS + TLS + HTTP reachability
+        results.test1_get_root_noauth = await runFetchTest(
+          'GET https://api.groq.com/ (no auth)',
+          'https://api.groq.com/',
+          { method: 'GET' },
+          15000
+        );
+
+        // Test 2: POST to /openai/v1/chat/completions with INVALID bearer key — if reachable, expect 401
+        results.test2_post_invalid_key = await runFetchTest(
+          'POST /openai/v1/chat/completions (invalid bearer)',
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer INVALID_CONNECTIVITY_TEST_KEY_NOT_REAL',
+            },
+            body: JSON.stringify({
+              model: 'openai/gpt-oss-120b',
+              messages: [{ role: 'user', content: 'connectivity test' }],
+              max_tokens: 1,
+            }),
+          },
+          15000
+        );
+
+        // Test 3: GET to a known-good external host — sanity check Worker egress
+        results.test3_egress_sanity = await runFetchTest(
+          'GET https://cloudflare.com/cdn-cgi/trace (egress sanity)',
+          'https://cloudflare.com/cdn-cgi/trace',
+          { method: 'GET' },
+          10000
+        );
+
+        // Test 4: GET to another AI API (openrouter.ai) — test if OTHER AI providers are reachable too
+        results.test4_other_ai_provider = await runFetchTest(
+          'GET https://openrouter.ai/api/v1/models (no auth)',
+          'https://openrouter.ai/api/v1/models',
+          { method: 'GET' },
+          15000
+        );
+
+        return jsonResponse({ status: 'success', results }, {}, env);
+      }
+
       // ── GET /api/bootstrap-diag — read [BOOTSTRAP-E2E] diagnostic logs ──
       // Public (no auth) — same as /api/start-diag, /api/admin-diag.
       // Returns the last 30 bootstrap flow entries from APP_CACHE KV.
