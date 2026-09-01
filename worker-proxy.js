@@ -5166,200 +5166,55 @@ async function batchTranslateToFarsi(texts, env) {
     const batchTexts = texts.slice(batchStart, batchStart + BATCH_TRANSLATION_MAX_BATCH);
     const batchEnd = Math.min(batchStart + BATCH_TRANSLATION_MAX_BATCH, texts.length);
 
-    // Try batch translation via Groq
+    // Try batch translation via Groq — DUAL-KEY ROUTED
     let batchSuccess = false;
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-      const cbGroq = await shouldAttemptProvider(env, 'groq');
-      if (cbGroq.attempt) {
-        try {
-          // ── Global Groq Coordinator: pre-flight capacity check ──
-          const batchPrompt = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
-          const batchSystemPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
-          const maxTokens = Math.min(4000, batchTexts.length * 200);
-          const estTokens = estimateGroqTokens(batchPrompt, batchSystemPrompt, maxTokens);
-          const capacity = await checkGroqCapacity(env, estTokens);
-          if (!capacity.allowed) {
-            console.warn(`[GROQ-COORD] batchTranslate skipped — ${capacity.reason}`);
-            // Fall through to individual translation (which also checks capacity)
-          } else {
-          // Build numbered list of headlines
-          const numberedHeadlines = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
-          const messages = [
-            { role: 'system', content: batchSystemPrompt },
-            { role: 'user', content: `Translate these ${batchTexts.length} headlines to Persian. Return a JSON array of ${batchTexts.length} strings:\n\n${numberedHeadlines}` }
-          ];
-          // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
-          const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, maxTokens, 0.3);
-          if (groqResult.status_code === 200) {
-            const data = JSON.parse(groqResult.response_body);
-            const content = data?.choices?.[0]?.message?.content || '';
-            // Parse JSON array from response
-            const jsonMatch = content.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              try {
-                const translations = JSON.parse(jsonMatch[0]);
-                if (Array.isArray(translations) && translations.length === batchTexts.length) {
-                  // Validate each translation
-                  let allValid = true;
-                  for (let i = 0; i < translations.length; i++) {
-                    const translated = String(translations[i] || '').trim();
-                    if (!translated || translated === batchTexts[i]) {
-                      allValid = false;
-                      break;
-                    }
-                    // Quick validation for translations (lower threshold than summaries)
-                    const validation = validatePersianOutput(translated, {
-                      minLength: 3, minPersianRatio: 0.10
-                    });
-                    if (!validation.valid && validation.reason !== 'too_short') {
-                      allValid = false;
-                      break;
-                    }
-                  }
-                  if (allValid) {
-                    // All translations valid — store them
-                    for (let i = 0; i < translations.length; i++) {
-                      results[batchStart + i] = {
-                        text: String(translations[i]).trim(),
-                        translation_failed: false,
-                      };
-                      // Cache the result
-                      _translationCache.set(batchTexts[i], {
-                        text: String(translations[i]).trim(),
-                        translation_failed: false,
-                        _expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS,
-                      });
-                    }
-                    batchSuccess = true;
-                    try { await recordCircuitResult(env, 'groq', true); } catch {}
-                    try { await recordGroqRequest(env, estTokens); } catch {}
-                    console.log(`[BATCH-TRANSLATE] ✅ Batch of ${batchTexts.length} translated in 1 Groq call`);
-                  } else {
-                    console.warn('[BATCH-TRANSLATE] ⚠️ Some translations failed validation — falling back to individual');
-                    try { await recordCircuitResult(env, 'groq', false, 'retryable', 'validation_failed'); } catch {}
-                  }
-                } else {
-                  console.warn(`[BATCH-TRANSLATE] ⚠️ Translation count mismatch: expected ${batchTexts.length}, got ${translations.length}`);
-                  try { await recordCircuitResult(env, 'groq', false, 'retryable', 'count_mismatch'); } catch {}
+      const batchPrompt = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
+      const batchSystemPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
+      const maxTokens = Math.min(4000, batchTexts.length * 200);
+      const messages = [
+        { role: 'system', content: batchSystemPrompt },
+        { role: 'user', content: `Translate these ${batchTexts.length} headlines to Persian. Return a JSON array of ${batchTexts.length} strings:\n\n${batchPrompt}` }
+      ];
+      // DUAL-KEY: tick-alternating batch routing (batchOffset=0 for translation)
+      // _groqRoutedFetch tries preferred key first, falls back to other key on failure
+      const groqResult = await _groqRoutedFetch(env, batchPrompt, true, 0, 'openai/gpt-oss-120b', messages, maxTokens, 0.3);
+      if (groqResult.status_code === 200) {
+        const data = JSON.parse(groqResult.response_body);
+        const content = data?.choices?.[0]?.message?.content || '';
+        const jsonMatch = content.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          try {
+            const translations = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(translations) && translations.length === batchTexts.length) {
+              let allValid = true;
+              for (let i = 0; i < translations.length; i++) {
+                const translated = String(translations[i] || '').trim();
+                if (!translated || translated === batchTexts[i]) { allValid = false; break; }
+                const validation = validatePersianOutput(translated, { minLength: 3, minPersianRatio: 0.10 });
+                if (!validation.valid && validation.reason !== 'too_short') { allValid = false; break; }
+              }
+              if (allValid) {
+                for (let i = 0; i < translations.length; i++) {
+                  results[batchStart + i] = { text: String(translations[i]).trim(), translation_failed: false };
+                  _translationCache.set(batchTexts[i], { text: String(translations[i]).trim(), translation_failed: false, _expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS });
                 }
-              } catch (parseErr) {
-                console.warn('[BATCH-TRANSLATE] ⚠️ JSON parse failed — falling back to individual');
-                try { await recordCircuitResult(env, 'groq', false, 'retryable', 'json_parse_error'); } catch {}
+                batchSuccess = true;
+                console.log(`[BATCH-TRANSLATE] ✅ Batch of ${batchTexts.length} translated in 1 Groq call (key=${groqResult.key_slot})`);
+              } else {
+                console.warn('[BATCH-TRANSLATE] ⚠️ Some translations failed validation — falling back to individual');
               }
             } else {
-              console.warn('[BATCH-TRANSLATE] ⚠️ No JSON array found in response — falling back to individual');
-              try { await recordCircuitResult(env, 'groq', false, 'retryable', 'no_json_array'); } catch {}
+              console.warn(`[BATCH-TRANSLATE] ⚠️ Translation count mismatch: expected ${batchTexts.length}, got ${translations?.length}`);
             }
-          } else {
-            const errorType = classifyHttpError(groqResult.status_code || 500);
-            try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
-            // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
-            if (groqResult.status_code === 429) {
-              try { await recordGroqRequest(env, estTokens); } catch {}
-            }
-            console.warn(`[BATCH-TRANSLATE] ⚠️ Groq failed (HTTP ${groqResult.status_code}) — falling back to individual`);
+          } catch (parseErr) {
+            console.warn('[BATCH-TRANSLATE] ⚠️ JSON parse failed — falling back to individual');
           }
-          } // end of capacity.allowed else block
-        } catch (e) {
-          try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.name === 'AbortError' ? 'timeout' : 'network_error'); } catch {}
-          console.warn('[BATCH-TRANSLATE] ⚠️ Groq Primary exception:', e?.message, '— falling back to Groq Secondary batch');
+        } else {
+          console.warn('[BATCH-TRANSLATE] ⚠️ No JSON array found in response — falling back to individual');
         }
       } else {
-        console.warn('[BATCH-TRANSLATE] Groq Primary circuit OPEN — trying Groq Secondary batch');
-      }
-    }
-
-    // ── Groq Secondary batch (env.GROQ_API_KEY_1) — independent key + circuit ──
-    // Only tried if Groq Primary batch didn't succeed.
-    if (!batchSuccess && env.GROQ_API_KEY_1 && isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-      const cbGroqSec = await shouldAttemptProvider(env, 'translation-groq-secondary');
-      if (cbGroqSec.attempt) {
-        try {
-          const secBatchPrompt = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
-          const secBatchSysPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
-          const secMaxTokens = Math.min(4000, batchTexts.length * 200);
-          const secMessages = [
-            { role: 'system', content: secBatchSysPrompt },
-            { role: 'user', content: `Translate these ${batchTexts.length} headlines to Persian. Return a JSON array of ${batchTexts.length} strings:\n\n${secBatchPrompt}` }
-          ];
-          const controller = new AbortController();
-          const secTimeout = setTimeout(() => controller.abort(), 15000);
-          const secRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${env.GROQ_API_KEY_1}`,
-            },
-            body: JSON.stringify({
-              model: 'openai/gpt-oss-120b',
-              messages: secMessages,
-              max_tokens: secMaxTokens,
-              temperature: 0.3,
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(secTimeout);
-
-          if (secRes.ok) {
-            const secData = await secRes.json();
-            const secContent = secData?.choices?.[0]?.message?.content || '';
-            const secJsonMatch = secContent.match(/\[[\s\S]*\]/);
-            if (secJsonMatch) {
-              try {
-                const secTranslations = JSON.parse(secJsonMatch[0]);
-                if (Array.isArray(secTranslations) && secTranslations.length === batchTexts.length) {
-                  let secAllValid = true;
-                  for (let i = 0; i < secTranslations.length; i++) {
-                    const secTranslated = String(secTranslations[i] || '').trim();
-                    if (!secTranslated || secTranslated === batchTexts[i]) {
-                      secAllValid = false;
-                      break;
-                    }
-                    const secValidation = validatePersianOutput(secTranslated, { minLength: 3, minPersianRatio: 0.10 });
-                    if (!secValidation.valid && secValidation.reason !== 'too_short') {
-                      secAllValid = false;
-                      break;
-                    }
-                  }
-                  if (secAllValid) {
-                    for (let i = 0; i < secTranslations.length; i++) {
-                      results[batchStart + i] = {
-                        text: String(secTranslations[i]).trim(),
-                        translation_failed: false,
-                      };
-                      _translationCache.set(batchTexts[i], {
-                        text: String(secTranslations[i]).trim(),
-                        translation_failed: false,
-                        _expiresAt: Date.now() + TRANSLATION_CACHE_TTL_MS,
-                      });
-                    }
-                    batchSuccess = true;
-                    try { await recordCircuitResult(env, 'translation-groq-secondary', true); } catch {}
-                    console.log(`[BATCH-TRANSLATE] ✅ Batch of ${batchTexts.length} translated via Groq Secondary in 1 call`);
-                  } else {
-                    try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', 'validation_failed'); } catch {}
-                  }
-                } else {
-                  try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', 'count_mismatch'); } catch {}
-                }
-              } catch (parseErr) {
-                try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', 'json_parse_error'); } catch {}
-              }
-            } else {
-              try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', 'no_json_array'); } catch {}
-            }
-          } else {
-            const secErrorType = classifyHttpError(secRes.status);
-            try { await recordCircuitResult(env, 'translation-groq-secondary', false, secErrorType, `http_${secRes.status}`); } catch {}
-            console.warn(`[BATCH-TRANSLATE] ⚠️ Groq Secondary failed (HTTP ${secRes.status}) — falling back to individual`);
-          }
-        } catch (e) {
-          const isAbort = e?.name === 'AbortError';
-          try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
-          console.warn('[BATCH-TRANSLATE] ⚠️ Groq Secondary exception:', e?.message, '— falling back to individual');
-        }
-      } else {
-        console.warn('[BATCH-TRANSLATE] Groq Secondary circuit OPEN — using individual translation (with fallbacks)');
+        console.warn(`[BATCH-TRANSLATE] ⚠️ Groq batch failed (HTTP ${groqResult.status_code}, keys_tried=${JSON.stringify(groqResult.tried_keys)}) — falling back to individual`);
       }
     }
 
@@ -5409,110 +5264,24 @@ async function translateToFarsi(text, env) {
   let result = text;
   let translation_failed = false;
 
-  // ── Primary: Groq (via DB gateway) ────────────────────────────────
-  // Groq uses llama-3.3-70b for translation — higher quality than m2m100.
-  // Circuit breaker key: 'groq' (shared with summary + batch paths).
+  // ── Groq: DUAL-KEY ROUTED (hash(headline) → Key 0 or Key 1) ──
+  // Both keys are active. _groqRoutedFetch tries preferred key, falls back to other.
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const cbGroq = await shouldAttemptProvider(env, 'groq');
-    if (cbGroq.attempt) {
-      try {
-        // ── Global Groq Coordinator: pre-flight capacity check ──
-        const indSysPrompt = 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل, Bitcoin → بیت‌کوین. 4) Numbers can stay as-is.';
-        const indEstTokens = estimateGroqTokens(text, indSysPrompt, 500);
-        const indCapacity = await checkGroqCapacity(env, indEstTokens);
-        if (!indCapacity.allowed) {
-          console.warn(`[GROQ-COORD] translateToFarsi skipped — ${indCapacity.reason}`);
-          // Fall through to Workers AI / Google Translate fallback
-        } else {
-        const messages = [
-          { role: 'system', content: indSysPrompt },
-          { role: 'user', content: text }
-        ];
-        // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
-        const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 500, 0.3);
-        if (groqResult.status_code === 200) {
-          const data = JSON.parse(groqResult.response_body);
-          const translated = data?.choices?.[0]?.message?.content;
-          if (translated && typeof translated === 'string' && translated.trim() && translated.trim() !== text) {
-            result = translated.trim();
-            translation_failed = false;
-            try { await recordCircuitResult(env, 'groq', true); } catch {}
-            try { await recordGroqRequest(env, indEstTokens); } catch {}
-          } else {
-            try { await recordCircuitResult(env, 'groq', false, 'retryable', 'empty_response'); } catch {}
-          }
-        } else {
-          const errorType = classifyHttpError(groqResult.status_code || 500);
-          try { await recordCircuitResult(env, 'groq', false, errorType, `http_${groqResult.status_code}`); } catch {}
-          // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
-          if (groqResult.status_code === 429) {
-            try { await recordGroqRequest(env, indEstTokens); } catch {}
-          }
-          console.warn('[TRANSLATE] Groq failed (non-fatal):', `HTTP ${groqResult.status_code}`);
-        }
-        } // end of capacity.allowed else block
-      } catch (e) {
-        try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.message?.substring(0, 120)); } catch {}
-        console.warn('[TRANSLATE] Groq Primary failed (non-fatal):', e?.message);
+    const indSysPrompt = 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل, Bitcoin → بیت‌کوین. 4) Numbers can stay as-is.';
+    const indMessages = [
+      { role: 'system', content: indSysPrompt },
+      { role: 'user', content: text }
+    ];
+    const routedResult = await _groqRoutedFetch(env, text, false, 0, 'openai/gpt-oss-120b', indMessages, 500, 0.3);
+    if (routedResult.status_code === 200) {
+      const routedData = JSON.parse(routedResult.response_body);
+      const routedTranslated = routedData?.choices?.[0]?.message?.content;
+      if (routedTranslated && typeof routedTranslated === 'string' && routedTranslated.trim() && routedTranslated.trim() !== text) {
+        result = routedTranslated.trim();
+        translation_failed = false;
       }
     } else {
-      console.warn('[TRANSLATE] Groq Primary circuit OPEN — skipping to Groq Secondary');
-    }
-  }
-
-  // ── Fallback 0b: Groq Secondary (env.GROQ_API_KEY_1) ─────────────
-  // INDEPENDENT circuit breaker key 'translation-groq-secondary'.
-  // Direct HTTP call with env.GROQ_API_KEY_1 (same model, different key + quota).
-  // Does NOT use the Groq Coordinator (secondary key has its own quota).
-  if (env.GROQ_API_KEY_1 && result === text) {
-    const cbGroqSec = await shouldAttemptProvider(env, 'translation-groq-secondary');
-    if (cbGroqSec.attempt) {
-      try {
-        const secSysPrompt = 'You are a professional translator. Translate the following English text to natural Persian (Farsi). Return ONLY the translation, no explanations or extra text. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل, Bitcoin → بیت‌کوین. 4) Numbers can stay as-is.';
-        const secMessages = [
-          { role: 'system', content: secSysPrompt },
-          { role: 'user', content: text }
-        ];
-        const controller = new AbortController();
-        const secTimeout = setTimeout(() => controller.abort(), 15000);
-        const secRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${env.GROQ_API_KEY_1}`,
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-oss-120b',
-            messages: secMessages,
-            max_tokens: 500,
-            temperature: 0.3,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(secTimeout);
-
-        if (secRes.ok) {
-          const secData = await secRes.json();
-          const secTranslated = secData?.choices?.[0]?.message?.content;
-          if (secTranslated && typeof secTranslated === 'string' && secTranslated.trim() && secTranslated.trim() !== text) {
-            result = secTranslated.trim();
-            translation_failed = false;
-            try { await recordCircuitResult(env, 'translation-groq-secondary', true); } catch {}
-          } else {
-            try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', 'empty_response'); } catch {}
-          }
-        } else {
-          const secErrorType = classifyHttpError(secRes.status);
-          try { await recordCircuitResult(env, 'translation-groq-secondary', false, secErrorType, `http_${secRes.status}`); } catch {}
-          console.warn('[TRANSLATE] Groq Secondary failed (non-fatal):', `HTTP ${secRes.status}`);
-        }
-      } catch (e) {
-        const isAbort = e?.name === 'AbortError';
-        try { await recordCircuitResult(env, 'translation-groq-secondary', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
-        console.warn('[TRANSLATE] Groq Secondary failed (non-fatal):', e?.message);
-      }
-    } else {
-      console.warn('[TRANSLATE] Groq Secondary circuit OPEN — skipping to Workers AI');
+      console.warn(`[TRANSLATE] Groq failed (HTTP ${routedResult.status_code}, keys_tried=${JSON.stringify(routedResult.tried_keys)}) — falling back`);
     }
   }
 
@@ -6204,58 +5973,186 @@ async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DUAL-KEY GROQ ROUTER
+// Routes News AI Groq requests between GROQ_API_KEY (Key 0) and GROQ_API_KEY_1 (Key 1).
+// Both keys are ACTIVE simultaneously — Key 1 is NOT just a fallback.
+//
+// Routing model:
+//   Summary (per article): deterministic hash(article_url) → Key 0 or Key 1
+//   Individual translation: deterministic hash(headline) → Key 0 or Key 1
+//   Batch translation: tick-alternating (even minute → Key 0, odd → Key 1)
+//   Batch analysis: tick-alternating (odd minute → Key 0, even → Key 1)
+//
+// Fallback: if routed key's circuit is OPEN or fetch fails, try the OTHER key.
+// If both keys fail → fall through to Gemini → OpenRouter → Workers AI (unchanged).
+//
+// Chat: UNCHANGED — uses chat-groq / chat-groq-secondary circuits (separate from News).
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
- * Provider 0: Groq (primary) — direct HTTP with env.GROQ_API_KEY (Cloudflare secret).
- * Uses openai/gpt-oss-120b via OpenAI-compatible API.
+ * Determine which Groq key slot to use for a request.
+ * @param {string} input - article URL, headline text, or batch prompt
+ * @param {boolean} isBatch - if true, use tick-alternating; if false, use hash
+ * @param {number} batchOffset - for batch calls, offset to alternate translation vs analysis
+ * @returns {number} 0 or 1
+ */
+function _groqRouteKey(input, isBatch, batchOffset) {
+  if (isBatch) {
+    // Batch calls alternate per tick. batchOffset=0 for translation, 1 for analysis
+    // so they go to DIFFERENT keys on the same tick.
+    const minute = new Date().getUTCMinutes();
+    return (minute + (batchOffset || 0)) % 2 === 0 ? 0 : 1;
+  }
+  // Per-item calls: deterministic hash
+  let hash = 0;
+  const str = String(input || '');
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash) % 2 === 0 ? 0 : 1;
+}
+
+/**
+ * Execute a Groq fetch with a specific key slot.
+ * @param {object} env - Worker environment
+ * @param {number} keySlot - 0 for GROQ_API_KEY, 1 for GROQ_API_KEY_1
+ * @param {string} model - Groq model name
+ * @param {Array} messages - OpenAI-compatible messages
+ * @param {number} maxTokens - max_tokens
+ * @param {number} temperature - temperature
+ * @returns {Promise<{status_code: number, response_body: string, key_slot: number}>}
+ */
+async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, temperature) {
+  const apiKey = keySlot === 0 ? env.GROQ_API_KEY : env.GROQ_API_KEY_1;
+  if (!apiKey) {
+    return { status_code: 503, response_body: '{"error":{"message":"Groq API key not configured","status":"UNAVAILABLE"}}', key_slot: keySlot };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const response_body = await res.text();
+    return { status_code: res.status, response_body, key_slot: keySlot };
+  } catch (e) {
+    clearTimeout(timeout);
+    const isAbort = e?.name === 'AbortError';
+    return {
+      status_code: 0,
+      response_body: JSON.stringify({ error: { message: isAbort ? 'timeout' : 'network_error', detail: (e?.message || '').substring(0, 120) } }),
+      key_slot: keySlot,
+    };
+  }
+}
+
+/**
+ * Route a Groq News AI request with dual-key support.
+ * Tries the preferred key first, falls back to the other key on failure.
+ * Returns the result + which key was used.
+ *
+ * @param {object} env - Worker environment
+ * @param {string} input - hash input (article URL, headline, batch prompt)
+ * @param {boolean} isBatch - whether this is a batch call (tick-alternating)
+ * @param {number} batchOffset - 0 for translation, 1 for analysis
+ * @param {string} model - Groq model
+ * @param {Array} messages - messages array
+ * @param {number} maxTokens - max_tokens
+ * @param {number} temperature - temperature
+ * @param {object} circuitEnv - for circuit breaker checks (env passed to shouldAttemptProvider)
+ * @returns {Promise<{status_code: number, response_body: string, key_slot: number, tried_keys: number[]}>}
+ */
+async function _groqRoutedFetch(env, input, isBatch, batchOffset, model, messages, maxTokens, temperature) {
+  const preferredKey = _groqRouteKey(input, isBatch, batchOffset);
+  const otherKey = preferredKey === 0 ? 1 : 0;
+  const circuitKey0 = 'groq-key0';
+  const circuitKey1 = 'groq-key1';
+  const triedKeys = [];
+
+  // Try preferred key
+  const preferredCircuit = `groq-key${preferredKey}`;
+  const preferredCb = await shouldAttemptProvider(env, preferredCircuit);
+  if (preferredCb.attempt) {
+    triedKeys.push(preferredKey);
+    const result = await _groqFetchWithKey(env, preferredKey, model, messages, maxTokens, temperature);
+    // Record circuit result
+    const errorType = result.status_code !== 200 ? classifyHttpError(result.status_code || 500) : null;
+    try { await recordCircuitResult(env, preferredCircuit, result.status_code === 200, errorType, result.status_code !== 200 ? `http_${result.status_code}` : null); } catch {}
+    if (result.status_code === 200) {
+      return { ...result, tried_keys: triedKeys };
+    }
+  }
+
+  // Fallback to other key
+  const otherCircuit = `groq-key${otherKey}`;
+  const otherCb = await shouldAttemptProvider(env, otherCircuit);
+  if (otherCb.attempt) {
+    triedKeys.push(otherKey);
+    const result = await _groqFetchWithKey(env, otherKey, model, messages, maxTokens, temperature);
+    const errorType = result.status_code !== 200 ? classifyHttpError(result.status_code || 500) : null;
+    try { await recordCircuitResult(env, otherCircuit, result.status_code === 200, errorType, result.status_code !== 200 ? `http_${result.status_code}` : null); } catch {}
+    return { ...result, tried_keys: triedKeys };
+  }
+
+  // Both circuits OPEN — return failure
+  return { status_code: 0, response_body: '{"error":{"message":"Both Groq keys circuit OPEN"}}', key_slot: -1, tried_keys: triedKeys };
+}
+
+/**
+ * Provider 0: Groq News AI — dual-key routed via _groqRoutedFetch.
+ * Both GROQ_API_KEY (Key 0) and GROQ_API_KEY_1 (Key 1) are active.
+ * Truncates article text to 8000 chars to control TPM.
  * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
  */
 async function tryGroq(env, prompt, systemPrompt) {
   const t0 = Date.now();
   try {
-    // ── Global Groq Coordinator: pre-flight capacity check ──
-    const estTokens = estimateGroqTokens(prompt, systemPrompt, 1024);
-    const capacity = await checkGroqCapacity(env, estTokens);
-    if (!capacity.allowed) {
-      console.warn(`[GROQ-COORD] tryGroq skipped — ${capacity.reason}`);
-      return { provider: 'groq', success: false, error: 'rate_limited', errorType: 'retryable', error_detail: capacity.reason, duration_ms: Date.now() - t0, coordinator_skipped: true };
-    }
+    // ── Truncate article text to 8000 chars to control TPM ──
+    // Workers AI / OpenRouter already truncate at 12000; Groq gets 8000 (more conservative).
+    const truncatedPrompt = (prompt && prompt.length > 8000) ? prompt.substring(0, 8000) : prompt;
 
     const messages = [];
     if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
       messages.push({ role: 'system', content: systemPrompt });
     }
-    messages.push({ role: 'user', content: prompt });
+    messages.push({ role: 'user', content: truncatedPrompt });
 
-    // MIGRATION: direct HTTP with env.GROQ_API_KEY (Cloudflare secret) — was groq_generate() DB function
-    const result = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 1024, 0.4);
+    // DUAL-KEY ROUTING: hash(prompt) → Key 0 or Key 1, with fallback to other key
+    const result = await _groqRoutedFetch(env, truncatedPrompt, false, 0, 'openai/gpt-oss-120b', messages, 1024, 0.4);
     const statusCode = result.status_code;
     const responseBody = result.response_body || '';
+    const keySlot = result.key_slot;
 
     if (statusCode !== 200) {
       const errorType = classifyHttpError(statusCode || 500);
-      // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
-      // This prevents subsequent requests in the same window from also hitting 429.
-      // Only record for 429 (real rate limit); other HTTP errors (4xx/5xx) may not consume quota.
-      if (statusCode === 429) {
-        try { await recordGroqRequest(env, estTokens); } catch {}
-      }
-      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0 };
+      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0, key_slot: keySlot };
     }
 
     let data;
     try {
       data = JSON.parse(responseBody);
     } catch (e) {
-      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
+      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
     }
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
-      // Record this request in the global coordinator (non-blocking)
-      try { await recordGroqRequest(env, estTokens); } catch {}
-      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
+      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0, key_slot: keySlot };
     }
-    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
+    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
     return {
@@ -6984,29 +6881,28 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
   // No parallel calls — sequential fallback to minimize cost + latency.
   // ────────────────────────────────────────────────────────────────────────────
 
-  // Provider 0: Groq Primary (primary) — always tried first
+  // Provider 0: Groq — DUAL-KEY ROUTED via tryGroq (hash routing + fallback to other key)
+  // tryGroq internally uses _groqRoutedFetch which handles both Key 0 and Key 1.
+  // Circuit keys: groq-key0 and groq-key1 (independent per key).
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const r = await attemptProvider('groq', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
-    if (r.success) {
+    const r = await attemptProvider('groq-key0', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
+    if (!r.success && env.GROQ_API_KEY_1) {
+      // If Key 0 failed, try Key 1 via the same tryGroq (which may route to Key 1 on hash)
+      // But also try tryGroqSecondary as explicit Key 1 fallback
+      const r2 = await attemptProvider('groq-key1', () => tryGroqSecondary(env, prompt, systemPrompt), validatePersianOutput);
+      if (r2.success) {
+        summary = r2.summary;
+        usedProvider = 'groq';
+        console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded (dual-key fallback)');
+      } else {
+        console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq dual-key failed (key0=${r.error}, key1=${r2.error}) — falling back to Gemini`);
+      }
+    } else if (r.success) {
       summary = r.summary;
       usedProvider = 'groq';
-      console.log('[NEWS-AI-FALLBACK] ✅ Groq PRIMARY succeeded — no fallback needed');
+      console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded — no fallback needed');
     } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Primary failed (error=${r.error}, type=${r.errorType}) — falling back to Groq Secondary`);
-    }
-  }
-
-  // Provider 0b: Groq Secondary (fallback 0b) — tried ONLY if Groq Primary didn't succeed
-  // INDEPENDENT circuit breaker key 'groq-secondary' — primary failure does NOT trip this.
-  // Gated on NEWS_PROVIDER_GROQ (same family flag) + env.GROQ_API_KEY_1 being configured.
-  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) && env.GROQ_API_KEY_1) {
-    const r = await attemptProvider('groq-secondary', () => tryGroqSecondary(env, prompt, systemPrompt), validatePersianOutput);
-    if (r.success) {
-      summary = r.summary;
-      usedProvider = 'groq-secondary';
-      console.log('[NEWS-AI-FALLBACK] ✅ Groq Secondary succeeded (Groq Primary was unavailable)');
-    } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Secondary failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 200)}) — falling back to Gemini`);
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq Key 0 failed (error=${r.error}) — no Key 1 configured, falling back to Gemini`);
     }
   }
 
@@ -7090,7 +6986,8 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
     const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
     let stats = {
       groq: { success: 0, failed: 0, total_ms: 0 },
-      'groq-secondary': { success: 0, failed: 0, total_ms: 0 },
+      'groq-key0': { success: 0, failed: 0, total_ms: 0 },
+      'groq-key1': { success: 0, failed: 0, total_ms: 0 },
       gemini: { success: 0, failed: 0, total_ms: 0 },
       'workers-ai': { success: 0, failed: 0, total_ms: 0 },
       'openrouter': { success: 0, failed: 0, total_ms: 0 },
@@ -7106,7 +7003,7 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
       if (parsed && typeof parsed === 'object') {
         stats = { ...stats, ...parsed };
         // Ensure nested provider objects exist
-        for (const k of ['groq', 'groq-secondary', 'gemini', 'workers-ai', 'openai']) {
+        for (const k of ['groq-key0', 'groq-key1', 'gemini', 'workers-ai', 'openai']) {
           if (!stats[k]) stats[k] = { success: 0, failed: 0, total_ms: 0 };
         }
         if (!stats.fallback_to) stats.fallback_to = {};
@@ -8687,8 +8584,8 @@ async function enrichNewsWithAISummaries(env, articles) {
   let allProvidersCircuitOpen = false;
   try {
     const enabledProviders = [];
-    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) enabledProviders.push('groq');
-    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) && env.GROQ_API_KEY_1) enabledProviders.push('groq-secondary');
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) enabledProviders.push('groq-key0');
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) && env.GROQ_API_KEY_1) enabledProviders.push('groq-key1');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) enabledProviders.push('gemini');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) enabledProviders.push('workers-ai');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) enabledProviders.push('openai');
@@ -8859,28 +8756,21 @@ ${headlines}`;
     } catch { return null; }
   }
 
-  // Method 0: Groq via DB gateway (primary) — always tried first
-  // Routes through Supabase EU to bypass geo-restriction.
-  // Model: openai/gpt-oss-120b
-  // Hoist batchAnalysisSysPrompt to function scope so Groq Secondary block can access it
+  // Method 0: Groq — DUAL-KEY ROUTED (tick-alternating, batchOffset=1 for analysis)
+  // Both keys are active. _groqRoutedFetch tries preferred key, falls back to other.
+  // Hoist batchAnalysisSysPrompt to function scope
   const batchAnalysisSysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const cbGroq = await shouldAttemptProvider(env, 'groq');
-    if (cbGroq.attempt) {
+    const cbGroq = await shouldAttemptProvider(env, 'groq-key0');
+    const cbGroqSec = await shouldAttemptProvider(env, 'groq-key1');
+    if (cbGroq.attempt || cbGroqSec.attempt) {
       try {
-        // ── Global Groq Coordinator: pre-flight capacity check ──
-        const batchEstTokens = estimateGroqTokens(prompt, batchAnalysisSysPrompt, 2048);
-        const batchCapacity = await checkGroqCapacity(env, batchEstTokens);
-        if (!batchCapacity.allowed) {
-          console.warn(`[GROQ-COORD] batchAnalyzeNews skipped — ${batchCapacity.reason}`);
-          // Fall through to Gemini / Workers AI / rule-based fallback
-        } else {
-        const messages = [
+        const batchMessages = [
           { role: 'system', content: batchAnalysisSysPrompt },
           { role: 'user', content: prompt }
         ];
-        // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
-        const groqResult = await groqPrimaryGenerate(env, 'openai/gpt-oss-120b', messages, 2048, 0.2);
+        // DUAL-KEY: tick-alternating batch routing (batchOffset=1 for analysis → opposite of translation)
+        const groqResult = await _groqRoutedFetch(env, prompt, true, 1, 'openai/gpt-oss-120b', batchMessages, 2048, 0.2);
         const statusCode = groqResult.status_code;
         const responseBody = groqResult.response_body || '';
 
@@ -8889,86 +8779,18 @@ ${headlines}`;
           const text = data?.choices?.[0]?.message?.content || '';
           const parsed = parseBatchResult(text);
           if (parsed && Object.keys(parsed).length > 0) {
-            try { await recordCircuitResult(env, 'groq', true); } catch {}
-            try { await recordGroqRequest(env, batchEstTokens); } catch {}
-            console.log('[NEWS-AI-BATCH] ✅ Groq PRIMARY succeeded — no fallback needed');
+            console.log('[NEWS-AI-BATCH] ✅ Groq succeeded (no fallback needed, key=' + groqResult.key_slot + ')');
             return parsed;
           }
-          try { await recordCircuitResult(env, 'groq', false, 'retryable', 'empty_response'); } catch {}
           console.warn('[NEWS-AI-BATCH] ⚠️ Groq returned empty/malformed response — falling back to Gemini');
         } else {
-          const errorType = classifyHttpError(statusCode || 500);
-          try { await recordCircuitResult(env, 'groq', false, errorType, `http_${statusCode}`); } catch {}
-          // Fix 1: Record 429 in coordinator — the request DID reach Groq and consumed quota.
-          if (statusCode === 429) {
-            try { await recordGroqRequest(env, batchEstTokens); } catch {}
-          }
-          console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}) — falling back to Gemini`);
-        }
-        } // end of capacity.allowed else block
-      } catch (e) {
-        try { await recordCircuitResult(env, 'groq', false, 'retryable', e?.name === 'AbortError' ? 'timeout' : 'network_error'); } catch {}
-        console.warn('[NEWS-AI-BATCH] ⚠️ Groq Primary failed:', e?.message, '— falling back to Groq Secondary');
-      }
-    } else {
-      console.warn(`[NEWS-AI-BATCH] ⚠️ Groq Primary circuit OPEN — skipping to Groq Secondary`);
-    }
-  }
-
-  // Method 0b: Groq Secondary (fallback 0b) — tried ONLY if Groq Primary didn't succeed
-  // INDEPENDENT circuit breaker key 'groq-secondary'. Direct HTTP call with env.GROQ_API_KEY_1.
-  // Does NOT use the Groq Coordinator (secondary key has its own quota).
-  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) && env.GROQ_API_KEY_1) {
-    const cbGroqSec = await shouldAttemptProvider(env, 'groq-secondary');
-    if (cbGroqSec.attempt) {
-      try {
-        const secMessages = [
-          { role: 'system', content: batchAnalysisSysPrompt },
-          { role: 'user', content: prompt }
-        ];
-        const controller = new AbortController();
-        const secTimeout = setTimeout(() => controller.abort(), 15000);
-        const secRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${env.GROQ_API_KEY_1}`,
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-oss-120b',
-            messages: secMessages,
-            max_tokens: 2048,
-            temperature: 0.2,
-          }),
-          signal: controller.signal,
-        });
-        clearTimeout(secTimeout);
-
-        if (secRes.ok) {
-          const secData = await secRes.json();
-          const secText = secData?.choices?.[0]?.message?.content || '';
-          const secParsed = parseBatchResult(secText);
-          if (secParsed && Object.keys(secParsed).length > 0) {
-            try { await recordCircuitResult(env, 'groq-secondary', true); } catch {}
-            console.log('[NEWS-AI-BATCH] ✅ Groq Secondary succeeded (Groq Primary was unavailable)');
-            return secParsed;
-          }
-          try { await recordCircuitResult(env, 'groq-secondary', false, 'retryable', 'empty_response'); } catch {}
-          console.warn('[NEWS-AI-BATCH] ⚠️ Groq Secondary returned empty/malformed response — falling back to Gemini');
-        } else {
-          const secErrorType = classifyHttpError(secRes.status);
-          let secErrorBody = '';
-          try { secErrorBody = (await secRes.text()).substring(0, 200); } catch {}
-          try { await recordCircuitResult(env, 'groq-secondary', false, secErrorType, `http_${secRes.status}`); } catch {}
-          console.warn(`[NEWS-AI-BATCH] ⚠️ Groq Secondary failed (HTTP ${secRes.status}) — falling back to Gemini`);
+          console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}, keys_tried=${JSON.stringify(groqResult.tried_keys)}) — falling back to Gemini`);
         }
       } catch (e) {
-        const isAbort = e?.name === 'AbortError';
-        try { await recordCircuitResult(env, 'groq-secondary', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
-        console.warn('[NEWS-AI-BATCH] ⚠️ Groq Secondary failed:', e?.message, '— falling back to Gemini');
+        console.warn('[NEWS-AI-BATCH] ⚠️ Groq exception:', e?.message, '— falling back to Gemini');
       }
     } else {
-      console.warn(`[NEWS-AI-BATCH] ⚠️ Groq Secondary circuit OPEN — skipping to Gemini`);
+      console.warn('[NEWS-AI-BATCH] ⚠️ Both Groq keys circuit OPEN — skipping to Gemini');
     }
   }
 

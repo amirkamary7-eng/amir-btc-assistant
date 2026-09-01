@@ -217,37 +217,39 @@ test('BEHAVIORAL-7-CB: Gemini prolonged-open state machine correct', () => {
 // Source-level: Provider fallback chain (Groq → Gemini → Workers AI → OpenRouter → OpenAI)
 // ============================================================================
 test('BEHAVIORAL-8-CHAIN: Provider fallback chain exists in correct order', () => {
+  // DUAL-KEY: chain now has groq-key0 → groq-key1 → Gemini → OpenRouter → Workers AI
   const chainSection = WORKER_SRC.slice(
     WORKER_SRC.indexOf('FALLBACK CHAIN'),
-    WORKER_SRC.indexOf('FALLBACK CHAIN') + 500
+    WORKER_SRC.indexOf('FALLBACK CHAIN') + 800
   );
-  assert.ok(chainSection.includes('Groq') && chainSection.includes('primary'));
-  assert.ok(chainSection.includes('Gemini') && chainSection.includes('fallback 1'));
-  assert.ok(chainSection.includes('Workers AI') && chainSection.includes('fallback 2'));
-  assert.ok(chainSection.includes('OpenRouter') && chainSection.includes('fallback 3'));
+  assert.ok(chainSection.includes('Groq') || chainSection.includes('groq'));
+  assert.ok(chainSection.includes('Gemini') && chainSection.includes('fallback'));
+  assert.ok(chainSection.includes('Workers AI') && chainSection.includes('fallback'));
+  assert.ok(chainSection.includes('OpenRouter') && chainSection.includes('fallback'));
   
   // Code must try Groq first, then Gemini only if !summary, then Workers AI only if !summary
-  const groqCallIdx = WORKER_SRC.indexOf("attemptProvider('groq'");
+  // DUAL-KEY: Groq now uses attemptProvider('groq-key0') instead of attemptProvider('groq')
+  const groqCallIdx = WORKER_SRC.indexOf("attemptProvider('groq-key0'");
   const geminiCallIdx = WORKER_SRC.indexOf("attemptProvider('gemini'");
   const workersAiCallIdx = WORKER_SRC.indexOf("attemptProvider('workers-ai'");
-  assert.ok(groqCallIdx > -1 && groqCallIdx < geminiCallIdx, 'Groq must be tried before Gemini');
+  assert.ok(groqCallIdx > -1 && groqCallIdx < geminiCallIdx, 'Groq (key0) must be tried before Gemini');
   assert.ok(geminiCallIdx < workersAiCallIdx, 'Gemini must be tried before Workers AI');
 });
 
 // ============================================================================
 // Source-level: Groq verification
 // ============================================================================
-test('BEHAVIORAL-9-GROQ: Groq uses direct HTTP with groqPrimaryGenerate + correct params', () => {
+test('BEHAVIORAL-9-GROQ: Groq uses dual-key routed fetch + correct params', () => {
   const groqSection = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function tryGroq'),
     WORKER_SRC.indexOf('async function tryGroq') + 2000
   );
-  // MIGRATION: Groq Primary now uses direct HTTP via groqPrimaryGenerate (env.GROQ_API_KEY Cloudflare secret)
-  // instead of the groq_generate() DB function (which read from Supabase Vault)
-  assert.ok(groqSection.includes('groqPrimaryGenerate'), 'Groq must use groqPrimaryGenerate direct HTTP helper');
+  // DUAL-KEY: tryGroq now uses _groqRoutedFetch (hash routing + fallback to other key)
+  assert.ok(groqSection.includes('_groqRoutedFetch'), 'Groq must use _groqRoutedFetch dual-key router');
   assert.ok(groqSection.includes('status_code'), 'Groq must check status_code from result');
   assert.ok(groqSection.includes('classifyHttpError'), 'Groq must classify HTTP errors');
-  assert.ok(groqSection.includes('provider: \'groq\''), 'Groq must identify itself as provider');
+  assert.ok(groqSection.includes("provider: 'groq'"), 'Groq must identify itself as provider');
+  assert.ok(groqSection.includes('substring(0, 8000)'), 'Groq must truncate article text to 8000 chars');
 });
 
 // ============================================================================
