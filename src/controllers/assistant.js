@@ -5,13 +5,14 @@
  *   GET  /api/assistant/limits  — read current AI rate limit status
  *   POST /api/assistant/chat    — send message to AI with provider fallback
  *
- * Provider chain (reuses News AI circuit breaker infrastructure):
- *   1. Groq Primary    (primary)    — groq_generate() DB function, openai/gpt-oss-120b (Vault key)
- *   2. Groq Secondary  (fallback 1) — direct HTTP with GROQ_API_KEY_1, openai/gpt-oss-120b (Cloudflare secret)
- *   3. Gemini          (fallback 2) — gemini_generate() DB function, gemini-3.5-flash
- *   4. OpenRouter      (fallback 3) — nvidia/nemotron-3-super-120b-a12b:free
- *   5. Workers AI      (fallback 4) — @cf/meta/llama-3.3-70b-instruct-fp8-fast
- *   6. OpenAI          (fallback 5) — opt-in, paid (gpt-4o-mini)
+ * Provider chain (GROQ-ROUTER-4KEY — Gemini + groq-secondary removed):
+ *   1. Groq Router     (primary)    — 4-key router (groqRouterExecute), openai/gpt-oss-120b
+ *   2. OpenRouter      (fallback 1) — nvidia/nemotron-3-super-120b-a12b:free
+ *   3. Workers AI      (fallback 2) — @cf/meta/llama-3.3-70b-instruct-fp8-fast
+ *   4. OpenAI          (fallback 3) — opt-in, paid (gpt-4o-mini)
+ *
+ * Gemini removed (chronic 429 quota exhaustion). The Chat image path (which
+ * used Gemini as the only vision provider) now returns a clear Persian error.
  *
  * DeepSeek removed (was dead code — DEEPSEEK_API_KEY not configured).
  *
@@ -33,17 +34,16 @@ export function createAssistantHandlers(deps) {
     queryDb,
     membershipAuthority,
     entitlementConfig,
-    // Circuit breaker infrastructure (reused from News AI)
+    // Circuit breaker infrastructure (used for non-Groq fallback providers)
     shouldAttemptProvider,
     recordCircuitResult,
     classifyHttpError,
     isNewsProviderEnabled,
-    // Phase 4: Global Groq Rate/Token Coordinator
-    checkGroqCapacity,
-    recordGroqRequest,
-    estimateGroqTokens,
-    // MIGRATION: Groq Primary direct HTTP helper (uses env.GROQ_API_KEY Cloudflare secret)
-    groqPrimaryGenerate,
+    // GROQ-ROUTER-4KEY: Centralized 4-key Groq Router (replaces old
+    // checkGroqCapacity/recordGroqRequest/estimateGroqTokens + groqPrimaryGenerate).
+    // The router handles key selection, per-key 3/10min budget, circuit-breaker,
+    // and HALF_OPEN probe internally.
+    groqRouterExecute,
   } = deps;
 
   // ── Constants ──────────────────────────────────────────────────────────────
@@ -827,53 +827,27 @@ export function createAssistantHandlers(deps) {
 
   // ── AI Providers (with circuit breaker) ─────────────────────────────────────
 
+  // GROQ-ROUTER-4KEY: callGroqChat delegates directly to the centralized 4-key
+  // Groq Router. The router handles:
+  //   - Key selection (1-4 keys discovered at runtime from env)
+  //   - Per-key 3/10min application budget (skips keys at window limit)
+  //   - Circuit-breaker state (CLOSED/OPEN/HALF_OPEN per key)
+  //   - 429 handling (ONLY the key that 429'd is OPENed; other keys remain usable)
+  //   - HALF_OPEN probe (in-memory lock ensures single probe per key)
+  // The old `checkGroqCapacity` + `shouldAttemptProvider('groq-key0')` +
+  // `recordGroqRequest` calls are REMOVED — the router does all of this internally.
   async function callGroqChat(env, prompt) {
-    // ── Global Groq Coordinator: pre-flight capacity check ──
-    if (typeof checkGroqCapacity === 'function') {
-      const estTokens = typeof estimateGroqTokens === 'function'
-        ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
-        : 1500;
-      const capacity = await checkGroqCapacity(env, estTokens);
-      if (!capacity.allowed) {
-        throw { message: `Groq rate limited: ${capacity.reason}`, errorType: 'retryable', _isProviderError: true, _coordinatorSkipped: true };
-      }
-    }
-
     const messages = [
       { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ];
-    // MIGRATION: direct HTTP with env.GROQ_API_KEY — was groq_generate() DB function
-    const groqResult = await groqPrimaryGenerate(env, CHAT_GROQ_MODEL, messages, 1024, 0.4);
+    const groqResult = await groqRouterExecute(env, CHAT_GROQ_MODEL, messages, 1024, 0.4);
 
-    // Fix 1: If Groq returned 429, record it in the coordinator BEFORE _parseGroqResult throws.
-    // The request DID reach Groq and consumed quota — must be counted to prevent subsequent 429s.
-    const _groqStatusCode = (typeof groqResult === 'object' && groqResult) ? groqResult.status_code : null;
-    if (_groqStatusCode === 429 && typeof recordGroqRequest === 'function') {
-      try {
-        const _estTokens = typeof estimateGroqTokens === 'function'
-          ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
-          : 1500;
-        await recordGroqRequest(env, _estTokens);
-      } catch {}
-    }
-
-    // Parse result FIRST — only record in coordinator if Groq actually succeeded
     let result;
     if (typeof groqResult === 'string') {
       try { const parsed = JSON.parse(groqResult); result = _parseGroqResult(parsed); } catch { result = _parseGroqResult(groqResult); }
     } else {
       result = _parseGroqResult(groqResult);
-    }
-
-    // Record this request in the global coordinator ONLY on success (non-blocking)
-    if (typeof recordGroqRequest === 'function') {
-      try {
-        const estTokens = typeof estimateGroqTokens === 'function'
-          ? estimateGroqTokens(prompt, ASSISTANT_SYSTEM_PROMPT, 1024)
-          : 1500;
-        await recordGroqRequest(env, estTokens);
-      } catch {}
     }
 
     return result;
@@ -894,95 +868,6 @@ export function createAssistantHandlers(deps) {
       throw { message: 'Empty Groq response', errorType: 'retryable', _isProviderError: true };
     }
     return text.trim();
-  }
-
-  // ── Groq Secondary (fallback 0b) — DB gateway call with GROQ_API_KEY_1 ──
-  // INDEPENDENT from Groq Primary:
-  //   - Uses env.GROQ_API_KEY_1 (Cloudflare secret), NOT the Vault-stored GROQ_API_KEY
-  //   - Does NOT use the Groq Coordinator (secondary key has its own quota)
-  //   - Same model (openai/gpt-oss-120b), same prompt, same max_tokens/temperature
-  //
-  // GROQ DB GATEWAY (Worker Egress WAF Bypass):
-  //   Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge.
-  //   Route through Supabase DB gateway (public.groq_generate_with_key), same
-  //   as callGroqChat (Primary) and callGeminiChat. The API key is passed as
-  //   a parameter (stays in Cloudflare secret).
-  async function callGroqSecondaryChat(env, prompt) {
-    const apiKey = normalizeOptionalString(env.GROQ_API_KEY_1);
-    if (!apiKey) {
-      throw { message: 'Groq Secondary not configured', errorType: 'non_retryable', _isProviderError: true };
-    }
-    const messages = [
-      { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
-    ];
-    let dbResult;
-    try {
-      dbResult = await queryDb(env,
-        `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
-        [CHAT_GROQ_MODEL, JSON.stringify(messages), apiKey, 1024, 0.4]
-      );
-    } catch (dbErr) {
-      console.error(`[ChatAI] Groq Secondary DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);
-      throw { message: `Groq Secondary DB gateway error: ${dbErr?.message || 'unknown'}`, errorType: 'retryable', _isProviderError: true };
-    }
-    const groqResult = dbResult.rows[0]?.result || {};
-    const statusCode = groqResult.status_code;
-    const responseBody = groqResult.response_body || '';
-    if (statusCode !== 200) {
-      const errorType = classifyHttpError(statusCode || 500);
-      throw { message: `Groq Secondary failed: HTTP ${statusCode}`, errorType, _isProviderError: true };
-    }
-    let data;
-    try { data = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody; }
-    catch { throw { message: 'Invalid Groq Secondary response JSON', errorType: 'retryable', _isProviderError: true }; }
-    const reply = data?.choices?.[0]?.message?.content;
-    if (typeof reply !== 'string' || !reply.trim()) {
-      throw { message: 'Empty Groq Secondary response', errorType: 'retryable', _isProviderError: true };
-    }
-    return reply.trim();
-  }
-
-  async function callGeminiChat(env, prompt, imageBase64) {
-    const parts = [{ text: prompt }];
-    if (imageBase64) {
-      parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64 } });
-      console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} partsCount=${parts.length} model=gemini-3.5-flash`);
-    }
-    const contents = [{ parts }];
-    const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
-    let dbResult;
-    try {
-      dbResult = await queryDb(env,
-        `SELECT public.gemini_generate($1::text, $2::jsonb, $3::jsonb, $4::jsonb) AS result`,
-        ['gemini-3.5-flash', JSON.stringify(contents),
-         JSON.stringify({ temperature: 0.7, maxOutputTokens: 2048, topP: 0.85 }),
-         JSON.stringify(systemInstruction)]
-      );
-    } catch (dbErr) {
-      console.error(`[ChatAI] Gemini DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);
-      throw { message: `Gemini DB gateway error: ${dbErr?.message || 'unknown'}`, errorType: 'retryable', _isProviderError: true };
-    }
-    const geminiResult = dbResult.rows[0]?.result || {};
-    const statusCode = geminiResult.status_code;
-    const responseBody = geminiResult.response_body || '';
-    console.log(`[ChatAI] Gemini response: status=${statusCode} bodyLen=${responseBody?.length || 0} hasImage=${Boolean(imageBase64)}`);
-    if (statusCode !== 200) {
-      // Log the actual error from Gemini for debugging
-      let errorDetail = responseBody;
-      try { errorDetail = typeof responseBody === 'string' ? JSON.parse(responseBody)?.error?.message || responseBody.slice(0, 200) : responseBody; } catch {}
-      console.error(`[ChatAI] Gemini HTTP ${statusCode}: ${String(errorDetail).slice(0, 200)}`);
-      const errorType = classifyHttpError(statusCode || 500);
-      throw { message: `Gemini failed: HTTP ${statusCode} — ${String(errorDetail).slice(0, 100)}`, errorType, _isProviderError: true };
-    }
-    let data;
-    try { data = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody; }
-    catch { throw { message: 'Invalid Gemini response JSON', errorType: 'retryable', _isProviderError: true }; }
-    const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
-    const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-    const reply = responseParts.find(p => typeof p?.text === 'string' && p.text.trim())?.text || null;
-    if (!reply) throw { message: 'Empty Gemini response', errorType: 'retryable', _isProviderError: true };
-    return reply;
   }
 
   async function callOpenRouterChat(env, prompt) {
@@ -1080,10 +965,11 @@ export function createAssistantHandlers(deps) {
   }
 
   // ── Provider fallback chain with circuit breaker ──────────────────────────
-  // PHASE 5: Chat AI uses SEPARATE circuit breaker keys ('chat-{provider}')
-  // to isolate Chat AI failures from News AI.
-  // Without this, Chat AI vision failures on 'gemini' key would OPEN the
-  // circuit for News AI's tryGemini(), breaking news summarization.
+  // GROQ-ROUTER-4KEY: Chat AI uses SEPARATE circuit breaker keys ('chat-{provider}')
+  // to isolate Chat AI failures from News AI. The 'chat-groq' circuit is NOT used
+  // for routing — the router handles Groq key selection internally. It IS still
+  // used to trip when callGroqChat throws (so subsequent Chat calls skip Groq
+  // for the cooldown window and fall through to OpenRouter/Workers AI/OpenAI).
 
   async function attemptChatProvider(env, providerName, providerCall) {
     const chatCircuitKey = `chat-${providerName}`;
@@ -1104,14 +990,8 @@ export function createAssistantHandlers(deps) {
     } catch (error) {
       const errorType = error?.errorType || 'retryable';
       const errorMsg = error?.message || String(error);
-      // FIX: 'prompt' and 'historyLen' are NOT in scope in this function.
-      // They are parameters of generateAssistantReply(), not attemptChatProvider().
-      // Previously: `prompt?.length` → ReferenceError: prompt is not defined
-      // Now: only log provider name + error (which IS in scope)
       console.warn(`[ChatAI] provider=${providerName} errorType=${errorType} error=${errorMsg.slice(0, 120)}`);
-      // FIX: Coordinator denial (_coordinatorSkipped) is a proactive rate limit,
-      // NOT a provider failure. It must NOT trip the circuit.
-      if (recordCircuitResult && errorType === 'retryable' && !error?._coordinatorSkipped) {
+      if (recordCircuitResult && errorType === 'retryable') {
         try { await recordCircuitResult(env, chatCircuitKey, false, errorType, errorMsg.slice(0, 120)); } catch {}
       }
       return { success: false, error: errorMsg, errorType };
@@ -1119,36 +999,36 @@ export function createAssistantHandlers(deps) {
   }
 
   async function generateAssistantReply(env, prompt, imageBase64, historyLen) {
-    // PHASE 3: Capability-aware routing.
-    // When an image is attached, ONLY vision-capable providers are used.
-    // Text-only providers (Groq, OpenRouter text, Workers AI) are FORBIDDEN
-    // for image requests — they would succeed with a text-only response
-    // saying "I cannot read images" which is worse than a clear error.
+    // GROQ-ROUTER-4KEY: Capability-aware routing.
     //
-    // Vision-capable providers:
-    //   - Gemini (via DB gateway, inline_data format)
-    //   - OpenAI gpt-4o-mini (opt-in, disabled by default — does NOT currently pass image)
+    // IMAGE PATH: Gemini was the only vision-capable provider. With Gemini
+    // REMOVED, the image path now returns a clear Persian error — no text-only
+    // model is asked to "describe" the image (that would silently lie to the
+    // user). The error is surfaced to the user via the catch block below.
     //
-    // Text-only path (NO image): Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
+    // TEXT-ONLY PATH: Groq Router → OpenRouter → Workers AI → OpenAI (opt-in).
+    // The router picks the best healthy Groq key internally — there is no
+    // separate "groq-secondary" step anymore.
     const hasImage = Boolean(imageBase64);
-    const providers = hasImage ? [
-      // VISION-ONLY providers when image is present
-      // NO text-only fallback — if vision fails, return clear error
-      ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
-    ] : [
+    if (hasImage) {
+      // GROQ-ROUTER-4KEY: No vision-capable provider configured (Gemini removed).
+      // Throw a clear, user-friendly Persian error. The catch block in
+      // handlePostChat surfaces this to the user.
+      const err = new Error('سرویس تحلیل تصویر در حال حاضر در دسترس نیست.');
+      err._imageUnavailable = true;
+      throw err;
+    }
+
+    const providers = [
       // Text-only path — failover chain per spec:
-      //   groq → groq-secondary → gemini → openrouter → workers-ai → openai(opt-in)
+      //   groq → openrouter → workers-ai → openai(opt-in)
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
-      ['groq-secondary', () => callGroqSecondaryChat(env, prompt), (isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true) && Boolean(env.GROQ_API_KEY_1)],
-      ['gemini', () => callGeminiChat(env, prompt, imageBase64), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true) : true],
       ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
       ['workers-ai', () => callWorkersAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) : true],
       ['openai', () => callOpenAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false) : false],
     ];
 
-    let lastError = hasImage
-      ? 'سرویس تحلیل تصویر در حال حاضر در دسترس نیست.'
-      : 'No AI provider configured';
+    let lastError = 'No AI provider configured';
     for (const [providerName, providerCall, enabled] of providers) {
       if (!enabled) continue;
       console.log(`[ChatAI] provider attempt: ${providerName} hasImage=${hasImage}`);
@@ -1336,12 +1216,16 @@ export function createAssistantHandlers(deps) {
         }
       }
       const responseBody = { status: 'success', reply, provider: result.provider };
-      if (hasImage && result.provider !== 'gemini') {
-        responseBody.image_ignored = true;
-        responseBody.warning = 'Image could not be processed by the active AI provider';
-      }
       return jsonResponse(responseBody, {}, env);
     } catch (error) {
+      // GROQ-ROUTER-4KEY: Image path now returns a clear Persian error (Gemini removed).
+      if (error?._imageUnavailable) {
+        return jsonResponse({
+          status: 'error',
+          reason: 'image_analysis_unavailable',
+          message: error.message || 'سرویس تحلیل تصویر در حال حاضر در دسترس نیست.',
+        }, { status: 503 }, env);
+      }
       console.error('[ChatAI] all_providers_failed:', error instanceof Error ? error.message : String(error));
       return jsonResponse({ status: 'error', reason: 'all_providers_failed', message: 'AI service temporarily unavailable' }, { status: 503 }, env);
     }

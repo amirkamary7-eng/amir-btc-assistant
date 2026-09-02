@@ -4514,3 +4514,182 @@ Stage Summary:
   - Pages app.fc4b40ca.js contains LIFECYCLE/BFCACHE FIX markers (lifecycle fix live)
   - Pages assistant.js has شروع چت removed and ai-bubble-title removed (welcome bubble fix live)
 - SCOPE: Only Lifecycle/BFCACHE Fix + Welcome Bubble cleanup. No backend, security, rate-limit, authentication, or admin-authorization changes.
+
+---
+Task ID: NEWS-LIFECYCLE
+Agent: News Lifecycle Tracer (general-purpose)
+Task: Trace news RSS→DB/KV→AI→feed lifecycle; find overwrite vs incremental; find cleanup/retention; AI failure behavior
+
+Work Log:
+- Read worklog.md for prior context (4516 lines, no prior NEWS-LIFECYCLE entry; searched for FARSI_NEWS / NEWS_CACHE / processNewsAIBatch — no direct hits in worklog body, but prior Task 1 noted "/api/farsi-news empty" issues from KV write failure).
+- Listed project root; confirmed worker-proxy.js (15894 lines), src/repositories/news_articles.js (DB layer), wrangler.jsonc (env config).
+- Located all news functions via grep: FARSI_NEWS_CACHE_KEY (4422), NEWS_RSS_SOURCES (4428–4443), filterAndScoreNews (4718), batchTranslateToFarsi (5159), translateToFarsi (5241), fetchAllNewsRss (5447), buildFarsiNewsArticles (5484), fetchFarsiNews (5689), _runNewsLiveFetchPipeline (5780), NEWS_AI_CACHE_TTL (5840), NEWS_SUMMARY_QUEUE_KEY (5841), getSummaryQueue/saveSummaryQueue (7121/7136), enqueueForSummary (7152), publishArticleToFarsiNews (7370), processOneArticleSummary (7451), enrichNewsWithAISummaries (8602), processNewsAIBatch (8989), handleFarsiNews (11348), cron scheduled() (15451).
+- Read worker-proxy.js:4400–5420 (RSS sources, filter/score/dedup, translation), 5420–5920 (translate fallbacks, fetchAllNewsRss, buildFarsiNewsArticles, fetchFarsiNews KV-read path, _runNewsLiveFetchPipeline), 7115–7450 (queue helpers + publishArticleToFarsiNews), 7451–7940 (processOneArticleSummary + succeedWithSummary), 8240–8725 (hashUrl/canonicalizeUrl, enrichNewsWithAISummaries), 8985–9365 (processNewsAIBatch — STEPS 1–10), 11348–11378 (handleFarsiNews), 14400–14430 (route), 15451–15810 (cron handler).
+- Read src/repositories/news_articles.js in full (193 lines) — DB schema, INSERT…ON CONFLICT, no DELETE.
+- Read wrangler.jsonc in full — NEWS_CACHE_TTL=86400 in dev/staging/production; production crons = `* * * * *`, `*/5 * * * *`, `*/15 * * * *` (no `*/30` in prod); production NEWS_PROVIDER_OPENROUTER=true, GROQ_RPM_LIMIT=20.
+- Grepped for all writes to FARSI_NEWS_CACHE_KEY (4 call sites: 7439, 9196, 9239, 9280), all deleteAppCache/APP_CACHE.delete (only `notif_cache_*` — none for news), all DELETE FROM news_articles (zero), all purge/retention/cleanup keywords for news (zero).
+- Confirmed via in-tree tests (news-hotfix-regression-test.cjs, news-hotfix-starvation-hang-test.cjs, news-hotfix-instant-display-test.cjs) that "Commit 2.6" explicitly restored the immediate write at STEP 6 of processNewsAIBatch — overriding the earlier "Commit 1 publication gate" which had delegated all news:farsi writes to publishArticleToFarsiNews (merge-only).
+
+Stage Summary:
+
+- RSS fetch stage (worker-proxy.js:5447–5482):
+  - `async function fetchAllNewsRss()` — Promise.allSettled over NEWS_RSS_SOURCES (8 sources, defined at 4428–4443):
+    1. https://cointelegraph.com/rss (crypto)
+    2. https://www.coindesk.com/arc/outboundfeeds/rss/ (crypto)
+    3. https://decrypt.co/feed (crypto)
+    4. https://www.actionforex.com/rss/ (forex)
+    5. https://www.investing.com/rss/news_301.rss (forex)
+    6. https://feeds.bbci.co.uk/news/business/rss.xml (economy)
+    7. https://rss.nytimes.com/services/xml/rss/nyt/Business.xml (economy)
+    8. https://www.irna.ir/rss (economy, skipTranslate:true — Persian)
+  - Returns array of `{ rssText, sourceName, category, skipTranslate }` for sources that responded HTTP 200 + body contains `<item>`. Failed/empty sources are silently filtered out (5479–5481).
+  - Raw RSS items are NOT stored anywhere — fetchAllNewsRss returns the raw RSS XML; parseRssItems is called inline by the caller (processNewsAIBatch STEP 2 at 9042, or _runNewsLiveFetchPipeline via buildFarsiNewsArticles at 5485).
+
+- Filter + score stage (worker-proxy.js:4718–4734):
+  - `function filterAndScoreNews(allItems, maxResults = 10)` — 4 stages:
+    1. scoreNewsItem (4625) — keyword-scored; items with score=0 (no important keywords) DROPPED; also rejects title length <20 or >200 chars.
+    2. Sort by score desc (4727).
+    3. fuzzyDedupNews (4673) — Jaccard similarity on normalized title tokens; threshold=0.7 → near-duplicates removed.
+    4. `deduped.slice(0, maxResults)` — top-N selection.
+  - N (maxResults): called with `10` from processNewsAIBatch (line 9059: `filterAndScoreNews(allRawItems, 10)`). So pre-filter caps at 10 articles per cron tick.
+  - Dedup key: Jaccard similarity on title (NOT URL, NOT hash). URL-based dedup happens later in STEP 5 (9162–9170) as a safety net.
+
+- Translation stage (worker-proxy.js:5159–5239):
+  - Call site in processNewsAIBatch (line 9092): `const translations = await batchTranslateToFarsi(titlesToTranslate, env);`
+  - `batchTranslateToFarsi(texts, env)`:
+    1. For each sub-batch of ≤10 headlines (BATCH_TRANSLATION_MAX_BATCH=10), sends ONE Groq request (model `openai/gpt-oss-120b`) via `_groqRoutedFetch` (dual-key routing).
+    2. Validates each translation via `validatePersianOutput(translated, { minLength: 3, minPersianRatio: 0.10 })` (5194). If ANY translation in the batch fails validation, `allValid=false` → falls back to individual translation (5222–5228).
+    3. Individual fallback = `translateToFarsi(text, env)` (5241–5441): Groq → Cloudflare Workers AI m2m100-1.2b → Google Translate (unofficial) → if all fail, `result=text; translation_failed=true` (5388–5390).
+  - CRITICAL failure behavior: If ALL providers fail for a given headline, `translateToFarsi` returns `{ text: originalEnglishText, translation_failed: true }` (5234 safety net + 5388 fallback). The caller (processNewsAIBatch STEP 4 at 9127–9128) then sets `title = ''` for failed translations. STEP 5 dedup (9165) FILTERS OUT articles with empty title — so failed translations are DROPPED from the batch.
+  - Does it OVERWRITE previous translations? No — each cron tick translates fresh RSS items independently. There's an in-memory `_translationCache` (5161, 5min TTL) that dedups identical input text within the same isolate, but it does NOT preserve previous feed content.
+
+- Storage stage (DB vs KV):
+  - **DB** (`src/repositories/news_articles.js`):
+    - Table `news_articles` (CREATE TABLE at 43–61): `id VARCHAR(64) PK, url TEXT NOT NULL UNIQUE, title TEXT NOT NULL, title_en TEXT, source VARCHAR(64), category VARCHAR(32) DEFAULT 'crypto', summary TEXT, sentiment VARCHAR(32) DEFAULT 'neutral', impact VARCHAR(32) DEFAULT 'low', impact_reason TEXT, coins TEXT, provider VARCHAR(32), analyzed_at TIMESTAMPTZ DEFAULT NOW(), created_at TIMESTAMPTZ DEFAULT NOW()`.
+    - WRITE: `saveAnalysis` (142–179) — `INSERT INTO news_articles … ON CONFLICT (id) DO UPDATE SET summary=EXCLUDED.summary, …, analyzed_at=NOW()`. Called ONLY from `succeedWithSummary` (worker-proxy.js:7815) after a successful AI summary.
+    - READ: `findByUrl` (121–133) + `findById` (98–111) — called from `processOneArticleSummary` (7633) + `enqueueForSummary` (7238) to skip re-analyzing already-summarized articles. NOT called from /api/farsi-news.
+    - **No DELETE, no `created_at < …` cleanup, no retention cron.** DB grows forever.
+  - **KV** (`FARSI_NEWS_CACHE_KEY = 'news:farsi'`, worker-proxy.js:4422):
+    - 4 write sites (all use `getNumericEnv(env, 'NEWS_CACHE_TTL', 86400)` = 24h TTL in production per wrangler.jsonc:185):
+      1. `publishArticleToFarsiNews` (7437–7442) — MERGE: reads existing list, replaces-by-canonical-URL or prepends new, trims to 12, writes back. **Preserves previous articles.**
+      2. `processNewsAIBatch` STEP 6 (9194–9199) — **OVERWRITE**: writes `JSON.stringify(trimmed)` where `trimmed = deduped.slice(0, 12)`. **Destroys previous content.**
+      3. `processNewsAIBatch` STEP 7 (9239) — **OVERWRITE**: re-writes `JSON.stringify(trimmed)` after batch analysis enriches sentiment/impact/coins. Same `trimmed` array, just enriched fields.
+      4. `processNewsAIBatch` STEP 8.5 (9278–9281) — TTL refresh: reads `existingNews` and re-writes the SAME content with fresh TTL. Preserves content (but only AFTER STEP 6 already overwrote it).
+    - **Source of truth = KV** (news:farsi). The DB news_articles table is NEVER read by /api/farsi-news — it is only used as a permanent cache for the AI summary to prevent re-processing after KV expiry.
+    - News is stored in BOTH DB (per-article AI summary, permanent) and KV (the feed list + per-article summary cache `news:ai:{hash}`). The DB is NOT the source of truth for the feed list — it's only a dedup cache for the AI pipeline.
+
+- Feed/API stage (worker-proxy.js:11348–11377):
+  - Route: `if (request.method === 'GET' && url.pathname === '/api/farsi-news') { return await handleFarsiNews(request, env, ctx); }` (14425–14427).
+  - Handler `handleFarsiNews`: parses `category`, `page`, `limit`; calls `fetchFarsiNews(env, categoryFilter, ctx)` (11360); paginates result; returns JSON.
+  - `fetchFarsiNews(env, categoryFilter, ctx)` (5689–5774):
+    - Reads `FARSI_NEWS_CACHE_KEY` from KV via `readAppCache` (5703). On cache hit: sanitizes titles, enriches with AI summaries from `news:ai:{hash}` KV (via enrichNewsWithAISummaries, 5719), filters by category in-memory, returns `{ status:'success', source:'cache', data, category_counts }`.
+    - On cache miss OR corrupt cache: returns `emptyResult = { status:'success', source:'rss_unavailable', data:[], category_counts:{all:0,...} }` (5763, 5773). **NO live RSS fetch is triggered from the HTTP path** — the HOTFIX at 5765–5773 explicitly removed the `ctx.waitUntil(_runNewsLiveFetchPipeline)` background refresh because after Commit 1 (publication gate), `_runNewsLiveFetchPipeline` no longer publishes to news:farsi. The cron (processNewsAIBatch) is the SOLE populator.
+  - What it returns when KV is empty/stale: empty array `[]` with `source:'rss_unavailable'` and all category counts =0. The user sees an empty news feed.
+
+- Overwrite vs incremental finding (THE ROOT CAUSE):
+  - `processNewsAIBatch` STEP 6 (worker-proxy.js:9188–9204) OVERWRITES the entire `FARSI_NEWS_CACHE_KEY` KV entry with the current batch:
+    ```js
+    // worker-proxy.js:9188–9204
+    const MAX_NEWS_ARTICLES = 12;
+    const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+    const newsJson = JSON.stringify(trimmed);
+    // Write translated articles to news:farsi IMMEDIATELY (before AI analysis)
+    try {
+      await writeAppCache(
+        env,
+        FARSI_NEWS_CACHE_KEY,
+        newsJson,
+        getNumericEnv(env, 'NEWS_CACHE_TTL', 86400),
+      );
+      stepLog('KV_ARTICLES_published_immediate', { count: trimmed.length });
+    } catch (cacheErr) { … }
+    ```
+  - This is a hard OVERWRITE — it does NOT read existing news:farsi content, does NOT merge, does NOT preserve previous articles. `writeAppCache` (466–509) just calls `env.APP_CACHE.put(key, value, {expirationTtl})` which replaces whatever was there.
+  - `publishArticleToFarsiNews` (7370–7449) is the ONLY writer that MERGES (reads existing, replaces-by-URL-or-prepends, trims to 12). It's called from `succeedWithSummary` (7865) after a successful AI summary — at most 1 article per call.
+  - What happens when only 1 article survives the AI pipeline (others fail translation):
+    - `batchTranslateToFarsi` returns 1 valid translation + N failures.
+    - STEP 4 (9120–9148) builds `allArticles` with the 1 valid title + N empty-title entries (`title=''` for failed).
+    - STEP 5 (9163–9170) filters out empty-title entries → `deduped = [1 article]`.
+    - STEP 6 (9188–9199) writes `JSON.stringify([1 article])` to news:farsi → **KV now contains only 1 article. Previous 12 articles are GONE.**
+    - /api/farsi-news returns that 1 article. **This is exactly what the user reports: "only 1 news item remains".**
+    - The 15-min cron runs every 15 min (15803–15808). If translation partial-failure persists (Groq 429s + fallbacks failing for most headlines), every 15 min the feed gets re-overwritten with 1 article.
+    - Note: if ALL translations fail (`deduped.length === 0`), STEP 5 returns early at 9171–9174 WITHOUT writing to KV → previous content preserved. So FULL failure does NOT cause disappearance; only PARTIAL failure (1+ survivors) does.
+
+- Cleanup/retention:
+  - **DB**: NO cleanup. Zero `DELETE FROM news_articles`, zero `WHERE created_at < …`, zero retention cron. DB grows forever. (Searched worker-proxy.js + src/repositories/news_articles.js.)
+  - **KV news:farsi**: NO `deleteAppCache` for news keys. Only TTL expiration (NEWS_CACHE_TTL=86400s=24h). The 4 write sites either OVERWRITE (processNewsAIBatch STEP 6/7) or refresh TTL (STEP 8.5) or merge (publishArticleToFarsiNews).
+  - **KV news:ai:{hash}**: TTL=NEWS_AI_CACHE_TTL=7 days (5840). No explicit delete; expires naturally.
+  - **KV news:summary_queue**: TTL=24h hardcoded in `saveSummaryQueue` (7136–7141: `writeAppCache(env, NEWS_SUMMARY_QUEUE_KEY, JSON.stringify(queue), 24 * 3600)`). Trimmed to 80 items (60 pending + 20 failed) inside `enqueueForSummary` (7300–7321). Failed items older than 24h are marked `q._remove=true` and filtered out (7312–7317). Stale `processing` items with expired `_claim_expires_at` (10-min claim TTL, 7556) are reset to `pending` (7307–7310). This is queue hygiene, NOT feed-content cleanup.
+  - **KV news:failed_urls**: TTL=24h (7738). Tracks permanently-failed URLs (fetch_403/404/410/invalid_url) to prevent re-enqueue loops.
+  - **Queue (enqueueForSummary + processOneArticleSummary)**: claim TTL = 10 min (`article._claim_expires_at = now + 10 * 60 * 1000`, 7556). Max retries = 3 (NEWS_SUMMARY_MAX_RETRIES=5876). Backoff = [5, 15, 30] min (NEWS_SUMMARY_BACKOFF_MINUTES=5877) with ±20% jitter (7698). Permanently-failed items (fetch_403/404) skip retries immediately (7715–7717).
+  - **Cron**: production crons = `* * * * *`, `*/5 * * * *`, `*/15 * * * *` (wrangler.jsonc:143–147). NO `*/30` in production (only staging has `*/30`). NO dedicated news-cleanup cron. NO `purge`/`retention` cron. (Staging has `*/30 * * * *` but it's not deployed in production.)
+  - `requeueStaleQueueItems` (referenced at 15604) is for NOTIFICATION queue, NOT news queue — confirmed by grep: only called from cron for `notificationPlatformRepo`.
+
+- AI failure behavior:
+  - In `batchTranslateToFarsi`: if Groq batch fails (HTTP non-200, JSON parse fail, count mismatch, or any translation fails Persian validation) → `batchSuccess=false` → falls back to individual `translateToFarsi` for each headline (5222–5228).
+  - In `translateToFarsi`: Groq → Workers AI m2m100 (with circuit breaker + daily-quota suppression) → Google Translate (unofficial). If ALL fail, `result=text` (original English) and `translation_failed=true` (5388–5390). Returns `{ text: originalEnglish, translation_failed: true }`.
+  - In `processNewsAIBatch` STEP 4 (9124–9132): if `translation_failed=true`, sets `title=''`. STEP 5 (9165) filters out empty-title articles from `deduped`.
+  - **CRITICAL**: The pipeline writes the (possibly empty/partial) result to KV ANYWAY at STEP 6 (9194–9199) — there is NO skip-on-failure guard. The ONLY early-return that skips the KV write is `deduped.length === 0` (9171–9173). So:
+    - ALL translations fail → `deduped=[]` → early return → KV preserved. ✅
+    - 1+ translations succeed → `deduped=[1+ articles]` → STEP 6 OVERWRITES KV with that partial batch → previous content LOST. ❌
+  - The STEP 8.5 TTL refresh (9278–9281) does NOT help — by the time it runs, STEP 6 has already overwritten the KV with `trimmed`. STEP 8.5 reads the (now-trimmed) content and re-writes it with fresh TTL — same content, just refreshed TTL.
+  - The STEP 7 batch-analysis-failure catch (9242–9246) also doesn't help — comment says "Articles remain in news:farsi with rule-based sentiment from STEP 6." But "remain" here means the trimmed batch from STEP 6 remains — NOT the previous 12-article content.
+
+- TTL summary table:
+  | TTL | Value | Controls | Source |
+  | --- | --- | --- | --- |
+  | NEWS_CACHE_TTL | 86400s (24h) — production override in wrangler.jsonc:185 | KV TTL on `news:farsi` (the feed list). Applied at all 4 write sites (7441, 9198, 9239, 9280) via `getNumericEnv(env, 'NEWS_CACHE_TTL', 86400)`. | wrangler.jsonc:185 + worker-proxy.js:7441,9198,9239,9280 |
+  | NEWS_AI_CACHE_TTL | 7 × 24 × 60 × 60 = 604800s (7 days) | KV TTL on `news:ai:{hash}` (per-article AI summary cache). Applied at writeAppCache calls in enqueueForSummary (7252), processOneArticleSummary DB-refresh (7653), succeedWithSummary (7806). | worker-proxy.js:5840 |
+  | NEWS_AI_MONITOR_TTL | 24 × 60 × 60 = 86400s (24h) | KV TTL on `news:ai_monitor` + `news:ai_provider_stats` + `news:ai_cache_stats` (monitoring). | worker-proxy.js:5843 |
+  | NEWS_QUEUE_TTL | (no constant — hardcoded 24 × 3600) | KV TTL on `news:summary_queue`. Applied in `saveSummaryQueue` (7139). | worker-proxy.js:7139 |
+  | news:failed_urls TTL | 24 × 3600 = 86400s (24h) | KV TTL on permanent-failure URL set. | worker-proxy.js:7738 |
+  | Queue item claim TTL | 10 × 60 × 1000 ms (10 min) | In-memory `_claim_expires_at` on queue items in `processing` state. Reset to `pending` if expired (7307–7310). | worker-proxy.js:7556 |
+  | Queue item retry backoff | [5, 15, 30] min × ±20% jitter | `next_retry` field on queue items. | worker-proxy.js:5877, 7686, 7698 |
+  | Queue max retries | 3 | After 3 retries → `status='failed'`. Permanent failures (fetch_403/404/410) skip retries immediately. | worker-proxy.js:5876, 7717 |
+  | Queue size cap | 80 (60 pending + 20 failed) | Queue trim in `enqueueForSummary` (7300–7321). | worker-proxy.js:7300–7321 |
+  | In-memory translation cache TTL | 5 × 60 × 1000 ms (5 min) | `_translationCache` per-isolate. | worker-proxy.js:5063 |
+  | In-memory m2m100 quota suppression | until UTC midnight | `_m2m100QuotaExhausted` + KV `wai:m2m100:quota_exhausted`. | worker-proxy.js:5078–5136 |
+  | DB news_articles retention | NONE (permanent) | No DELETE, no cleanup cron. DB grows forever. | src/repositories/news_articles.js (no DELETE) |
+  | writeAppCache in-memory dedup | matches KV TTL | `_kvWriteCache` skips identical-value writes if KV entry still alive; re-writes if expired (MKT-006 fix). | worker-proxy.js:466–509 |
+
+- Root cause hypothesis (ranked):
+  1. **MOST LIKELY — KV OVERWRITE with partial/failed batch** (worker-proxy.js:9194–9199): `processNewsAIBatch` STEP 6 OVERWRITES `news:farsi` with `JSON.stringify(trimmed)` where `trimmed = deduped.slice(0, 12)`. When `batchTranslateToFarsi` partially fails (Groq 429 + Workers AI m2m100 quota exhausted + Google Translate fallback failing for most headlines — i.e., the user's reported "AI/providers erroring heavily"), only 1–2 articles survive the Persian-validation filter. STEP 5 dedup keeps only those 1–2 (failed ones get `title=''` and are filtered at 9165). STEP 6 then OVERWRITES the entire KV with that 1–2-article array — the previous 12-article content is GONE. /api/farsi-news returns the 1–2 articles. **This matches the user's symptom exactly: "only 1 news item remains".** The 15-min cron re-runs every 15 min, so if partial-failure persists, the feed gets re-overwritten every 15 min. This regression was introduced by "Commit 2.6" (worker-proxy.js:9183–9187) which restored the immediate write at STEP 6 — overriding the earlier "Commit 1 publication gate" that had delegated all news:farsi writes to the merge-only `publishArticleToFarsiNews` (7370–7449). In-tree test `news-hotfix-instant-display-test.cjs` and `news-hotfix-starvation-hang-test.cjs:142` explicitly assert that STEP 6 publishes immediately — confirming the regression is by design (not an accident).
+  2. **Secondary — KV TTL expiration** (NEWS_CACHE_TTL=86400s=24h): If ALL translations fail for >24h (so STEP 5 always returns `deduped=[]` and STEP 6 never writes), the KV eventually expires and the feed goes empty. But this requires 24h of TOTAL failure, which is less likely than partial-failure overwrite. The STEP 8.5 TTL refresh (9278–9281) only refreshes TTL on content that already exists — it cannot preserve content that was already overwritten by STEP 6.
+  3. **NOT a factor — DB cleanup**: No `DELETE FROM news_articles`, no retention cron. DB grows forever. But the DB is NOT read by /api/farsi-news anyway — it's only a dedup cache for the AI pipeline. So DB state is irrelevant to feed disappearance.
+  4. **NOT a factor — Queue cleanup**: `enqueueForSummary` trims queue to 80 items and removes failed items >24h old (7300–7321). This affects the summary-generation queue, NOT the news:farsi feed content. Queue hygiene cannot cause feed disappearance.
+  5. **Contributing factor — `_kvWriteCache` skip-on-identical-value** (466–509): If the same isolate runs two consecutive 15-min crons that produce identical `trimmed` content (e.g., same 1 article surviving both times), the second write is skipped (line 480–484) — but the KV TTL is NOT refreshed. After 24h the entry expires naturally. This is a minor accelerant, not the primary cause.
+
+  **Bottom line**: The disappearance is caused by `processNewsAIBatch` STEP 6 (worker-proxy.js:9194–9199) OVERWRITING the entire `news:farsi` KV entry with the current batch on every 15-min cron tick. When AI translation partially fails (the user's reported scenario), the batch shrinks to 1–2 articles and the previous 12-article content is destroyed. The fix would be to either (a) revert Commit 2.6 and rely solely on the merge-only `publishArticleToFarsiNews` (7370) for feed writes, or (b) make STEP 6 merge-with-existing instead of overwrite (read existing → dedup-by-URL → prepend new → trim to 12 → write back), mirroring `publishArticleToFarsiNews`'s logic.
+
+---
+Task ID: NEWS-FIX-P0-P4
+Agent: Z.ai Code (Orchestrator)
+Task: Fix news feed destruction — DB as source of truth, merge publication, 4-day retention
+
+Work Log:
+- P0: Replaced STEP 6 hard-overwrite with merge via publishArticleToFarsiNews() per article
+- P0: Same merge for STEP 7 (enriched sentiment re-cache)
+- P1: Added listForFeed() to news_articles repo (4-day window, ORDER BY analyzed_at DESC)
+- P1: Modified fetchFarsiNews: KV fast-path → DB fallback → re-cache to KV
+- P2: Added cleanupOld(days=4) to news_articles repo (DELETE WHERE created_at < NOW() - interval)
+- P2: Added STEP 11 to processNewsAIBatch (calls cleanupOld on every */15 tick)
+- P3: Changed NEWS_CACHE_TTL from 86400 (24h) → 1800 (30 min) in production wrangler.jsonc
+- P4: Added partial-batch diagnostic log (Feed preserved via merge)
+- Added news-persistence-regression-test.cjs (18 tests, all pass)
+- Full suite: 1226 tests, 1224 pass, 0 fail, 2 skipped
+- Commit: 4cb46d6 — Deploy Production SUCCESS
+
+Production Evidence (post-deploy, 12:45 UTC */15 tick):
+- Feed preserved 10 articles (was 2 before fix, would have been destroyed by overwrite)
+- Groq failed (HTTP 0, circuits OPEN from TPD rate limit) — but feed NOT destroyed
+- Individual translation fallback ran; new articles merged into existing feed
+- /api/news-ai-pending shows 10 articles (7 with summaries, 3 pending)
+- No "KV_ARTICLES_published_immediate" (old overwrite) — only merge publication now
+
+Stage Summary:
+- ROOT CAUSE FIXED: STEP 6 no longer hard-overwrites news:farsi
+- DB is now source of truth (listForFeed + fetchFarsiNews DB fallback)
+- KV is pure cache (30-min TTL, DB fallback covers gaps)
+- 4-day DB retention active (cleanupOld runs every */15 tick)
+- Partial AI failure preserves previous feed (merge, not overwrite)
+- No provider/fallback/circuit changes (scope discipline maintained)

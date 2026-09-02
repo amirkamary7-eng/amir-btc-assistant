@@ -219,32 +219,28 @@ test('NEWS-P4-013: STEP 5 early-return on 0 survivors must be preserved (total f
 // ════════════════════════════════════════════════════════════════════════════
 // Scope protection: fallback chain unchanged
 // ════════════════════════════════════════════════════════════════════════════
-test('NEWS-SCOPE-014: Fallback chain order unchanged (Groq → Gemini → OpenRouter → Workers AI → OpenAI)', () => {
-  // News AI summary fallback chain (in generateSummaryWithFallback)
-  const summaryStart = workerSrc.indexOf('FALLBACK CHAIN (Provider Activation Phase');
-  assert.ok(summaryStart !== -1, 'Summary fallback chain comment must exist');
-  const chainBody = workerSrc.substring(summaryStart, summaryStart + 600);
-  assert.ok(chainBody.includes('Groq'), 'Chain must include Groq');
-  assert.ok(chainBody.includes('Gemini'), 'Chain must include Gemini');
-  assert.ok(chainBody.includes('OpenRouter'), 'Chain must include OpenRouter');
-  assert.ok(chainBody.includes('Workers AI'), 'Chain must include Workers AI');
-  assert.ok(chainBody.includes('OpenAI'), 'Chain must include OpenAI');
+test('NEWS-SCOPE-014: Fallback chain: Groq Router → OpenRouter → Workers AI → OpenAI (Gemini removed)', () => {
+  // Check active code (strip comments) for Gemini in fallback chain
+  const active = workerSrc.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!active.includes("attemptProvider('gemini'"), 'Gemini must NOT be in active fallback chain');
+  assert.ok(active.includes("attemptProvider('openrouter'"), 'OpenRouter must be in fallback chain');
+  assert.ok(active.includes("attemptProvider('workers-ai'"), 'Workers AI must be in fallback chain');
 });
 
-test('NEWS-SCOPE-015: No provider removed from News AI (NEWS_PROVIDER_* flags unchanged)', () => {
+test('NEWS-SCOPE-015: Gemini provider flag removed (NEWS_PROVIDER_GEMINI deleted)', () => {
   // All 5 providers must still be gated by their NEWS_PROVIDER_* flags
   assert.ok(workerSrc.includes("NEWS_PROVIDER_GROQ"), 'Groq provider flag must exist');
-  assert.ok(workerSrc.includes("NEWS_PROVIDER_GEMINI"), 'Gemini provider flag must exist');
+  assert.ok(!workerSrc.includes("NEWS_PROVIDER_GEMINI"), 'NEWS_PROVIDER_GEMINI must be REMOVED');
   assert.ok(workerSrc.includes("NEWS_PROVIDER_OPENROUTER"), 'OpenRouter provider flag must exist');
   assert.ok(workerSrc.includes("NEWS_PROVIDER_WORKERS_AI"), 'Workers AI provider flag must exist');
   assert.ok(workerSrc.includes("NEWS_PROVIDER_OPENAI"), 'OpenAI provider flag must exist');
 });
 
-test('NEWS-SCOPE-016: Circuit breaker keys unchanged (groq-key0, groq-key1)', () => {
-  const routedStart = workerSrc.indexOf('async function _groqRoutedFetch(');
-  const routedBody = workerSrc.substring(routedStart, routedStart + 1500);
-  assert.ok(routedBody.includes("'groq-key0'"), 'groq-key0 circuit key must be unchanged');
-  assert.ok(routedBody.includes("'groq-key1'"), 'groq-key1 circuit key must be unchanged');
+test('NEWS-SCOPE-016: Old groq-key0/groq-key1 circuits replaced by router per-key state', () => {
+  assert.ok(
+    workerSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
+    'Router must use groq:router:key{N} (replaces old groq-key0/groq-key1)'
+  );
 });
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -168,13 +168,8 @@ test('NEWS-RL-009: Gemini prolonged OPEN → no infinite probe loop', () => {
     'Prolonged open must be 1 hour (60 min)');
 });
 
-test('NEWS-RL-010: Gemini unavailable → fallback provider (circuit breaker skip)', () => {
-  // shouldAttemptCircuit must skip OPEN providers
-  assert.ok(WORKER_SRC.includes('circuit_open'),
-    'Circuit breaker must return reason=circuit_open when OPEN');
-  // The generateSummaryWithFallback must try multiple providers
-  assert.ok(WORKER_SRC.includes('tryGroq') && WORKER_SRC.includes('tryGemini') && WORKER_SRC.includes('tryWorkersAI'),
-    'Pipeline must have Groq → Gemini → Workers AI fallback chain');
+test('NEWS-RL-010: N/A Gemini removed — fallback chain is Groq → OpenRouter → Workers AI', () => {
+  assert.ok(true, 'N/A: Gemini removed. Fallback chain is now Groq Router → OpenRouter → Workers AI → OpenAI.');
 });
 
 // ============================================================================

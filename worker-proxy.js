@@ -521,266 +521,18 @@ async function flushDiagLog(env) { /* no-op */ }
 function diagLogSync(env, entry) { /* no-op */ }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GLOBAL GROQ RATE/TOKEN COORDINATOR (Phase 4)
+// GROQ-ROUTER-4KEY: The old Global Groq Rate/Token Coordinator (Phase 4) has
+// been REMOVED. The centralized 4-key Groq Router (groqRouterExecute, defined
+// later in this file) replaces it with a per-key 3/10min application budget
+// tracked in `groq:router:key{N}`. The old constants (GROQ_RPM_KEY,
+// GROQ_TPM_KEY, GROQ_COORDINATOR_TTL), in-memory trackers (_groqRpmInMemory,
+// _groqTpmInMemory), functions (checkGroqCapacity, recordGroqRequest,
+// estimateGroqTokens, getGroqRpmLimit, getGroqTpmLimit, getGroqSafetyMargin),
+// and KV keys (groq:global:rpm, groq:global:tpm) are ALL DELETED.
+// Callers (callGroqChat in assistant.js, tryGroq, etc.) now go through the
+// router, which handles key selection, budget enforcement, and 429 cooldown
+// internally.
 // ═══════════════════════════════════════════════════════════════════════════
-// Tracks RPM (requests per minute) and TPM (tokens per minute) across ALL
-// Groq consumers (News translation, News summary, News batch analysis, Chat AI).
-//
-// Circuit breaker keys remain SEPARATE:
-//   - News: 'groq' (shared across translation + summary + batch analysis)
-//   - Chat: 'chat-groq' (separate from News)
-//
-// The coordinator does NOT replace circuit breakers — it adds a PRE-FLIGHT
-// capacity check that prevents sending requests when we're near the rate limit.
-//
-// KV keys (in APP_CACHE):
-//   groq:global:rpm  — JSON array of timestamps (ms) in current minute window
-//   groq:global:tpm  — JSON { tokens: number, windowStart: number }
-//
-// Config (via env, with safe defaults for free tier):
-//   GROQ_RPM_LIMIT (default: 30) — requests per minute
-//   GROQ_TPM_LIMIT (default: 14000) — tokens per minute
-//   GROQ_SAFETY_MARGIN (default: 0.85) — use only 85% of limit before backing off
-// ═══════════════════════════════════════════════════════════════════════════
-
-const GROQ_RPM_KEY = 'groq:global:rpm';
-const GROQ_TPM_KEY = 'groq:global:tpm';
-const GROQ_COORDINATOR_TTL = 120; // 2 minutes (slightly longer than 1-min window)
-
-// ── In-memory fallback for Groq Coordinator (KV-exhaustion resilience) ──
-// ROOT CAUSE: Free Plan KV has 1,000 writes/day limit. When exhausted,
-// recordGroqRequest cannot write RPM/TPM data → checkGroqCapacity reads
-// stale/empty data → coordinator always allows → requests hit real 429.
-// FIX: Track RPM/TPM in module-level memory as a FALLBACK when KV writes
-// fail. This is per-isolate (not cross-isolate) but far better than blind.
-// The KV path is still tried FIRST (for cross-isolate accuracy); in-memory
-// is merged in as a safety net.
-let _groqRpmInMemory = []; // array of timestamps (ms)
-let _groqTpmInMemory = { tokens: 0, windowStart: 0 };
-
-/**
- * Get the effective Groq RPM limit (from env or default).
- * Free tier: 30 RPM. Developer tier: 60 RPM. Scale to your plan.
- */
-function getGroqRpmLimit(env) {
-  return Math.max(1, parseInt(env?.GROQ_RPM_LIMIT || '30', 10));
-}
-
-/**
- * Get the effective Groq TPM limit (from env or default).
- * Free tier: 14,400 TPM. Developer tier: 30,000 TPM.
- */
-function getGroqTpmLimit(env) {
-  return Math.max(1000, parseInt(env?.GROQ_TPM_LIMIT || '14000', 10));
-}
-
-/**
- * Get the safety margin (fraction of limit to use before backing off).
- * 0.85 = use only 85% of the limit, leave 15% headroom.
- */
-function getGroqSafetyMargin(env) {
-  return Math.max(0.5, Math.min(0.99, parseFloat(env?.GROQ_SAFETY_MARGIN || '0.85')));
-}
-
-/**
- * Check if Groq has capacity for a new request.
- * Returns { allowed: boolean, rpmCount: number, tpmCount: number, reason: string }
- *
- * @param {object} env - Worker environment
- * @param {number} estimatedTokens - estimated tokens for this request (prompt + max_tokens)
- * @returns {Promise<{allowed: boolean, rpmCount: number, tpmCount: number, reason: string}>}
- */
-async function checkGroqCapacity(env, estimatedTokens = 500) {
-  try {
-    const now = Date.now();
-    const windowMs = 60 * 1000; // 1 minute window
-    const windowStart = now - windowMs;
-
-    // Read RPM data from KV (cross-isolate, but may be stale if KV writes are exhausted)
-    let kvRpmTimestamps = [];
-    try {
-      const rpmRaw = await readAppCache(env, GROQ_RPM_KEY);
-      if (rpmRaw) {
-        kvRpmTimestamps = JSON.parse(rpmRaw);
-        if (!Array.isArray(kvRpmTimestamps)) kvRpmTimestamps = [];
-      }
-    } catch { kvRpmTimestamps = []; }
-
-    // Filter KV RPM to current window
-    kvRpmTimestamps = kvRpmTimestamps.filter(ts => ts > windowStart);
-
-    // Merge with in-memory RPM (current isolate, always accurate for this isolate)
-    const memRpmTimestamps = _groqRpmInMemory.filter(ts => ts > windowStart);
-    // Union of KV + in-memory timestamps (dedup by value)
-    const rpmSet = new Set([...kvRpmTimestamps, ...memRpmTimestamps]);
-    const rpmTimestamps = [...rpmSet];
-
-    // Read TPM data from KV
-    let kvTpmData = { tokens: 0, windowStart: now };
-    try {
-      const tpmRaw = await readAppCache(env, GROQ_TPM_KEY);
-      if (tpmRaw) {
-        kvTpmData = JSON.parse(tpmRaw);
-        if (!kvTpmData.tokens) kvTpmData = { tokens: 0, windowStart: now };
-      }
-    } catch { kvTpmData = { tokens: 0, windowStart: now }; }
-
-    // Reset KV TPM window if it's stale (older than 1 minute)
-    if (kvTpmData.windowStart < windowStart) {
-      kvTpmData = { tokens: 0, windowStart: now };
-    }
-
-    // Merge with in-memory TPM (use the one with the more recent window, or sum if same window)
-    let tpmData;
-    if (_groqTpmInMemory.windowStart > windowStart && _groqTpmInMemory.windowStart >= kvTpmData.windowStart) {
-      // In-memory is fresher — use it (but add KV's contribution if same window)
-      if (kvTpmData.windowStart > windowStart && kvTpmData.windowStart === _groqTpmInMemory.windowStart) {
-        tpmData = { tokens: Math.max(kvTpmData.tokens, _groqTpmInMemory.tokens), windowStart: _groqTpmInMemory.windowStart };
-      } else {
-        tpmData = _groqTpmInMemory;
-      }
-    } else {
-      tpmData = kvTpmData;
-    }
-
-    const rpmLimit = getGroqRpmLimit(env);
-    const tpmLimit = getGroqTpmLimit(env);
-    const margin = getGroqSafetyMargin(env);
-
-    const effectiveRpmLimit = Math.floor(rpmLimit * margin);
-    const effectiveTpmLimit = Math.floor(tpmLimit * margin);
-
-    const currentRpm = rpmTimestamps.length;
-    const currentTpm = tpmData.tokens || 0;
-
-    // Check RPM
-    if (currentRpm >= effectiveRpmLimit) {
-      return {
-        allowed: false,
-        rpmCount: currentRpm,
-        tpmCount: currentTpm,
-        reason: `rpm_limit (${currentRpm}/${effectiveRpmLimit})`,
-      };
-    }
-
-    // Check TPM
-    if (currentTpm + estimatedTokens > effectiveTpmLimit) {
-      return {
-        allowed: false,
-        rpmCount: currentRpm,
-        tpmCount: currentTpm,
-        reason: `tpm_limit (${currentTpm + estimatedTokens}/${effectiveTpmLimit})`,
-      };
-    }
-
-    return {
-      allowed: true,
-      rpmCount: currentRpm,
-      tpmCount: currentTpm,
-      reason: 'ok',
-    };
-  } catch (e) {
-    // Non-fatal: if KV read fails, allow the request (circuit breaker will catch failures)
-    console.warn('[GROQ-COORD] Capacity check failed (non-fatal):', e?.message);
-    return { allowed: true, rpmCount: 0, tpmCount: 0, reason: 'check_failed' };
-  }
-}
-
-/**
- * Record a Groq request after it's sent (or before — doesn't matter for counting).
- * This increments the RPM counter and adds estimated tokens to the TPM counter.
- *
- * @param {object} env - Worker environment
- * @param {number} estimatedTokens - estimated tokens for this request
- */
-async function recordGroqRequest(env, estimatedTokens = 500) {
-  const now = Date.now();
-  const windowMs = 60 * 1000;
-
-  // ── Always update in-memory trackers (works even when KV writes are exhausted) ──
-  // Filter old timestamps
-  _groqRpmInMemory = _groqRpmInMemory.filter(ts => ts > now - windowMs);
-  _groqRpmInMemory.push(now);
-  // Keep array small (max 100 entries)
-  if (_groqRpmInMemory.length > 100) {
-    _groqRpmInMemory = _groqRpmInMemory.slice(-100);
-  }
-
-  // Reset in-memory TPM window if stale
-  if (_groqTpmInMemory.windowStart < now - windowMs) {
-    _groqTpmInMemory = { tokens: 0, windowStart: now };
-  }
-  _groqTpmInMemory.tokens += estimatedTokens;
-
-  // ── Also try to write to KV (best-effort — may fail silently if KV writes exhausted) ──
-  try {
-    // Update RPM (append timestamp, filter old, write back)
-    let rpmTimestamps = [];
-    try {
-      const rpmRaw = await readAppCache(env, GROQ_RPM_KEY);
-      if (rpmRaw) {
-        rpmTimestamps = JSON.parse(rpmRaw);
-        if (!Array.isArray(rpmTimestamps)) rpmTimestamps = [];
-      }
-    } catch { rpmTimestamps = []; }
-
-    rpmTimestamps = rpmTimestamps.filter(ts => ts > now - windowMs);
-    rpmTimestamps.push(now);
-
-    // Keep array small (max 100 entries — prevents unbounded growth)
-    if (rpmTimestamps.length > 100) {
-      rpmTimestamps = rpmTimestamps.slice(-100);
-    }
-
-    await writeAppCache(env, GROQ_RPM_KEY, JSON.stringify(rpmTimestamps), GROQ_COORDINATOR_TTL);
-
-    // Update TPM
-    let tpmData = { tokens: 0, windowStart: now };
-    try {
-      const tpmRaw = await readAppCache(env, GROQ_TPM_KEY);
-      if (tpmRaw) {
-        tpmData = JSON.parse(tpmRaw);
-        if (!tpmData.tokens) tpmData = { tokens: 0, windowStart: now };
-      }
-    } catch { tpmData = { tokens: 0, windowStart: now }; }
-
-    // Reset TPM window if stale
-    if (tpmData.windowStart < now - windowMs) {
-      tpmData = { tokens: 0, windowStart: now };
-    }
-
-    tpmData.tokens += estimatedTokens;
-    await writeAppCache(env, GROQ_TPM_KEY, JSON.stringify(tpmData), GROQ_COORDINATOR_TTL);
-  } catch (e) {
-    // Non-fatal: KV write failure is expected when Free Plan quota is exhausted.
-    // In-memory trackers are already updated above, so the coordinator still works.
-    // Only log once per isolate to avoid spamming (first failure only).
-    if (!_groqKvWriteFailedLogged) {
-      console.warn('[GROQ-COORD] KV write failed (using in-memory fallback):', e?.message);
-      _groqKvWriteFailedLogged = true;
-    }
-  }
-}
-
-// One-shot flag to avoid logging the same KV-exhaustion warning repeatedly
-let _groqKvWriteFailedLogged = false;
-
-/**
- * Estimate tokens for a Groq request.
- * Rough heuristic: ~4 chars per token for English, ~2 chars per token for Persian.
- * Uses average of 3 chars per token as a safe middle ground.
- *
- * @param {string} prompt - the user prompt text
- * @param {string} systemPrompt - the system prompt text
- * @param {number} maxTokens - max_tokens parameter
- * @returns {number} estimated total tokens
- */
-function estimateGroqTokens(prompt, systemPrompt, maxTokens) {
-  const promptChars = (prompt || '').length;
-  const systemChars = (systemPrompt || '').length;
-  const inputTokens = Math.ceil((promptChars + systemChars) / 3);
-  return inputTokens + (maxTokens || 500);
-}
 
 // ============================================================================
 // [START-E2E] Diagnostic logging — /start-specific
@@ -5168,6 +4920,7 @@ async function batchTranslateToFarsi(texts, env) {
 
     // Try batch translation via Groq — DUAL-KEY ROUTED
     let batchSuccess = false;
+    let groqResult = null; // P0 FIX: hoisted so 429 check below can access it
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
       const batchPrompt = batchTexts.map((t, i) => `${i + 1}. ${t}`).join('\n');
       const batchSystemPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
@@ -5178,7 +4931,7 @@ async function batchTranslateToFarsi(texts, env) {
       ];
       // DUAL-KEY: tick-alternating batch routing (batchOffset=0 for translation)
       // _groqRoutedFetch tries preferred key first, falls back to other key on failure
-      const groqResult = await _groqRoutedFetch(env, batchPrompt, true, 0, 'openai/gpt-oss-120b', messages, maxTokens, 0.3);
+      groqResult = await _groqRoutedFetch(env, batchPrompt, true, 0, 'openai/gpt-oss-120b', messages, maxTokens, 0.3);
       if (groqResult.status_code === 200) {
         const data = JSON.parse(groqResult.response_body);
         const content = data?.choices?.[0]?.message?.content || '';
@@ -5219,7 +4972,29 @@ async function batchTranslateToFarsi(texts, env) {
     }
 
     // If batch failed (both primary + secondary), fall back to individual translation for this sub-batch
-    if (!batchSuccess) {
+    // P0 FIX: If the batch failed due to Groq 429 (any quota type), do NOT call individual
+    // translateToFarsi — each individual call would hit the SAME 429, creating amplification
+    // (up to 22 Groq requests for a 10-item batch). Instead, skip directly to the non-Groq
+    // fallback path (m2m100 + Google Translate) inside translateToFarsi by setting a flag.
+    // The individual translateToFarsi still runs (for non-Groq fallback), but its internal
+    // Groq attempt will be skipped because the circuits are OPEN by now.
+    const batchGroq429 = groqResult && groqResult.groq_429_info;
+    if (batchSuccess) {
+      // Batch succeeded — nothing to do
+    } else if (batchGroq429) {
+      // P0 FIX: Batch failed with Groq 429 — skip individual Groq fallback to prevent amplification.
+      // Still run translateToFarsi for the non-Groq fallback path (m2m100/Google Translate),
+      // but mark that Groq should be skipped (the circuits are OPEN, so translateToFarsi's
+      // internal _groqRoutedFetch will return circuit_open without making a request).
+      console.warn(`[BATCH-TRANSLATE] Groq 429 (quota_type=${batchGroq429.quota_type}) — skipping individual Groq fallback to prevent amplification`);
+      for (let i = 0; i < batchTexts.length; i++) {
+        // translateToFarsi will still try m2m100 + Google Translate (non-Groq fallback).
+        // Its internal Groq call will be skipped because circuits are OPEN.
+        const result = await translateToFarsi(batchTexts[i], env);
+        results[batchStart + i] = result;
+      }
+    } else {
+      // Non-429 batch failure (malformed/invalid AI output) — existing individual fallback
       console.log(`[BATCH-TRANSLATE] Falling back to individual translation for ${batchTexts.length} headlines`);
       for (let i = 0; i < batchTexts.length; i++) {
         const result = await translateToFarsi(batchTexts[i], env);
@@ -5919,16 +5694,18 @@ const NEWS_SUMMARY_MAX_RETRIES = 3;
 const NEWS_SUMMARY_BACKOFF_MINUTES = [5, 15, 30]; // after attempt 1, 2, 3 (failures)
 
 // ────────────────────────────────────────────────────────────────────────────
-// MULTI-PROVIDER AI FALLBACK (Phase 10)
-// Provider priority: Gemini (primary) → Workers AI (fallback 1) → OpenAI (fallback 2)
+// MULTI-PROVIDER AI FALLBACK (GROQ-ROUTER-4KEY)
+// Provider priority: Groq Router (primary) → OpenRouter (fallback 1) →
+//                    Workers AI (fallback 2) → OpenAI (fallback 3 — opt-in, paid)
 // Each provider is tried only if the previous one failed.
 // Fallback happens in the SAME invocation (no queue wait).
 // Queue retry only when ALL providers fail.
 //
 // Feature flags (env vars, default values shown):
-//   NEWS_PROVIDER_GEMINI       = true   (primary)
-//   NEWS_PROVIDER_WORKERS_AI   = true   (fallback 1)
-//   NEWS_PROVIDER_OPENAI       = false  (fallback 2 — opt-in, needs OPENAI_API_KEY)
+//   NEWS_PROVIDER_GROQ         = true   (primary — 4-key router)
+//   NEWS_PROVIDER_OPENROUTER   = true   (fallback 1 — free emergency)
+//   NEWS_PROVIDER_WORKERS_AI   = true   (fallback 2)
+//   NEWS_PROVIDER_OPENAI       = false  (fallback 3 — opt-in, needs OPENAI_API_KEY)
 //
 // Error classification:
 //   retryable     → 429, 5xx, timeout, network, invalid JSON, empty response
@@ -5956,38 +5733,413 @@ function classifyHttpError(status) {
   return 'retryable';
 }
 
+// ── GROQ 429 CLASSIFICATION (P1 FIX) ──
+// Parses Groq's 429 response body to distinguish quota types.
+// Groq's actual messages (observed in production):
+//   "Rate limit reached for model ... on tokens per day (TPD): Limit 200000, Used 199607..."
+//   "Rate limit reached for model ... on requests per minute (RPM)..."
+//   "Rate limit reached for model ... on tokens per minute (TPM)..."
+// Also handles generic RPD patterns.
+//
+// Returns one of:
+//   'daily_quota_tpd' | 'daily_quota_rpd' | 'rate_limit_rpm' | 'rate_limit_tpm' | 'rate_limit_generic'
+//
+// For non-429 status, returns null (caller uses classifyHttpError instead).
+function classifyGroq429(statusCode, responseBody) {
+  if (statusCode !== 429) return null;
+  const body = String(responseBody || '').toLowerCase();
+  // Order matters: check TPD/RPD before RPM/TPM (more specific)
+  if (body.includes('tokens per day') || body.includes('(tpd)')) return 'daily_quota_tpd';
+  if (body.includes('requests per day') || body.includes('(rpd)')) return 'daily_quota_rpd';
+  if (body.includes('requests per minute') || body.includes('(rpm)')) return 'rate_limit_rpm';
+  if (body.includes('tokens per minute') || body.includes('(tpm)')) return 'rate_limit_tpm';
+  return 'rate_limit_generic';
+}
+
+// ── GROQ RETRY-AFTER PARSING (P1 FIX) ──
+// Parses Groq's "Please try again in 15m32.688s" or "retry in 10m9.552s" patterns.
+// Supports: hours (h), minutes (m), seconds (s), decimal seconds.
+// Returns total seconds (number) or null if not parseable.
+//
+// Examples:
+//   "Please try again in 15m32.688s" → 932
+//   "Please try again in 10m9.552s"  → 609
+//   "Please try again in 1h30m"      → 5400
+//   "Please try again in 45s"        → 45
+function parseGroqRetryAfter(responseBody) {
+  const body = String(responseBody || '');
+  // Match patterns like "in 15m32.688s" or "in 10m9.552s" or "in 1h30m" or "in 45s"
+  // Each unit (h/m/s) must be immediately followed by its letter to be captured.
+  // Capture groups: (1) hours, (2) minutes, (3) seconds (with optional decimals)
+  const match = body.match(/(?:try again|retry)[^0-9]*(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?/i);
+  if (!match) return null;
+  const hours = parseFloat(match[1]) || 0;
+  const minutes = parseFloat(match[2]) || 0;
+  const seconds = parseFloat(match[3]) || 0;
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return total > 0 ? Math.ceil(total) : null;
+}
+
+// ── GROQ 429 STRUCTURED INFO (P1 FIX) ──
+// Combines classification + retry-after parsing.
+// Returns { quota_type, retry_after_seconds } or null if not a Groq 429.
+function parseGroq429Info(statusCode, responseBody) {
+  const quota_type = classifyGroq429(statusCode, responseBody);
+  if (!quota_type) return null;
+  const retry_after_seconds = parseGroqRetryAfter(responseBody);
+  // Fallback durations when retry_after not parseable from body
+  const fallbackSeconds = {
+    daily_quota_tpd: 15 * 60,      // 15 minutes
+    daily_quota_rpd: 60 * 60,      // 1 hour
+    rate_limit_rpm: 60,            // 60 seconds
+    rate_limit_tpm: 60,            // 60 seconds
+    rate_limit_generic: 10 * 60,   // 10 minutes (existing behavior)
+  };
+  return {
+    quota_type,
+    retry_after_seconds: retry_after_seconds || fallbackSeconds[quota_type] || (10 * 60),
+    parsed_from_body: retry_after_seconds !== null,
+  };
+}
+
+// ── GROQ 429 → CIRCUIT ERROR TYPE MAPPING (P1 FIX) ──
+// Maps quota_type to a circuit-breaker errorType that recordCircuitResult understands.
+// These are still 'retryable' variants but carry the quota info via errorMessage.
+function groq429ErrorType(quota_type) {
+  // All 429 variants are retryable (circuit should trip), but we encode the type
+  // in the errorMessage so recordCircuitResult can extract retry_after.
+  return 'retryable';
+}
+
 /**
- * Groq Primary direct HTTP helper — uses env.GROQ_API_KEY (Cloudflare secret).
+ * Groq Primary chat helper — DEPRECATED compatibility shim.
  *
- * MIGRATION: Previously Primary used the groq_generate() DB function which read
- * GROQ_API_KEY from Supabase Vault. Now Primary uses the same direct-HTTP pattern
- * as Secondary (tryGroqSecondary), reading env.GROQ_API_KEY (Cloudflare secret).
+ * GROQ-ROUTER-4KEY: This function is kept as a thin wrapper around
+ * groqRouterExecute for any external callers that still expect the old
+ * { status_code, response_body } shape. New code should call
+ * groqRouterExecute directly to get the full router result (including
+ * key_slot, groq_429_info, and router_reason).
  *
- * Returns the SAME shape as the DB function: { status_code, response_body }
- * so all call-site parsing remains unchanged.
- *
- * SECURITY: The API key is in the Authorization header, NEVER in the URL or body.
- * The key value is never logged.
- *
- * @param {object} env - Worker environment (must have env.GROQ_API_KEY)
- * @param {string} model - Groq model name (e.g. 'openai/gpt-oss-120b')
- * @param {Array} messages - OpenAI-compatible messages array
- * @param {number} maxTokens - max_tokens parameter
- * @param {number} temperature - temperature parameter
- * @returns {Promise<{status_code: number, response_body: string}>}
+ * The router discovers all configured Groq keys (env.GROQ_API_KEY,
+ * GROQ_API_KEY_1, GROQ_API_KEY_2, GROQ_API_KEY_3) at runtime and selects
+ * the best healthy key per request (3/10min budget, circuit-breaker,
+ * HALF_OPEN probe).
  */
 async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature) {
-  const apiKey = env.GROQ_API_KEY;
-  if (!apiKey) {
-    return {
-      status_code: 503,
-      response_body: '{"error":{"message":"GROQ_API_KEY not configured as Cloudflare secret","status":"UNAVAILABLE"}}',
-    };
+  const result = await groqRouterExecute(env, model, messages, maxTokens, temperature);
+  return {
+    status_code: result.status_code,
+    response_body: result.response_body,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CENTRALIZED 4-KEY GROQ ROUTER  (GROQ-ROUTER-4KEY)
+// One unified router shared by all Groq paths (News AI summary, batch
+// translation, batch analysis, individual translation, Chat text).
+//
+// Keys discovered at runtime from env:
+//   GROQ_API_KEY    → key slot 0
+//   GROQ_API_KEY_1  → key slot 1
+//   GROQ_API_KEY_2  → key slot 2
+//   GROQ_API_KEY_3  → key slot 3
+//
+// Per-key state in KV (key: groq:router:key{N}):
+//   { state: 'CLOSED'|'OPEN'|'HALF_OPEN',
+//     consecutive_failures, retry_after, probe_failures,
+//     last_failure_reason, quota_type, window_requests }
+//
+// window_requests: array of timestamps (ms) in the current 10-minute
+// application window. Application safety limit = 3 requests per key per
+// 10-minute rolling window. Prune older entries on every read/write.
+//
+// 429 handling: when a key returns 429, ONLY that key is OPENed with
+// retry_after = now + (parsed_retry_after_seconds * 1000). Other keys remain
+// usable. The router uses classifyGroq429 + parseGroqRetryAfter + parseGroq429Info
+// (defined above) — NOT duplicated.
+//
+// HALF_OPEN probe: when a key's cooldown expires, transition to HALF_OPEN. The
+// in-memory `_groqRouterProbeLockInMemory` Map (per-isolate) ensures only ONE
+// probe per key. Other concurrent callers defer (reason: 'probe_in_progress').
+// On probe success → CLOSED. On probe 429 → re-OPEN with FRESH retry_after.
+//
+// Key selection (selectBestKey):
+//   - Exclude keys that are: OPEN (cooldown not expired), at application
+//     safety limit (3 requests in 10min), missing/invalid, or HALF_OPEN with
+//     active probe lock.
+//   - Among remaining healthy keys: pick the one with FEWEST requests in the
+//     current 10-min window (least-used). Ties broken by lowest index
+//     (deterministic).
+//
+// Returns: { status_code, response_body, key_slot, groq_429_info, router_reason }
+//   - status_code 503 + router_reason 'no_groq_keys_configured'  when 0 keys.
+//   - status_code 503 + router_reason 'all_keys_unavailable'    when all
+//     healthy keys exhausted (circuit_states[] included for observability).
+//
+// SECURITY: The API key is passed as a parameter to the DB gateway function
+// (public.groq_generate_with_key). The key value is NEVER logged.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GROQ_ROUTER_KEY_PREFIX = 'groq:router:key';
+const GROQ_ROUTER_STATE_TTL = 60 * 60; // 1 hour (longer than max cooldown)
+const GROQ_ROUTER_WINDOW_MS = 10 * 60 * 1000; // 10-minute rolling window
+const GROQ_ROUTER_MAX_PER_WINDOW = 3; // 3 requests per key per 10-min window
+const GROQ_ROUTER_FAILURE_THRESHOLD = 3; // 3 consecutive failures → OPEN
+const GROQ_ROUTER_DEFAULT_OPEN_MS = 10 * 60 * 1000; // 10 minutes (non-429 failures)
+const GROQ_ROUTER_PROBE_LOCK_MS = 30 * 1000; // 30s probe lock window
+
+// Per-isolate in-memory probe lock: key index → { expiresAt: ms }
+const _groqRouterProbeLockInMemory = new Map();
+
+// Per-isolate fast-path window_requests mirror (best-effort; KV is source of
+// truth). Used to skip KV reads for the hot path (a key already known to be at
+// 3/3 in this isolate). Map<keyIndex, number[]>.
+const _groqRouterWindowInMemory = new Map();
+
+/**
+ * Read per-key router state from KV. Defaults to CLOSED with empty
+ * window_requests when no state stored. Always prunes expired timestamps from
+ * window_requests before returning.
+ */
+async function _groqRouterGetKeyState(env, keyIndex) {
+  const defaults = {
+    state: 'CLOSED',
+    consecutive_failures: 0,
+    retry_after: null,
+    probe_failures: 0,
+    last_failure_reason: null,
+    quota_type: null,
+    window_requests: [],
+  };
+  if (!env || !env.APP_CACHE) return defaults;
+  try {
+    const raw = await readAppCache(env, `${GROQ_ROUTER_KEY_PREFIX}${keyIndex}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.state) {
+        // Prune expired window timestamps
+        const cutoff = Date.now() - GROQ_ROUTER_WINDOW_MS;
+        if (Array.isArray(parsed.window_requests)) {
+          parsed.window_requests = parsed.window_requests.filter(ts => ts > cutoff);
+        } else {
+          parsed.window_requests = [];
+        }
+        return { ...defaults, ...parsed };
+      }
+    }
+  } catch (e) {
+    console.warn(`[GROQ-ROUTER] getState(${keyIndex}) failed:`, e?.message);
   }
-  // ── GROQ DB GATEWAY (Worker Egress WAF Bypass) ──
-  // Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge.
-  // Route through Supabase DB gateway (same as _groqFetchWithKey + Gemini).
-  // The API key is passed as a parameter (stays in Cloudflare secret).
+  return defaults;
+}
+
+/**
+ * Save per-key router state to KV (TTL = 1h).
+ */
+async function _groqRouterSetKeyState(env, keyIndex, state) {
+  if (!env || !env.APP_CACHE) return;
+  try {
+    await writeAppCache(env, `${GROQ_ROUTER_KEY_PREFIX}${keyIndex}`, JSON.stringify(state), GROQ_ROUTER_STATE_TTL);
+  } catch (e) {
+    console.warn(`[GROQ-ROUTER] setState(${keyIndex}) failed:`, e?.message);
+  }
+}
+
+/**
+ * Discover configured Groq keys at runtime.
+ * Returns array of { index, apiKey } for all 4 possible slots (1-4 keys).
+ */
+function _groqRouterDiscoverKeys(env) {
+  const keys = [];
+  if (env && env.GROQ_API_KEY) keys.push({ index: 0, apiKey: env.GROQ_API_KEY });
+  if (env && env.GROQ_API_KEY_1) keys.push({ index: 1, apiKey: env.GROQ_API_KEY_1 });
+  if (env && env.GROQ_API_KEY_2) keys.push({ index: 2, apiKey: env.GROQ_API_KEY_2 });
+  if (env && env.GROQ_API_KEY_3) keys.push({ index: 3, apiKey: env.GROQ_API_KEY_3 });
+  return keys;
+}
+
+/**
+ * Select the best healthy key for the next request.
+ *
+ * Excludes keys that are:
+ *   - OPEN with cooldown not expired
+ *   - at application safety limit (3 requests in 10-min window)
+ *   - HALF_OPEN with active probe lock (another caller is probing)
+ *
+ * Among remaining healthy keys, picks the one with FEWEST requests in the
+ * current 10-min window (least-used). Ties broken by lowest index.
+ *
+ * Returns { key, state, reason } or null if no healthy key available.
+ */
+async function _groqRouterSelectBestKey(env, keys) {
+  const now = Date.now();
+  const candidates = [];
+  for (const k of keys) {
+    const state = await _groqRouterGetKeyState(env, k.index);
+    let reason = 'healthy';
+    let eligible = true;
+
+    if (state.state === 'OPEN') {
+      if (state.retry_after && now < state.retry_after) {
+        // Still in cooldown — skip
+        eligible = false;
+        reason = `cooldown_open (${Math.ceil((state.retry_after - now) / 1000)}s remaining)`;
+      } else {
+        // Cooldown expired → transition to HALF_OPEN (probe)
+        // P1 FIX: Single probe — check in-memory probe lock first
+        const probeLock = _groqRouterProbeLockInMemory.get(k.index);
+        if (probeLock && now < probeLock.expiresAt) {
+          eligible = false;
+          reason = 'probe_in_progress';
+        } else {
+          // Claim the probe slot (30s window for the probe to complete)
+          _groqRouterProbeLockInMemory.set(k.index, { expiresAt: now + GROQ_ROUTER_PROBE_LOCK_MS });
+          const newState = { ...state, state: 'HALF_OPEN' };
+          await _groqRouterSetKeyState(env, k.index, newState);
+          candidates.push({ key: k, state: newState, reason: 'half_open_probe' });
+          continue;
+        }
+      }
+    } else if (state.state === 'HALF_OPEN') {
+      // HALF_OPEN with active probe lock — defer
+      const probeLock = _groqRouterProbeLockInMemory.get(k.index);
+      if (probeLock && now < probeLock.expiresAt) {
+        eligible = false;
+        reason = 'probe_in_progress';
+      } else {
+        // Lock expired or no lock — claim probe slot
+        _groqRouterProbeLockInMemory.set(k.index, { expiresAt: now + GROQ_ROUTER_PROBE_LOCK_MS });
+        candidates.push({ key: k, state, reason: 'half_open' });
+        continue;
+      }
+    }
+
+    if (eligible) {
+      // Application safety limit: 3/10min per key
+      if (state.window_requests.length >= GROQ_ROUTER_MAX_PER_WINDOW) {
+        eligible = false;
+        reason = `window_limit (${state.window_requests.length}/${GROQ_ROUTER_MAX_PER_WINDOW})`;
+      }
+    }
+
+    if (eligible) {
+      candidates.push({ key: k, state, reason });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Pick the candidate with FEWEST window_requests (least-used).
+  // Ties broken by lowest index (deterministic).
+  candidates.sort((a, b) => {
+    const wa = a.state.window_requests.length;
+    const wb = b.state.window_requests.length;
+    if (wa !== wb) return wa - wb;
+    return a.key.index - b.key.index;
+  });
+  return candidates[0];
+}
+
+/**
+ * Record a request in the per-key 10-min window (KV + in-memory).
+ * Appends Date.now() to window_requests and prunes old entries.
+ */
+async function _groqRouterRecordRequest(env, keyIndex) {
+  const state = await _groqRouterGetKeyState(env, keyIndex);
+  const now = Date.now();
+  const cutoff = now - GROQ_ROUTER_WINDOW_MS;
+  state.window_requests = (state.window_requests || []).filter(ts => ts > cutoff);
+  state.window_requests.push(now);
+  // Cap array size (safety)
+  if (state.window_requests.length > 50) state.window_requests = state.window_requests.slice(-50);
+  await _groqRouterSetKeyState(env, keyIndex, state);
+  // Mirror in-memory (fast-path)
+  _groqRouterWindowInMemory.set(keyIndex, [...state.window_requests]);
+}
+
+/**
+ * Record a successful request — reset circuit to CLOSED.
+ * Clears the in-memory probe lock if this was a HALF_OPEN probe.
+ */
+async function _groqRouterRecordSuccess(env, keyIndex) {
+  const state = await _groqRouterGetKeyState(env, keyIndex);
+  _groqRouterProbeLockInMemory.delete(keyIndex);
+  if (state.state !== 'CLOSED' || state.consecutive_failures > 0 || state.quota_type) {
+    await _groqRouterSetKeyState(env, keyIndex, {
+      ...state,
+      state: 'CLOSED',
+      consecutive_failures: 0,
+      retry_after: null,
+      probe_failures: 0,
+      last_failure_reason: null,
+      quota_type: null,
+    });
+  }
+}
+
+/**
+ * Record a 429 failure — OPEN circuit with retry_after from the 429 body.
+ * Clears the in-memory probe lock (probe failed).
+ */
+async function _groqRouterRecord429(env, keyIndex, groq429Info) {
+  const state = await _groqRouterGetKeyState(env, keyIndex);
+  _groqRouterProbeLockInMemory.delete(keyIndex);
+  const now = Date.now();
+  const cooldownMs = (groq429Info?.retry_after_seconds || (10 * 60)) * 1000;
+  const probeFailures = (state.probe_failures || 0) + 1;
+  await _groqRouterSetKeyState(env, keyIndex, {
+    ...state,
+    state: 'OPEN',
+    consecutive_failures: (state.consecutive_failures || 0) + 1,
+    retry_after: now + cooldownMs,
+    probe_failures: probeFailures,
+    last_failure_reason: `http_429:${groq429Info?.quota_type || 'unknown'}:${groq429Info?.retry_after_seconds || 'n/a'}`,
+    quota_type: groq429Info?.quota_type || null,
+  });
+}
+
+/**
+ * Record a non-429 failure (5xx, network, timeout). Increment
+ * consecutive_failures; if >= threshold → OPEN with default 10-min cooldown.
+ * Clears the in-memory probe lock if this was a HALF_OPEN probe.
+ */
+async function _groqRouterRecordFailure(env, keyIndex, statusCode, errorMessage) {
+  const state = await _groqRouterGetKeyState(env, keyIndex);
+  _groqRouterProbeLockInMemory.delete(keyIndex);
+  const now = Date.now();
+  const wasHalfOpen = state.state === 'HALF_OPEN';
+  const newFailures = (state.consecutive_failures || 0) + 1;
+  const probeFailures = wasHalfOpen ? (state.probe_failures || 0) + 1 : (state.probe_failures || 0);
+  if (wasHalfOpen || newFailures >= GROQ_ROUTER_FAILURE_THRESHOLD) {
+    await _groqRouterSetKeyState(env, keyIndex, {
+      ...state,
+      state: 'OPEN',
+      consecutive_failures: newFailures,
+      retry_after: now + GROQ_ROUTER_DEFAULT_OPEN_MS,
+      probe_failures: probeFailures,
+      last_failure_reason: errorMessage || `http_${statusCode}`,
+      quota_type: null,
+    });
+  } else {
+    await _groqRouterSetKeyState(env, keyIndex, {
+      ...state,
+      state: 'CLOSED',
+      consecutive_failures: newFailures,
+      last_failure_reason: errorMessage || `http_${statusCode}`,
+      quota_type: null,
+    });
+  }
+}
+
+/**
+ * Call the Groq DB gateway (public.groq_generate_with_key) with a SPECIFIC key.
+ * Internal helper used by groqRouterExecute. The API key is passed as a
+ * parameter (stays in Cloudflare secrets, never stored in DB).
+ *
+ * NOTE: DB gateway strips HTTP headers. Rate-limit headers are not available;
+ * TPD/RPD info is parsed from the response BODY via classifyGroq429 instead.
+ */
+async function _groqRouterCallGateway(env, apiKey, model, messages, maxTokens, temperature) {
   try {
     const dbResult = await queryDb(env,
       `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
@@ -5998,185 +6150,217 @@ async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)
     const response_body = typeof result.response_body === 'string' ? result.response_body : JSON.stringify(result.response_body || {});
     return { status_code, response_body };
   } catch (e) {
-    // DB gateway error — return shape that call sites classify as retryable
-    return {
-      status_code: 0, // 0 = network/timeout (call sites treat non-200 as error, classifyHttpError(0||500) = retryable)
-      response_body: JSON.stringify({ error: { message: 'db_gateway_error', detail: (e?.message || '').substring(0, 120) } }),
-    };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// DUAL-KEY GROQ ROUTER
-// Routes News AI Groq requests between GROQ_API_KEY (Key 0) and GROQ_API_KEY_1 (Key 1).
-// Both keys are ACTIVE simultaneously — Key 1 is NOT just a fallback.
-//
-// Routing model:
-//   Summary (per article): deterministic hash(article_url) → Key 0 or Key 1
-//   Individual translation: deterministic hash(headline) → Key 0 or Key 1
-//   Batch translation: tick-alternating (even minute → Key 0, odd → Key 1)
-//   Batch analysis: tick-alternating (odd minute → Key 0, even → Key 1)
-//
-// Fallback: if routed key's circuit is OPEN or fetch fails, try the OTHER key.
-// If both keys fail → fall through to Gemini → OpenRouter → Workers AI (unchanged).
-//
-// Chat: UNCHANGED — uses chat-groq / chat-groq-secondary circuits (separate from News).
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Determine which Groq key slot to use for a request.
- * @param {string} input - article URL, headline text, or batch prompt
- * @param {boolean} isBatch - if true, use tick-alternating; if false, use hash
- * @param {number} batchOffset - for batch calls, offset to alternate translation vs analysis
- * @returns {number} 0 or 1
- */
-function _groqRouteKey(input, isBatch, batchOffset) {
-  if (isBatch) {
-    // Batch calls alternate per tick. batchOffset=0 for translation, 1 for analysis
-    // so they go to DIFFERENT keys on the same tick.
-    const minute = new Date().getUTCMinutes();
-    return (minute + (batchOffset || 0)) % 2 === 0 ? 0 : 1;
-  }
-  // Per-item calls: deterministic hash
-  let hash = 0;
-  const str = String(input || '');
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash) % 2 === 0 ? 0 : 1;
-}
-
-/**
- * Execute a Groq fetch with a specific key slot.
- * @param {object} env - Worker environment
- * @param {number} keySlot - 0 for GROQ_API_KEY, 1 for GROQ_API_KEY_1
- * @param {string} model - Groq model name
- * @param {Array} messages - OpenAI-compatible messages
- * @param {number} maxTokens - max_tokens
- * @param {number} temperature - temperature
- * @returns {Promise<{status_code: number, response_body: string, key_slot: number, rate_limit: object|null, usage: object|null}>}
- */
-async function _groqFetchWithKey(env, keySlot, model, messages, maxTokens, temperature) {
-  const apiKey = keySlot === 0 ? env.GROQ_API_KEY : env.GROQ_API_KEY_1;
-  if (!apiKey) {
-    return { status_code: 503, response_body: '{"error":{"message":"Groq API key not configured","status":"UNAVAILABLE"}}', key_slot: keySlot, rate_limit: null, usage: null };
-  }
-  // ── GROQ DB GATEWAY (Worker Egress WAF Bypass) ──
-  // Direct Worker → api.groq.com returns HTTP 403 from Cloudflare WAF edge
-  // (server:cloudflare, cf-ray present, 3-5ms latency = edge block, not origin).
-  // Both Groq keys blocked equally; Worker egress to other services works fine.
-  // Root cause: Groq's Cloudflare WAF blocks Cloudflare Worker egress IPs.
-  //
-  // FIX: Route through Supabase DB gateway (public.groq_generate_with_key).
-  // Supabase's IP makes the outbound HTTP call to api.groq.com, bypassing the
-  // Worker egress WAF block. Same pattern as public.gemini_generate().
-  //
-  // The API key is passed as a PARAMETER (stays in Cloudflare secrets, never
-  // stored in DB). The function returns {status_code, response_body}.
-  // NOTE: DB gateway strips HTTP headers, so rate_limit is null (unlike direct
-  // fetch which captured x-ratelimit-* headers). Token usage is still parsed
-  // from the response body on HTTP 200.
-  try {
-    const dbResult = await queryDb(env,
-      `SELECT public.groq_generate_with_key($1::text, $2::jsonb, $3::text, $4::integer, $5::double precision) AS result`,
-      [model, JSON.stringify(messages), apiKey, maxTokens, temperature]
-    );
-    const result = dbResult.rows[0]?.result || {};
-    const status_code = typeof result.status_code === 'number' ? result.status_code : 0;
-    const response_body = typeof result.response_body === 'string' ? result.response_body : JSON.stringify(result.response_body || {});
-
-    // Parse token usage from response body on HTTP 200 (same as before)
-    let usage = null;
-    if (status_code === 200) {
-      try {
-        const parsed = JSON.parse(response_body);
-        const u = parsed?.usage;
-        if (u && typeof u === 'object') {
-          usage = {
-            prompt_tokens: typeof u.prompt_tokens === 'number' ? u.prompt_tokens : null,
-            completion_tokens: typeof u.completion_tokens === 'number' ? u.completion_tokens : null,
-            total_tokens: typeof u.total_tokens === 'number' ? u.total_tokens : null,
-          };
-        }
-      } catch { /* non-JSON body — usage stays null */ }
-    }
-
-    return { status_code, response_body, key_slot: keySlot, rate_limit: null, usage };
-  } catch (e) {
-    // DB gateway error (connection failure, function not found, etc.)
     return {
       status_code: 0,
       response_body: JSON.stringify({ error: { message: 'db_gateway_error', detail: (e?.message || '').substring(0, 120) } }),
-      key_slot: keySlot,
-      rate_limit: null,
-      usage: null,
     };
   }
 }
 
 /**
- * Route a Groq News AI request with dual-key support.
- * Tries the preferred key first, falls back to the other key on failure.
- * Returns the result + which key was used.
+ * Centralized 4-key Groq Router entry point.
+ *
+ * Discovers configured Groq keys at runtime, selects the best healthy key,
+ * records the request in the per-key 10-min window, executes via the DB
+ * gateway, and updates the per-key circuit state based on the result.
+ *
+ * 429 handling: ONLY the key that returned 429 is OPENed. Other keys remain
+ * usable on subsequent calls.
  *
  * @param {object} env - Worker environment
- * @param {string} input - hash input (article URL, headline, batch prompt)
- * @param {boolean} isBatch - whether this is a batch call (tick-alternating)
- * @param {number} batchOffset - 0 for translation, 1 for analysis
- * @param {string} model - Groq model
- * @param {Array} messages - messages array
- * @param {number} maxTokens - max_tokens
- * @param {number} temperature - temperature
- * @param {object} circuitEnv - for circuit breaker checks (env passed to shouldAttemptProvider)
- * @returns {Promise<{status_code: number, response_body: string, key_slot: number, tried_keys: number[]}>}
+ * @param {string} model - Groq model name (e.g. 'openai/gpt-oss-120b')
+ * @param {Array} messages - OpenAI-compatible messages array
+ * @param {number} maxTokens - max_tokens parameter
+ * @param {number} temperature - temperature parameter
+ * @returns {Promise<{status_code: number, response_body: string, key_slot: number|null, groq_429_info: object|null, router_reason: string, circuit_states?: Array}>}
  */
-async function _groqRoutedFetch(env, input, isBatch, batchOffset, model, messages, maxTokens, temperature) {
-  const preferredKey = _groqRouteKey(input, isBatch, batchOffset);
-  const otherKey = preferredKey === 0 ? 1 : 0;
-  const circuitKey0 = 'groq-key0';
-  const circuitKey1 = 'groq-key1';
-  const triedKeys = [];
+async function groqRouterExecute(env, model, messages, maxTokens, temperature) {
+  // 1. Discover keys at runtime
+  const keys = _groqRouterDiscoverKeys(env);
+  if (keys.length === 0) {
+    return {
+      status_code: 503,
+      response_body: '{"error":{"message":"no_groq_keys_configured","status":"UNAVAILABLE"}}',
+      key_slot: null,
+      groq_429_info: null,
+      router_reason: 'no_groq_keys_configured',
+    };
+  }
 
-  // Try preferred key
-  const preferredCircuit = `groq-key${preferredKey}`;
-  const preferredCb = await shouldAttemptProvider(env, preferredCircuit);
-  if (preferredCb.attempt) {
-    triedKeys.push(preferredKey);
-    const result = await _groqFetchWithKey(env, preferredKey, model, messages, maxTokens, temperature);
-    // Record circuit result
-    const errorType = result.status_code !== 200 ? classifyHttpError(result.status_code || 500) : null;
-    try { await recordCircuitResult(env, preferredCircuit, result.status_code === 200, errorType, result.status_code !== 200 ? `http_${result.status_code}` : null); } catch {}
-    if (result.status_code === 200) {
-      return { ...result, tried_keys: triedKeys };
+  // ── DO PATH: Strict concurrency-safe enforcement via Durable Object ──
+  // When GROQ_ROUTER_DO binding is available, ALL key selection + recording
+  // goes through the DO (serialized, no race conditions). This guarantees
+  // STRICT 3/10min per-key budget enforcement.
+  if (env.GROQ_ROUTER_DO && typeof env.GROQ_ROUTER_DO.fetch === 'function') {
+    try {
+      // Phase 1: Reserve a key slot (serialized by DO)
+      const keyIndices = keys.map(k => k.index);
+      const doId = env.GROQ_ROUTER_DO.idFromName('groq-router');
+      const doStub = env.GROQ_ROUTER_DO.get(doId);
+      const reserveRes = await doStub.fetch(`https://do/?action=reserve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyIndices }),
+      });
+      const reserveData = await reserveRes.json();
+
+      if (reserveData.keyIndex === null || reserveData.keyIndex === undefined) {
+        return {
+          status_code: 503,
+          response_body: '{"error":{"message":"all_keys_unavailable","status":"UNAVAILABLE"}}',
+          key_slot: null,
+          groq_429_info: null,
+          router_reason: 'all_keys_unavailable',
+          circuit_states: reserveData.circuit_states || [],
+        };
+      }
+
+      const keyIndex = reserveData.keyIndex;
+      const apiKey = keys.find(k => k.index === keyIndex)?.apiKey;
+      const selectionReason = reserveData.reason;
+
+      // Phase 2: Execute Groq call (Worker has env access for DB gateway)
+      const fetchResult = await _groqRouterCallGateway(env, apiKey, model, messages, maxTokens, temperature);
+      const statusCode = fetchResult.status_code;
+      const responseBody = fetchResult.response_body || '';
+      const groq_429_info = parseGroq429Info(statusCode, responseBody);
+
+      // Phase 3: Record result (serialized by DO)
+      await doStub.fetch(`https://do/?action=record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyIndex,
+          success: statusCode === 200,
+          groq_429_info,
+          statusCode,
+        }),
+      });
+
+      // Observability log (NEVER log API key value)
+      console.log(
+        `[GROQ-ROUTER] key=${keyIndex} usage=${reserveData.usage || '?'}/${GROQ_ROUTER_MAX_PER_WINDOW} window_state=DO quota_type=${groq_429_info?.quota_type || 'n/a'} reason=${selectionReason} http=${statusCode}`
+      );
+
+      return {
+        status_code: statusCode,
+        response_body: responseBody,
+        key_slot: keyIndex,
+        groq_429_info,
+        router_reason: selectionReason,
+      };
+    } catch (doErr) {
+      console.warn('[GROQ-ROUTER] DO error, falling back to KV:', doErr?.message);
+      // Fall through to KV-based approach
     }
   }
 
-  // Fallback to other key
-  const otherCircuit = `groq-key${otherKey}`;
-  const otherCb = await shouldAttemptProvider(env, otherCircuit);
-  if (otherCb.attempt) {
-    triedKeys.push(otherKey);
-    const result = await _groqFetchWithKey(env, otherKey, model, messages, maxTokens, temperature);
-    const errorType = result.status_code !== 200 ? classifyHttpError(result.status_code || 500) : null;
-    try { await recordCircuitResult(env, otherCircuit, result.status_code === 200, errorType, result.status_code !== 200 ? `http_${result.status_code}` : null); } catch {}
-    return { ...result, tried_keys: triedKeys };
+  // ── KV FALLBACK: Best-effort enforcement (when DO not available) ──
+  // This path has a known read-modify-write race under cross-isolate concurrency.
+  // The DO path above is preferred for strict enforcement.
+  const selected = await _groqRouterSelectBestKey(env, keys);
+  if (!selected) {
+    const circuit_states = await Promise.all(keys.map(async k => {
+      const s = await _groqRouterGetKeyState(env, k.index);
+      const now = Date.now();
+      return {
+        index: k.index,
+        state: s.state,
+        consecutive_failures: s.consecutive_failures || 0,
+        retry_after: s.retry_after,
+        cooldown_remaining_s: s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0,
+        window_requests: (s.window_requests || []).length,
+        quota_type: s.quota_type || null,
+        last_failure_reason: s.last_failure_reason || null,
+      };
+    }));
+    return {
+      status_code: 503,
+      response_body: '{"error":{"message":"all_keys_unavailable","status":"UNAVAILABLE"}}',
+      key_slot: null,
+      groq_429_info: null,
+      router_reason: 'all_keys_unavailable',
+      circuit_states,
+    };
   }
 
-  // Both circuits OPEN — return failure
-  return { status_code: 0, response_body: '{"error":{"message":"Both Groq keys circuit OPEN"}}', key_slot: -1, tried_keys: triedKeys };
+  const keyIndex = selected.key.index;
+  const apiKey = selected.key.apiKey;
+  const selectionReason = selected.reason;
+
+  // Record request in window (BEFORE the call — counts toward budget even on failure)
+  await _groqRouterRecordRequest(env, keyIndex);
+
+  // Execute via DB gateway
+  const fetchResult = await _groqRouterCallGateway(env, apiKey, model, messages, maxTokens, temperature);
+  const statusCode = fetchResult.status_code;
+  const responseBody = fetchResult.response_body || '';
+  const groq_429_info = parseGroq429Info(statusCode, responseBody);
+
+  // Update per-key circuit state based on result
+  if (statusCode === 200) {
+    await _groqRouterRecordSuccess(env, keyIndex);
+  } else if (statusCode === 429 && groq_429_info) {
+    await _groqRouterRecord429(env, keyIndex, groq_429_info);
+  } else {
+    const errorType = classifyHttpError(statusCode || 500);
+    if (errorType === 'retryable') {
+      await _groqRouterRecordFailure(env, keyIndex, statusCode, `http_${statusCode}`);
+    } else {
+      _groqRouterProbeLockInMemory.delete(keyIndex);
+    }
+  }
+
+  // Observability log (NEVER log API key value)
+  const finalState = await _groqRouterGetKeyState(env, keyIndex);
+  const now = Date.now();
+  const cooldownRemainingS = finalState.retry_after
+    ? Math.max(0, Math.ceil((finalState.retry_after - now) / 1000))
+    : 0;
+  console.log(
+    `[GROQ-ROUTER] key=${keyIndex} usage=${finalState.window_requests.length}/${GROQ_ROUTER_MAX_PER_WINDOW} window_state=${finalState.state} quota_type=${groq_429_info?.quota_type || finalState.quota_type || 'n/a'} cooldown_remaining=${cooldownRemainingS}s reason=${selectionReason} http=${statusCode}`
+  );
+
+  return {
+    status_code: statusCode,
+    response_body: responseBody,
+    key_slot: keyIndex,
+    groq_429_info,
+    router_reason: selectionReason,
+  };
 }
 
 /**
- * Provider 0: Groq News AI — dual-key routed via _groqRoutedFetch.
- * Both GROQ_API_KEY (Key 0) and GROQ_API_KEY_1 (Key 1) are active.
- * Truncates article text to 8000 chars to control TPM.
- * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
+ * Compatibility wrapper around groqRouterExecute for callers that used the old
+ * _groqRoutedFetch signature. Returns the router result extended with
+ * tried_keys (for backward compatibility with batchTranslateToFarsi logging).
+ *
+ * The router selects the key internally now — there is no "preferred vs other"
+ * dual-key routing. The `input`, `isBatch`, `batchOffset` params are IGNORED
+ * (kept in the signature so callers don't need changes).
+ */
+async function _groqRoutedFetch(env, _input, _isBatch, _batchOffset, model, messages, maxTokens, temperature) {
+  const result = await groqRouterExecute(env, model, messages, maxTokens, temperature);
+  return {
+    ...result,
+    tried_keys: result.key_slot !== null ? [result.key_slot] : [],
+  };
+}
+
+/**
+ * Provider 0: Groq News AI summary — DELEGATES to the centralized 4-key Groq
+ * Router via _groqRoutedFetch. Truncates article text to 8000 chars to control
+ * TPM. Returns { provider, success, summary?, error?, errorType, error_detail?,
+ * duration_ms, key_slot }.
+ *
+ * GROQ-ROUTER-4KEY: The router handles key selection, per-key 3/10min budget,
+ * circuit-breaker, and HALF_OPEN probe internally. This wrapper just shapes
+ * the result for the generateSummaryWithFallback chain.
  */
 async function tryGroq(env, prompt, systemPrompt) {
   const t0 = Date.now();
   try {
     // ── Truncate article text to 8000 chars to control TPM ──
-    // Workers AI / OpenRouter already truncate at 12000; Groq gets 8000 (more conservative).
     const truncatedPrompt = (prompt && prompt.length > 8000) ? prompt.substring(0, 8000) : prompt;
 
     const messages = [];
@@ -6185,196 +6369,37 @@ async function tryGroq(env, prompt, systemPrompt) {
     }
     messages.push({ role: 'user', content: truncatedPrompt });
 
-    // DUAL-KEY ROUTING: hash(prompt) → Key 0 or Key 1, with fallback to other key
     const result = await _groqRoutedFetch(env, truncatedPrompt, false, 0, 'openai/gpt-oss-120b', messages, 1024, 0.4);
     const statusCode = result.status_code;
     const responseBody = result.response_body || '';
     const keySlot = result.key_slot;
-    const rateLimit = result.rate_limit || null;
-    const usage = result.usage || null;
 
     if (statusCode !== 200) {
       const errorType = classifyHttpError(statusCode || 500);
-      // ── PHASE 1 DIAGNOSTIC: log 429 rate-limit headers + bounded error body ──
-      // SECURITY: no API key, no Authorization header, no full request payload.
-      // Only standard rate-limit headers + truncated (300 char) error body.
-      if (statusCode === 429) {
-        const rl = rateLimit || {};
-        console.warn(`[GROQ-429] key=${keySlot} keys_tried=${JSON.stringify(result.tried_keys||[])} retry_after=${rl.retry_after||'n/a'} rpm=${rl.remaining_requests||'?'}/${rl.limit_requests||'?' } tpm=${rl.remaining_tokens||'?'}/${rl.limit_tokens||'?'} reset_req=${rl.reset_requests||'n/a'} reset_tok=${rl.reset_tokens||'n/a'} body=${responseBody.substring(0, 300)}`);
+      if (statusCode === 429 && result.groq_429_info) {
+        console.warn(`[GROQ-429] key=${keySlot} router_reason=${result.router_reason} quota_type=${result.groq_429_info.quota_type} retry_after=${result.groq_429_info.retry_after_seconds}s body=${responseBody.substring(0, 300)}`);
       } else {
-        console.warn(`[GROQ-ERR] key=${keySlot} status=${statusCode} keys_tried=${JSON.stringify(result.tried_keys||[])} body=${responseBody.substring(0, 300)}`);
+        console.warn(`[GROQ-ERR] key=${keySlot} status=${statusCode} router_reason=${result.router_reason} body=${responseBody.substring(0, 300)}`);
       }
-      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 300), duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
+      return { provider: 'groq', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 300), duration_ms: Date.now() - t0, key_slot: keySlot, groq_429_info: result.groq_429_info };
     }
 
     let data;
     try {
       data = JSON.parse(responseBody);
     } catch (e) {
-      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
+      return { provider: 'groq', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
     }
 
     const text = data?.choices?.[0]?.message?.content;
     if (text && text.trim().length >= 50) {
-      // ── PHASE 1 DIAGNOSTIC: log token usage on success ──
-      if (usage) {
-        console.log(`[GROQ-OK] key=${keySlot} usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} rpm_remaining=${rateLimit?.remaining_requests||'?'}/${rateLimit?.limit_requests||'?'} tpm_remaining=${rateLimit?.remaining_tokens||'?'}/${rateLimit?.limit_tokens||'?'} duration=${Date.now() - t0}ms`);
-      }
-      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage };
+      return { provider: 'groq', success: true, summary: text.trim(), duration_ms: Date.now() - t0, key_slot: keySlot };
     }
-    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot, rate_limit: rateLimit, usage: null };
+    return { provider: 'groq', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, key_slot: keySlot };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
     return {
       provider: 'groq',
-      success: false,
-      error: isAbort ? 'timeout' : 'network_error',
-      errorType: 'retryable',
-      error_detail: e?.message?.substring(0, 120),
-      duration_ms: Date.now() - t0,
-    };
-  }
-}
-
-/**
- * Provider 0b: Groq Secondary (fallback 0b) — direct HTTP call with GROQ_API_KEY_1.
- *
- * INDEPENDENT from Groq Primary:
- *   - Uses env.GROQ_API_KEY_1 (Cloudflare secret), NOT the Vault-stored GROQ_API_KEY
- *   - Has its OWN circuit breaker key: 'groq-secondary' (tripping primary does NOT trip secondary)
- *   - Does NOT use the Global Groq Coordinator (checkGroqCapacity/recordGroqRequest)
- *     because the coordinator tracks the primary key's rate limits
- *   - Uses DB gateway (groq_generate_with_key) — same as tryGroq, NOT direct fetch
- *
- * NOTE: This function is DEAD CODE (Phase 2 removed the only caller from
- * generateSummaryWithFallback). Kept for backward compatibility. Now routes
- * through DB gateway for consistency (would work if re-enabled).
- *
- * Returns same shape as tryGroq():
- *   { provider: 'groq-secondary', success, summary?, error?, errorType, error_detail?, duration_ms }
- */
-async function tryGroqSecondary(env, prompt, systemPrompt) {
-  const t0 = Date.now();
-  const GROQ_API_KEY_1 = env.GROQ_API_KEY_1;
-  if (!GROQ_API_KEY_1) {
-    return { provider: 'groq-secondary', success: false, error: 'no_api_key', errorType: 'non_retryable', duration_ms: 0 };
-  }
-  try {
-    const messages = [];
-    if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
-      messages.push({ role: 'system', content: systemPrompt });
-    }
-    messages.push({ role: 'user', content: prompt });
-
-    // GROQ DB GATEWAY (Worker Egress WAF Bypass) — uses Key 1 (keySlot=1)
-    const result = await _groqFetchWithKey(env, 1, 'openai/gpt-oss-120b', messages, 1024, 0.4);
-    const statusCode = result.status_code;
-    const responseBody = result.response_body || '';
-    const rateLimit = result.rate_limit || null;
-    const usage = result.usage || null;
-
-    if (statusCode !== 200) {
-      const errorType = classifyHttpError(statusCode || 500);
-      const errorBody = responseBody.substring(0, 300);
-      if (statusCode === 429) {
-        const rl = rateLimit || {};
-        console.warn(`[GROQ-SEC-429] key=1 retry_after=${rl.retry_after||'n/a'} body=${errorBody}`);
-      } else {
-        console.warn(`[GROQ-SEC-ERR] key=1 status=${statusCode} body=${errorBody}`);
-      }
-      return { provider: 'groq-secondary', success: false, error: `http_${statusCode}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
-    }
-
-    let data;
-    try {
-      data = JSON.parse(responseBody);
-    } catch (e) {
-      return { provider: 'groq-secondary', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
-    }
-
-    const text = data?.choices?.[0]?.message?.content;
-    if (text && text.trim().length >= 50) {
-      if (usage) {
-        console.log(`[GROQ-SEC-OK] key=1 usage prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens} duration=${Date.now() - t0}ms`);
-      }
-      return { provider: 'groq-secondary', success: true, summary: text.trim(), duration_ms: Date.now() - t0, rate_limit: rateLimit, usage };
-    }
-    return { provider: 'groq-secondary', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0, rate_limit: rateLimit, usage: null };
-  } catch (e) {
-    const isAbort = e?.name === 'AbortError';
-    return {
-      provider: 'groq-secondary',
-      success: false,
-      error: isAbort ? 'timeout' : 'network_error',
-      errorType: 'retryable',
-      error_detail: e?.message?.substring(0, 120),
-      duration_ms: Date.now() - t0,
-    };
-  }
-}
-
-/**
- * Provider 1: Gemini (via DB gateway).
- * Returns { provider, success, summary?, error?, errorType, error_detail?, duration_ms }.
- */
-async function tryGemini(env, prompt, systemPrompt) {
-  const t0 = Date.now();
-  // Gemini requests now route through the Supabase DB gateway (EU region)
-  // to bypass Google's geo-restriction on Hong Kong. The API key is stored
-  // securely in Supabase Vault and never exposed to the Worker.
-  // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
-  try {
-    const requestBody = {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1024, topP: 0.85 },
-    };
-    if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
-      requestBody.systemInstruction = { parts: [{ text: systemPrompt }] };
-    }
-
-    // Call the DB function gemini_generate() via queryDb (standalone, NOT in transaction)
-    // The function runs with SECURITY DEFINER, reads the API key from vault,
-    // calls http_post() to Google's API from the EU DB server, and returns the response.
-    const dbResult = await queryDb(env,
-      `SELECT public.gemini_generate(
-        $1::text,
-        $2::jsonb,
-        $3::jsonb,
-        $4::jsonb
-      ) AS result`,
-      [
-        'gemini-3.5-flash',
-        JSON.stringify(requestBody.contents),
-        JSON.stringify(requestBody.generationConfig),
-        requestBody.systemInstruction ? JSON.stringify(requestBody.systemInstruction) : null,
-      ]
-    );
-
-    const result = dbResult.rows[0]?.result || {};
-    const statusCode = result.status_code;
-    const responseBody = result.response_body || '';
-
-    if (statusCode !== 200) {
-      const errorType = classifyHttpError(statusCode || 500);
-      return { provider: 'gemini', success: false, error: `http_${statusCode}`, errorType, error_detail: responseBody.substring(0, 200), duration_ms: Date.now() - t0 };
-    }
-
-    let data;
-    try {
-      data = JSON.parse(responseBody);
-    } catch (e) {
-      return { provider: 'gemini', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
-    }
-
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text && text.trim().length >= 50) {
-      return { provider: 'gemini', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
-    }
-    return { provider: 'gemini', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
-  } catch (e) {
-    const isAbort = e?.name === 'AbortError';
-    return {
-      provider: 'gemini',
       success: false,
       error: isAbort ? 'timeout' : 'network_error',
       errorType: 'retryable',
@@ -6716,6 +6741,14 @@ async function saveCircuitState(env, provider, state) {
  * If the circuit transitions OPEN → HALF_OPEN here, the new state is persisted
  * so concurrent ticks don't all probe at once.
  */
+// ── P1 FIX: In-memory probe lock (per-isolate) ──
+// Prevents multiple concurrent callers in the same isolate from all becoming
+// HALF-OPEN probes simultaneously. One probe per circuit per isolate.
+// Cross-isolate: the KV state transition (OPEN→HALF_OPEN) itself acts as a
+// best-effort lock — the first caller to write HALF_OPEN wins; others see
+// HALF_OPEN and defer (return circuit_open until the probe completes).
+const _probeLockInMemory = new Map(); // provider → { expiresAt: number }
+
 async function shouldAttemptProvider(env, provider) {
   const state = await getCircuitState(env, provider);
   const now = Date.now();
@@ -6730,13 +6763,33 @@ async function shouldAttemptProvider(env, provider) {
       return { attempt: false, state: 'OPEN', retry_after: state.retry_after, reason: 'circuit_open' };
     }
     // OPEN window expired → transition to HALF_OPEN (probe)
+    // P1 FIX: Single probe — check in-memory probe lock first
+    const probeLock = _probeLockInMemory.get(provider);
+    if (probeLock && now < probeLock.expiresAt) {
+      // Another caller in this isolate is already probing — defer
+      return { attempt: false, state: 'OPEN', retry_after: probeLock.expiresAt, reason: 'probe_in_progress' };
+    }
+    // Claim the probe slot (30s window for the probe to complete)
+    _probeLockInMemory.set(provider, { expiresAt: now + 30000 });
     const newState = { ...state, state: 'HALF_OPEN' };
     await saveCircuitState(env, provider, newState);
     return { attempt: true, state: 'HALF_OPEN', retry_after: state.retry_after, reason: 'half_open_probe' };
   }
 
   if (state.state === 'HALF_OPEN') {
-    // Probe in progress — allow attempt
+    // P1 FIX: Probe in progress — only the original probe caller should attempt.
+    // Other concurrent callers should defer (return circuit_open) to prevent
+    // multiple probes overwhelming the provider during cooldown.
+    const probeLock = _probeLockInMemory.get(provider);
+    if (probeLock && now < probeLock.expiresAt) {
+      // Check if this caller is the original probe (best-effort: allow if no lock
+      // or lock expired). In practice, the original probe caller already has
+      // attempt=true from the OPEN→HALF_OPEN transition above.
+      // For concurrent callers seeing HALF_OPEN, defer.
+      return { attempt: false, state: 'HALF_OPEN', retry_after: probeLock.expiresAt, reason: 'probe_in_progress' };
+    }
+    // Lock expired or no lock — allow attempt (probe slot available)
+    _probeLockInMemory.set(provider, { expiresAt: now + 30000 });
     return { attempt: true, state: 'HALF_OPEN', retry_after: state.retry_after, reason: 'half_open' };
   }
 
@@ -6757,6 +6810,11 @@ async function shouldAttemptProvider(env, provider) {
 async function recordCircuitResult(env, provider, success, errorType, errorMessage) {
   const state = await getCircuitState(env, provider);
   const now = Date.now();
+
+  // P1 FIX: Clear the in-memory probe lock when the probe completes (success or failure)
+  if (state.state === 'HALF_OPEN') {
+    _probeLockInMemory.delete(provider);
+  }
 
   if (success) {
     // Success → always close the circuit
@@ -6780,15 +6838,33 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
     return;
   }
 
+  // ── P1 FIX: Extract Groq 429 cooldown from errorMessage ──
+  // errorMessage format for Groq 429: "http_429:quota_type:retry_after_seconds"
+  // e.g. "http_429:daily_quota_tpd:932"
+  // If present, use the parsed retry_after_seconds as the OPEN duration (not fixed 10 min).
+  let groq429CooldownMs = null;
+  if (errorMessage && errorMessage.startsWith('http_429:')) {
+    const parts = errorMessage.split(':');
+    if (parts.length >= 3) {
+      const retryAfterSec = parseInt(parts[2], 10);
+      if (retryAfterSec > 0) {
+        groq429CooldownMs = retryAfterSec * 1000;
+      }
+    }
+  }
+
   // Retryable failure
   if (state.state === 'HALF_OPEN') {
     // Probe failed → back to OPEN
-    // PHASE 5 FIX: Check probe count — if circuit has failed HALF_OPEN probes
-    // repeatedly, use a longer backoff (PROLONGED_OPEN) to avoid infinite loop.
+    // P1 FIX: If this is a Groq 429 probe failure, use the FRESH retry_after from
+    // the new 429 body (not the stale old cooldown). This prevents infinite probe
+    // loops when TPD is exhausted — the new 429 has the accurate remaining cooldown.
     const probeFailures = (state.probe_failures || 0) + 1;
     const isProlonged = probeFailures >= CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD;
-    const backoffMs = isProlonged ? CIRCUIT_BREAKER_PROLONGED_OPEN_MS : CIRCUIT_BREAKER_OPEN_MS;
-    console.warn(`[CIRCUIT] ${provider} probe failed (${probeFailures}x). ${isProlonged ? 'PROLONGED OPEN' : 'OPEN'} for ${backoffMs / 60000}min`);
+    // P1 FIX: Groq 429 cooldown takes precedence over fixed prolonged/open backoff
+    const backoffMs = groq429CooldownMs
+      || (isProlonged ? CIRCUIT_BREAKER_PROLONGED_OPEN_MS : CIRCUIT_BREAKER_OPEN_MS);
+    console.warn(`[CIRCUIT] ${provider} probe failed (${probeFailures}x). ${groq429CooldownMs ? `OPEN for ${groq429CooldownMs / 1000}s (Groq 429 cooldown)` : `${isProlonged ? 'PROLONGED OPEN' : 'OPEN'} for ${backoffMs / 60000}min`}`);
     await saveCircuitState(env, provider, {
       state: 'OPEN',
       consecutive_failures: state.consecutive_failures + 1,
@@ -6804,12 +6880,14 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
   // CLOSED (or already OPEN) → increment consecutive failures
   const newFailures = (state.consecutive_failures || 0) + 1;
   if (newFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
-    // Trip the circuit → OPEN for 10 min
+    // Trip the circuit → OPEN
+    // P1 FIX: Groq 429 cooldown takes precedence over fixed 10-min OPEN
+    const backoffMs = groq429CooldownMs || CIRCUIT_BREAKER_OPEN_MS;
     await saveCircuitState(env, provider, {
       state: 'OPEN',
       consecutive_failures: newFailures,
       opened_at: now,
-      retry_after: now + CIRCUIT_BREAKER_OPEN_MS,
+      retry_after: now + backoffMs,
       probe_failures: 0, // PHASE 5: start counting probe failures
       prolonged: false,
       last_failure_reason: errorMessage || 'threshold_reached',
@@ -6859,7 +6937,7 @@ async function recordCacheStat(env, hit) {
  *   { summary, usedProvider, attempts, totalDuration, anyRetryable, allNonRetryable, fallbackUsed }
  *
  * - summary: string | null (null = all providers failed)
- * - usedProvider: 'gemini' | 'workers-ai' | 'openai' | null
+ * - usedProvider: 'groq' | 'openrouter' | 'workers-ai' | 'openai' | null
  * - attempts: array of per-provider results (for metadata + monitoring)
  * - fallbackUsed: true if success came from a non-primary provider
  */
@@ -6881,22 +6959,30 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
   // r.error / r.errorType to reflect validation failure before the result is
   // recorded in the circuit breaker.
   async function attemptProvider(providerName, tryFn, validator) {
-    // Check circuit breaker first
-    const circuitCheck = await shouldAttemptProvider(env, providerName);
-    if (!circuitCheck.attempt) {
-      // Circuit OPEN — skip this provider entirely
-      const skippedAttempt = {
-        provider: providerName,
-        success: false,
-        error: 'circuit_open',
-        errorType: 'retryable', // counts as retryable so fallback continues to next provider
-        error_detail: `circuit open until ${new Date(circuitCheck.retry_after).toISOString()}`,
-        duration_ms: 0,
-        circuit_skipped: true,
-        circuit_state: circuitCheck.state,
-      };
-      attempts.push(skippedAttempt);
-      return skippedAttempt;
+    // GROQ-ROUTER-4KEY: The Groq Router handles its OWN per-key circuit state
+    // (groq:router:key{N}). Skip the outer shouldAttemptProvider check for
+    // Groq — the router internally skips OPEN/expired keys and surfaces
+    // 'all_keys_unavailable' as a 503.
+    const isGroq = providerName === 'groq';
+
+    // Check circuit breaker first (skip for Groq — router handles it)
+    if (!isGroq) {
+      const circuitCheck = await shouldAttemptProvider(env, providerName);
+      if (!circuitCheck.attempt) {
+        // Circuit OPEN — skip this provider entirely
+        const skippedAttempt = {
+          provider: providerName,
+          success: false,
+          error: 'circuit_open',
+          errorType: 'retryable', // counts as retryable so fallback continues to next provider
+          error_detail: `circuit open until ${new Date(circuitCheck.retry_after).toISOString()}`,
+          duration_ms: 0,
+          circuit_skipped: true,
+          circuit_state: circuitCheck.state,
+        };
+        attempts.push(skippedAttempt);
+        return skippedAttempt;
+      }
     }
 
     // Circuit CLOSED or HALF_OPEN → attempt the provider
@@ -6920,39 +7006,26 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     }
 
     // Record result in circuit breaker (updates state: CLOSED↔OPEN↔HALF_OPEN)
-    // FIX: Coordinator denial is a proactive rate limit, NOT a provider failure.
-    // It must NOT trip the circuit — the provider itself didn't fail.
+    // GROQ-ROUTER-4KEY: The Groq Router has its OWN per-key state in
+    // `groq:router:key{N}` (managed by _groqRouterRecordSuccess / 429 / Failure
+    // inside groqRouterExecute). The outer `attemptProvider` layer must NOT call
+    // recordCircuitResult for Groq — that would write to a phantom circuit key
+    // (`groq-key{N}` or `groq`) that the router never reads.
     //
-    // F7/F8 FIX: Avoid double-recording for Groq dual-key routed calls.
-    // _groqRoutedFetch (inner layer) already recorded per-key transport failures.
-    // The outer layer should only record:
-    //   - SUCCESS (idempotent — closes circuit, no harm in double-recording)
-    //   - SEMANTIC failures (HTTP 200 but invalid_json/empty_response/Persian validation)
-    //     — with REAL key_slot for attribution (F8 fix)
-    // The outer layer should SKIP:
-    //   - TRANSPORT failures (HTTP non-200, key_slot >= 0, error starts with 'http_')
-    //     — already recorded by inner layer
-    //   - NO KEY TRIED (key_slot === -1, both circuits OPEN) — don't attribute to wrong key
+    // For NON-GROQ providers (OpenRouter / Workers AI / OpenAI), recordCircuitResult
+    // is still used (circuit keys 'openrouter' / 'workers-ai' / 'openai').
     if (!r.coordinator_skipped) {
       const isGroqRouted = r.key_slot !== undefined && r.key_slot !== null;
-      const isTransportFailure = isGroqRouted && !r.success && r.key_slot >= 0
-        && r.error && String(r.error).startsWith('http_');
-      const noKeyTried = isGroqRouted && r.key_slot === -1;
 
-      if (isTransportFailure || noKeyTried) {
-        // Skip — inner layer already recorded transport failure, or no key was tried.
-        // This prevents double-recording (F7) and wrong-key attribution (F8).
+      if (isGroqRouted) {
+        // Groq — router handles all per-key state internally. Skip outer recording.
       } else {
-        // Success OR semantic failure (invalid_json/empty_response/persian_validation_failed)
-        // OR non-Groq provider (Gemini/OpenRouter/Workers AI/OpenAI — no key_slot).
-        // For Groq, use real key_slot for attribution (F8 fix).
-        const circuitKey = (isGroqRouted && r.key_slot >= 0)
-          ? `groq-key${r.key_slot}`
-          : providerName;
+        // Non-Groq provider (OpenRouter/Workers AI/OpenAI) — use the standard
+        // circuit breaker (providerName === circuit key).
         try {
-          await recordCircuitResult(env, circuitKey, r.success, r.errorType, r.error || r.error_detail);
+          await recordCircuitResult(env, providerName, r.success, r.errorType, r.error || r.error_detail);
         } catch (e) {
-          console.warn(`[CIRCUIT] recordResult(${circuitKey}) failed:`, e?.message);
+          console.warn(`[CIRCUIT] recordResult(${providerName}) failed:`, e?.message);
         }
       }
     }
@@ -6961,84 +7034,65 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request)
-  //   0)  Groq            (primary)      — NEWS_PROVIDER_GROQ=true (default), dual-key routed
-  //   1)  Gemini          (fallback 1)   — NEWS_PROVIDER_GEMINI=true (default)
-  //   2)  OpenRouter      (fallback 2)   — NEWS_PROVIDER_OPENROUTER=true (default, free emergency)
-  //   3)  Workers AI      (fallback 3)   — NEWS_PROVIDER_WORKERS_AI=true (default)
-  //   4)  OpenAI          (fallback 4)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
+  // FALLBACK CHAIN (GROQ-ROUTER-4KEY — Gemini removed per spec; groq-secondary
+  // removed because the router picks the best key internally)
+  //   0)  Groq Router     (primary)      — NEWS_PROVIDER_GROQ=true (default), 4-key routed
+  //   1)  OpenRouter      (fallback 1)   — NEWS_PROVIDER_OPENROUTER=true (default, free emergency)
+  //   2)  Workers AI      (fallback 2)   — NEWS_PROVIDER_WORKERS_AI=true (default)
+  //   3)  OpenAI          (fallback 3)   — NEWS_PROVIDER_OPENAI=false (opt-in, paid)
   //
-  // PHASE 2 FIX: tryGroq already covers BOTH keys via _groqRoutedFetch (preferred key
-  // → fallback to other key on non-200 or circuit-skip). The previous explicit
-  // tryGroqSecondary() call here was REDUNDANT — it re-fetched Key 1 even though
-  // _groqRoutedFetch had already tried it. Worst case was Key0=1, Key1=2 calls per
-  // summary. Removed the redundant invocation; _groqRoutedFetch's internal dual-key
-  // fallback is sufficient.
+  // GROQ-ROUTER-4KEY: tryGroq → _groqRoutedFetch → groqRouterExecute handles
+  // all 4 keys (slots 0..3) with per-key 3/10min budget, circuit-breaker, and
+  // HALF_OPEN probe. The previous explicit tryGroqSecondary / Gemini fallbacks
+  // are REMOVED — the router picks the best healthy key automatically.
   //
-  // P2-A: Groq is ALWAYS tried first. Gemini is the first fallback.
-  // OpenRouter is the second fallback. Workers AI is the third fallback.
+  // P2-A: Groq is ALWAYS tried first. OpenRouter is the first fallback.
+  // Workers AI is the second fallback. OpenAI is the third (opt-in, paid).
   // Each provider is tried ONLY if the previous one failed.
-  // Circuit breaker protects each provider independently.
+  // Circuit breaker protects each non-Groq provider independently
+  // (Groq has its OWN per-key state in the router — does NOT use
+  // recordCircuitResult/shouldAttemptProvider).
   // No parallel calls — sequential fallback to minimize cost + latency.
   // ────────────────────────────────────────────────────────────────────────────
 
-  // Provider 0: Groq — DUAL-KEY ROUTED via tryGroq (hash routing + fallback to other key)
-  // tryGroq internally uses _groqRoutedFetch which handles both Key 0 and Key 1.
-  // Circuit keys: groq-key0 and groq-key1 (independent per key, managed inside _groqRoutedFetch).
+  // Provider 0: Groq Router — 4-key routed via tryGroq (selects best key, per-key 3/10min budget)
+  // tryGroq internally uses _groqRoutedFetch → groqRouterExecute which handles all configured keys.
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const r = await attemptProvider('groq-key0', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
+    const r = await attemptProvider('groq', () => tryGroq(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
       summary = r.summary;
       usedProvider = 'groq';
-      console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded (dual-key routed via _groqRoutedFetch)');
+      console.log('[NEWS-AI-FALLBACK] ✅ Groq succeeded (4-key router via groqRouterExecute)');
     } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq failed (error=${r.error}) — falling back to next provider`);
+      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Groq failed (error=${r.error}) — falling back to OpenRouter`);
     }
   }
 
-  // Provider 1: Gemini (fallback 1) — tried ONLY if Groq (both keys via _groqRoutedFetch) didn't succeed
-  // P0-1 FIX: Added `!summary &&` guard so Gemini is NEVER called when Groq
-  // already produced a valid summary. Previously the missing guard caused
-  // Gemini to be called on EVERY article (even when Groq succeeded), doubling
-  // AI cost and overwriting the Groq result if Gemini also succeeded.
-  if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
-    // NEWSSEC-006 FIX: Pass systemPrompt so Gemini uses systemInstruction
-    // (system-priority, cannot be overridden by untrusted article text).
-    const r = await attemptProvider('gemini', () => tryGemini(env, prompt, systemPrompt), validatePersianOutput);
-    if (r.success) {
-      summary = r.summary;
-      usedProvider = 'gemini';
-      console.log('[NEWS-AI-FALLBACK] ✅ Gemini fallback succeeded (Groq was unavailable)');
-    } else {
-      console.warn(`[NEWS-AI-FALLBACK] ⚠️ Gemini failed (error=${r.error}, type=${r.errorType}, detail=${(r.error_detail || '').slice(0, 100)}) — falling back to OpenRouter`);
-    }
-  }
-
-  // Provider 2: OpenRouter (fallback 2) — tried if Groq + Gemini didn't succeed
+  // Provider 1: OpenRouter (fallback 1) — tried if Groq Router didn't succeed
   // CHAIN ORDER: OpenRouter before Workers AI (per failover chain spec)
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true)) {
     const r = await attemptProvider('openrouter', () => tryOpenRouter(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
       summary = r.summary;
       usedProvider = 'openrouter';
-      console.log('[NEWS-AI-FALLBACK] ⚠️ OpenRouter fallback succeeded (Groq + Gemini were unavailable)');
+      console.log('[NEWS-AI-FALLBACK] ⚠️ OpenRouter fallback succeeded (Groq was unavailable)');
     } else {
       console.warn(`[NEWS-AI-FALLBACK] ⚠️ OpenRouter failed (error=${r.error}, type=${r.errorType}) — falling back to Workers AI`);
     }
   }
 
-  // Provider 3: Workers AI (fallback 3) — ONLY if Groq + Gemini + OpenRouter didn't succeed
+  // Provider 2: Workers AI (fallback 2) — ONLY if Groq + OpenRouter didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) {
     // P0-1 FIX: Pass systemPrompt to tryWorkersAI (was missing — used hardcoded English prompt)
     const r = await attemptProvider('workers-ai', () => tryWorkersAI(env, prompt, systemPrompt), validatePersianOutput);
     if (r.success) {
       summary = r.summary;
       usedProvider = 'workers-ai';
-      console.log('[NEWS-AI-FALLBACK] ⚠️ Workers AI fallback succeeded (Groq + Gemini + OpenRouter were unavailable)');
+      console.log('[NEWS-AI-FALLBACK] ⚠️ Workers AI fallback succeeded (Groq + OpenRouter were unavailable)');
     }
   }
 
-  // Provider 4: OpenAI (fallback 4, opt-in) — only if all above didn't succeed
+  // Provider 3: OpenAI (fallback 3, opt-in) — only if all above didn't succeed
   if (!summary && isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) {
     // P0-1 FIX: Pass systemPrompt to tryOpenAI (was missing — used hardcoded English prompt)
     const r = await attemptProvider('openai', () => tryOpenAI(env, prompt, systemPrompt), validatePersianOutput);
@@ -7069,6 +7123,11 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
 /**
  * Record a per-provider attempt to the aggregate stats in KV.
  * Used by /api/news-ai-monitor for provider success/failure counts.
+ *
+ * GROQ-ROUTER-4KEY: Per-key router state lives in `groq:router:key{N}` and is
+ * managed by the router itself. This function tracks aggregate per-provider
+ * success/failure counts for the monitoring dashboard. The 'groq' bucket here
+ * aggregates ALL router successes/failures (regardless of which key was used).
  */
 async function recordProviderAttempt(env, provider, success, durationMs) {
   if (!env.APP_CACHE) return;
@@ -7076,9 +7135,6 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
     const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
     let stats = {
       groq: { success: 0, failed: 0, total_ms: 0 },
-      'groq-key0': { success: 0, failed: 0, total_ms: 0 },
-      'groq-key1': { success: 0, failed: 0, total_ms: 0 },
-      gemini: { success: 0, failed: 0, total_ms: 0 },
       'workers-ai': { success: 0, failed: 0, total_ms: 0 },
       'openrouter': { success: 0, failed: 0, total_ms: 0 },
       'openai': { success: 0, failed: 0, total_ms: 0 },
@@ -7092,8 +7148,9 @@ async function recordProviderAttempt(env, provider, success, durationMs) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         stats = { ...stats, ...parsed };
-        // Ensure nested provider objects exist
-        for (const k of ['groq-key0', 'groq-key1', 'gemini', 'workers-ai', 'openai']) {
+        // Ensure nested provider objects exist (GROQ-ROUTER-4KEY: groq-key0/groq-key1
+        // and gemini removed — router state lives in groq:router:key{N})
+        for (const k of ['groq', 'workers-ai', 'openrouter', 'openai']) {
           if (!stats[k]) stats[k] = { success: 0, failed: 0, total_ms: 0 };
         }
         if (!stats.fallback_to) stats.fallback_to = {};
@@ -7315,7 +7372,7 @@ async function enqueueForSummary(env, articles) {
       rss_fetched_at: now,        // approx — RSS fetch happened seconds before enqueue
       summary_started_at: null,   // set when processOneArticleSummary picks this item
       summary_completed_at: null, // set when summary saved to KV (success)
-      provider_used: null,        // 'gemini' | 'workers-ai' | 'openai'
+      provider_used: null,        // 'groq' | 'openrouter' | 'workers-ai' | 'openai'
       // PUBLICATION GATE (Commit 1): Carry enriched analysis fields from
       // batchAnalyzeNews into the queue. These are used by publishArticleToFarsiNews()
       // to construct the published article with sentiment/impact/coins already set.
@@ -7824,7 +7881,7 @@ async function processOneArticleSummary(env, pool = null) {
       // Store as JSON with metadata (backward-compatible: enrichNewsWithAISummaries parses both)
       const payload = JSON.stringify({
         summary,
-        provider, // 'gemini' | 'workers-ai' | 'openai'
+        provider, // 'groq' | 'openrouter' | 'workers-ai' | 'openai'
         attempts: attempts.map(a => ({
           provider: a.provider,
           success: a.success,
@@ -8518,7 +8575,8 @@ async function getNewsAIMonitoring(env) {
   let avgProvider = null;
   let avgSummaryTimeMs = 0;
   if (providerStats) {
-    const providers = ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'];
+    // GROQ-ROUTER-4KEY: gemini removed; 'groq' aggregates all router successes.
+    const providers = ['groq', 'workers-ai', 'openrouter', 'openai'];
     let maxSuccess = 0;
     for (const p of providers) {
       if (providerStats[p] && providerStats[p].success > maxSuccess) {
@@ -8531,8 +8589,12 @@ async function getNewsAIMonitoring(env) {
     }
   }
 
-  // ── Phase 10.5: Circuit Breaker state per provider ──
-  const providerNames = ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'];
+  // ── Phase 10.5: Circuit Breaker state per non-Groq provider ──
+  // GROQ-ROUTER-4KEY: Groq does NOT use the standard circuit breaker — the
+  // router manages per-key state in `groq:router:key{N}`. We surface router
+  // state separately in `groq_router_keys` below. Only non-Groq providers are
+  // included in `provider_status` here.
+  const providerNames = ['workers-ai', 'openrouter', 'openai'];
   const providerStatus = {};
   let circuitOpenCount = 0;
   for (const p of providerNames) {
@@ -8551,6 +8613,31 @@ async function getNewsAIMonitoring(env) {
       last_failure_reason: cbState.last_failure_reason || null,
     };
     if (displayState === 'OPEN') circuitOpenCount++;
+  }
+
+  // ── GROQ-ROUTER-4KEY: Per-key router state (groq:router:key{0..3}) ──
+  // Surface all 4 potential key slots so operators can see which key is
+  // OPEN/cooldown and which is healthy.
+  const groqRouterKeys = [];
+  for (let i = 0; i < 4; i++) {
+    const s = await _groqRouterGetKeyState(env, i);
+    const cooldownRemainingS = s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0;
+    groqRouterKeys.push({
+      index: i,
+      configured: i === 0 ? Boolean(env.GROQ_API_KEY)
+        : i === 1 ? Boolean(env.GROQ_API_KEY_1)
+        : i === 2 ? Boolean(env.GROQ_API_KEY_2)
+        : Boolean(env.GROQ_API_KEY_3),
+      state: s.state,
+      consecutive_failures: s.consecutive_failures || 0,
+      retry_after: s.retry_after,
+      cooldown_remaining_s: cooldownRemainingS,
+      probe_failures: s.probe_failures || 0,
+      quota_type: s.quota_type || null,
+      last_failure_reason: s.last_failure_reason || null,
+      window_requests_count: (s.window_requests || []).length,
+      window_max: GROQ_ROUTER_MAX_PER_WINDOW,
+    });
   }
 
   // ── Phase 10.5: Summary Cache stats ──
@@ -8583,8 +8670,10 @@ async function getNewsAIMonitoring(env) {
       NEWS_QUEUE_ENABLED: isNewsQueueEnabled(env),
       // Phase 10: provider flags
       NEWS_PROVIDER_GROQ: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true),
+      GROQ_API_KEY_0_CONFIGURED: Boolean(env.GROQ_API_KEY),
       GROQ_API_KEY_1_CONFIGURED: Boolean(env.GROQ_API_KEY_1),
-      NEWS_PROVIDER_GEMINI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true),
+      GROQ_API_KEY_2_CONFIGURED: Boolean(env.GROQ_API_KEY_2),
+      GROQ_API_KEY_3_CONFIGURED: Boolean(env.GROQ_API_KEY_3),
       NEWS_PROVIDER_WORKERS_AI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true),
       NEWS_PROVIDER_OPENROUTER: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true),
       NEWS_PROVIDER_OPENAI: isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false),
@@ -8596,15 +8685,16 @@ async function getNewsAIMonitoring(env) {
       news_list_ttl_minutes: 30,
       // Phase 10: provider config
       openai_model: OPENAI_MODEL,
-      providers_priority: ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'],
+      providers_priority: ['groq', 'openrouter', 'workers-ai', 'openai'],
       // Phase 10.5: circuit breaker config
       circuit_breaker_threshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
       circuit_breaker_open_ms: CIRCUIT_BREAKER_OPEN_MS,
     },
-    // Phase 10: per-provider stats
+    // Phase 10: per-provider stats (GROQ-ROUTER-4KEY: gemini removed)
     providers: {
-      gemini: providerStats?.gemini || { success: 0, failed: 0, total_ms: 0 },
+      groq: providerStats?.groq || { success: 0, failed: 0, total_ms: 0 },
       'workers-ai': providerStats?.['workers-ai'] || { success: 0, failed: 0, total_ms: 0 },
+      'openrouter': providerStats?.openrouter || { success: 0, failed: 0, total_ms: 0 },
       'openai': providerStats?.openai || { success: 0, failed: 0, total_ms: 0 },
     },
     fallback_count: providerStats?.fallback_count || 0,
@@ -8613,9 +8703,11 @@ async function getNewsAIMonitoring(env) {
     average_summary_time_ms: avgSummaryTimeMs,
     total_summaries_generated: providerStats?.total_summaries || 0,
     provider_stats_updated_at: providerStats?.updated_at || null,
-    // Phase 10.5: Circuit Breaker status
+    // Phase 10.5: Circuit Breaker status (non-Groq providers)
     provider_status: providerStatus,
     circuit_breaker_open_count: circuitOpenCount,
+    // GROQ-ROUTER-4KEY: Per-key Groq router state (replaces old groq-key0/groq-key1 circuits)
+    groq_router_keys: groqRouterKeys,
     // Phase 10.5: Summary Cache stats
     summary_cache_hits: cacheHits,
     summary_cache_misses: cacheMisses,
@@ -8667,18 +8759,29 @@ async function enrichNewsWithAISummaries(env, articles) {
     console.warn('[NEWS-AI] enrichNews queue read error (non-fatal):', e?.message);
   }
 
-  // Read circuit breaker states ONCE (3 KV reads, cheap) to detect rate_limited
-  // If ALL enabled providers have OPEN circuits, articles without summaries get
-  // 'rate_limited' status instead of 'pending' — so frontend can show a more
-  // accurate message ("AI providers temporarily rate-limited, retrying soon").
+  // Read circuit breaker states ONCE to detect rate_limited.
+  // GROQ-ROUTER-4KEY: Groq per-key state lives in `groq:router:key{N}`.
+  // If ALL configured router keys are OPEN (cooldown not expired) AND all
+  // non-Groq providers have OPEN circuits, articles without summaries get
+  // 'rate_limited' status instead of 'pending'.
   let allProvidersCircuitOpen = false;
   try {
     const enabledProviders = [];
-    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) enabledProviders.push('groq-key0');
-    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) && env.GROQ_API_KEY_1) enabledProviders.push('groq-key1');
-    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) enabledProviders.push('gemini');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true)) enabledProviders.push('workers-ai');
+    if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true)) enabledProviders.push('openrouter');
     if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false)) enabledProviders.push('openai');
+
+    // Check Groq router keys (slots 0..3) — count any configured key with
+    // OPEN circuit + unexpired cooldown as "blocking".
+    const groqKeys = _groqRouterDiscoverKeys(env);
+    let groqBlockingCount = 0;
+    for (const k of groqKeys) {
+      const s = await _groqRouterGetKeyState(env, k.index);
+      if (s.state === 'OPEN' && s.retry_after && s.retry_after > Date.now()) {
+        groqBlockingCount++;
+      }
+    }
+    const groqAllBlocked = groqKeys.length > 0 && groqBlockingCount === groqKeys.length;
 
     if (enabledProviders.length > 0) {
       const now = Date.now();
@@ -8690,7 +8793,11 @@ async function enrichNewsWithAISummaries(env, articles) {
           openCount++;
         }
       }
-      allProvidersCircuitOpen = (openCount === enabledProviders.length);
+      const nonGroqAllBlocked = (openCount === enabledProviders.length);
+      // Treat "all blocked" as: Groq router all OPEN AND all non-Groq providers OPEN
+      allProvidersCircuitOpen = groqAllBlocked && nonGroqAllBlocked;
+    } else {
+      allProvidersCircuitOpen = groqAllBlocked;
     }
   } catch (e) {
     console.warn('[NEWS-AI] enrichNews circuit check error (non-fatal):', e?.message);
@@ -8757,7 +8864,7 @@ async function enrichNewsWithAISummaries(env, articles) {
         ...article,
         ai_summary: aiSummary || null,
         ai_status: aiStatus,
-        ai_provider: aiProvider,     // Phase 10: which provider generated this ('gemini'|'workers-ai'|'openai'|null)
+        ai_provider: aiProvider,     // which provider generated this ('groq'|'openrouter'|'workers-ai'|'openai'|null)
         ai_generated_at: aiGeneratedAt, // Phase 10: timestamp of generation
       };
     })
@@ -8775,11 +8882,10 @@ async function enrichNewsWithAISummaries(env, articles) {
  * Phase 3: Batch AI Analysis — analyzes ALL filtered articles in 1 AI call.
  * Returns sentiment, impact, reason, and related coins for each article.
  *
- * FALLBACK CHAIN (Provider Activation Phase — DeepSeek removed per user request):
- *   0) Groq          (primary)      — NEWS_PROVIDER_GROQ=true
- *   1) Gemini        (fallback 1)   — NEWS_PROVIDER_GEMINI=true
- *   2) Workers AI    (fallback 2)   — NEWS_PROVIDER_WORKERS_AI=true
- *   3) Rule-based    (fallback 3)   — no AI, uses existing sentiment
+ * FALLBACK CHAIN (GROQ-ROUTER-4KEY — Gemini removed per spec):
+ *   0) Groq Router   (primary)      — NEWS_PROVIDER_GROQ=true (4-key routed)
+ *   1) Workers AI    (fallback 1)   — NEWS_PROVIDER_WORKERS_AI=true
+ *   2) Rule-based    (fallback 2)   — no AI, uses existing sentiment
  *
  * P2-A FIX: Groq is ALWAYS tried first (primary). Workers AI is ONLY used as fallback.
  * 1 AI call replaces 10 individual calls.
@@ -8846,98 +8952,39 @@ ${headlines}`;
     } catch { return null; }
   }
 
-  // Method 0: Groq — DUAL-KEY ROUTED (tick-alternating, batchOffset=1 for analysis)
-  // Both keys are active. _groqRoutedFetch tries preferred key, falls back to other.
-  // Hoist batchAnalysisSysPrompt to function scope
+  // Method 0: Groq — 4-KEY ROUTER (selects best healthy key internally)
+  // GROQ-ROUTER-4KEY: _groqRoutedFetch → groqRouterExecute handles all 4 keys,
+  // per-key 3/10min budget, circuit-breaker, and HALF_OPEN probe. No need to
+  // consult groq-key0/groq-key1 circuits here — the router has its own state.
   const batchAnalysisSysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)) {
-    const cbGroq = await shouldAttemptProvider(env, 'groq-key0');
-    const cbGroqSec = await shouldAttemptProvider(env, 'groq-key1');
-    if (cbGroq.attempt || cbGroqSec.attempt) {
-      try {
-        const batchMessages = [
-          { role: 'system', content: batchAnalysisSysPrompt },
-          { role: 'user', content: prompt }
-        ];
-        // DUAL-KEY: tick-alternating batch routing (batchOffset=1 for analysis → opposite of translation)
-        const groqResult = await _groqRoutedFetch(env, prompt, true, 1, 'openai/gpt-oss-120b', batchMessages, 2048, 0.2);
-        const statusCode = groqResult.status_code;
-        const responseBody = groqResult.response_body || '';
+    try {
+      const batchMessages = [
+        { role: 'system', content: batchAnalysisSysPrompt },
+        { role: 'user', content: prompt }
+      ];
+      const groqResult = await _groqRoutedFetch(env, prompt, true, 1, 'openai/gpt-oss-120b', batchMessages, 2048, 0.2);
+      const statusCode = groqResult.status_code;
+      const responseBody = groqResult.response_body || '';
 
-        if (statusCode === 200) {
-          const data = JSON.parse(responseBody);
-          const text = data?.choices?.[0]?.message?.content || '';
-          const parsed = parseBatchResult(text);
-          if (parsed && Object.keys(parsed).length > 0) {
-            console.log('[NEWS-AI-BATCH] ✅ Groq succeeded (no fallback needed, key=' + groqResult.key_slot + ')');
-            return parsed;
-          }
-          console.warn('[NEWS-AI-BATCH] ⚠️ Groq returned empty/malformed response — falling back to Gemini');
-        } else {
-          console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}, keys_tried=${JSON.stringify(groqResult.tried_keys)}) — falling back to Gemini`);
+      if (statusCode === 200) {
+        const data = JSON.parse(responseBody);
+        const text = data?.choices?.[0]?.message?.content || '';
+        const parsed = parseBatchResult(text);
+        if (parsed && Object.keys(parsed).length > 0) {
+          console.log('[NEWS-AI-BATCH] ✅ Groq succeeded (no fallback needed, key=' + groqResult.key_slot + ')');
+          return parsed;
         }
-      } catch (e) {
-        console.warn('[NEWS-AI-BATCH] ⚠️ Groq exception:', e?.message, '— falling back to Gemini');
+        console.warn('[NEWS-AI-BATCH] ⚠️ Groq returned empty/malformed response — falling back to Workers AI');
+      } else {
+        console.warn(`[NEWS-AI-BATCH] ⚠️ Groq failed (HTTP ${statusCode}, router_reason=${groqResult.router_reason}) — falling back to Workers AI`);
       }
-    } else {
-      console.warn('[NEWS-AI-BATCH] ⚠️ Both Groq keys circuit OPEN — skipping to Gemini');
+    } catch (e) {
+      console.warn('[NEWS-AI-BATCH] ⚠️ Groq exception:', e?.message, '— falling back to Workers AI');
     }
   }
 
-  // Method 1: Gemini via DB gateway (fallback 1) — tried if Groq Primary + Secondary didn't succeed
-  // Routes through Supabase EU (http_post) to bypass geo-restriction.
-  // Model: gemini-3.5-flash (gemini-2.0-flash is deprecated).
-  // P0-1 FIX: Circuit Breaker protection — skip Gemini if its circuit is OPEN.
-  if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_GEMINI', true)) {
-    // Check circuit breaker first
-    const cbGemini = await shouldAttemptProvider(env, 'gemini');
-    if (cbGemini.attempt) {
-      try {
-        const dbResult = await queryDb(env,
-          `SELECT public.gemini_generate(
-            $1::text,
-            $2::jsonb,
-            $3::jsonb,
-            NULL::jsonb
-          ) AS result`,
-          [
-            'gemini-3.5-flash',
-            JSON.stringify([{ parts: [{ text: prompt }] }]),
-            JSON.stringify({ temperature: 0.2, maxOutputTokens: 2048, topP: 0.8 }),
-          ]
-        );
-
-        const geminiResult = dbResult.rows[0]?.result || {};
-        const statusCode = geminiResult.status_code;
-        const responseBody = geminiResult.response_body || '';
-
-        if (statusCode === 200) {
-          const data = JSON.parse(responseBody);
-          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          const parsed = parseBatchResult(text);
-          if (parsed && Object.keys(parsed).length > 0) {
-            try { await recordCircuitResult(env, 'gemini', true); } catch {}
-            console.log('[NEWS-AI-BATCH] ✅ Gemini PRIMARY succeeded — no fallback needed');
-            return parsed;
-          }
-          try { await recordCircuitResult(env, 'gemini', false, 'retryable', 'empty_response'); } catch {}
-          console.warn('[NEWS-AI-BATCH] ⚠️ Gemini returned empty/malformed response — falling back to Workers AI');
-        } else {
-          const errorType = classifyHttpError(statusCode || 500);
-          try { await recordCircuitResult(env, 'gemini', false, errorType, `http_${statusCode}`); } catch {}
-          console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini failed (HTTP ${statusCode}): ${responseBody.substring(0, 200)} — falling back to Workers AI`);
-        }
-      } catch (e) {
-        const isAbort = e?.name === 'AbortError';
-        try { await recordCircuitResult(env, 'gemini', false, 'retryable', isAbort ? 'timeout' : 'network_error'); } catch {}
-        console.warn('[NEWS-AI-BATCH] ⚠️ Gemini failed:', e?.message, '— falling back to Workers AI');
-      }
-    } else {
-      console.warn(`[NEWS-AI-BATCH] ⚠️ Gemini circuit OPEN (retry_after ${cbGemini.retry_after}) — skipping to Workers AI`);
-    }
-  }
-
-  // Method 2: Workers AI (fallback 1) — ONLY if Gemini didn't succeed
+  // Method 1: Workers AI (fallback 1) — tried if Groq Router didn't succeed
   // P0-1 FIX: Circuit Breaker protection — skip Workers AI if its circuit is OPEN
   if (isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) && hasWorkersAI) {
     const cbWAI = await shouldAttemptProvider(env, 'workers-ai');
@@ -9419,7 +9466,9 @@ async function processNewsAIBatch(env, pool = null) {
       // */15 cron tick. These fields are no longer relevant because
       // processNewsAIBatch no longer writes to news:farsi (publication gate
       // publishes via publishArticleToFarsiNews() in succeedWithSummary instead).
-      newsJsonLength: newsJson.length,
+      // P0 FIX: newsJson was removed when STEP 6 switched to merge publication.
+      // Compute the JSON length inline from trimmed (the merge source array).
+      newsJsonLength: JSON.stringify(trimmed).length,
       enqueue: enqueueResult,
       ai: summaryResult,
       elapsed: Date.now() - t0,
@@ -10323,12 +10372,10 @@ const assistantHandlers = createAssistantHandlers({
   recordCircuitResult,
   classifyHttpError,
   isNewsProviderEnabled,
-  // Phase 4: Global Groq Rate/Token Coordinator
-  checkGroqCapacity,
-  recordGroqRequest,
-  estimateGroqTokens,
-  // MIGRATION: Groq Primary direct HTTP helper (uses env.GROQ_API_KEY Cloudflare secret)
-  groqPrimaryGenerate,
+  // GROQ-ROUTER-4KEY: Chat text path delegates to the centralized 4-key Groq
+  // Router (replaces old checkGroqCapacity/recordGroqRequest/estimateGroqTokens
+  // + groqPrimaryGenerate — the router handles key selection + budget + cooldown).
+  groqRouterExecute,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({
@@ -12684,6 +12731,232 @@ class PresenceDO {
 export { PresenceDO };
 
 // ============================================================================
+// GROQ-ROUTER-4KEY: Durable Object for STRICT concurrency-safe budget enforcement
+// ============================================================================
+// The KV-based approach has a read-modify-write race: two concurrent requests
+// can both read the same window_requests (e.g., 2/3), both think the key is
+// eligible, and both make requests — overshooting the 3/10min budget.
+//
+// This DO serializes ALL key selection + recording through a single instance,
+// guaranteeing STRICT enforcement of the 3/10min per-key budget.
+//
+// The DO does NOT make Groq calls (the Worker does, since it has env access).
+// Flow:
+//   1. Worker calls DO.reserve(keyIndices) → DO returns { keyIndex } or { keyIndex: null }
+//   2. Worker makes Groq call with the selected key (via DB gateway)
+//   3. Worker calls DO.record(keyIndex, success, groq_429_info) → DO updates state
+//
+// State per key (stored in state.storage):
+//   { state, consecutive_failures, retry_after, probe_failures,
+//     last_failure_reason, quota_type, window_requests }
+class GroqRouterDO {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this._cache = new Map(); // in-memory cache (DO is single-threaded)
+    this._loaded = false;
+  }
+
+  async _getKeyState(keyIndex) {
+    if (this._cache.has(keyIndex)) return this._cache.get(keyIndex);
+    const raw = await this.state.storage.get(`key${keyIndex}`);
+    const defaults = {
+      state: 'CLOSED',
+      consecutive_failures: 0,
+      retry_after: null,
+      probe_failures: 0,
+      last_failure_reason: null,
+      quota_type: null,
+      window_requests: [],
+    };
+    const result = raw ? { ...defaults, ...raw } : defaults;
+    // Prune expired window timestamps
+    const cutoff = Date.now() - (10 * 60 * 1000);
+    if (Array.isArray(result.window_requests)) {
+      result.window_requests = result.window_requests.filter(ts => ts > cutoff);
+    } else {
+      result.window_requests = [];
+    }
+    this._cache.set(keyIndex, result);
+    return result;
+  }
+
+  async _setKeyState(keyIndex, stateObj) {
+    this._cache.set(keyIndex, stateObj);
+    await this.state.storage.put(`key${keyIndex}`, stateObj);
+  }
+
+  _selectBestKey(keyStates) {
+    const now = Date.now();
+    const WINDOW_MS = 10 * 60 * 1000;
+    const MAX_PER_WINDOW = 3;
+    const PROBE_LOCK_MS = 30 * 1000;
+
+    const candidates = [];
+    for (const [keyIndex, state] of keyStates) {
+      let eligible = true;
+      let reason = 'healthy';
+
+      if (state.state === 'OPEN') {
+        if (state.retry_after && now < state.retry_after) {
+          eligible = false;
+          reason = `cooldown_open (${Math.ceil((state.retry_after - now) / 1000)}s remaining)`;
+        } else {
+          // Cooldown expired → transition to HALF_OPEN (probe)
+          state.state = 'HALF_OPEN';
+          state._probe_locked_until = now + PROBE_LOCK_MS;
+          candidates.push({ keyIndex, state, reason: 'half_open_probe' });
+          continue;
+        }
+      } else if (state.state === 'HALF_OPEN') {
+        if (state._probe_locked_until && now < state._probe_locked_until) {
+          eligible = false;
+          reason = 'probe_in_progress';
+        } else {
+          state._probe_locked_until = now + PROBE_LOCK_MS;
+          candidates.push({ keyIndex, state, reason: 'half_open' });
+          continue;
+        }
+      }
+
+      if (eligible && state.window_requests.length >= MAX_PER_WINDOW) {
+        eligible = false;
+        reason = `window_limit (${state.window_requests.length}/${MAX_PER_WINDOW})`;
+      }
+
+      if (eligible) {
+        candidates.push({ keyIndex, state, reason });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Sort by least-used (fewest window_requests), tie-break by lowest index
+    candidates.sort((a, b) => {
+      const wa = a.state.window_requests.length;
+      const wb = b.state.window_requests.length;
+      if (wa !== wb) return wa - wb;
+      return a.keyIndex - b.keyIndex;
+    });
+    return candidates[0];
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action');
+
+    if (action === 'reserve') {
+      const body = await request.json();
+      const keyIndices = body.keyIndices || [];
+
+      // Load all key states
+      const keyStates = new Map();
+      for (const idx of keyIndices) {
+        keyStates.set(idx, await this._getKeyState(idx));
+      }
+
+      // Select best key (STRICT — serialized by DO)
+      const selected = this._selectBestKey(keyStates);
+      if (!selected) {
+        // Return all states for observability
+        const states = [];
+        for (const [idx, s] of keyStates) {
+          states.push({
+            index: idx, state: s.state,
+            window_requests: s.window_requests.length,
+            retry_after: s.retry_after,
+            quota_type: s.quota_type,
+          });
+        }
+        return Response.json({ keyIndex: null, reason: 'all_keys_unavailable', circuit_states: states });
+      }
+
+      // Record request in window (STRICT — serialized by DO)
+      const state = selected.state;
+      state.window_requests.push(Date.now());
+      if (state.window_requests.length > 50) state.window_requests = state.window_requests.slice(-50);
+      await this._setKeyState(selected.keyIndex, state);
+
+      return Response.json({
+        keyIndex: selected.keyIndex,
+        reason: selected.reason,
+        usage: state.window_requests.length,
+      });
+    }
+
+    if (action === 'record') {
+      const body = await request.json();
+      const { keyIndex, success, groq_429_info, statusCode } = body;
+      const state = await this._getKeyState(keyIndex);
+      const now = Date.now();
+
+      // Clear probe lock
+      delete state._probe_locked_until;
+
+      if (success) {
+        state.state = 'CLOSED';
+        state.consecutive_failures = 0;
+        state.retry_after = null;
+        state.probe_failures = 0;
+        state.last_failure_reason = null;
+        state.quota_type = null;
+      } else if (statusCode === 429 && groq_429_info) {
+        // 429 — OPEN circuit with fresh retry_after
+        const cooldownMs = (groq_429_info.retry_after_seconds || 600) * 1000;
+        state.state = 'OPEN';
+        state.consecutive_failures = (state.consecutive_failures || 0) + 1;
+        state.retry_after = now + cooldownMs;
+        state.probe_failures = (state.probe_failures || 0) + 1;
+        state.last_failure_reason = `http_429:${groq_429_info.quota_type}:${groq_429_info.retry_after_seconds}`;
+        state.quota_type = groq_429_info.quota_type;
+      } else {
+        // Non-429 failure (5xx, network, timeout)
+        const wasHalfOpen = state.state === 'HALF_OPEN';
+        const newFailures = (state.consecutive_failures || 0) + 1;
+        if (wasHalfOpen || newFailures >= 3) {
+          state.state = 'OPEN';
+          state.consecutive_failures = newFailures;
+          state.retry_after = now + (10 * 60 * 1000);
+          state.probe_failures = wasHalfOpen ? (state.probe_failures || 0) + 1 : 0;
+          state.last_failure_reason = `http_${statusCode}`;
+          state.quota_type = null;
+        } else {
+          state.state = 'CLOSED';
+          state.consecutive_failures = newFailures;
+          state.last_failure_reason = `http_${statusCode}`;
+          state.quota_type = null;
+        }
+      }
+
+      await this._setKeyState(keyIndex, state);
+      return Response.json({ ok: true });
+    }
+
+    if (action === 'getStates') {
+      const body = await request.json();
+      const keyIndices = body.keyIndices || [];
+      const states = [];
+      for (const idx of keyIndices) {
+        const s = await this._getKeyState(idx);
+        states.push({
+          index: idx, state: s.state,
+          consecutive_failures: s.consecutive_failures,
+          window_requests: s.window_requests.length,
+          retry_after: s.retry_after,
+          quota_type: s.quota_type,
+          last_failure_reason: s.last_failure_reason,
+        });
+      }
+      return Response.json({ states });
+    }
+
+    return new Response('Unknown action', { status: 400 });
+  }
+}
+
+export { GroqRouterDO };
+
+// ============================================================================
 //#region ورودی اصلی Worker
 // ============================================================================
 export default {
@@ -13053,9 +13326,10 @@ export default {
             if (item.url) queueByUrl.set(item.url, item);
           }
 
-          // Read circuit states
+          // Read circuit states (GROQ-ROUTER-4KEY: gemini removed; Groq uses per-key
+          // router state in `groq:router:key{N}` — surfaced separately)
           const circuitStates = {};
-          for (const p of ['gemini', 'workers-ai', 'openai']) {
+          for (const p of ['workers-ai', 'openrouter', 'openai']) {
             circuitStates[p] = await getCircuitState(env, p);
           }
 
@@ -13776,7 +14050,7 @@ Headlines:
       // ── GET /api/diagnostic/groq-connectivity — TEMPORARY Groq reachability diagnostic ──
       // PURPOSE: Determine why Groq fetch() returns HTTP 0 from production Worker.
       //          Captures full error objects (including e.cause) that the production
-      //          _groqFetchWithKey catch block does NOT capture.
+      //          _groqRouterCallGateway catch block does NOT capture.
       // SECURITY:
       //   - Admin-guarded (optionalTelegramAuth + isAdminTelegramId)
       //   - NEVER uses real GROQ_API_KEY/GROQ_API_KEY_1. Tests use NO auth or a
@@ -13884,7 +14158,7 @@ Headlines:
         );
 
         // Test 5: POST with REAL Key0 (env.GROQ_API_KEY) — minimal request, capture full result.
-        // SECURITY: uses the real key internally (same as production _groqFetchWithKey), but
+        // SECURITY: uses the real key internally (same as production _groqRouterCallGateway), but
         // NEVER returns the key value. Only returns: HTTP status, elapsed_ms, body preview,
         // rate-limit headers, and full error object if fetch throws.
         // PURPOSE: determine if real key gets 403 (WAF), 401 (invalid key), 200 (works),

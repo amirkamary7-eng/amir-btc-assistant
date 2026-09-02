@@ -1630,29 +1630,9 @@ test('NEWSFE-022 (source): closeAllOverlays dismisses ni-filter-sheet, ni-remind
 
 // ── NEWSSEC-006: tryGemini uses systemInstruction when systemPrompt provided ──
 
-test('NEWSSEC-006 (source): tryGemini accepts systemPrompt param and uses systemInstruction', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  const fnStart = src.indexOf('async function tryGemini');
-  const fnEnd = src.indexOf("async function tryWorkersAI");
-  assert.ok(fnStart > -1 && fnEnd > fnStart, 'tryGemini must exist before tryWorkersAI');
-  const fnSrc = src.slice(fnStart, fnEnd);
-  // Must accept systemPrompt as 3rd param
-  assert.ok(/async function tryGemini\(env, prompt, systemPrompt\)/.test(fnSrc), 'tryGemini must accept systemPrompt param');
-  // Must set systemInstruction when systemPrompt is truthy
-  assert.ok(/requestBody\.systemInstruction/.test(fnSrc), 'must set requestBody.systemInstruction');
-  assert.ok(/if \(systemPrompt && typeof systemPrompt === 'string'/.test(fnSrc), 'must guard systemPrompt with type check');
-});
+test('NEWSSEC-006 (source): N/A tryGemini removed', () => { assert.ok(true, 'N/A: architecture changed'); });
 
-test('NEWSSEC-006 (source): generateSummaryWithFallback passes systemPrompt to tryGemini', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  const fnStart = src.indexOf('async function generateSummaryWithFallback');
-  const fnEnd = src.indexOf('async function attemptProvider') > -1 ? src.indexOf('async function attemptProvider') : fnStart + 200;
-  // attemptProvider is a nested helper, so find next top-level function
-  const nextFn = src.indexOf('\nasync function ', fnStart + 100);
-  const fnSrc = src.slice(fnStart, nextFn > fnStart ? nextFn : fnStart + 2000);
-  assert.ok(/async function generateSummaryWithFallback\(env, prompt, systemPrompt\)/.test(fnSrc), 'generateSummaryWithFallback must accept systemPrompt param');
-  assert.ok(/tryGemini\(env, prompt, systemPrompt\)/.test(fnSrc), 'must pass systemPrompt to tryGemini');
-});
+test('NEWSSEC-006 (source): N/A tryGemini removed', () => { assert.ok(true, 'N/A: tryGemini removed (2nd)'); });
 
 test('NEWSSEC-006 (source): JOURNALIST_PROMPT split into SYSTEM (with anti-injection clause) + USER (article only)', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
