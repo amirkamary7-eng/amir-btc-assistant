@@ -182,11 +182,103 @@ export function createNewsArticleRepository(deps) {
   // callers. Only fingerprint, findById, findByUrl, saveAnalysis, ensureTable
   // are used. Removed the ~16-line function + export.
 
+  /**
+   * List recent articles for the feed (DB fallback for /api/farsi-news).
+   *
+   * P1 FIX (DB as Source of Truth): When KV (news:farsi) is empty/stale/missing,
+   * the feed API falls back to reading from the DB. This returns articles
+   * analyzed within the last 4 days, ordered by analyzed_at DESC (most recent
+   * AI analysis first), limited to 30 (matches the API default limit).
+   *
+   * Returns the SAME shape as KV entries so the API can serve them directly:
+   *   { title, title_en, url, source, category, summary (as ai_summary),
+   *     sentiment, impact, impact_reason, coins, provider, analyzed_at }
+   *
+   * @param {object} env - Worker env
+   * @param {object} opts - { category, limit }
+   * @returns {Promise<Array>}
+   */
+  async function listForFeed(env, opts = {}, pool = null) {
+    const { category = null, limit = 30 } = opts;
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 30));
+    try {
+      const params = [safeLimit];
+      let sql = `
+        SELECT
+          id, url, title, title_en, source, category,
+          summary, sentiment, impact, impact_reason, coins, provider,
+          analyzed_at, created_at
+        FROM news_articles
+        WHERE created_at > NOW() - INTERVAL '4 days'
+      `;
+      if (category && ['crypto', 'forex', 'economy'].includes(category)) {
+        sql += ` AND category = $2`;
+        params.push(category);
+      }
+      sql += ` ORDER BY analyzed_at DESC NULLS LAST, created_at DESC LIMIT $1`;
+      const result = await queryDb(env, sql, params, 1, pool);
+      // Transform DB rows to feed-article shape (match KV news:farsi format)
+      return (result.rows || []).map(row => {
+        let coinsArr = [];
+        try { coinsArr = typeof row.coins === 'string' ? JSON.parse(row.coins) : (Array.isArray(row.coins) ? row.coins : []); } catch {}
+        return {
+          title: row.title || '',
+          title_en: row.title_en || '',
+          description: '',
+          time_ago: null,
+          pub_date: null,
+          source: row.source || '',
+          category: row.category || 'crypto',
+          image: null,
+          url: row.url || '',
+          sentiment: row.sentiment || 'neutral',
+          impact: row.impact || 'low',
+          impact_reason: row.impact_reason || '',
+          coins: Array.isArray(coinsArr) ? coinsArr : [],
+          importance_tags: [],
+          importance_score: 0,
+          published_at: row.analyzed_at ? new Date(row.analyzed_at).getTime() : (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
+          // DB-specific: ai_summary is the stored summary (enrichNewsWithAISummaries adds this)
+          _db_summary: row.summary || '',
+          _db_provider: row.provider || '',
+        };
+      });
+    } catch (e) {
+      console.warn('[NEWS-ARTICLES] listForFeed failed:', e?.message);
+      return [];
+    }
+  }
+
+  /**
+   * Delete articles older than the retention window.
+   * P2 FIX (4-day retention): Called periodically to keep DB size stable.
+   * Safe — no FK references to news_articles exist (verified in 00-migrate.sql).
+   *
+   * @param {object} env - Worker env
+   * @param {number} days - retention window (default 4)
+   * @returns {Promise<number>} - count of deleted rows
+   */
+  async function cleanupOld(env, days = 4, pool = null) {
+    try {
+      const result = await queryDb(env, `
+        DELETE FROM news_articles
+        WHERE created_at < NOW() - ($1::text)::interval
+        RETURNING id
+      `, [`${parseInt(days, 10) || 4} days`], 1, pool);
+      return (result.rows || []).length;
+    } catch (e) {
+      console.warn('[NEWS-ARTICLES] cleanupOld failed:', e?.message);
+      return 0;
+    }
+  }
+
   return Object.freeze({
     ensureTable,
     fingerprint,
     findById,
     findByUrl,
     saveAnalysis,
+    listForFeed,
+    cleanupOld,
   });
 }

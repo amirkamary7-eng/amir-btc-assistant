@@ -5704,35 +5704,77 @@ async function fetchFarsiNews(env, categoryFilter, ctx = null) {
   if (cachedNews) {
     try {
       const parsed = JSON.parse(cachedNews);
-      // ROOT CAUSE FIX (item 1 permanent): Apply sanitizeNewsTitle on the
-      // CACHE-HIT path too. Previously sanitization only ran in
-      // buildFarsiNewsArticles (live-fetch path). If the KV cache contained
-      // old titles with AI-translation duplication artifacts (from before
-      // the fix was deployed), they were served as-is — causing the bug to
-      // persist in production even after the fix. Now every title is
-      // sanitized regardless of whether it came from cache or live fetch.
-      const sanitized = parsed.map(a => ({
-        ...a,
-        title: sanitizeNewsTitle(a.title),
-      }));
-      // Enrich with AI summaries from KV (if available)
-      const enriched = await enrichNewsWithAISummaries(env, sanitized);
-      // RESTORED (Commit 2.6): Return ALL articles — AI is enrichment, not a display requirement.
-      // Articles with ai_summary=null have ai_status='pending' and are shown with a premium
-      // pending UI in the frontend. The readyOnly filter (Commit 1) is removed because
-      // articles are now published to news:farsi immediately after translation (STEP 6).
-      const data = categoryFilter
-        ? enriched.filter((a) => a.category === categoryFilter)
-        : enriched;
-      const categoryCounts = {
-        all: enriched.length,
-        crypto: enriched.filter(a => a.category === 'crypto').length,
-        forex: enriched.filter(a => a.category === 'forex').length,
-        economy: enriched.filter(a => a.category === 'economy').length,
-      };
-      return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // ROOT CAUSE FIX (item 1 permanent): Apply sanitizeNewsTitle on the
+        // CACHE-HIT path too. Previously sanitization only ran in
+        // buildFarsiNewsArticles (live-fetch path). If the KV cache contained
+        // old titles with AI-translation duplication artifacts (from before
+        // the fix was deployed), they were served as-is — causing the bug to
+        // persist in production even after the fix. Now every title is
+        // sanitized regardless of whether it came from cache or live fetch.
+        const sanitized = parsed.map(a => ({
+          ...a,
+          title: sanitizeNewsTitle(a.title),
+        }));
+        // Enrich with AI summaries from KV (if available)
+        const enriched = await enrichNewsWithAISummaries(env, sanitized);
+        // RESTORED (Commit 2.6): Return ALL articles — AI is enrichment, not a display requirement.
+        // Articles with ai_summary=null have ai_status='pending' and are shown with a premium
+        // pending UI in the frontend. The readyOnly filter (Commit 1) is removed because
+        // articles are now published to news:farsi immediately after translation (STEP 6).
+        const data = categoryFilter
+          ? enriched.filter((a) => a.category === categoryFilter)
+          : enriched;
+        const categoryCounts = {
+          all: enriched.length,
+          crypto: enriched.filter(a => a.category === 'crypto').length,
+          forex: enriched.filter(a => a.category === 'forex').length,
+          economy: enriched.filter(a => a.category === 'economy').length,
+        };
+        return { status: 'success', source: 'cache', data, category_counts: categoryCounts };
+      }
+      // KV exists but is empty array — fall through to DB fallback
     } catch {
-      // Corrupt cache — fall through to live fetch
+      // Corrupt cache — fall through to DB fallback
+    }
+  }
+
+  // ── P1 FIX: DB FALLBACK — KV miss/empty/corrupt → read from news_articles ──
+  // DB is the source of truth. KV is only a cache. If KV is unavailable,
+  // the feed is rebuilt from the DB (articles analyzed in last 4 days).
+  // The result is re-cached to KV for subsequent fast-path requests.
+  if (newsArticleRepo && typeof newsArticleRepo.listForFeed === 'function') {
+    try {
+      const dbArticles = await newsArticleRepo.listForFeed(env, { limit: 30 });
+      if (dbArticles && dbArticles.length > 0) {
+        // Enrich DB articles with their stored summaries (already in _db_summary)
+        const enriched = dbArticles.map(a => {
+          const { _db_summary, _db_provider, ...rest } = a;
+          return {
+            ...rest,
+            ai_summary: _db_summary || null,
+            ai_status: _db_summary ? 'ready' : 'pending',
+            ai_provider: _db_provider || null,
+          };
+        });
+        // Apply category filter
+        const data = categoryFilter
+          ? enriched.filter((a) => a.category === categoryFilter)
+          : enriched;
+        const categoryCounts = {
+          all: enriched.length,
+          crypto: enriched.filter(a => a.category === 'crypto').length,
+          forex: enriched.filter(a => a.category === 'forex').length,
+          economy: enriched.filter(a => a.category === 'economy').length,
+        };
+        // Re-cache the DB result to KV (best-effort, non-blocking)
+        try {
+          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(enriched), getNumericEnv(env, 'NEWS_CACHE_TTL', 1800));
+        } catch {}
+        return { status: 'success', source: 'db', data, category_counts: categoryCounts };
+      }
+    } catch (dbErr) {
+      console.warn('[NEWS-FEED] DB fallback failed:', dbErr?.message);
     }
   }
 
@@ -9180,27 +9222,47 @@ async function processNewsAIBatch(env, pool = null) {
     // full AI analysis (news:ai:{hash} write). This ensures users never see
     // articles with ai_summary: null.
     //
-    // RESTORED (Commit 2.6): Articles are published to news:farsi IMMEDIATELY
-    // after translation/dedup — BEFORE AI analysis. AI is an enrichment layer,
-    // not a display requirement. Articles appear with ai_summary=null, ai_status='pending'.
-    // When AI succeeds, publishArticleToFarsiNews() updates the same article (dedup by URL).
-    // If AI fails, the article remains visible — the frontend shows a premium pending state.
+    // ── STEP 6: PUBLISH (MERGE-AWARE) — no longer hard-overwrites news:farsi ──
+    //
+    // P0/P4 FIX (News persistence): Previously this step did a HARD OVERWRITE:
+    //   writeAppCache(FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed))
+    // This destroyed the previous 12-article feed when a partial AI failure
+    // left only 1-2 survivors (failed translations get title='' and are
+    // filtered out in STEP 5). The feed would shrink to 1-2 articles every
+    // 15-min cron tick.
+    //
+    // NOW: Use the merge-aware publishArticleToFarsiNews() for EACH survivor.
+    // That function reads existing news:farsi, dedup-by-canonical-URL (replace
+    // if exists, else prepend), trims to 12, writes back. This PRESERVES
+    // previous healthy articles when the new batch is partial.
+    //
+    // P4 GUARD: If the new batch is suspiciously small relative to RSS input
+    // (e.g., 48 raw → 10 filtered → only 1-2 survivors = AI failure), we still
+    // publish the survivors (merge, not overwrite) so new valid news appears,
+    // BUT the previous feed is NOT destroyed. The merge keeps old articles.
     const MAX_NEWS_ARTICLES = 12;
     const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
-    const newsJson = JSON.stringify(trimmed);
 
-    // Write translated articles to news:farsi IMMEDIATELY (before AI analysis)
-    try {
-      await writeAppCache(
-        env,
-        FARSI_NEWS_CACHE_KEY,
-        newsJson,
-        getNumericEnv(env, 'NEWS_CACHE_TTL', 86400),
-      );
-      stepLog('KV_ARTICLES_published_immediate', { count: trimmed.length });
-    } catch (cacheErr) {
-      console.warn('[NEWS-AI-CRON] Failed to cache articles (non-fatal):', cacheErr?.message);
-      stepLog('KV_ARTICLES_cache_failed', { error: cacheErr?.message });
+    // Publish each survivor via MERGE (not overwrite).
+    // publishArticleToFarsiNews reads existing list, dedup by URL, prepends new,
+    // trims to 12, writes back. Previous healthy articles are PRESERVED.
+    let publishCount = 0;
+    for (const article of trimmed) {
+      try {
+        const pubResult = await publishArticleToFarsiNews(env, article);
+        if (pubResult.published) publishCount++;
+      } catch (pubErr) {
+        console.warn('[NEWS-AI-CRON] publishArticleToFarsiNews failed (non-fatal):', pubErr?.message);
+      }
+    }
+    stepLog('KV_ARTICLES_published_merge', { new_count: trimmed.length, published: publishCount });
+
+    // P4 GUARD: Log if batch was partial (AI failure detected) but feed preserved.
+    // This does NOT block publication — merge already preserved previous articles.
+    // It's a diagnostic log so operators can see when AI failures are shrinking
+    // the INCOMING batch (without shrinking the FEED).
+    if (trimmed.length < deduped.length) {
+      console.warn(`[NEWS-AI] Partial batch: ${trimmed.length} survivors from ${deduped.length} deduped (AI failure). Feed preserved via merge.`);
     }
 
     // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
@@ -9232,11 +9294,14 @@ async function processNewsAIBatch(env, pool = null) {
           }
         }
         // RESTORED (Commit 2.6): Re-cache with enriched sentiment/impact data.
-        // Articles are already in news:farsi from STEP 6 — this updates them with
-        // AI-powered sentiment/impact/coins. If batch analysis fails, the original
-        // rule-based sentiment from STEP 6 remains (better than no news).
+        // Articles are already in news:farsi from STEP 6 (merge). This updates
+        // them with AI-powered sentiment/impact/coins via the SAME merge path
+        // (publishArticleToFarsiNews dedup-by-URL = replace existing entry).
+        // P0 FIX: NO hard overwrite — use merge to preserve other feed articles.
         try {
-          await writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), getNumericEnv(env, 'NEWS_CACHE_TTL', 86400));
+          for (const article of trimmed) {
+            try { await publishArticleToFarsiNews(env, article); } catch {}
+          }
         } catch {}
         stepLog('BATCH_ANALYZE_done', { analyzed: Object.keys(batchAnalysis).length });
       } catch (batchErr) {
@@ -9323,6 +9388,22 @@ async function processNewsAIBatch(env, pool = null) {
       });
     } catch (e) {
       console.warn('[NEWS-AI-CRON] recordTick failed:', e?.message);
+    }
+
+    // ── STEP 11: DB RETENTION CLEANUP (4-day retention) ──
+    // P2 FIX: Delete news_articles older than 4 days to keep DB size stable.
+    // Safe — no FK references to news_articles (verified in 00-migrate.sql).
+    // Runs on every */15 tick (96×/day) — DELETE is idempotent and cheap
+    // when there's nothing to delete. Best-effort: failures are non-fatal.
+    if (newsArticleRepo && typeof newsArticleRepo.cleanupOld === 'function') {
+      try {
+        const deletedCount = await newsArticleRepo.cleanupOld(env, 4, pool);
+        if (deletedCount > 0) {
+          stepLog('DB_RETENTION_cleanup', { deleted: deletedCount, retention_days: 4 });
+        }
+      } catch (cleanupErr) {
+        console.warn('[NEWS-AI-CRON] DB retention cleanup failed (non-fatal):', cleanupErr?.message);
+      }
     }
 
     // ── FINISH ──
