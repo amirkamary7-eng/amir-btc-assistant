@@ -339,7 +339,7 @@
                 </div>
                 <div class="mkt-header-text">
                     <h2 class="mkt-title" data-i18n="market">بازار</h2>
-                    <p class="mkt-subtitle">مشاهده بازارهای جهانی و فرصت‌های معاملاتی</p>
+                    <p class="mkt-subtitle" data-i18n="market_subtitle">مشاهده بازارهای جهانی و فرصت‌های معاملاتی</p>
                 </div>
             </div>
             <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
@@ -540,14 +540,14 @@
         <!-- 4. Category Tabs + Search -->
         <div class="analysis-tabs-row" id="analysis-tabs-row">
             <div class="at-tabs" id="analysis-tf-chips">
-                <button type="button" class="tf-chip active" data-tf="all">همه</button>
-                <button type="button" class="tf-chip" data-tf="crypto">کریپتو</button>
-                <button type="button" class="tf-chip" data-tf="forex">فارکس</button>
-                <button type="button" class="tf-chip" data-tf="saved">🔖 ذخیره‌شده</button>
+                <button type="button" class="tf-chip active" data-tf="all" data-i18n="news_all">همه</button>
+                <button type="button" class="tf-chip" data-tf="crypto" data-i18n="news_crypto">کریپتو</button>
+                <button type="button" class="tf-chip" data-tf="forex" data-i18n="news_forex">فارکس</button>
+                <button type="button" class="tf-chip" data-tf="saved" data-i18n="news_saved">🔖 ذخیره‌شده</button>
             </div>
             <div class="at-search-wrap">
                 <svg class="at-search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجو..." autocomplete="off" />
+                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجو..." data-i18n-placeholder="search" autocomplete="off" />
                 <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
                 </button>
@@ -694,11 +694,11 @@
         <div class="ni-topbar">
             <!-- Row 1: Category tabs -->
             <div class="ni-tabs" id="news-tabs">
-                <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)">همه</button>
-                <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)">کریپتو</button>
-                <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)">فارکس</button>
-                <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)">تقویم</button>
-                <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)">ذخیره شده</button>
+                <button class="ni-tab active" data-news="all" onclick="switchNewsTab('all', this)" data-i18n="news_all">همه</button>
+                <button class="ni-tab" data-news="crypto" onclick="switchNewsTab('crypto', this)" data-i18n="news_crypto">کریپتو</button>
+                <button class="ni-tab" data-news="forex" onclick="switchNewsTab('forex', this)" data-i18n="news_forex">فارکس</button>
+                <button class="ni-tab" data-news="calendar" onclick="switchNewsTab('calendar', this)" data-i18n="news_calendar">تقویم</button>
+                <button class="ni-tab" data-news="saved" onclick="switchNewsTab('saved', this)" data-i18n="news_saved">ذخیره شده</button>
             </div>
             <!-- Row 2: Tools (search + filter) — separated from tabs -->
             <div class="ni-tools-row">
@@ -1014,23 +1014,23 @@
     <div id="add-analysis-modal" class="modal" onclick="if(event.target===this) closeAddAnalysisModal()">
         <div class="modal-box analysis-form-modal">
             <div class="modal-header">
-                <h3 id="analysis-modal-title">تحلیل جدید</h3>
+                <h3 id="analysis-modal-title" data-i18n="analysis_new">تحلیل جدید</h3>
                 <button class="modal-close-btn" onclick="closeAddAnalysisModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="analysis-form-fields">
                 <div class="af-row">
-                    <div class="af-field"><label>عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field" maxlength="256"></div>
+                    <div class="af-field"><label data-i18n="analysis_label_title">عنوان</label><input type="text" id="analysis-title" placeholder="عنوان تحلیل" class="input-field" maxlength="256"></div>
                 </div>
                 <div class="af-row">
-                    <div class="af-field af-field-half"><label>نماد</label><input type="text" id="analysis-coin" placeholder="BTC" class="input-field" style="text-transform:uppercase"></div>
-                    <div class="af-field af-field-half"><label>تایم فریم</label><input type="text" id="analysis-timeframe" placeholder="4H" class="input-field"></div>
+                    <div class="af-field af-field-half"><label data-i18n="analysis_label_symbol">نماد</label><input type="text" id="analysis-coin" placeholder="BTC" class="input-field" style="text-transform:uppercase"></div>
+                    <div class="af-field af-field-half"><label data-i18n="analysis_label_timeframe">تایم فریم</label><input type="text" id="analysis-timeframe" placeholder="4H" class="input-field"></div>
                 </div>
                 <div class="af-row">
                     <div class="af-field af-field-half">
-                        <label>دسته‌بندی</label>
+                        <label data-i18n="analysis_label_category">دسته‌بندی</label>
                         <select id="analysis-category" class="input-field">
-                            <option value="crypto">کریپتو</option>
-                            <option value="forex">فارکس</option>
+                            <option value="crypto" data-i18n="news_crypto">کریپتو</option>
+                            <option value="forex" data-i18n="news_forex">فارکس</option>
                         </select>
                     </div>
                     <div class="af-field af-field-half af-field-checkbox">
@@ -1456,7 +1456,7 @@
             <div class="modal-header content-modal-header">
                 <h3 class="modal-title-with-icon">
                     <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    <span id="about-modal-title">درباره ما</span>
+                    <span id="about-modal-title" data-i18n="about_title">درباره ما</span>
                 </h3>
                 <div class="content-header-actions">
                     <button class="content-edit-btn" id="about-edit-btn" onclick="openContentEditor('about')" style="display:none;" aria-label="Edit">
@@ -1477,7 +1477,7 @@
             <div class="modal-header content-modal-header">
                 <h3 class="modal-title-with-icon">
                     <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                    <span id="terms-modal-title">قوانین و شرایط</span>
+                    <span id="terms-modal-title" data-i18n="terms_title">قوانین و شرایط</span>
                 </h3>
                 <div class="content-header-actions">
                     <button class="content-edit-btn" id="terms-edit-btn" onclick="openContentEditor('terms')" style="display:none;" aria-label="Edit">
@@ -1498,7 +1498,7 @@
             <div class="modal-header content-modal-header">
                 <h3 class="modal-title-with-icon">
                     <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    <span id="privacy-modal-title">حریم خصوصی</span>
+                    <span id="privacy-modal-title" data-i18n="privacy_title">حریم خصوصی</span>
                 </h3>
                 <div class="content-header-actions">
                     <button class="content-edit-btn" id="privacy-edit-btn" onclick="openContentEditor('privacy')" style="display:none;" aria-label="Edit">
@@ -2525,8 +2525,8 @@
             <div class="join-lock-badge">AMIRBTC</div>
 
             <!-- Dynamic content area (states: loading / not-joined / error) -->
-            <h2 class="join-lock-title" id="join-lock-title">در حال بررسی وضعیت عضویت...</h2>
-            <p class="join-lock-desc" id="join-lock-desc">لطفاً چند لحظه صبر کنید.</p>
+            <h2 class="join-lock-title" id="join-lock-title" data-i18n="jl_checking">در حال بررسی وضعیت عضویت...</h2>
+            <p class="join-lock-desc" id="join-lock-desc" data-i18n="jl_wait">لطفاً چند لحظه صبر کنید.</p>
 
             <!-- Required channels list (multi-channel, Phase 2) -->
             <div class="join-lock-channels" id="join-lock-channels" style="display:none;"></div>
@@ -2535,11 +2535,11 @@
             <div class="join-lock-actions" id="join-lock-actions" style="display:none;">
                 <a id="join-lock-channel-btn" class="join-lock-btn join-lock-btn-primary" href="https://t.me/amir_btc_2024" target="_blank">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                    <span>عضویت در کانال</span>
+                    <span data-i18n="jl_join_channel">عضویت در کانال</span>
                 </a>
                 <button id="join-lock-verify-btn" class="join-lock-btn join-lock-btn-secondary">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                    <span>تأیید عضویت</span>
+                    <span data-i18n="jl_verify">تأیید عضویت</span>
                 </button>
             </div>
 

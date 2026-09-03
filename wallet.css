@@ -139,6 +139,7 @@
   margin-block-end: 14px;
   position: relative;
   z-index: 1;
+  direction: rtl;
 }
 
 .wallet-preview-logo {
