@@ -13395,8 +13395,8 @@ export default {
                 kv_summary_length: kvSummaryLen,
                 api_serves: kvExists && kvSummaryLen >= 50, // will be served as completed
                 circuit_breaker: {
-                  gemini: circuitStates.gemini?.state || 'CLOSED',
                   'workers-ai': circuitStates['workers-ai']?.state || 'CLOSED',
+                  openrouter: circuitStates.openrouter?.state || 'CLOSED',
                   openai: circuitStates.openai?.state || 'CLOSED',
                 },
                 pending_age_ms: qItem?.enqueued_at ? (now - qItem.enqueued_at) : null,

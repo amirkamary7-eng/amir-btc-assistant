@@ -220,7 +220,7 @@ test('ROUTER-018: Chat has no separate chat-groq-secondary circuit (merged into 
     'callGroqSecondaryChat must be REMOVED (no separate Chat Groq pool)'
   );
   // Verify Chat text path does NOT have groq-secondary as a provider entry
-  const fnStart = assistantSrc.indexOf('const providers = [');
+  const fnStart = assistantSrc.indexOf('const providers = hasImage');
   const fnBody = assistantSrc.substring(fnStart, fnStart + 800);
   assert.ok(
     !fnBody.includes("['groq-secondary'"),
@@ -239,9 +239,10 @@ test('GEMINI-019: tryGemini function removed from worker-proxy.js', () => {
 });
 
 test('GEMINI-020: callGeminiChat function removed from assistant.js', () => {
+  // FINAL AUDIT: Gemini restored for Chat ONLY (not removed)
   assert.ok(
-    !assistantSrc.includes('async function callGeminiChat('),
-    'callGeminiChat must be REMOVED from assistant.js'
+    assistantSrc.includes('async function callGeminiChat('),
+    'callGeminiChat must exist (restored for Chat vision + text fallback)'
   );
 });
 
@@ -279,22 +280,23 @@ test('GEMINI-023: Gemini absent from News AI summary fallback chain', () => {
   );
 });
 
-test('GEMINI-024: Gemini absent from Chat fallback chain', () => {
-  const fnStart = assistantSrc.indexOf('const providers = [');
+test('GEMINI-024: Gemini IS present in Chat fallback chain (restored for Chat only)', () => {
+  const fnStart = assistantSrc.indexOf('const providers = hasImage');
   if (fnStart === -1) return;
   const fnBody = assistantSrc.substring(fnStart, fnStart + 800);
   assert.ok(
-    !fnBody.includes("'gemini'") && !fnBody.includes('callGeminiChat'),
-    'Gemini must NOT be in Chat providers array'
+    fnBody.includes("['gemini'") && fnBody.includes('callGeminiChat'),
+    'Gemini MUST be in Chat providers array (restored for Chat text + vision)'
   );
 });
 
 test('GEMINI-025: Chat image path returns error (no Gemini)', () => {
-  const fnStart = assistantSrc.indexOf('const hasImage = Boolean(imageBase64)');
-  const fnBody = assistantSrc.substring(fnStart, fnStart + 400);
+  // FINAL AUDIT: Gemini restored for Chat image path
+  const fnStart = assistantSrc.indexOf('const providers = hasImage');
+  const fnBody = assistantSrc.substring(fnStart, fnStart + 600);
   assert.ok(
-    fnBody.includes('سرویس تحلیل تصویر') || fnBody.includes('_imageUnavailable'),
-    'Chat image path must return Persian error (Gemini was the only vision provider)'
+    fnBody.includes("['gemini'") && fnBody.includes('callGeminiChat'),
+    'Chat image path must use Gemini (restored for vision)'
   );
 });
 
@@ -370,13 +372,14 @@ test('FALLBACK-031: News AI summary fallback: Groq → OpenRouter → Workers AI
 });
 
 test('FALLBACK-032: Chat fallback: Groq → OpenRouter → Workers AI → OpenAI (no Gemini)', () => {
-  const fnStart = assistantSrc.indexOf('const providers = [');
+  // FINAL AUDIT: Chat fallback: Groq → OpenRouter → Gemini → Workers AI → OpenAI
+  const fnStart = assistantSrc.indexOf('const providers = hasImage');
   const fnBody = assistantSrc.substring(fnStart, fnStart + 800);
   assert.ok(fnBody.includes("['groq'"), 'Chat must have Groq');
   assert.ok(fnBody.includes("['openrouter'"), 'Chat must have OpenRouter');
+  assert.ok(fnBody.includes("['gemini'"), 'Chat must have Gemini (restored)');
   assert.ok(fnBody.includes("['workers-ai'"), 'Chat must have Workers AI');
   assert.ok(!fnBody.includes("['groq-secondary'"), 'Chat must NOT have groq-secondary');
-  assert.ok(!fnBody.includes("['gemini'"), 'Chat must NOT have Gemini');
 });
 
 // ════════════════════════════════════════════════════════════════════════════

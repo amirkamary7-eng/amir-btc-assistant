@@ -170,12 +170,13 @@ test('GROQ-GW-009: Old groq-key0/groq-key1 circuits replaced by router per-key s
 // TEST 10: Chat fallback chain order unchanged (groq → groq-secondary → gemini → ...)
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-010: Chat fallback chain: Groq → OpenRouter → Workers AI → OpenAI (no Gemini, no groq-secondary)', () => {
-  const fnStart = assistantSrc.indexOf('const providers = [');
+  // FINAL AUDIT: Chat fallback: Groq → OpenRouter → Gemini → Workers AI → OpenAI
+  const fnStart = assistantSrc.indexOf('const providers = hasImage');
   assert.ok(fnStart !== -1, 'Chat providers array must exist');
   const fnBody = assistantSrc.substring(fnStart, fnStart + 800);
   assert.ok(fnBody.includes("['groq'"), 'Chat must have Groq');
   assert.ok(fnBody.includes("['openrouter'"), 'Chat must have OpenRouter');
+  assert.ok(fnBody.includes("['gemini'"), 'Chat must have Gemini (restored for Chat only)');
   assert.ok(fnBody.includes("['workers-ai'"), 'Chat must have Workers AI');
   assert.ok(!fnBody.includes("['groq-secondary'"), 'Chat must NOT have groq-secondary');
-  assert.ok(!fnBody.includes("['gemini'"), 'Chat must NOT have Gemini');
 });

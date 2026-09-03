@@ -870,6 +870,51 @@ export function createAssistantHandlers(deps) {
     return text.trim();
   }
 
+  // ── Gemini (Chat ONLY — restored for vision + text fallback) ──
+  // FINAL AUDIT FIX: Gemini was completely removed in be0482d. This restores it
+  // for Chat ONLY (text fallback + vision/image). News AI still has NO Gemini.
+  // Gemini circuit key: 'chat-gemini' (isolated from News AI + Groq router).
+  async function callGeminiChat(env, prompt, imageBase64) {
+    const parts = [{ text: prompt }];
+    if (imageBase64) {
+      parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64 } });
+      console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} partsCount=${parts.length} model=gemini-3.5-flash`);
+    }
+    const contents = [{ parts }];
+    const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
+    let dbResult;
+    try {
+      dbResult = await queryDb(env,
+        `SELECT public.gemini_generate($1::text, $2::jsonb, $3::jsonb, $4::jsonb) AS result`,
+        ['gemini-3.5-flash', JSON.stringify(contents),
+         JSON.stringify({ temperature: 0.7, maxOutputTokens: 2048, topP: 0.85 }),
+         JSON.stringify(systemInstruction)]
+      );
+    } catch (dbErr) {
+      console.error(`[ChatAI] Gemini DB gateway error: ${dbErr?.message || String(dbErr)?.slice(0, 200)}`);
+      throw { message: `Gemini DB gateway error: ${dbErr?.message || 'unknown'}`, errorType: 'retryable', _isProviderError: true };
+    }
+    const geminiResult = dbResult.rows[0]?.result || {};
+    const statusCode = geminiResult.status_code;
+    const responseBody = geminiResult.response_body || '';
+    console.log(`[ChatAI] Gemini response: status=${statusCode} bodyLen=${responseBody?.length || 0} hasImage=${Boolean(imageBase64)}`);
+    if (statusCode !== 200) {
+      let errorDetail = responseBody;
+      try { errorDetail = typeof responseBody === 'string' ? JSON.parse(responseBody)?.error?.message || responseBody.slice(0, 200) : responseBody; } catch {}
+      console.error(`[ChatAI] Gemini HTTP ${statusCode}: ${String(errorDetail).slice(0, 200)}`);
+      const errorType = classifyHttpError(statusCode || 500);
+      throw { message: `Gemini failed: HTTP ${statusCode} — ${String(errorDetail).slice(0, 100)}`, errorType, _isProviderError: true };
+    }
+    let data;
+    try { data = typeof responseBody === 'string' ? JSON.parse(responseBody) : responseBody; }
+    catch { throw { message: 'Invalid Gemini response JSON', errorType: 'retryable', _isProviderError: true }; }
+    const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+    const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    const reply = responseParts.find(p => typeof p?.text === 'string' && p.text.trim())?.text || null;
+    if (!reply) throw { message: 'Empty Gemini response', errorType: 'retryable', _isProviderError: true };
+    return reply;
+  }
+
   async function callOpenRouterChat(env, prompt) {
     const apiKey = normalizeOptionalString(env.OPENROUTER_API_KEY);
     if (!apiKey) throw { message: 'OpenRouter not configured', errorType: 'non_retryable', _isProviderError: true };
@@ -1010,20 +1055,17 @@ export function createAssistantHandlers(deps) {
     // The router picks the best healthy Groq key internally — there is no
     // separate "groq-secondary" step anymore.
     const hasImage = Boolean(imageBase64);
-    if (hasImage) {
-      // GROQ-ROUTER-4KEY: No vision-capable provider configured (Gemini removed).
-      // Throw a clear, user-friendly Persian error. The catch block in
-      // handlePostChat surfaces this to the user.
-      const err = new Error('سرویس تحلیل تصویر در حال حاضر در دسترس نیست.');
-      err._imageUnavailable = true;
-      throw err;
-    }
 
-    const providers = [
-      // Text-only path — failover chain per spec:
-      //   groq → openrouter → workers-ai → openai(opt-in)
+    const providers = hasImage ? [
+      // VISION-ONLY path: Gemini is the only vision-capable provider.
+      // If Gemini fails, return clear error (no text-only fallback for images).
+      ['gemini', () => callGeminiChat(env, prompt, imageBase64), true],
+    ] : [
+      // Text-only path — failover chain:
+      //   groq → openrouter → gemini → workers-ai → openai(opt-in)
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
       ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
+      ['gemini', () => callGeminiChat(env, prompt), true],
       ['workers-ai', () => callWorkersAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_WORKERS_AI', true) : true],
       ['openai', () => callOpenAIChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENAI', false) : false],
     ];
