@@ -653,7 +653,7 @@ const i18n = {
         mkt_btc_unavailable: 'داده BTC در دسترس نیست',
         premium_settings_msg: 'برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید.',
         premium_upgrade_btn: 'ارتقا به پریمیوم',
-        featured_limit_warn: '' + t('featured_limit_warn') + '',
+        featured_limit_warn: 'در حال حاضر ۵ تحلیل ویژه فعال دارید.<br>قدیمی‌ترین تحلیل ویژه حذف و این تحلیل جایگزین خواهد شد.<br>ادامه می‌دهید؟',
         loading_dots: '...',
         retry: 'تلاش مجدد',
         // ── showToast + analysis i18n keys ──
@@ -866,8 +866,7 @@ const i18n = {
         toast_analysis_delete_error_retry: 'Error deleting analysis — please try again.',
         toast_analysis_deleted: 'Analysis deleted.',
         toast_analysis_delete_error: 'Error deleting analysis.',
-        toast_form_errors: 'Please fix form errors'
-    },
+        toast_form_errors: 'Please fix form errors',
         // ── Missing EN keys (notification settings) ──
         ns_marketing: 'Promotional',
         ns_marketing_desc: 'Special offers and campaigns',
