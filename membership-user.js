@@ -29,18 +29,26 @@
   // Fallback values used if the requirement API is unavailable (pre-migration
   // or network error). These match the EXACT current hard-coded behavior so
   // there is zero user-visible change in the fallback path.
-  var FALLBACK_REQUIREMENT = {
-    active: true,
-    exchange_name: 'Bitunix',
-    exchange_register_url: 'https://www.bitunix.com/register?vipCode=AMIRBTC',
-    uid_label: t('mem_uid_label_default', { exchange: 'Bitunix' }),
-    referral_code: 'AMIRBTC',
-    label: 'Bitunix + First Trade',
-    metadata: {
-      timeline_step_1: t('mem_timeline_step1', { exchange: 'Bitunix' }),
-      button_text: t('mem_register_btn', { exchange: 'Bitunix' }),
-    },
-  };
+  //
+  // LAZY FIX (load-order regression): Originally this was a static object that
+  // called t() at module-load time. But membership-user.js loads BEFORE app.js
+  // (which defines t()), causing ReferenceError: t is not defined → IIFE crash
+  // → window.MembershipApp never assigned → Premium badge broken.
+  // Now it's a function so t() is only called at use-time (after app.js loaded).
+  function FALLBACK_REQUIREMENT() {
+    return {
+      active: true,
+      exchange_name: 'Bitunix',
+      exchange_register_url: 'https://www.bitunix.com/register?vipCode=AMIRBTC',
+      uid_label: t('mem_uid_label_default', { exchange: 'Bitunix' }),
+      referral_code: 'AMIRBTC',
+      label: 'Bitunix + First Trade',
+      metadata: {
+        timeline_step_1: t('mem_timeline_step1', { exchange: 'Bitunix' }),
+        button_text: t('mem_register_btn', { exchange: 'Bitunix' }),
+      },
+    };
+  }
 
   // PHASE 7B (B1): Fallback when /api/membership/rules is unavailable or
   // returns no active version. active:false tells the popup to render the
@@ -103,17 +111,17 @@
       if (res && res.ok && res.data && res.data.active) {
         _requirement = res.data;
       } else {
-        _requirement = FALLBACK_REQUIREMENT;
+        _requirement = FALLBACK_REQUIREMENT();
       }
     } catch (e) {
-      _requirement = FALLBACK_REQUIREMENT;
+      _requirement = FALLBACK_REQUIREMENT();
     }
     return _requirement;
   }
 
   /** Synchronous getter — returns cached requirement or fallback. */
   function getRequirement() {
-    return _requirement || FALLBACK_REQUIREMENT;
+    return _requirement || FALLBACK_REQUIREMENT();
   }
 
   /**
@@ -987,7 +995,7 @@
 
   function openRegisterUrl() {
     var req = getRequirement();
-    var url = req.exchange_register_url || FALLBACK_REQUIREMENT.exchange_register_url;
+    var url = req.exchange_register_url || FALLBACK_REQUIREMENT().exchange_register_url;
     if (window.Telegram?.WebApp?.openLink) {
       window.Telegram.WebApp.openLink(url);
     } else {
