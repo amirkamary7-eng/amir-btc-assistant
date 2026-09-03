@@ -655,7 +655,35 @@ const i18n = {
         premium_upgrade_btn: 'ارتقا به پریمیوم',
         featured_limit_warn: '' + t('featured_limit_warn') + '',
         loading_dots: '...',
-        retry: 'تلاش مجدد'
+        retry: 'تلاش مجدد',
+        // ── showToast + analysis i18n keys ──
+        toast_api_unavailable: 'API در دسترس نیست.',
+        toast_admin_denied: 'دسترسی ادمین تأیید نشده — لطفاً دوباره تلاش کنید.',
+        toast_server_loading: 'سرور در حال بارگذاری است — لطفاً چند ثانیه بعد تلاش کنید.',
+        toast_timeout: 'درخواست زمان‌بر شد — لطفاً دوباره تلاش کنید.',
+        toast_removed_saved: 'از ذخیره‌شده‌ها حذف شد.',
+        toast_added_saved: 'در ذخیره‌شده‌ها اضافه شد.',
+        toast_analysis_refreshed: 'تحلیل‌ها به‌روز شد.',
+        toast_analysis_refresh_error: 'خطا در به‌روزرسانی.',
+        toast_analysis_load_error: 'خطا در بارگذاری تحلیل. لطفاً دوباره تلاش کنید.',
+        toast_views_not_updated: 'شماره بازدید به‌روزرسانی نشد. متن تحلیل کامل است.',
+        toast_text_copied: 'متن تحلیل کپی شد.',
+        toast_copy_failed: 'کپی ناموفق بود.',
+        toast_link_copied: 'لینک تحلیل کپی شد!',
+        toast_link_copy_failed: 'کپی لینک ناموفق بود',
+        toast_link_copy_short: 'لینک کپی شد',
+        toast_fields_required: 'نام ارز و متن تحلیل الزامی است.',
+        toast_no_server_response: 'خطا: پاسخی از سرور دریافت نشد.',
+        toast_analysis_save_error: 'خطا در ذخیره تحلیل.',
+        toast_analysis_edited: 'تحلیل ویرایش شد.',
+        toast_analysis_published: 'تحلیل منتشر شد.',
+        toast_analysis_save_error_detail: 'خطا در ذخیره تحلیل: ',
+        toast_unexpected_error: 'خطای غیرمنتظره: ',
+        toast_admin_only_delete: 'فقط ادمین اجازه حذف تحلیل را دارد.',
+        toast_analysis_delete_error_retry: 'خطا در حذف تحلیل — لطفاً دوباره تلاش کنید.',
+        toast_analysis_deleted: 'تحلیل حذف شد.',
+        toast_analysis_delete_error: 'خطا در حذف تحلیل.',
+        toast_form_errors: 'لطفاً خطاهای فرم را برطرف کنید'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -810,6 +838,36 @@ const i18n = {
         premium_upgrade_btn: 'Upgrade to Premium',
         featured_limit_warn: 'You already have 5 featured analyses.<br>The oldest featured analysis will be removed and replaced.<br>Continue?',
         loading_dots: '...',
+        retry: 'Retry',
+        // ── showToast + analysis i18n keys ──
+        toast_api_unavailable: 'API unavailable.',
+        toast_admin_denied: 'Admin access not verified — please try again.',
+        toast_server_loading: 'Server is loading — please try again in a few seconds.',
+        toast_timeout: 'Request timed out — please try again.',
+        toast_removed_saved: 'Removed from saved.',
+        toast_added_saved: 'Added to saved.',
+        toast_analysis_refreshed: 'Analyses refreshed.',
+        toast_analysis_refresh_error: 'Error refreshing.',
+        toast_analysis_load_error: 'Error loading analysis. Please try again.',
+        toast_views_not_updated: 'Views not updated. Full analysis text.',
+        toast_text_copied: 'Analysis text copied.',
+        toast_copy_failed: 'Copy failed.',
+        toast_link_copied: 'Analysis link copied!',
+        toast_link_copy_failed: 'Link copy failed',
+        toast_link_copy_short: 'Link copied',
+        toast_fields_required: 'Coin name and analysis text are required.',
+        toast_no_server_response: 'Error: No response from server.',
+        toast_analysis_save_error: 'Error saving analysis.',
+        toast_analysis_edited: 'Analysis edited.',
+        toast_analysis_published: 'Analysis published.',
+        toast_analysis_save_error_detail: 'Error saving analysis: ',
+        toast_unexpected_error: 'Unexpected error: ',
+        toast_admin_only_delete: 'Only admins can delete analyses.',
+        toast_analysis_delete_error_retry: 'Error deleting analysis — please try again.',
+        toast_analysis_deleted: 'Analysis deleted.',
+        toast_analysis_delete_error: 'Error deleting analysis.',
+        toast_form_errors: 'Please fix form errors'
+    },
         // ── Missing EN keys (notification settings) ──
         ns_marketing: 'Promotional',
         ns_marketing_desc: 'Special offers and campaigns',
@@ -1505,7 +1563,7 @@ async function fetchAnalyses(force = false, append = false) {
 async function saveAnalysisToServer(payload, method, analysisId) {
     // ── Step 1: Check API_BASE ──
     if (!API_BASE) {
-        showToast('API در دسترس نیست.');
+        showToast(t('toast_api_unavailable'));
         return null;
     }
 
@@ -1551,12 +1609,12 @@ async function saveAnalysisToServer(payload, method, analysisId) {
             console.error('[ANALYSIS] HTTP ERROR', res.status, responseText.substring(0, 200));
             // Handle 403 specifically — admin auth failed
             if (res.status === 403) {
-                showToast('دسترسی ادمین تأیید نشده — لطفاً دوباره تلاش کنید.');
+                showToast(t('toast_admin_denied'));
                 return null;
             }
             // Handle 503 — database timeout
             if (res.status === 503) {
-                showToast('سرور در حال بارگذاری است — لطفاً چند ثانیه بعد تلاش کنید.');
+                showToast(t('toast_server_loading'));
                 return null;
             }
             throw new Error(`HTTP ${res.status}: ${responseText.substring(0, 100)}`);
@@ -1568,7 +1626,7 @@ async function saveAnalysisToServer(payload, method, analysisId) {
         console.error('[ANALYSIS] fetch exception:', err.name, err.message);
         // Handle abort/timeout specifically
         if (err.name === 'AbortError') {
-            showToast('درخواست زمان‌بر شد — لطفاً دوباره تلاش کنید.');
+            showToast(t('toast_timeout'));
             return null;
         }
         throw err;
@@ -1674,7 +1732,7 @@ function toggleAnalysisBookmark(id, event) {
         if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
             updateDetailBookmarkButton(id);
         }
-        showToast('از ذخیره‌شده‌ها حذف شد.');
+        showToast(t('toast_removed_saved'));
     } else {
         analysisBookmarks.push(id);
         localStorage.setItem('analysisBookmarks', JSON.stringify(analysisBookmarks));
@@ -1683,7 +1741,7 @@ function toggleAnalysisBookmark(id, event) {
         if (currentAnalysisDetail && currentAnalysisDetail.id === id) {
             updateDetailBookmarkButton(id);
         }
-        showToast('در ذخیره‌شده‌ها اضافه شد.');
+        showToast(t('toast_added_saved'));
     }
 }
 
@@ -2321,9 +2379,9 @@ function initPullToRefresh() {
                 renderAnalysisStats();
                 renderAnalysisList();
                 renderAnalysisSlider();
-                showToast('تحلیل‌ها به‌روز شد.');
+                showToast(t('toast_analysis_refreshed'));
             } catch (e) {
-                showToast('خطا در به‌روزرسانی.');
+                showToast(t('toast_analysis_refresh_error'));
             } finally {
                 setTimeout(() => {
                     ptr.classList.remove('refreshing');
@@ -2490,7 +2548,7 @@ async function openAnalysisDetailPage(id) {
         }
     }
     if (!detailFetched && !cachedAnalysis) {
-        showToast('خطا در بارگذاری تحلیل. لطفاً دوباره تلاش کنید.');
+        showToast(t('toast_analysis_load_error'));
         // Navigation stack: pop back to the analysis list since there's
         // nothing to show on the detail page.
         tgBackPop();
@@ -2498,7 +2556,7 @@ async function openAnalysisDetailPage(id) {
         // Cached record already carries the full text (post backend fix), so
         // there is nothing "summary" about what's on screen — only the view
         // counter couldn't be refreshed. Reflect that accurately.
-        showToast('شماره بازدید به‌روزرسانی نشد. متن تحلیل کامل است.');
+        showToast(t('toast_views_not_updated'));
     }
 }
 
@@ -2828,7 +2886,7 @@ function copyAnalysisContent() {
 
     try {
         navigator.clipboard.writeText(text).then(() => {
-            showToast('متن تحلیل کپی شد.');
+            showToast(t('toast_text_copied'));
         }).catch(() => {
             // Fallback for older WebViews
             const ta = document.createElement('textarea');
@@ -2837,12 +2895,12 @@ function copyAnalysisContent() {
             ta.style.opacity = '0';
             document.body.appendChild(ta);
             ta.select();
-            try { document.execCommand('copy'); showToast('متن تحلیل کپی شد.'); }
-            catch { showToast('کپی ناموفق بود.'); }
+            try { document.execCommand('copy'); showToast(t('toast_text_copied')); }
+            catch { showToast(t('toast_copy_failed')); }
             document.body.removeChild(ta);
         });
     } catch {
-        showToast('کپی ناموفق بود.');
+        showToast(t('toast_copy_failed'));
     }
 }
 
@@ -2859,7 +2917,7 @@ function shareAnalysisById(id) {
         navigator.share({ title: `${a.coin} Analysis`, text: text + '\n\n' + deepLink, url: deepLink }).catch(() => {});
     } else if (navigator.clipboard) {
         navigator.clipboard.writeText(text + '\n\n' + deepLink).then(() => {
-            showToast('لینک تحلیل کپی شد!');
+            showToast(t('toast_link_copied'));
         });
     }
 }
@@ -3206,7 +3264,7 @@ function submitAnalysis() {
 
         // ── Step 3: Validate ──
         if (!coin || !text) {
-            showToast('نام ارز و متن تحلیل الزامی است.');
+            showToast(t('toast_fields_required'));
             return;
         }
 
@@ -3230,7 +3288,7 @@ function submitAnalysis() {
                 }
 
                 if (!result) {
-                    showToast('خطا: پاسخی از سرور دریافت نشد.');
+                    showToast(t('toast_no_server_response'));
                     return;
                 }
 
@@ -3277,20 +3335,20 @@ function submitAnalysis() {
                 }
 
                 _applySaveResult(result, wasEditing);
-                showToast(wasEditing ? 'تحلیل ویرایش شد.' : 'تحلیل منتشر شد.');
+                showToast(wasEditing ? t('toast_analysis_edited') : t('toast_analysis_published'));
 
                 // Background refetch to sync with server
                 fetchAnalyses(true).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
-                showToast('خطا در ذخیره تحلیل: ' + (e.message || 'Unknown'));
+                showToast(t('toast_analysis_save_error_detail') + (e.message || 'Unknown'));
             } finally {
-                if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = wasEditing ? 'ذخیره تغییرات' : 'انتشار تحلیل'; }
+                if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = wasEditing ? t('analysis_save_changes') : t('analysis_publish'); }
             }
         })();
     } catch (syncErr) {
         console.error('[ANALYSIS] submit sync error:', syncErr.message);
-        showToast('خطای غیرمنتظره: ' + (syncErr.message || 'Unknown'));
+        showToast(t('toast_unexpected_error') + (syncErr.message || 'Unknown'));
     }
 }
 
@@ -3362,7 +3420,7 @@ function _applySaveResult(result, wasEditing) {
 
 // ── Admin: Delete (Double Confirm) ──
 function startDeleteAnalysis(id) {
-    if (!isAdmin()) { showToast('فقط ادمین اجازه حذف تحلیل را دارد.'); return; }
+    if (!isAdmin()) { showToast(t('toast_admin_only_delete')); return; }
     deletingAnalysisId = id;
     document.getElementById('delete-confirm-step1').style.display = '';
     document.getElementById('delete-confirm-step2').style.display = 'none';
@@ -3391,7 +3449,7 @@ function executeDeleteAnalysis() {
             // Previously, null result was not caught, causing silent failure —
             // the analysis was removed from UI but never actually deleted from server.
             if (!result) {
-                showToast('خطا در حذف تحلیل — لطفاً دوباره تلاش کنید.');
+                showToast(t('toast_analysis_delete_error_retry'));
                 return;
             }
             if (result.status !== 'success') {
@@ -3421,7 +3479,7 @@ function executeDeleteAnalysis() {
                 localStorage.setItem('analysisFeatured', JSON.stringify(analysisFeatured));
             }
 
-            showToast('تحلیل حذف شد.');
+            showToast(t('toast_analysis_deleted'));
 
             // If we're on the detail page of the deleted analysis, go back
             if (currentAnalysisDetail?.id === id) {
@@ -3444,7 +3502,7 @@ function executeDeleteAnalysis() {
             }).catch(() => {});
         } catch (e) {
             console.error('deleteAnalysis:', e);
-            showToast('خطا در حذف تحلیل.');
+            showToast(t('toast_analysis_delete_error'));
         }
     })();
 }
@@ -7406,7 +7464,7 @@ function shareNewsTo(platform) {
                 // would silently fail with no user feedback. Now we show a toast
                 // on failure too, and fall back to the execCommand path.
                 navigator.clipboard.writeText(url).then(() => {
-                    if (typeof showToast === 'function') showToast('لینک کپی شد');
+                    if (typeof showToast === 'function') showToast(t('toast_link_copy_short'));
                 }).catch(() => {
                     // Clipboard API rejected — try execCommand fallback
                     const input = document.createElement('input');
@@ -7415,9 +7473,9 @@ function shareNewsTo(platform) {
                     input.select();
                     try {
                         document.execCommand('copy');
-                        if (typeof showToast === 'function') showToast('لینک کپی شد');
+                        if (typeof showToast === 'function') showToast(t('toast_link_copy_short'));
                     } catch (e) {
-                        if (typeof showToast === 'function') showToast('کپی لینک ناموفق بود');
+                        if (typeof showToast === 'function') showToast(t('toast_link_copy_failed'));
                     }
                     document.body.removeChild(input);
                 });
@@ -11427,11 +11485,11 @@ async function submitTicket() {
         if (errEl) errEl.textContent = `حداقل ${TICKET_MIN_BODY} کاراکتر نیاز است`;
         if (bodyEl) bodyEl.classList.add('tk-error-state');
     }
-    if (!valid) { showToast('لطفاً خطاهای فرم را برطرف کنید'); return; }
+    if (!valid) { showToast(t('toast_form_errors')); return; }
     if (!API_BASE) { showToast(t('ticket_error')); return; }
 
     // Prevent double-submit
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerHTML = '<div class="tk-mini-spinner"></div> در حال ارسال...'; }
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerHTML = '<div class="tk-mini-spinner"></div> ' + t('analysis_sending'); }
 
     try {
         const healthy = await checkBackendHealth();
