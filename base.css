@@ -113,6 +113,7 @@ body.user-loading .profile-loading-target.skeleton-text {
   position: sticky;
   top: 0;
   z-index: 100;
+  direction: ltr;
 }
 .header-side {
   display: flex;

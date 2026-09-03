@@ -1489,8 +1489,8 @@ test('ADS-FREE-UI-07: Locked card has upgrade message with lock SVG', () => {
   const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
   assert.ok(renderBlock.includes('ns-prem-upgrade-msg'),
     'locked card must have ns-prem-upgrade-msg element');
-  assert.ok(renderBlock.includes('برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید'),
-    'locked card must show Persian upgrade message');
+  assert.ok(renderBlock.includes("t('premium_settings_msg')"),
+    'locked card must use t("premium_settings_msg") for upgrade message (i18n)');
   // Message has a lock SVG
   const msgStart = renderBlock.indexOf('ns-prem-upgrade-msg');
   const msgBlock = renderBlock.slice(msgStart, msgStart + 300);
@@ -1504,8 +1504,8 @@ test('ADS-FREE-UI-08: Locked card has CTA button with crown SVG → upgrade', ()
   const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
   assert.ok(renderBlock.includes('ns-prem-upgrade-cta'),
     'locked card must have ns-prem-upgrade-cta button');
-  assert.ok(renderBlock.includes('ارتقا به پریمیوم'),
-    'CTA must show "ارتقا به پریمیوم"');
+  assert.ok(renderBlock.includes("t('premium_upgrade_btn')"),
+    'CTA must use t("premium_upgrade_btn") for upgrade button text (i18n)');
   // CTA has crown SVG
   const ctaStart = renderBlock.indexOf('ns-prem-upgrade-cta');
   const ctaBlock = renderBlock.slice(ctaStart, ctaStart + 400);

@@ -639,7 +639,23 @@ const i18n = {
         beta_popup_report_desc: 'هر باگ، خطا یا رفتار غیرعادی را از طریق تیکت و بخش پشتیبانی گزارش کن تا بررسی و پیگیری شود. حتی اگر مشکل کوچک به نظر می‌رسد، گزارش آن برای ما ارزشمند است.',
         beta_popup_cta_continue: 'ادامه به نسخه بتا',
         beta_popup_cta_support: 'گزارش مشکل / پشتیبانی',
-        beta_popup_beta_badge: 'BETA'
+        beta_popup_beta_badge: 'BETA',
+        // ── Phase 2 i18n: hardcoded strings moved to dictionary ──
+        analysis_new: 'تحلیل جدید',
+        analysis_publish: 'انتشار تحلیل',
+        analysis_edit: 'ویرایش تحلیل',
+        analysis_save_changes: 'ذخیره تغییرات',
+        analysis_sending: '⏳ در حال ارسال...',
+        loading_search: 'در حال جستجو...',
+        loading_default: 'در حال بارگذاری...',
+        empty_content: 'محتوایی موجود نیست.',
+        error_loading: 'خطا در بارگذاری محتوا.',
+        mkt_btc_unavailable: 'داده BTC در دسترس نیست',
+        premium_settings_msg: 'برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید.',
+        premium_upgrade_btn: 'ارتقا به پریمیوم',
+        featured_limit_warn: '' + t('featured_limit_warn') + '',
+        loading_dots: '...',
+        retry: 'تلاش مجدد'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -778,7 +794,33 @@ const i18n = {
         beta_popup_report_desc: 'Report any bug, error, or unusual behavior via the support and ticket section so we can investigate. Even small issues are valuable to us.',
         beta_popup_cta_continue: 'Continue to Beta',
         beta_popup_cta_support: 'Report Issue / Support',
-        beta_popup_beta_badge: 'BETA'
+        beta_popup_beta_badge: 'BETA',
+        // ── Phase 2 i18n: hardcoded strings moved to dictionary ──
+        analysis_new: 'New Analysis',
+        analysis_publish: 'Publish Analysis',
+        analysis_edit: 'Edit Analysis',
+        analysis_save_changes: 'Save Changes',
+        analysis_sending: '⏳ Sending...',
+        loading_search: 'Searching...',
+        loading_default: 'Loading...',
+        empty_content: 'No content available.',
+        error_loading: 'Error loading content.',
+        mkt_btc_unavailable: 'BTC data unavailable',
+        premium_settings_msg: 'Upgrade to Premium to access these settings.',
+        premium_upgrade_btn: 'Upgrade to Premium',
+        featured_limit_warn: 'You already have 5 featured analyses.<br>The oldest featured analysis will be removed and replaced.<br>Continue?',
+        loading_dots: '...',
+        // ── Missing EN keys (notification settings) ──
+        ns_marketing: 'Promotional',
+        ns_marketing_desc: 'Special offers and campaigns',
+        ns_referral: 'Referral',
+        ns_referral_desc: 'New invite notifications',
+        ns_reward: 'Token Reward',
+        ns_reward_desc: 'AB Token reward received',
+        ns_system: 'System',
+        ns_system_desc: 'Important system announcements',
+        ns_ticket: 'Support Ticket',
+        ns_ticket_desc: 'Replies to support tickets'
     }
 };
 /**
@@ -3065,8 +3107,8 @@ function initAnalysisCharCounter() {
 function openAddAnalysisModal() {
     if (!isAdmin()) return;
     editingAnalysisId = null;
-    document.getElementById('analysis-modal-title').innerText = 'تحلیل جدید';
-    document.getElementById('analysis-submit-btn').innerText = 'انتشار تحلیل';
+    document.getElementById('analysis-modal-title').innerText = t('analysis_new');
+    document.getElementById('analysis-submit-btn').innerText = t('analysis_publish');
     ['analysis-title', 'analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text', 'analysis-support', 'analysis-current-price', 'analysis-resistance'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -3088,8 +3130,8 @@ function openEditAnalysisModal(id) {
     const a = analyses.find(x => x.id === id) || (Array.isArray(analysisFeatured) ? analysisFeatured.find(x => x.id === id) : null);
     if (!a) return;
     editingAnalysisId = id;
-    document.getElementById('analysis-modal-title').innerText = 'ویرایش تحلیل';
-    document.getElementById('analysis-submit-btn').innerText = 'ذخیره تغییرات';
+    document.getElementById('analysis-modal-title').innerText = t('analysis_edit');
+    document.getElementById('analysis-submit-btn').innerText = t('analysis_save_changes');
     document.getElementById('analysis-title').value = a.title || '';
     document.getElementById('analysis-coin').value = a.coin || '';
     document.getElementById('analysis-timeframe').value = a.timeframe || '';
@@ -3119,10 +3161,10 @@ function showFeaturedLimitConfirm(onConfirm, onCancel) {
     overlay.id = 'featured-limit-confirm';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:20px;';
     overlay.innerHTML = `
-        <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;padding:24px;max-width:340px;width:100%;text-align:center;direction:rtl;">
+        <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;padding:24px;max-width:340px;width:100%;text-align:center;">
             <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
             <p style="font-size:14px;line-height:1.8;color:var(--text-primary,#fff);margin:0 0 20px;">
-                در حال حاضر ۵ تحلیل ویژه فعال دارید.<br>قدیمی‌ترین تحلیل ویژه حذف و این تحلیل جایگزین خواهد شد.<br>ادامه می‌دهید؟
+                ' + t('featured_limit_warn') + '
             </p>
             <div style="display:flex;gap:10px;">
                 <button id="fl-confirm-yes" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e74c3c;color:#fff;font-size:14px;cursor:pointer;font-weight:bold;">بله، ادامه</button>
@@ -3174,7 +3216,7 @@ function submitAnalysis() {
 
         // ── Step 5: Disable button ──
         const btn = document.getElementById('analysis-submit-btn');
-        if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerText = '⏳ در حال ارسال...'; }
+        if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerText = t('analysis_sending'); }
 
         // ── Step 6: Async save with optimistic UI update ──
         const wasEditing = !!editingAnalysisId;
@@ -4128,21 +4170,56 @@ function selectLang(lang) {
     loadNews(true);
     closeLangModal();
 
-    // Re-render open full-page overlays so their localized text updates live.
-    // These pages are rendered dynamically (not via data-i18n attributes) so
-    // they need an explicit re-render when the language changes mid-session.
+    // Phase 2: Re-render dynamic content that uses isFa? or t() conditionals.
+    // These renders are NOT covered by applyLanguage() (which only updates data-i18n elements).
+    // Each render is called ONLY if the corresponding page/element is currently visible,
+    // to avoid unnecessary API calls or state disruption.
     try {
+        // Market ticker (always visible on dashboard)
+        renderMarketTicker();
+
+        // Active alerts (visible if coin detail is open)
+        const detailTitle = document.getElementById('detail-coin-title');
+        if (detailTitle) {
+            renderActiveAlerts(detailTitle.innerText.split(' ')[0] || '');
+        }
+
+        // Notification settings (visible if settings modal is open)
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal && settingsModal.style.display !== 'none') {
+            // Re-render notification settings if the function exists
+            if (typeof renderNotificationSettings === 'function') {
+                renderNotificationSettings();
+            }
+        }
+
+        // Re-render open full-page overlays so their localized text updates live.
         const referralPage = document.getElementById('referral-full-page');
         if (referralPage && referralPage.classList.contains('open') && window.ReferralApp) {
-            // Re-open triggers a fresh buildPage() with the new language
             window.ReferralApp.openReferral();
         }
         const walletPage = document.getElementById('wallet-full-page');
         if (walletPage && walletPage.classList.contains('open') && window.WalletApp?.isOpen) {
-            // Wallet has its own internal state; re-render via its public API if available
             if (typeof window.WalletApp.refresh === 'function') window.WalletApp.refresh();
         }
-    } catch (e) { /* non-critical — overlays will update on next open */ }
+
+        // Re-render analysis list (if analysis page is active)
+        const analysisPage = document.getElementById('analysis-page');
+        if (analysisPage && analysisPage.classList.contains('active')) {
+            renderAnalysisList();
+            renderAnalysisStats();
+        }
+
+        // Re-render dashboard calendar + important news
+        renderDashboardCalendar();
+        loadImportantNews();
+
+        // Re-render tickets if profile page is active
+        const profilePage = document.getElementById('profile-page');
+        if (profilePage && profilePage.classList.contains('active')) {
+            renderTickets();
+        }
+    } catch (e) { /* non-critical — dynamic content will update on next interaction */ }
 }
 /**
  * زبان را تغییر می‌دهد.
@@ -5034,7 +5111,7 @@ function renderMarket() {
     // directly without depending on allCoins.
     if (searchTerm) {
         // Show skeleton immediately while search runs
-        list.innerHTML = '<div class="empty-state" style="padding:20px;">در حال جستجو...</div>';
+        list.innerHTML = '<div class="empty-state" style="padding:20px;">' + t('loading_search') + '</div>';
 
         // Use plain fetch() — NOT apiFetch() — because:
         // 1. The endpoint is PUBLIC (no auth required)
@@ -5173,7 +5250,7 @@ function renderMarket() {
                 const btcPrice = btc?.priceUsd || 0;
                 const btcChange = btc?.changePercent24Hr || 0;
                 if (!btcPrice) {
-                    list.innerHTML = '<div class="mkt-empty">داده BTC در دسترس نیست</div>';
+                    list.innerHTML = '<div class="mkt-empty">' + t('mkt_btc_unavailable') + '</div>';
                     return;
                 }
                 const pairs = allCoins
@@ -10099,7 +10176,7 @@ async function markNotifRead(id) {
 function loadUser() {
     if (UserContext.loading || isUserLoading()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
-        const pu = $('profile-username'); if (pu) pu.innerText = '...';
+        const pu = $('profile-username'); if (pu) pu.innerText = t('loading_dots');
         const pi = $('profile-id-num'); if (pi) pi.innerText = '...';
         return;
     }
@@ -10120,7 +10197,7 @@ function loadUser() {
         window.MembershipApp?.loadCard();
     } else if (UserContext.isPending()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('loading_user');
-        const pu = $('profile-username'); if (pu) pu.innerText = '...';
+        const pu = $('profile-username'); if (pu) pu.innerText = t('loading_dots');
         const pi = $('profile-id-num'); if (pi) pi.innerText = '...';
     } else if (UserContext.isGuest()) {
         const pn = $('profile-name'); if (pn) pn.innerText = t('guest');
@@ -10471,7 +10548,7 @@ async function loadContent(type) {
     const body = document.getElementById(bodyId);
     if (!body) return;
 
-    body.innerHTML = '<div class="content-loading"><div class="spinner"></div>در حال بارگذاری...</div>';
+    body.innerHTML = '<div class="content-loading"><div class="spinner"></div>' + t('loading_default') + '</div>';
 
     try {
         const data = await apiFetch('/api/content/' + type);
@@ -10486,10 +10563,10 @@ async function loadContent(type) {
                 body.innerHTML = renderAccordionContent(content);
             }
         } else {
-            body.innerHTML = '<div class="content-loading">محتوایی موجود نیست.</div>';
+            body.innerHTML = '<div class="content-loading">' + t('empty_content') + '</div>';
         }
     } catch (e) {
-        body.innerHTML = '<div class="content-loading">خطا در بارگذاری محتوا.</div>';
+        body.innerHTML = '<div class="content-loading">' + t('error_loading') + '</div>';
     }
 }
 
@@ -10776,7 +10853,7 @@ async function renderNotifSettings() {
     if (!list) return;
 
     // Show skeleton immediately — no blocking
-    list.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7A8D;font-size:12px;">در حال بارگذاری...</div>';
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7A8D;font-size:12px;">' + t('loading_default') + '</div>';
 
     // Load settings (use cache if available for instant render)
     let settings = _nsSettingsCache;
@@ -10980,13 +11057,13 @@ async function renderNotifSettings() {
 
                 const msgText = document.createElement('div');
                 msgText.className = 'ns-prem-upgrade-msg';
-                msgText.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + (isFa ? 'برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید.' : 'Upgrade to Premium to access these settings.') + '</span>';
+                msgText.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>' + t('premium_settings_msg') + '</span>';
                 msgRow.appendChild(msgText);
 
                 const ctaBtn = document.createElement('button');
                 ctaBtn.className = 'ns-prem-upgrade-cta';
                 ctaBtn.setAttribute('type', 'button');
-                ctaBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h20M3 22h18M5 18l-2-9 6 4 5-7 5 7 6-4-2 9"/></svg><span>' + (isFa ? 'ارتقا به پریمیوم' : 'Upgrade to Premium') + '</span>';
+                ctaBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 18h20M3 22h18M5 18l-2-9 6 4 5-7 5 7 6-4-2 9"/></svg><span>' + t('premium_upgrade_btn') + '</span>';
                 // CTA click → upgrade flow (MembershipApp.open). The card-level click handler
                 // also does this, but having an explicit CTA button is clearer UX.
                 ctaBtn.addEventListener('click', function(e) {

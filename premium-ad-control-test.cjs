@@ -76,11 +76,11 @@ test('AD-PREM-05: Locked card shows upgrade message + CTA (PHASE 2)', () => {
   const renderStart = APP_SRC.indexOf('async function renderNotifSettings');
   const renderBlock = APP_SRC.slice(renderStart, renderStart + 13000);
   // PHASE 2: Upgrade message at bottom of card
-  assert.ok(renderBlock.includes('برای دسترسی به این تنظیمات، به پریمیوم ارتقا دهید'),
-    'locked card must show Persian upgrade message');
+  assert.ok(renderBlock.includes("t('premium_settings_msg')"),
+    'locked card must use t("premium_settings_msg") for upgrade message (i18n)');
   // PHASE 2: CTA button "ارتقا به پریمیوم"
-  assert.ok(renderBlock.includes('ارتقا به پریمیوم'),
-    'locked card must show CTA button "ارتقا به پریمیوم"');
+  assert.ok(renderBlock.includes("t('premium_upgrade_btn')"),
+    'locked card must use t("premium_upgrade_btn") for CTA button (i18n)');
   assert.ok(renderBlock.includes('ns-prem-upgrade-cta'),
     'CTA must have ns-prem-upgrade-cta class');
 });

@@ -405,6 +405,7 @@
 .ni-tabs {
     display: flex; gap: 6px;
     width: 100%;
+    direction: ltr;
 }
 .ni-tabs::-webkit-scrollbar { display: none; }
 .ni-tab {

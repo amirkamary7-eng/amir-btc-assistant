@@ -68,7 +68,7 @@
 /* #region منوی پایینی */
 /* این بخش استایل‌های مرتبط با "منوی پایینی" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; margin: 0 12px 10px; border-radius: 22px 22px 18px 18px; background: rgba(17,22,29,0.92); box-shadow: 0 -8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05); border-top: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4); }
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 72px; margin: 0 12px 10px; border-radius: 22px 22px 18px 18px; background: rgba(17,22,29,0.92); box-shadow: 0 -8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05); border-top: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: space-around; align-items: center; z-index: 1000; padding-bottom: env(safe-area-inset-bottom); backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4); direction: ltr; }
 .nav-item { background: none; border: none; display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--text-sub); cursor: pointer; transition: color var(--transition), transform 0.15s; padding: 6px 12px 4px; position: relative; }
 .nav-item:active { transform: scale(0.9); }
 .nav-item svg { width: 22px; height: 22px; transition: transform 0.2s; }
@@ -84,7 +84,7 @@
 /* #region Scroll-to-top button */
 /* ============================================================================ */
 .scroll-top-btn {
-  position: fixed; bottom: 90px; left: 20px; width: 42px; height: 42px;
+  position: fixed; bottom: 90px; inset-inline-end: 20px; width: 42px; height: 42px;
   border-radius: 50%; border: 1px solid rgba(255,255,255,0.1);
   background: rgba(21,28,36,0.9); backdrop-filter: blur(12px);
   color: var(--text-dim); display: flex; align-items: center; justify-content: center;
