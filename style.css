@@ -308,7 +308,7 @@ strong.down { color: var(--red); }
 /* این بخش استایل‌های مرتبط با "پروفایل" را در خود نگه می‌دارد. */
 /* ============================================================================ */
 .profile-card { border-radius: 18px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.06); padding: 24px 20px 20px; margin: 0 20px 16px; text-align: center; position: relative; background: var(--bg-card); box-shadow: 0 8px 24px rgba(0,0,0,0.25); min-height: 240px; display: flex; flex-direction: column; align-items: center; }
-.profile-settings { position: absolute; top: 16px; inset-inline-end: 16px; cursor: pointer; }
+.profile-settings { position: absolute; top: 16px; right: 16px; cursor: pointer; }
 .profile-avatar { width: 80px; height: 80px; margin: 0 auto 10px; border-radius: 50%; border: 2px solid var(--accent); overflow: hidden; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .profile-name { font-size: 18px; font-weight: 700; }

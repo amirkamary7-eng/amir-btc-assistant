@@ -4184,12 +4184,13 @@ function selectLang(lang) {
             renderActiveAlerts(detailTitle.innerText.split(' ')[0] || '');
         }
 
-        // Notification settings (visible if settings modal is open)
+        // Notification settings — 23 isFa? conditionals in renderNotifSettings
+        // Check if settings modal/overlay is open
         const settingsModal = document.getElementById('settings-modal');
-        if (settingsModal && settingsModal.style.display !== 'none') {
-            // Re-render notification settings if the function exists
-            if (typeof renderNotificationSettings === 'function') {
-                renderNotificationSettings();
+        const notifSettingsEl = document.getElementById('notif-settings-list');
+        if ((settingsModal && settingsModal.style.display !== 'none') || notifSettingsEl) {
+            if (typeof renderNotifSettings === 'function') {
+                renderNotifSettings();
             }
         }
 
@@ -4218,6 +4219,16 @@ function selectLang(lang) {
         const profilePage = document.getElementById('profile-page');
         if (profilePage && profilePage.classList.contains('active')) {
             renderTickets();
+        }
+
+        // Join-lock overlay — 10 isFa? conditionals in showJoinStatusBar/setJoinLockState/_renderRequiredChannelsList
+        // Only re-render if join-lock is currently visible
+        const joinLock = document.getElementById('join-lock');
+        if (joinLock && joinLock.classList.contains('open')) {
+            // Re-render the required channels list (updates isFa? text)
+            if (typeof _renderRequiredChannelsList === 'function') {
+                _renderRequiredChannelsList();
+            }
         }
     } catch (e) { /* non-critical — dynamic content will update on next interaction */ }
 }
