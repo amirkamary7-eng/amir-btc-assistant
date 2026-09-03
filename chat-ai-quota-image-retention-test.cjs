@@ -8,6 +8,8 @@ const crypto = require('node:crypto');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 function getWorkerSource() { return fs.readFileSync(WORKER_PATH, 'utf8'); }
+const WORKER_SRC = getWorkerSource();
+const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
 function loadWorker(pgOverride) {
   const source = getWorkerSource();
@@ -558,7 +560,20 @@ test('WS-REG-04: Real Groq E2E — SKIPPED (no production Groq credential in tes
 // PHASE 12: Provider Chain Unchanged
 // ============================================================================
 
-test('PROVIDER-CHAIN-01: N/A: Chain changed (Groq→OpenRouter→Workers AI→OpenAI)', () => { assert.ok(true, 'N/A: Chain changed (Groq→OpenRouter→Workers AI→OpenAI)'); });
+test('PROVIDER-CHAIN-01: Chat text chain: Groq → OpenRouter → Gemini → Workers AI → OpenAI', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  assert.ok(fnStart !== -1, 'Chat providers must exist');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  const groqIdx = textChain.indexOf("['groq'");
+  const orIdx = textChain.indexOf("['openrouter'");
+  const geminiIdx = textChain.indexOf("['gemini'");
+  const waIdx = textChain.indexOf("['workers-ai'");
+  assert.ok(groqIdx > 0, 'Groq must exist');
+  assert.ok(orIdx > groqIdx, 'OpenRouter must come after Groq');
+  assert.ok(geminiIdx > orIdx, 'Gemini must come after OpenRouter');
+  assert.ok(waIdx > geminiIdx, 'Workers AI must come after Gemini');
+});
 
 test('AUDIT-01: worker-proxy.js NOT modified', () => {
   // This is verified by git diff — but also check that assistant.js doesn't
@@ -1091,7 +1106,13 @@ test('CHAT-AVAIL-01: Chat API success response renders correctly', () => {
     'send() must append bubble on success');
 });
 
-test('CHAT-AVAIL-02: N/A: Chat chain changed', () => { assert.ok(true, 'N/A: Chat chain changed'); });
+test('CHAT-AVAIL-02: Chat provider failure falls through chain (sequential)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('for (const [providerName, providerCall, enabled] of providers)');
+  assert.ok(fnStart !== -1, 'Chat must iterate providers sequentially');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  assert.ok(fnBody.includes('if (result.success)'), 'Must check success before returning');
+  assert.ok(fnBody.includes('lastError'), 'Must track lastError for fallback');
+});
 
 test('CHAT-AVAIL-03: Frontend does NOT convert valid response to unavailable', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
@@ -1187,7 +1208,16 @@ test('REGRESSION-02: Image attachment pipeline still works', () => {
   assert.ok(JS.includes('status: \'processing\''), 'processing state intact');
 });
 
-test('REGRESSION-03: Provider chain preserved (Groq→Groq-Secondary→Gemini→OpenRouter→Workers AI→OpenAI)', () => { assert.ok(true, 'N/A: chain changed'); });
+test('REGRESSION-03: Chat provider chain: Groq → OpenRouter → Gemini → Workers AI → OpenAI', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  assert.ok(textChain.includes("['groq'"), 'Has Groq');
+  assert.ok(textChain.includes("['openrouter'"), 'Has OpenRouter');
+  assert.ok(textChain.includes("['gemini'"), 'Has Gemini (restored)');
+  assert.ok(textChain.includes("['workers-ai'"), 'Has Workers AI');
+  assert.ok(!textChain.includes("['groq-secondary'"), 'No groq-secondary (router handles keys)');
+});
 
 test('REGRESSION-04: Quotas NOT changed (Free=10, Premium=100, Free images=3, Premium images=10)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/services/entitlement_config.js'), 'utf8');
@@ -1256,13 +1286,44 @@ test('ATTACHMENT-UX-04: clearAttachment hides composer attachment area', () => {
   assert.ok(fnBlock.includes('composerAttach'), 'Must hide composer attachment');
 });
 
-test('VISION-01: N/A: Gemini removed, image path returns error', () => { assert.ok(true, 'N/A: Gemini removed, image path returns error'); });
+test('VISION-01: Gemini vision routing when image present (restored)', () => {
+  // FINAL AUDIT: Gemini restored for Chat image path
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  assert.ok(fnStart !== -1, 'Chat providers array must exist');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 400);
+  assert.ok(fnBody.includes("['gemini'"), 'Image path must use Gemini as vision provider');
+  assert.ok(fnBody.includes('callGeminiChat'), 'Image path must call callGeminiChat');
+});
 
-test('VISION-02: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-02: Text-only chain: Groq → OpenRouter → Gemini → Workers AI → OpenAI', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  // Find the text-only chain (after the `] : [`)
+  const textChainStart = fnBody.indexOf('] : [');
+  assert.ok(textChainStart !== -1, 'Text-only chain must exist');
+  const textChain = fnBody.substring(textChainStart);
+  assert.ok(textChain.includes("['groq'"), 'Text chain must have Groq');
+  assert.ok(textChain.includes("['openrouter'"), 'Text chain must have OpenRouter');
+  assert.ok(textChain.includes("['gemini'"), 'Text chain must have Gemini (restored)');
+  assert.ok(textChain.includes("['workers-ai'"), 'Text chain must have Workers AI');
+});
 
-test('VISION-03: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-03: Gemini call receives imageBase64 (vision path)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  assert.ok(fnStart !== -1, 'callGeminiChat must exist');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  assert.ok(fnBody.includes('imageBase64'), 'callGeminiChat must accept imageBase64 param');
+  assert.ok(fnBody.includes('inline_data'), 'callGeminiChat must use inline_data format for vision');
+});
 
-test('VISION-04: N/A: Gemini removed (callGeminiChat deleted)', () => { assert.ok(true, 'N/A: Gemini removed (callGeminiChat deleted)'); });
+test('VISION-04: callGeminiChat passes imageBase64 as inline_data to Gemini API', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  assert.ok(fnBody.includes('inline_data'), 'Must use inline_data format');
+  assert.ok(fnBody.includes('mime_type'), 'Must set mime_type');
+  assert.ok(fnBody.includes('image/jpeg'), 'Must use image/jpeg MIME type');
+  assert.ok(fnBody.includes('gemini_generate'), 'Must call gemini_generate DB function');
+});
 
 test('COMPOSER-ATTACHMENT-01: HTML has composer-attachment div', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
@@ -1346,7 +1407,12 @@ test('VISION-E2E-01: send() includes image in payload when attachment ready', ()
   assert.ok(fnBlock.includes('attachment.data'), 'Must use attachment.data');
 });
 
-test('VISION-E2E-02: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-E2E-02: Backend passes imageBase64 to Gemini with inline_data', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  assert.ok(fnBody.includes('inline_data'), 'Must use inline_data');
+  assert.ok(fnBody.includes('data: imageBase64'), 'Must pass imageBase64 as data');
+});
 
 test('ATTACH-SEND-01: Image shown in user message bubble on send', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
@@ -1523,9 +1589,22 @@ test('VISION-PROD-01: Image request sets hasImage=true in generateAssistantReply
     'Must compute hasImage from imageBase64');
 });
 
-test('VISION-PROD-02: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-PROD-02: Image request uses Gemini vision (not text-only providers)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 500);
+  // Image path must ONLY have Gemini (no Groq/OpenRouter/Workers AI for images)
+  const imageChain = fnBody.substring(0, fnBody.indexOf('] : ['));
+  assert.ok(imageChain.includes("['gemini'"), 'Image path must have Gemini');
+  assert.ok(!imageChain.includes("['groq'"), 'Image path must NOT have Groq (text-only)');
+  assert.ok(!imageChain.includes("['openrouter'"), 'Image path must NOT have OpenRouter');
+});
 
-test('VISION-PROD-03: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-PROD-03: Gemini vision request contains inline_data with base64', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 400);
+  assert.ok(fnBody.includes('inline_data'), 'Must construct inline_data');
+  assert.ok(fnBody.includes('imageBase64'), 'Must include imageBase64');
+});
 
 test('VISION-PROD-04: Base64 data URL prefix is removed correctly by backend', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1537,7 +1616,11 @@ test('VISION-PROD-04: Base64 data URL prefix is removed correctly by backend', (
     'Must return raw base64 if no prefix');
 });
 
-test('VISION-PROD-05: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-PROD-05: Correct MIME type (image/jpeg) sent for vision', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 400);
+  assert.ok(fnBody.includes('image/jpeg'), 'Must use image/jpeg MIME type');
+});
 
 test('VISION-PROD-06: Vision failure returns Persian error (not text-only fallback)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1545,9 +1628,22 @@ test('VISION-PROD-06: Vision failure returns Persian error (not text-only fallba
     'Must return Persian vision service error when vision providers fail');
 });
 
-test('VISION-PROD-07: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-PROD-07: Text-only providers forbidden as fallback for image requests', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 500);
+  const imageChain = fnBody.substring(0, fnBody.indexOf('] : ['));
+  assert.ok(imageChain.includes("['gemini'"), 'Image path has Gemini');
+  assert.ok(!imageChain.includes("['workers-ai'"), 'Image path must NOT have Workers AI (text-only)');
+  assert.ok(!imageChain.includes("['openai'"), 'Image path must NOT have OpenAI (text-only)');
+});
 
-test('VISION-PROD-08: N/A: Chain changed (Groq→OpenRouter→Workers AI→OpenAI)', () => { assert.ok(true, 'N/A: Chain changed (Groq→OpenRouter→Workers AI→OpenAI)'); });
+test('VISION-PROD-08: Text-only chain: Groq → OpenRouter → Gemini → Workers AI → OpenAI', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  assert.ok(textChain.includes("['groq'"), 'Has Groq');
+  assert.ok(textChain.includes("['gemini'"), 'Has Gemini (restored for Chat text)');
+});
 
 test('VISION-PROD-09: Provider attempt logging exists for debugging', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1559,7 +1655,12 @@ test('VISION-PROD-09: Provider attempt logging exists for debugging', () => {
     'Must log provider failure');
 });
 
-test('VISION-PROD-10: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-PROD-10: Gemini vision request logs metadata (no API key)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  assert.ok(fnBody.includes('[ChatAI] Gemini vision request'), 'Must log vision request metadata');
+  assert.ok(!fnBody.includes('API_KEY'), 'Must NOT log API key value');
+});
 
 console.log('✅ All production vision regression tests loaded.');
 
@@ -1636,11 +1737,25 @@ test('WELCOME-MSG-10: Welcome hidden when chat opens', () => {
   assert.ok(fnBlock.includes('ai-speech-hidden'), 'Must hide bubble when chat opens');
 });
 
-test('VISION-DIAG-01: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-DIAG-01: Gemini call logs DB gateway errors', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('Gemini DB gateway error'), 'Must log DB gateway errors');
+});
 
-test('VISION-DIAG-02: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-DIAG-02: Gemini call logs response status + body length', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('Gemini response: status='), 'Must log response status');
+  assert.ok(fnBody.includes('bodyLen='), 'Must log body length');
+});
 
-test('VISION-DIAG-03: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-DIAG-03: Gemini error logs actual error message from API', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('Gemini HTTP'), 'Must log HTTP status on error');
+  assert.ok(fnBody.includes('errorDetail'), 'Must extract error detail from response');
+});
 
 test('VISION-DIAG-04: Circuit breaker state logged', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1652,7 +1767,12 @@ test('VISION-DIAG-04: Circuit breaker state logged', () => {
     'Must log circuit breaker state');
 });
 
-test('VISION-DIAG-05: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('VISION-DIAG-05: Gemini error includes detail in thrown exception', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('Gemini failed: HTTP'), 'Must throw with HTTP status');
+  assert.ok(fnBody.includes('_isProviderError: true'), 'Must mark as provider error');
+});
 
 console.log('✅ All welcome + vision diagnostic tests loaded.');
 
@@ -1679,7 +1799,13 @@ test('CB-ISOLATION-02: Chat AI does NOT use bare provider name for circuit break
     'Must NOT call recordCircuitResult with bare providerName');
 });
 
-test('CB-ISOLATION-03: News AI circuit breaker key unchanged (bare provider name)', () => { assert.ok(true, 'N/A: groq-key0/groq-key1 replaced by router'); });
+test('CB-ISOLATION-03: News AI uses bare circuit keys (no chat- prefix, no gemini)', () => {
+  // News AI circuit keys: 'openrouter', 'workers-ai', 'openai' (no 'gemini', no 'groq-key0')
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI has openrouter circuit');
+  assert.ok(active.includes("attemptProvider('workers-ai'"), 'News AI has workers-ai circuit');
+  assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have gemini circuit');
+});
 
 test('CB-ISOLATION-04: Chat AI vision failure does NOT affect News AI circuit', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1690,7 +1816,11 @@ test('CB-ISOLATION-04: Chat AI vision failure does NOT affect News AI circuit', 
     'Must record on chatCircuitKey (not bare provider name)');
 });
 
-test('NEWS-REGRESSION-01: News AI tryGemini unchanged (text-only, no inline_data)', () => { assert.ok(true, 'N/A: tryGemini removed'); });
+test('NEWS-REGRESSION-01: News AI tryGemini removed (no Gemini in News)', () => {
+  assert.ok(!WORKER_SRC.includes('async function tryGemini('), 'tryGemini must NOT exist in worker-proxy.js');
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT call attemptProvider with gemini');
+});
 
 test('NEWS-REGRESSION-02: Translation circuit breaker key separate (translation-workers-ai)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
@@ -1701,7 +1831,10 @@ test('NEWS-REGRESSION-02: Translation circuit breaker key separate (translation-
     'Translation key must NOT have chat- prefix');
 });
 
-test('NEWS-REGRESSION-03: News AI uses gemini_generate() with text-only contents', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('NEWS-REGRESSION-03: News AI does NOT use gemini_generate (Gemini removed from News)', () => {
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!active.includes('public.gemini_generate'), 'News AI must NOT call gemini_generate DB function');
+});
 
 test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections NOT modified', () => {
   // GUARD-RAIL (refined): the original test asserted `git diff` was empty, which
@@ -1810,7 +1943,13 @@ console.log('✅ All circuit breaker isolation + news regression tests loaded.')
 // PHASE: "prompt is not defined" fix + Gemini 429 regression
 // ============================================================================
 
-test('PROMPT-SCOPE-01: N/A: attemptChatProvider may have changed', () => { assert.ok(true, 'N/A: attemptChatProvider may have changed'); });
+test('PROMPT-SCOPE-01: attemptChatProvider uses chat-{provider} circuit key (isolated)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function attemptChatProvider(');
+  assert.ok(fnStart !== -1, 'attemptChatProvider must exist');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 400);
+  assert.ok(fnBody.includes('chat-${providerName}'), 'Must use chat-{provider} circuit key pattern');
+  assert.ok(fnBody.includes('shouldAttemptProvider'), 'Must check circuit before attempting');
+});
 
 test('PROMPT-SCOPE-02: error log in attemptChatProvider only uses in-scope variables', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1828,9 +1967,22 @@ test('PROMPT-SCOPE-02: error log in attemptChatProvider only uses in-scope varia
   }
 });
 
-test('GEMINI-429-01: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('GEMINI-429-01: Gemini 429 returns clean error (no ReferenceError)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('classifyHttpError'), 'Must classify HTTP error on 429');
+  assert.ok(fnBody.includes('errorType'), 'Must set errorType');
+  assert.ok(fnBody.includes('_isProviderError: true'), 'Must mark as provider error');
+});
 
-test('GEMINI-429-02: N/A: Gemini removed', () => { assert.ok(true, 'N/A: Gemini removed'); });
+test('GEMINI-429-02: Image request with Gemini 429 does NOT fall back to text-only', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 500);
+  const imageChain = fnBody.substring(0, fnBody.indexOf('] : ['));
+  // Image path has ONLY Gemini — if it fails, no text-only fallback
+  assert.ok(imageChain.includes("['gemini'"), 'Image path has Gemini');
+  assert.ok(!imageChain.includes("['groq'"), 'No text-only fallback for images');
+});
 
 test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1847,7 +1999,14 @@ test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () =
     'Catch block must NOT reference prompt (would cause ReferenceError)');
 });
 
-test('GEMINI-429-04: N/A: Gemini removed, Groq uses router now', () => { assert.ok(true, 'N/A: Gemini removed, Groq uses router now'); });
+test('GEMINI-429-04: Text-only chat has Groq + Gemini fallback (restored)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  assert.ok(textChain.includes("['groq'"), 'Text chain must have Groq (primary)');
+  assert.ok(textChain.includes("['gemini'"), 'Text chain must have Gemini (fallback, restored)');
+  assert.ok(textChain.includes("['workers-ai'"), 'Text chain must have Workers AI');
+});
 
 test('GEMINI-ERROR-01: Gemini 400 handled as non_retryable', () => {
   // classifyHttpError(400) = non_retryable — verified in worker-proxy.js

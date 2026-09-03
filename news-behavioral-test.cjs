@@ -216,7 +216,12 @@ test('BEHAVIORAL-7-CB: Gemini prolonged-open state machine correct', () => {
 // ============================================================================
 // Source-level: Provider fallback chain (Groq → Gemini → Workers AI → OpenRouter → OpenAI)
 // ============================================================================
-test('BEHAVIORAL-8-CHAIN: N/A: Chain changed (Gemini removed)', () => { assert.ok(true, 'N/A: Chain changed (Gemini removed)'); });
+test('BEHAVIORAL-8-CHAIN: News AI fallback chain has NO Gemini (Groq → OpenRouter → Workers AI)', () => {
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have Gemini in fallback chain');
+  assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI must have OpenRouter');
+  assert.ok(active.includes("attemptProvider('workers-ai'"), 'News AI must have Workers AI');
+});
 
 // ============================================================================
 // Source-level: Groq verification

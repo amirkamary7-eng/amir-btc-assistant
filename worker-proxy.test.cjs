@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 // ============================================================================
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
+const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
 
 /** Cache the worker source to avoid repeated disk reads. */
 let _workerSourceCache = null;
@@ -1630,9 +1631,13 @@ test('NEWSFE-022 (source): closeAllOverlays dismisses ni-filter-sheet, ni-remind
 
 // ── NEWSSEC-006: tryGemini uses systemInstruction when systemPrompt provided ──
 
-test('NEWSSEC-006 (source): N/A tryGemini removed', () => { assert.ok(true, 'N/A: architecture changed'); });
+test('NEWSSEC-006 (source): tryGemini removed from News AI (Gemini Chat-only)', () => {
+  assert.ok(!WORKER_SRC.includes('async function tryGemini('), 'tryGemini must NOT exist in worker-proxy.js');
+});
 
-test('NEWSSEC-006 (source): N/A tryGemini removed', () => { assert.ok(true, 'N/A: tryGemini removed (2nd)'); });
+test('NEWSSEC-006 (source): News AI does NOT pass systemPrompt to Gemini', () => {
+  assert.ok(!WORKER_SRC.includes('tryGemini'), 'News AI must NOT reference tryGemini at all');
+});
 
 test('NEWSSEC-006 (source): JOURNALIST_PROMPT split into SYSTEM (with anti-injection clause) + USER (article only)', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');

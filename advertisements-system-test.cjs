@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const ADS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/advertisements.js'), 'utf8');
 const ADS_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/advertisements.js'), 'utf8');
@@ -1835,7 +1836,11 @@ test('OR-12: Provider stats include openrouter entry', () => {
 });
 
 // OR-13: Provider arrays include openrouter
-test('OR-13: N/A: Provider arrays changed (Gemini removed)', () => { assert.ok(true, 'N/A: Provider arrays changed (Gemini removed)'); });
+test('OR-13: News AI provider arrays do NOT include Gemini', () => {
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have Gemini in provider arrays');
+  assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI must have OpenRouter');
+});
 
 // OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER
 test('OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER flag', () => {
@@ -1844,7 +1849,10 @@ test('OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER flag', () => {
 });
 
 // OR-15: providers_priority includes openrouter
-test('OR-15: N/A: providers_priority changed (Gemini removed)', () => { assert.ok(true, 'N/A: providers_priority changed (Gemini removed)'); });
+test('OR-15: providers_priority array does NOT include Gemini', () => {
+  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  assert.ok(!active.includes("'gemini'"), 'providers_priority must NOT include gemini');
+});
 
 // OR-16: tryOpenRouter has 15s timeout (same as tryOpenAI)
 test('OR-16: tryOpenRouter has 15s timeout', () => {
@@ -1881,7 +1889,13 @@ console.log('✅ All OpenRouter tests loaded.');
 // CA-01: Groq is primary provider, Groq Secondary is fallback #2, Gemini is fallback #3
 // Updated for Groq Secondary failover chain spec:
 //   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
-test('CA-01: Groq is first in TEXT-ONLY Chat AI provider chain', () => { assert.ok(true, 'N/A: chain changed (Groq→OpenRouter→Workers AI→OpenAI)'); });
+test('CA-01: Groq is first in TEXT-ONLY Chat AI provider chain', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 800);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  const groqIdx = textChain.indexOf("['groq'");
+  assert.ok(groqIdx > 0, 'Groq must be first in text-only chain');
+});
 
 // CA-02: OpenRouter uses correct model
 test('CA-02: Chat AI OpenRouter uses nvidia/nemotron-3-super-120b-a12b:free', () => {
@@ -2019,7 +2033,16 @@ test('CA-13: Chat AI OpenRouter has HTTP-Referer + X-Title headers', () => {
 // CA-14: Provider chain order: Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
 // Updated for Groq Secondary failover chain spec:
 //   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
-test('CA-14: Provider chain order is correct (text-only path)', () => { assert.ok(true, 'N/A: chain changed'); });
+test('CA-14: Chat text chain order: Groq → OpenRouter → Gemini → Workers AI → OpenAI', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 800);
+  const textChain = fnBody.substring(fnBody.indexOf('] : ['));
+  const g = textChain.indexOf("['groq'");
+  const o = textChain.indexOf("['openrouter'");
+  const m = textChain.indexOf("['gemini'");
+  const w = textChain.indexOf("['workers-ai'");
+  assert.ok(g > 0 && o > g && m > o && w > m, 'Chain order: Groq < OpenRouter < Gemini < Workers AI');
+});
 
 // CA-15: Workers AI is fallback (not primary)
 test('CA-15: Workers AI is fallback, not primary', () => {
@@ -2295,7 +2318,11 @@ test('RT-35: No external search for non-external intents', () => {
 // RT-36: Provider chain order: Groq → Groq Secondary → Gemini → OpenRouter → Workers AI → OpenAI
 // Updated for Groq Secondary failover chain spec:
 //   Chat: groq → groq-secondary → gemini → openrouter → workers-ai → openai
-test('RT-36: Provider chain order with Groq Secondary inserted', () => { assert.ok(true, 'N/A: groq-secondary removed'); });
+test('RT-36: No groq-secondary in Chat chain (router handles all keys)', () => {
+  const fnStart = ASSISTANT_SRC.indexOf('const providers = hasImage');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 800);
+  assert.ok(!fnBody.includes("['groq-secondary'"), 'Chat must NOT have groq-secondary (router handles key selection)');
+});
 
 // RT-37: News AI pipeline untouched (worker-proxy.js not modified)
 test('RT-37: worker-proxy.js NOT modified (News AI untouched)', () => {
