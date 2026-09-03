@@ -688,14 +688,1083 @@ const i18n = {
         analysis_label_symbol: 'نماد',
         analysis_label_timeframe: 'تایم فریم',
         analysis_label_category: 'دسته‌بندی',
-        market_subtitle: 'مشاهده بازارهای جهانی و فرصت‌های معاملاتی',
         about_title: 'درباره ما',
         terms_title: 'قوانین و شرایط',
         privacy_title: 'حریم خصوصی',
         jl_checking: 'در حال بررسی وضعیت عضویت...',
         jl_wait: 'لطفاً چند لحظه صبر کنید.',
         jl_join_channel: 'عضویت در کانال',
-        jl_verify: 'تأیید عضویت'
+        jl_verify: 'تأیید عضویت',
+        // ── i18n AUDIT: timeAgo ──
+        time_just_now: 'لحظاتی پیش',
+        time_m_ago: '{n} دقیقه پیش',
+        time_h_ago: '{n} ساعت پیش',
+        time_d_ago: '{n} روز پیش',
+        // ── i18n AUDIT: analysis / market labels ──
+        decision_range: 'محدوده تصمیم',
+        saved_chip: 'ذخیره‌شده',
+        saved_chip_count: '🔖 ذخیره‌شده ({n})',
+        featured_badge: '⭐ ویژه',
+        stat_total: 'کل',
+        stat_featured: 'ویژه',
+        stat_normal: 'عادی',
+        stat_today: 'امروز',
+        resistance: 'مقاومت',
+        support_level: 'حمایت',
+        view_cta: 'مشاهده ←',
+        analysis_empty_title: 'هنوز تحلیلی منتشر نشده است',
+        analysis_empty_desc_add: 'برای انتشار اولین تحلیل روی دکمه + کلیک کنید',
+        analysis_empty_desc_soon: 'به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند',
+        no_result_found: 'نتیجه‌ای یافت نشد',
+        analysis_filter_empty_desc: 'با فیلترهای فعلی هیچ تحلیلی پیدا نشد. فیلترها را تغییر دهید یا همه تحلیل‌ها را ببینید.',
+        clear_filters: 'پاک کردن فیلترها',
+        read_time_mins: '{n} دقیقه',
+        load_more: 'مشاهده بیشتر',
+        // ── i18n AUDIT: pull-to-refresh ──
+        ptr_release: 'رها کنید برای refresh',
+        ptr_pull: 'برای refresh پایین بکشید',
+        ptr_updating: 'در حال به‌روزرسانی...',
+        // ── i18n AUDIT: market search/info ──
+        coins_count: '{n} ارز',
+        search_in_coins: 'جستجو در {n}+ ارز',
+        // ── i18n AUDIT: fear & greed insights ──
+        fg_insight_extreme_fear: 'ترس شدید در بازار — فرصت خرید احتمالی برای سرمایه‌گذاران شجاع',
+        fg_insight_fear: 'ترس در بازار غالب است — احتیاط کنید اما فرصت‌ها را بررسی کنید',
+        fg_insight_neutral: 'بازار در حالت خنثی — منتظر جهت‌گیری مشخص باشید',
+        fg_insight_greed: 'حریصیت در بازار — زمان مناسب برای سودگیری و مدیریت ریسک',
+        fg_insight_extreme_greed: 'حریصیت شدید — احتیاط کنید، اصلاح بازار محتمل است',
+        // ── i18n AUDIT: forex market ──
+        forex_auth_title: 'داده فارکس نیاز به ورود از تلگرام دارد',
+        forex_auth_desc: 'برای مشاهده نرخ فارکس و طلا، اپ را داخل تلگرام باز کنید',
+        forex_retry_title: 'بارگذاری مجدد',
+        forex_retry_desc: 'دریافت داده فارکس ناموفق بود',
+        forex_cat_major: 'جفت اصلی',
+        forex_cat_cross: 'کراس',
+        forex_cat_metal: 'فلز گران‌بها',
+        forex_cat_stock: 'سهم',
+        forex_group_metal: 'فلزات گران‌بها',
+        forex_group_major: 'جفت‌های اصلی',
+        forex_group_cross: 'کراس‌ها',
+        forex_group_stock: 'سهام جهانی',
+        forex_type_forex: 'فارکس',
+        forex_type_metal: 'فلز',
+        forex_type_stock: 'سهم',
+        forex_type_market: 'بازار',
+        // ── i18n AUDIT: watchlist ──
+        remove_from_watchlist: 'حذف از واچ‌لیست',
+        add_to_watchlist: 'افزودن به واچ‌لیست',
+        // ── i18n AUDIT: missions ──
+        mission_completed_badge: '✓ دریافت شد',
+        mission_complete_title: 'ماموریت کامل شد!',
+        // ── i18n AUDIT: news ──
+        news_sent_macro: 'کلان',
+        news_empty: 'خبری یافت نشد',
+        news_save: 'ذخیره',
+        news_share: 'اشتراک‌گذاری',
+        news_unsave: 'حذف ذخیره',
+        saved_news_empty: 'هیچ مورد ذخیره شده‌ای وجود ندارد',
+        news_time_group_news: 'اخبار',
+        news_time_group_events: 'رویدادهای اقتصادی',
+        news_auth_title: 'برای مشاهده اخبار، اپ را داخل تلگرام باز کنید',
+        news_auth_desc: 'اخبار بازار به‌صورت لحظه‌ای داخل Mini App نمایش داده می‌شود',
+        open_in_telegram: 'باز کردن در تلگرام',
+        news_cat_crypto: 'کریپتو',
+        news_cat_forex: 'فارکس',
+        news_cat_economy: 'اقتصاد',
+        news_analysis_label: 'تحلیل خبر',
+        news_ai_smart_label: 'تحلیل هوشمند',
+        news_ai_unavailable: 'تحلیل این خبر فعلاً در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.',
+        news_ai_rate_limited: 'سرویس‌های هوش مصنوعی در حال حاضر دارای محدودیت نرخ هستند. تحلیل خبر بزودی تولید خواهد شد.',
+        news_ai_error: 'تولید تحلیل این خبر با خطا مواجه شد و در حال تلاش مجدد است. طی چند دقیقه آینده تکمیل خواهد شد.',
+        news_ai_preparing: 'در حال آماده‌سازی...',
+        news_filter_title: 'فیلتر اخبار',
+        news_filter_sentiment: 'احساس بازار',
+        news_filter_priority: 'اولویت',
+        news_filter_category: 'دسته‌بندی',
+        news_filter_time: 'بازه زمانی',
+        news_filter_breaking: 'خبر فوری',
+        news_filter_trending: 'پرطرفدار',
+        news_filter_bitcoin: 'بیت‌کوین',
+        news_filter_ethereum: 'اتریوم',
+        news_filter_solana: 'سولانا',
+        news_filter_regulation: 'قانون‌گذاری',
+        news_filter_macro: 'کلان',
+        news_filter_market_structure: 'ساختار بازار',
+        news_filter_1h: 'ساعت گذشته',
+        news_filter_24h: '۲۴ ساعت گذشته',
+        news_filter_7d: '۷ روز گذشته',
+        news_filter_reset: 'بازنشانی',
+        news_filter_apply: 'اعمال فیلتر',
+        news_search_placeholder: 'جستجوی خبر، ارز، کشور...',
+        // ── i18n AUDIT: calendar ──
+        cal_status_ended: 'پایان یافت',
+        cal_status_running: 'در حال اجرا',
+        cal_status_waiting: 'در انتظار',
+        cal_event_empty: 'رویداد اقتصادی یافت نشد',
+        cal_filter_empty: 'رویدادی برای این فیلتر یافت نشد',
+        cal_impact: 'تأثیر',
+        time_morning: 'صبح',
+        time_afternoon: 'بعدازظهر',
+        time_evening: 'عصر/شب',
+        reminder_title: 'یادآوری رویداد',
+        reminder_active: 'یادآور فعال',
+        reminder_set: 'یادآوری',
+        reminder_15m: '۱۵ دقیقه قبل',
+        reminder_1h: '۱ ساعت قبل',
+        reminder_24h: '۲۴ ساعت قبل',
+        reminder_remove: 'حذف یادآوری',
+        // ── i18n AUDIT: share sheet ──
+        share_title: 'اشتراک‌گذاری',
+        share_telegram: 'تلگرام',
+        share_whatsapp: 'واتساپ',
+        share_copy_link: 'کپی لینک',
+        // ── i18n AUDIT: coin detail ──
+        cd_current_price: 'قیمت فعلی',
+        cd_daily_change: 'تغییر روزانه',
+        cd_category: 'دسته‌بندی',
+        cd_type: 'نوع',
+        cd_alerts_active: '{n} هشدار فعال',
+        alert_when_below: 'وقتی پایین‌تر رفت',
+        alert_when_above: 'وقتی بالاتر رفت',
+        alert_inactive: 'غیرفعال',
+        alert_status_label: 'وضعیت هشدار',
+        alert_active_count_label: 'هشدار فعال',
+        alert_current_label: 'قیمت فعلی',
+        alert_register_btn: 'ثبت هشدار',
+        cd_market_stats: 'آمار بازار',
+        cd_market_cap: 'مارکت کپ',
+        cd_ai_analysis: 'تحلیل هوش مصنوعی AMIRBTC',
+        cd_price_section: 'هشدار قیمت',
+        chart_source_search: 'جستجوی منبع جایگزین',
+        chart_unavailable_title: 'نمودار این دارایی در حال حاضر در دسترس نیست',
+        chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
+        alert_trigger_msg: '🔔 هشدار قیمت فعال شد\nقیمت {symbol} به {price} USDT رسید.',
+        alert_trigger_title: '🔔 هشدار قیمت {symbol}',
+        // ── i18n AUDIT: analysis form ──
+        af_chart_image: 'لینک تصویر چارت',
+        af_support_opt: 'حمایت (اختیاری)',
+        af_current_price_opt: 'قیمت فعلی (اختیاری)',
+        af_resistance_opt: 'مقاومت (اختیاری)',
+        af_body: 'متن تحلیل',
+        af_body_ph: 'سناریوی اصلی: ...\nسناریوی جایگزین: ...',
+        af_publish: 'انتشار تحلیل',
+        af_cancel: 'انصراف',
+        af_featured_toggle: '⭐ تحلیل ویژه',
+        af_confirm_title: 'آیا مطمئن هستید؟',
+        af_confirm_desc: 'این عمل قابل بازگشت نیست.',
+        af_confirm_continue: 'ادامه',
+        af_permanent_title: 'حذف دائمی شود؟',
+        af_permanent_desc: 'تحلیل برای همیشه حذف خواهد شد.',
+        af_permanent_delete: 'حذف قطعی',
+        // ── i18n AUDIT: delete account modal ──
+        delete_account_warning: '⚠️ هشدار جدی\n\nآیا واقعاً می‌خواهید حساب خود را حذف کنید؟\n\n• تمام پاداش‌ها و توکن‌های شما پاک می‌شود\n• تاریخچه دعوت‌ها حذف می‌شود\n• کیف پول، هشدارها و واچ‌لیست پاک می‌شود\n• این عملیات قابل بازگشت نیست\n\nپس از حذف، می‌توانید دوباره با لینک دعوت ثبت‌نام کنید.',
+        delete_account_telegram_error: 'خطا: ابتدا از طریق تلگرام وارد شوید',
+        delete_account_success_msg: '✅ حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.',
+        delete_account_deleted_title: 'حساب شما حذف شد',
+        delete_account_deleted_desc: 'برای ثبت‌نام مجدد، ربات را در تلگرام استارت کنید. اگر با لینک دعوت وارد شوید، دعوت شما ثبت خواهد شد.',
+        reload: 'بارگذاری مجدد',
+        error_prefix: 'خطا: ',
+        network_error_retry: 'خطای شبکه — دوباره تلاش کنید',
+        unknown_error: 'نامشخص',
+        // ── i18n AUDIT: content editor ──
+        content_version: 'نسخه',
+        official_channel_label: 'کانال رسمی: amir_btc_2024',
+        content_edit_about: 'ویرایش: درباره ما',
+        content_edit_terms: 'ویرایش: قوانین',
+        content_edit_privacy: 'ویرایش: حریم خصوصی',
+        content_edit_default: 'ویرایش محتوا',
+        content_load_error: 'خطا در بارگذاری محتوا',
+        content_json_error: 'خطا در JSON: ',
+        content_save_progress: 'در حال ذخیره...',
+        content_save_success: '✓ با موفقیت ذخیره شد',
+        content_save_btn: 'ذخیره',
+        content_title_label: 'عنوان',
+        content_version_label: 'نسخه برنامه (فقط برای About)',
+        content_sections_label: 'بخش‌ها (JSON)',
+        content_sections_ph: '[{"heading":"عنوان بخش","body":"متن بخش"}]',
+        // ── i18n AUDIT: notification settings ──
+        notif_critical_alerts: 'اعلان‌های حیاتی',
+        notif_account_alerts: 'اعلان‌های حساب کاربری',
+        notif_select_channel: 'انتخاب کانال دریافت',
+        ch_price_alert: 'هشدار قیمت',
+        ch_price_alert_desc: 'هنگام رسیدن قیمت به مقدار تعیین شده',
+        ch_analysis: 'تحلیل‌های جدید',
+        ch_analysis_desc: 'انتشار تحلیل جدید بازار',
+        ch_calendar: 'تقویم اقتصادی',
+        ch_calendar_desc: 'هشدار رویدادهای مهم اقتصادی',
+        ch_tickets: 'تیکت‌ها',
+        ch_tickets_desc: 'پاسخ به تیکت‌های پشتیبانی',
+        ch_announcements: 'اطلاعیه‌ها',
+        ch_announcements_desc: 'اطلاعیه‌های سیستم و برنامه',
+        ch_wheel: 'گردونه شانس',
+        ch_wheel_desc: 'پاداش گردونه و اسپین رایگان',
+        ch_referral: 'رفرال',
+        ch_referral_desc: 'دعوت کاربران جدید و پاداش',
+        ch_wallet: 'کیف پول',
+        ch_wallet_desc: 'دریافت توکن، پاداش روزانه',
+        ch_promotions: 'تبلیغات',
+        ch_promotions_desc: 'پیشنهادات ویژه و تبلیغات',
+        notif_off: 'خاموش',
+        notif_app: 'اپ',
+        notif_bot: 'ربات',
+        notif_both: 'هر دو',
+        premium_only_label: 'فقط برای اعضای Premium',
+        notif_all_disabled_title: 'همه اعلان‌ها غیرفعال هستند',
+        notif_all_disabled_desc: 'هیچ اعلانی دریافت نخواهید کرد',
+        notif_system_active_title: 'سیستم اعلان فعال است',
+        notif_system_active_desc: '{active} دسته فعال · {both} روی هر دو کانال',
+        notif_important_active_title: 'اعلان‌های مهم فعال هستند',
+        notif_important_active_desc: '{active} از {total} دسته فعال',
+        // ── i18n AUDIT: tickets ──
+        ticket_title_min: 'عنوان حداقل ۳ کاراکتر باشد',
+        ticket_body_min: 'حداقل {n} کاراکتر',
+        ticket_max_chars: 'سقف مجاز ({n} کاراکتر)',
+        ticket_title_required: 'عنوان الزامی است',
+        ticket_body_required: 'متن پیام الزامی است',
+        ticket_body_min_needed: 'حداقل {n} کاراکتر نیاز است',
+        ticket_new: 'تیکت جدید',
+        ticket_title_label: 'عنوان',
+        ticket_body_label: 'متن پیام',
+        ticket_char_counter: '{n} / {max}',
+        // ── i18n AUDIT: maintenance ──
+        maint_optimizing: 'در حال بهینه‌سازی سیستم...',
+        maint_updating: 'در حال بروزرسانی سرویس‌ها...',
+        maint_syncing: 'در حال همگام‌سازی داده‌ها...',
+        maint_security: 'در حال بررسی امنیت...',
+        maint_new_version: 'آماده‌سازی نسخه جدید...',
+        maint_bypass: 'عبور از حالت نگهداری',
+        maint_progress: 'پیشرفت کار',
+        // ── i18n AUDIT: join-lock dynamic ──
+        jl_checking_access: 'در حال بررسی دسترسی...',
+        jl_membership_checking: 'در حال بررسی عضویت…',
+        jl_membership_verified: 'عضویت تأیید شد ✓',
+        jl_membership_required: 'عضویت در کانال الزامی است',
+        jl_join_btn: 'عضویت',
+        jl_connection_error: 'خطای اتصال',
+        jl_retry_btn: 'تلاش مجدد',
+        jl_required_channels: 'کانال‌های موردنیاز:',
+        jl_lock_desc_full: 'برای استفاده از امکانات برنامه، ابتدا باید عضو کانال رسمی شوید.',
+        jl_not_verified_msg: 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.',
+        // ── i18n AUDIT: misc ──
+        premium_membership: 'عضویت Premium',
+        premium_activate: 'فعال‌سازی Premium',
+        admin_author: 'مدیر',
+        admin_panel: 'پنل مدیریت',
+        fl_confirm_yes: 'بله، ادامه',
+        support_center_desc: 'مرکز پشتیبانی AMIRBTC',
+        add_to_watchlist_title: 'افزودن به واچ‌لیست',
+        coin_search_ph: 'جستجو...',
+        // ── i18n AUDIT: analysis detail ──
+        adp_back: 'بازگشت',
+        adp_edit: 'ویرایش',
+        adp_delete: 'حذف',
+        adp_related: 'تحلیل‌های مرتبط',
+        adp_save: 'ذخیره',
+        adp_copy_text: 'کپی متن',
+        adp_share: 'اشتراک‌گذاری',
+        adp_analysis_title: 'تحلیل‌های بازار',
+        // ── i18n AUDIT: month names ──
+        month_jan: 'ژانویه', month_feb: 'فوریه', month_mar: 'مارس', month_apr: 'آوریل',
+        month_may: 'مه', month_jun: 'ژوئن', month_jul: 'ژوئیه', month_aug: 'اوت',
+        month_sep: 'سپتامبر', month_oct: 'اکتبر', month_nov: 'نوامبر', month_dec: 'دسامبر',
+        // ── i18n AUDIT: market headers ──
+        mkt_header_coin: 'ارز',
+        mkt_header_price: 'قیمت',
+        mkt_status_title: 'وضعیت بازار',
+        mkt_trend_title: 'روند بازار',
+        mkt_tab_crypto: 'کریپتو',
+        mkt_tab_forex: 'فارکس',
+        mkt_tab_watchlist: 'واچ‌لیست',
+        mkt_search_ph: 'جستجوی ارز یا نماد...',
+        news_search_label: 'جستجو',
+        news_filter_label: 'فیلتر',
+        // ── i18n AUDIT: admin panel ──
+        adm_menu: 'منو',
+        adm_back_to_app: 'بازگشت به اپ',
+        adm_section_label: 'داشبورد',
+        adm_sidebar_overview: 'نمای کلی',
+        adm_sidebar_management: 'مدیریت',
+        adm_sidebar_content: 'محتوا',
+        adm_sidebar_system: 'سیستم',
+        adm_sidebar_dashboard: 'داشبورد',
+        adm_sidebar_users: 'کاربران',
+        adm_sidebar_admins: 'مدیران',
+        adm_sidebar_tickets: 'تیکت‌ها',
+        adm_sidebar_rewards: 'پاداش‌ها',
+        adm_sidebar_transactions: 'تراکنش‌ها',
+        adm_sidebar_referral: 'رفرال',
+        adm_sidebar_reward_center: 'مرکز پاداش',
+        adm_sidebar_notification_center: 'مرکز اعلانات',
+        adm_sidebar_vpn: 'خریدهای VPN',
+        adm_sidebar_alert_economy: 'اقتصاد هشدارها',
+        adm_sidebar_ads: 'تبلیغات',
+        adm_sidebar_membership: 'عضویت ویژه',
+        adm_sidebar_system_control: 'کنترل سیستم',
+        adm_sidebar_health: 'سلامت سیستم',
+        adm_sidebar_logs: 'لاگ‌ها',
+        adm_username: 'مدیر',
+        adm_dashboard_title: 'داشبورد',
+        adm_dashboard_desc: 'نمای کلی سیستم در یک نگاه',
+        adm_maint_status_checking: 'وضعیت نگهداری: بررسی...',
+        adm_maint_loading: 'در حال بارگذاری وضعیت سیستم',
+        adm_stat_users: 'کاربران',
+        adm_stat_tickets: 'تیکت‌ها',
+        adm_stat_broadcast: 'پیام همگانی',
+        adm_stat_maintenance: 'نگهداری',
+        adm_recent_activity: 'فعالیت‌های اخیر',
+        adm_admins_title: 'مدیریت مدیران',
+        adm_admins_desc: 'افزودن، ویرایش و حذف مدیران سیستم',
+        adm_add_admin: 'افزودن مدیر',
+        adm_telegram_id: 'شناسه تلگرام',
+        adm_telegram_id_ph: 'مثال: 123456789',
+        adm_role: 'نقش (Role)',
+        adm_permissions: 'دسترسی‌ها (Permissions) — بر اساس نقش پر می‌شود، قابل ویرایش',
+        adm_add_btn: 'افزودن',
+        adm_users_title: 'کاربران',
+        adm_users_desc: 'جستجو و مدیریت کاربران مینی‌اپ',
+        adm_users_search_ph: 'جستجو بر اساس ID، نام کاربری، نام...',
+        adm_tickets_title: 'مرکز تیکت‌ها',
+        adm_tickets_desc: 'مدیریت و پاسخ به تیکت‌های کاربران',
+        adm_filter_all: 'همه',
+        adm_filter_open: 'باز',
+        adm_filter_answered: 'پاسخ داده شده',
+        adm_filter_closed: 'بسته شده',
+        adm_filter_pending: 'در انتظار',
+        adm_filter_approved: 'تأیید شده',
+        adm_filter_delivered: 'تحویل شده',
+        adm_rewards_title: 'پاداش‌ها',
+        adm_rewards_desc: 'مدیریت درخواست‌های پاداش کاربران',
+        adm_wallet_title: 'کیف پول و تراکنش‌ها',
+        adm_wallet_desc: 'مشاهده و فیلتر تراکنش‌های AB Token',
+        adm_tx_user_id: 'شناسه کاربر',
+        adm_tx_all_types: 'همه انواع',
+        adm_tx_daily_claim: 'چک‌این روزانه',
+        adm_tx_referral: 'رفرال',
+        adm_tx_admin_grant: 'هدیه مدیر',
+        adm_tx_wheel: 'چرخ شانس',
+        adm_referral_title: 'سیستم رفرال',
+        adm_referral_desc: 'آمار دعوت‌ها و پاداش‌های معرف',
+        adm_referral_search_ph: 'جستجو بر اساس شناسه کاربر...',
+        adm_system_title: 'کنترل سیستم',
+        adm_system_desc: 'مدیریت وضعیت مینی‌اپ و حالت نگهداری',
+        adm_maint_mode_title: 'حالت نگهداری (Maintenance Mode)',
+        adm_maint_mode_desc: 'با فعال‌سازی، مینی‌اپ برای کاربران عادی غیرفعال می‌شود.',
+        adm_maint_display_title: 'عنوان نمایشی',
+        adm_maint_title_ph: 'در حال ساخت آینده‌ای بهتر!',
+        adm_maint_desc_label: 'توضیحات',
+        adm_maint_desc_ph: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم...',
+        adm_save_settings: 'ذخیره تنظیمات',
+        adm_reload: 'بارگذاری مجدد',
+        adm_maint_status_off: 'غیرفعال',
+        adm_maint_status_label: 'وضعیت نگهداری',
+        adm_maint_progress_label: 'پیشرفت',
+        adm_last_update: 'آخرین به‌روزرسانی',
+        adm_presets_title: 'سناریوهای آماده',
+        adm_presets_hint: 'با یک کلیک تنظیمات نگهداری را اعمال کنید',
+        adm_preset_new_release: 'استقرار نسخه جدید',
+        adm_preset_upgrade: 'ارتقای سیستم',
+        adm_preset_migration: 'مهاجرت دیتابیس',
+        adm_preset_hotfix: 'اصلاح فوری',
+        adm_preset_end: 'پایان نگهداری',
+        adm_preset_disable: 'غیرفعال‌سازی',
+        adm_preset_progress_25: 'پیشرفت ۲۵٪',
+        adm_preset_progress_50: 'پیشرفت ۵۰٪',
+        adm_preset_progress_75: 'پیشرفت ۷۵٪',
+        adm_preset_progress_10: 'پیشرفت ۱۰٪',
+        maint_title_default: 'در حال ساخت آینده‌ای بهتر!',
+        maint_desc_default_full: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        news_modal_default_title: 'عنوان خبر',
+        ai_welcome_msg: 'سلام 👋🏻 خوش اومدی\nاگر سوالی یا چیزی خواستی من اینجام',
+        ai_title: 'دستیار هوشمند AMIRBTC',
+        ai_online: 'آنلاین',
+        ai_placeholder: 'درباره بازار، ارزهای دیجیتال، اخبار و اطلاعات روز سؤال کن',
+        ai_suggestion_1: 'دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟',
+        ai_suggestion_2: 'با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟',
+        ai_suggestion_3: 'چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های با سود استفاده کنم؟',
+        adm_health_title: 'سلامت سیستم',
+        adm_health_desc: 'شاخص‌های عملکرد و وضعیت سرویس‌ها',
+        adm_logs_title: 'لاگ‌های امنیتی',
+        adm_logs_desc: 'رویدادهای امنیتی و فعالیت مدیران',
+        adm_rc_title: 'مرکز پاداش',
+        adm_rc_desc: 'مدیریت کامل پاداش‌ها، گردونه، کمپین‌ها و تنظیمات',
+        adm_rc_tab_overview: 'نمای کلی',
+        adm_rc_tab_wheel: 'گردونه شانس',
+        adm_rc_tab_referral: 'پاداش رفرال',
+        adm_rc_tab_mission: 'پاداش ماموریت',
+        adm_rc_tab_campaigns: 'کمپین‌ها',
+        adm_rc_tab_library: 'کتابخانه پاداش',
+        adm_rc_tab_analytics: 'تحلیل‌ها',
+        adm_rc_tab_settings: 'تنظیمات',
+        adm_loading: 'در حال بارگذاری...',
+        adm_vpn_title: 'خریدهای VPN — صف انجام',
+        adm_vpn_desc: 'درخواست‌های خرید VPN کاربران Premium. پس از ارسال لینک VPN، وضعیت را به «انجام شد» تغییر دهید.',
+        adm_vpn_fulfilled: 'انجام شده',
+        adm_vpn_th_user: 'کاربر',
+        adm_vpn_th_plan: 'پلن',
+        adm_vpn_th_cost: 'هزینه',
+        adm_vpn_th_credit: 'اعتبار',
+        adm_vpn_th_tracking: 'کد رهگیری',
+        adm_vpn_th_date: 'تاریخ',
+        adm_vpn_th_status: 'وضعیت',
+        adm_vpn_th_action: 'اقدام',
+        adm_notif_title: 'مرکز اعلانات',
+        adm_notif_desc: 'مدیریت یکپارچه اعلان‌ها، پیام‌ها و broadcast',
+        adm_np_tab_dashboard: 'داشبورد',
+        adm_np_tab_broadcast: 'ارسال همگانی',
+        adm_np_tab_templates: 'قالب‌ها',
+        adm_np_tab_analytics: 'تحلیل‌ها',
+        adm_ae_title: 'اقتصاد هشدارها',
+        adm_ae_desc: 'مدیریت سهمیه، هزینه و فعال‌سازی هشدارها',
+        adm_ads_title: 'تبلیغات',
+        adm_ads_desc: 'مدیریت کانال‌های عضویت، پاپ‌آپ مینی‌اپ و پیام‌های تبلیغاتی',
+        adm_mb_title: 'عضویت ویژه',
+        adm_mb_desc: 'مدیریت درخواست‌های عضویت صرافی و کاربران VIP',
+        adm_update_btn: 'به‌روزرسانی',
+        adm_mb_search_ph: 'جستجو بر اساس ID، نام، صرافی، UID...',
+        adm_mb_all_status: 'همه وضعیت‌ها',
+        adm_mb_pending: 'در انتظار',
+        adm_mb_approved: 'تأیید شده',
+        adm_mb_rejected: 'رد شده',
+        adm_mb_all_exchanges: 'همه صرافی‌ها',
+        adm_csv_export: 'خروجی CSV',
+        adm_empty: 'داده‌ای موجود نیست',
+        adm_operation_error: 'خطا در عملیات',
+        adm_logout_error: 'خطا در خروجی',
+        adm_error_prefix: 'خطا: ',
+        // ── i18n AUDIT: premium / membership ──
+        mem_premium_badge: 'عضویت ویژه',
+        mem_exchange_label: 'صرافی',
+        mem_uid_label: 'UID صرافی',
+        mem_status_label: 'وضعیت',
+        mem_actions_label: 'اقدامات',
+        mem_approve: 'تأیید',
+        mem_reject: 'رد',
+        mem_vip: 'VIP',
+        // ── i18n AUDIT: membership-user.js ──
+        mem_activate_premium: 'فعال‌سازی Premium',
+        mem_vip_member: 'عضو ویژه AMIRBTC',
+        mem_upgrade_to_vip: 'ارتقا به عضویت ویژه',
+        mem_level_premium: 'پرمیوم',
+        mem_level_elite: 'الیت',
+        mem_welcome_title: 'تبریک!',
+        mem_welcome_subtitle: 'عضویت {level} شما با موفقیت فعال شد',
+        mem_welcome_desc: 'اکنون تمام امکانات ویژه برای شما فعال است.<br>از تجربه اختصاصی AmirBTC Assistant لذت ببرید.',
+        mem_benefit_charts: 'چارت‌ها و تحلیل‌های اختصاصی',
+        mem_benefit_premium_badge: 'نشان Premium در پروفایل',
+        mem_benefit_priority_features: 'اولویت در قابلیت‌های جدید',
+        mem_benefit_campaigns: 'کمپین‌ها و جوایز ویژه',
+        mem_welcome_cta: 'شروع استفاده',
+        mem_vip_status_active: 'عضویت فعال',
+        mem_vip_status_subtitle: 'عضویت شما فعال است. تمام امکانات اختصاصی با سهمیه بالاتر در دسترس شماست.',
+        mem_label_level: 'سطح',
+        mem_label_activation_date: 'تاریخ فعال‌سازی',
+        mem_label_membership_type: 'نوع عضویت',
+        mem_no_expiry: 'بدون تاریخ انقضا',
+        mem_label_expiry: 'انقضا',
+        mem_benefits_premium_title: 'مزایای Premium',
+        mem_benefits_exclusive_title: 'دسترسی‌های اختصاصی',
+        mem_benefit_ai: 'چت هوش مصنوعی',
+        mem_benefit_ai_desc: '۱۰۰ پیام در روز با مدل‌های پیشرفته',
+        mem_benefit_alerts: 'هشدارهای قیمتی',
+        mem_benefit_alerts_desc: '۱۰ هشدار رایگان در روز',
+        mem_benefit_wheel: 'چرخ شانس',
+        mem_benefit_wheel_desc: '۵ اسپین در روز با جوایز ویژه',
+        mem_benefit_watchlist: 'واچ‌لیست',
+        mem_benefit_watchlist_desc: '۲۰ نماد در واچ‌لیست',
+        mem_benefit_daily: 'پاداش روزانه',
+        mem_benefit_daily_desc: '۲۰ AB Token رایگان هر روز',
+        mem_benefit_pro_badge: 'دسترسی به Badge حرفه‌ای',
+        mem_benefit_pro_badge_desc: 'نمایش نشان اختصاصی Premium در پروفایل شما',
+        mem_benefit_ad_control: 'کنترل تبلیغات',
+        mem_benefit_ad_control_desc: 'مدیریت و غیرفعال‌سازی تبلیغات و اعلان‌های تبلیغاتی',
+        mem_benefit_early_access: 'اولویت دریافت قابلیت‌های جدید',
+        mem_benefit_early_access_desc: 'دسترسی زودهنگام به امکانات جدید',
+        mem_benefit_priority_support: 'اولویت پشتیبانی',
+        mem_benefit_priority_support_desc: 'پاسخگویی اولویت‌دار تیم پشتیبانی',
+        mem_benefit_permanent: 'دسترسی دائمی Premium',
+        mem_benefit_permanent_desc: 'بدون تاریخ انقضا • مطابق شرایط و قوانین عضویت',
+        mem_activation_subtitle: 'با فعال‌سازی عضویت Premium، سهمیه بالاتر، امکانات اختصاصی و مزایای دائمی حساب شما فعال خواهد شد.',
+        mem_timeline_step1: 'ثبت‌نام از طریق لینک رسمی {exchange}',
+        mem_timeline_step2: 'ثبت UID صرافی',
+        mem_timeline_step3: 'واریز اولیه به حساب صرافی',
+        mem_timeline_step4: 'انجام اولین معامله (First Trade)',
+        mem_timeline_step5: 'بررسی اطلاعات توسط تیم',
+        mem_timeline_step6: 'فعال‌سازی پریمیوم',
+        mem_timeline_note: 'عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.',
+        mem_uid_form_label: 'ثبت درخواست عضویت',
+        mem_submit_btn: 'ارسال درخواست عضویت',
+        mem_submit_accept_first: 'ابتدا قوانین را بپذیرید',
+        mem_submit_loading_accept: 'در حال ثبت پذیرش قوانین...',
+        mem_submit_loading: 'در حال ارسال...',
+        mem_rejected_reason_label: 'دلیل رد قبلی:',
+        mem_rules_title: 'قوانین عضویت',
+        mem_rules_title_full: 'قوانین عضویت Premium',
+        mem_rules_unavailable: 'قوانین فعال در حال حاضر در دسترس نیست. می‌توانید درخواست خود را ارسال کنید؛ در صورت نیاز، تیم پس از بررسی با شما تماس خواهد گرفت.',
+        mem_rules_summary: 'برای ادامه، قوانین عضویت Premium را مطالعه و تأیید کنید.',
+        mem_rules_view_full: 'مشاهده کامل قوانین',
+        mem_rules_accept_label: 'قوانین عضویت Premium را مطالعه کرده‌ام و با آن موافقم.',
+        mem_rules_body_fallback: 'متن قوانین در دسترس نیست.',
+        mem_rules_ok: 'متوجه شدم',
+        mem_pending_title: 'درخواست شما در حال بررسی است',
+        mem_pending_subtitle: 'درخواست عضویت شما ثبت شده و در حال بررسی توسط تیم مدیریت است.',
+        mem_pending_exchange_uid: 'صرافی: {exchange} · UID: {uid}',
+        mem_success_title: 'درخواست شما با موفقیت ثبت شد',
+        mem_success_msg: 'پس از بررسی توسط تیم، وضعیت عضویت شما به Premium تغییر خواهد کرد.',
+        mem_err_invalid_uid: 'شناسه نامعتبر است',
+        mem_err_rules_required: 'برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.',
+        mem_err_accept_failed: 'خطا در ثبت پذیرش قوانین. لطفاً دوباره تلاش کنید.',
+        mem_err_rules_updated: 'نسخه قوانین به‌روزرسانی شده است. لطفاً نسخه جدید را مطالعه و تأیید کنید.',
+        mem_err_rules_changed: 'نسخه قوانین فعال تغییر کرده است. لطفاً نسخه جدید را تأیید کنید.',
+        mem_err_server: 'خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.',
+        mem_err_rules_updated_request: 'قوانین عضویت به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه کرده و دوباره تأیید کنید.',
+        mem_err_submit_failed: 'خطا در ثبت درخواست',
+        mem_err_server_internet: 'خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.',
+        mem_uid_label_default: 'شناسه کاربری {exchange} خود را وارد کنید',
+        mem_register_btn: 'ثبت‌نام در {exchange}',
+        mem_loading_module: 'در حال بارگذاری ماژول عضویت...',
+        // ── i18n AUDIT: membership-admin.js ──
+        mba_now: 'همین الان',
+        mba_minutes_ago: '{n} دقیقه پیش',
+        mba_hours_ago: '{n} ساعت پیش',
+        mba_days_ago: '{n} روز پیش',
+        mba_total_requests: 'کل درخواست‌های عضویت',
+        mba_active_premium: 'پرمیوم فعال',
+        mba_suspended: 'معلق',
+        mba_no_data: 'داده‌ای یافت نشد',
+        mba_load_error: 'خطا در بارگذاری',
+        mba_suspend_btn: 'تعلیق',
+        mba_label_submitted: 'ثبت',
+        mba_label_note: 'یادداشت: ',
+        mba_records_count: '{n} رکورد',
+        mba_confirm_approve: 'آیا از تأیید این درخواست اطمینان دارید؟ کاربر به VIP ارتقا می‌یابد.',
+        mba_confirm_reject: 'آیا از رد این درخواست اطمینان دارید؟',
+        mba_confirm_suspend: 'آیا از تعلیق این کاربر اطمینان دارید؟',
+        mba_op_success: 'عملیات با موفقیت انجام شد',
+        mba_export_error: 'خطا در خروجی',
+        // ── i18n AUDIT: admin.js (permissions + section labels) ──
+        adm_role_admin: 'مدیر',
+        adm_perm_count: '{n} دسترسی',
+        adm_no_access: 'شما به این بخش دسترسی ندارید',
+        adm_status_active: 'فعال',
+        adm_status_inactive: 'غیرفعال',
+        adm_status_unknown: 'نامشخص',
+        adm_status_draft: 'پیش‌نویس',
+        adm_status_paused: 'متوقف',
+        adm_status_archived: 'بایگانی',
+        adm_channel_mini_app: 'مینی‌اپ',
+        adm_channel_telegram: 'تلگرام',
+        adm_channel_both: 'هر دو',
+        adm_audience_free: 'رایگان',
+        adm_audience_premium: 'ویژه',
+        adm_audience_all: 'همه',
+        adm_change_status: 'تغییر وضعیت',
+        adm_image_size_error: 'حجم تصویر باید کمتر از ۵۰۰ کیلوبایت باشد',
+        adm_load_error_status: 'خطا در بارگذاری وضعیت: ',
+        adm_maint_desc_default: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        adm_maint_saved_cache_prefix: '⚠ تنظیمات ذخیره شد (حافظه موقت) — ',
+        adm_maint_saved_ok: '✓ تنظیمات با موفقیت ذخیره شد',
+        adm_maint_saved_cache_toast: 'ذخیره شد (حافظه موقت)',
+        adm_maint_saved_toast: 'تنظیمات نگهداری ذخیره شد',
+        adm_maint_save_error_prefix: '✗ خطا در ذخیره: ',
+        adm_maint_save_error_toast: 'خطا در ذخیره تنظیمات',
+        adm_no_cooldown: 'بدون کوپل‌داون',
+        adm_cooldown_weeks: '{n} هفته',
+        adm_cooldown_days: '{n} روز',
+        adm_cooldown_hours: '{n} ساعت',
+        adm_cooldown_seconds: '{n} ثانیه',
+        // Permission labels
+        adm_perm_analysis_publish: 'انتشار تحلیل',
+        adm_perm_analysis_edit: 'ویرایش تحلیل',
+        adm_perm_analysis_delete: 'حذف تحلیل',
+        adm_perm_news_publish: 'انتشار خبر',
+        adm_perm_news_edit: 'ویرایش خبر',
+        adm_perm_news_delete: 'حذف خبر',
+        adm_perm_users_view: 'مشاهده کاربران',
+        adm_perm_users_manage: 'مدیریت کاربران',
+        adm_perm_users_block: 'مسدودسازی کاربران',
+        adm_perm_admins_view: 'مشاهده مدیران',
+        adm_perm_admins_add: 'افزودن مدیر',
+        adm_perm_admins_edit: 'ویرایش مدیر',
+        adm_perm_admins_delete: 'حذف مدیر',
+        adm_perm_wallet_view: 'مشاهده کیف پول',
+        adm_perm_wallet_manage: 'مدیریت موجودی',
+        adm_perm_wallet_reward: 'ثبت پاداش',
+        adm_perm_referral_manage: 'مدیریت ریفرال',
+        adm_perm_referral_reward: 'ثبت پاداش ریفرال',
+        adm_perm_tickets_view: 'مشاهده تیکت',
+        adm_perm_tickets_reply: 'پاسخ به تیکت',
+        adm_perm_tickets_close: 'بستن تیکت',
+        adm_perm_notifications_send: 'ارسال اعلان',
+        adm_perm_notifications_manage: 'مدیریت اعلان',
+        adm_perm_market_manage: 'مدیریت وضعیت بازار',
+        adm_perm_market_alerts: 'مدیریت هشدارها',
+        adm_perm_system_logs: 'مشاهده لاگ',
+        adm_perm_system_settings: 'تنظیمات سیستم',
+        adm_perm_system_maintenance: 'حالت نگهداری',
+        adm_perm_ads_banners: 'مدیریت بنرها',
+        adm_perm_ads_manage: 'مدیریت تبلیغات',
+        // Permission groups
+        adm_perm_group_analysis: 'تحلیل',
+        adm_perm_group_news: 'اخبار',
+        adm_perm_group_users: 'کاربران',
+        adm_perm_group_admins: 'مدیران',
+        adm_perm_group_wallet: 'کیف پول',
+        adm_perm_group_referral: 'ریفرال',
+        adm_perm_group_tickets: 'تیکت',
+        adm_perm_group_notifications: 'اعلان‌ها',
+        adm_perm_group_market: 'بازار',
+        adm_perm_group_system: 'سیستم',
+        adm_perm_group_ads: 'تبلیغات',
+        // Maintenance presets
+        adm_preset_new_release_title: 'در حال استقرار نسخه جدید',
+        adm_preset_new_release_desc: 'در حال انتشار نسخه جدید اپلیکیشن با قابلیت‌های بهتر هستیم. به‌زودی بازمی‌گردیم!',
+        adm_preset_upgrade_title: 'ارتقای سیستم در حال انجام است',
+        adm_preset_upgrade_desc: 'در حال ارتقاء زیرساخت و بهبود عملکرد سیستم هستیم. چند دقیقه دیگر بازمی‌گردیم.',
+        adm_preset_migration_title: 'مهاجرت دیتابیس',
+        adm_preset_migration_desc: 'در حال مهاجرت دیتابیس برای بهبود سرعت و پایداری هستیم. این عملیات کمی طول می‌کشد.',
+        adm_preset_hotfix_title: 'اصلاح فوری سیستم',
+        adm_preset_hotfix_desc: 'متأسفیم! یک مشکل فوری شناسایی کردیم که در حال رفع آن هستیم. به‌زودی بازمی‌گردیم.',
+        adm_preset_end_title: 'در حال ساخت آینده‌ای بهتر!',
+        adm_preset_unknown: 'سناریو نامشخص',
+        adm_preset_enable_confirm: '⚠️ فعال‌سازی حالت نگهداری؟\n\nتمام کاربران عادی قفل خواهند شد و فقط ادمین‌ها می‌توانند وارد شوند.\n\nسناریو: {title}',
+        adm_preset_end_confirm: '✓ پایان حالت نگهداری؟\n\nکاربران دوباره می‌توانند وارد شوند.',
+        // Dashboard stats
+        adm_stat_total_users: 'کل کاربران',
+        adm_stat_new_today: 'جدید امروز',
+        adm_stat_new_this_week: 'جدید این هفته',
+        adm_stat_new_this_month: 'جدید این ماه',
+        adm_stat_joined_channel: 'عضو کانال',
+        adm_stat_join_percentage: 'درصد عضویت',
+        adm_stat_joined_bot: 'کاربران بات',
+        adm_stat_opened_mini_app: 'بازکردن Mini App',
+        adm_stat_active_alerts: 'هشدارهای فعال',
+        adm_stat_triggered_today: 'هشدارهای فعال‌شده امروز',
+        adm_stat_open_tickets: 'تیکت‌های باز',
+        adm_stat_total_transactions: 'تراکنش‌ها',
+        adm_stat_admins_count: 'مدیران',
+        adm_stat_no_stats: 'آماری موجود نیست',
+        adm_stat_users_joined_bot: 'بات را استارت زده‌اند',
+        adm_stat_users_opened_app: 'Mini App را باز کرده‌اند',
+        adm_stat_users_join_pct: 'درصد عضویت کانال',
+        adm_stat_active_today: 'فعال امروز',
+        adm_stat_active_this_week: 'فعال این هفته',
+        adm_stat_active_this_month: 'فعال این ماه',
+        // Recent activity
+        adm_act_new_analysis: 'تحلیل جدید: {coin}',
+        adm_act_analysis_by_author: ' توسط {author}',
+        adm_act_ticket: 'تیکت: {title} ({status})',
+        adm_act_no_recent: 'فعالیتی اخیر وجود ندارد',
+        adm_act_load_failed: 'بارگذاری داشبورد ناموفق بود',
+        // Maintenance status
+        adm_maint_status_off_text: 'وضعیت نگهداری: غیرفعال',
+        adm_maint_status_on_text: 'وضعیت نگهداری: فعال ⚠',
+        adm_maint_status_off_ok: 'وضعیت نگهداری: غیرفعال ✓',
+        adm_maint_status_unknown_text: 'وضعیت نگهداری: نامشخص',
+        adm_maint_system_normal: 'سیستم در حالت عادی',
+        adm_maint_progress_label_full: 'پیشرفت: {pct}% — کاربران قفل شده‌اند',
+        adm_maint_status_error: 'خطا در دریافت وضعیت',
+        // Admins
+        adm_admins_no_perms: 'بدون دسترسی',
+        adm_admins_label_membership: 'عضویت',
+        adm_admins_label_last_login: 'آخرین ورود',
+        adm_admins_label_perms: 'دسترسی‌ها',
+        adm_admins_btn_deactivate: 'غیرفعال‌سازی',
+        adm_admins_btn_activate: 'فعال‌سازی',
+        adm_admins_protected: 'حفاظت‌شده',
+        adm_admins_err_tg_id_required: 'لطفاً شناسه تلگرام را وارد کنید',
+        adm_admins_err_tg_id_invalid: 'شناسه تلگرام باید عدد معتبر باشد',
+        adm_admins_added: 'مدیر با موفقیت افزوده شد',
+        adm_admins_add_error: 'خطا در افزودن مدیر: ',
+        // Users
+        adm_users_default_name: 'کاربر',
+        adm_users_label_last_active: 'آخرین فعالیت',
+        adm_users_label_tokens: 'توکن',
+        adm_users_stats_error: 'داده آماری موجود نیست.',
+        adm_users_stats_load_error: 'خطا در بارگذاری آمار.',
+        // Tickets
+        adm_tk_status_open: 'باز',
+        adm_tk_status_answered: 'پاسخ داده شده',
+        adm_tk_status_closed: 'بسته شده',
+        adm_tk_subject_default: 'تیکت #{id}',
+        adm_tk_updated: '· به‌روزرسانی: {date}',
+        adm_tk_replies: '💬 {n} پاسخ',
+        adm_tk_admin_label: 'مدیر',
+        adm_tk_reply_ph: 'پاسخ خود را بنویسید...',
+        adm_tk_reply_btn: 'ارسال پاسخ',
+        adm_tk_close_btn: 'بستن',
+        adm_tk_open_btn: 'باز کردن',
+        adm_tk_answered_btn: 'پاسخ داده شده',
+        // Broadcast
+        adm_bc_target_channel: 'عضو کانال',
+        adm_bc_sent_by: 'ارسال توسط: {name}',
+        adm_bc_recipients: ' &bull; گیرندگان: {n}',
+        // Rewards
+        adm_rw_approved: 'پاداش تأیید شد',
+        adm_rw_approve_error: 'خطا در تأیید پاداش',
+        adm_rw_rejected: 'پاداش رد شد',
+        adm_rw_reject_error: 'خطا در رد پاداش',
+        adm_rw_server_error: 'خطا در ارتباط با سرور',
+        // Transactions
+        adm_tx_user_label: 'کاربر: {name}',
+        // System health
+        adm_health_checking: 'در حال بررسی سرویس‌ها...',
+        adm_health_overall_problem: 'سیستم دارای مشکل',
+        adm_health_overall_warning: 'سیستم با هشدار',
+        adm_health_overall_healthy: 'سیستم سالم',
+        adm_health_summary: '🟢 {healthy} سالم &nbsp; • &nbsp; 🟡 {warning} هشدار &nbsp; • &nbsp; 🔴 {down} از کار افتاده',
+        adm_health_last_check: 'آخرین بررسی: {date}',
+        adm_health_db_postgres: 'دیتابیس PostgreSQL',
+        adm_health_notif_queue: 'صف اعلان‌ها',
+        adm_health_status_healthy: 'سالم',
+        adm_health_status_warning: 'هشدار',
+        adm_health_status_down: 'از کار افتاده',
+        adm_health_load_error: 'بارگذاری وضعیت سیستم ناموفق بود',
+        // Reward center common
+        adm_rc_load_error: 'خطا در بارگذاری',
+        adm_rc_load_config_error: 'خطا در بارگذاری تنظیمات',
+        adm_rc_saved: 'تنظیمات ذخیره شد',
+        adm_rc_save_error: 'خطا در ذخیره',
+        adm_rc_saved_short: 'ذخیره شد',
+        adm_rc_status_changed: 'وضعیت تغییر کرد',
+        adm_rc_created: 'ایجاد شد',
+        adm_rc_create_error: 'خطا در ایجاد',
+        adm_rc_error: 'خطا',
+        adm_rc_deleted: 'حذف شد',
+        adm_rc_delete_confirm: 'حذف این پاداش؟',
+        adm_rc_delete_confirm_short: 'حذف؟',
+        adm_rc_error_short: 'خطا',
+        adm_rc_no_data: 'داده‌ای نیست',
+        // Reward center wheel overview
+        adm_rc_wheel_status_label: 'وضعیت گردونه',
+        adm_rc_spins_today: 'اسپین امروز',
+        adm_rc_rewards_today: 'پاداش امروز',
+        adm_rc_tokens_distributed_today: 'توکن توزیع شده امروز',
+        adm_rc_active_campaigns: 'کمپین‌های فعال',
+        adm_rc_active_wheel_rewards: 'پاداش‌های فعال گردونه',
+        adm_rc_active_referral_tiers: 'طبقات رفرال فعال',
+        adm_rc_active_missions: 'ماموریت‌های فعال',
+        adm_rc_pending_rewards: 'پاداش‌های در انتظار',
+        adm_rc_most_frequent_reward: 'پرتکرارترین پاداش',
+        adm_rc_highest_reward: 'بزرگ‌ترین پاداش',
+        adm_rc_wheel_version: 'نسخه گردونه',
+        // Reward center wheel config
+        adm_rc_wheel_config_title: 'تنظیمات عمومی گردونه',
+        adm_rc_enable_wheel: 'فعال‌سازی گردونه',
+        adm_rc_daily_spin: 'اسپین روزانه',
+        adm_rc_referral_spin: 'اسپین رفرال',
+        adm_rc_mission_spin: 'اسپین ماموریت',
+        adm_rc_premium_spin: 'اسپین ویژه',
+        adm_rc_campaign_spin: 'اسپین کمپین',
+        adm_rc_maintenance_mode: 'حالت تعمیرات',
+        adm_rc_status_maintenance: 'تعمیرات',
+        adm_rc_field_segments: 'تعداد بخش‌ها',
+        adm_rc_field_version: 'نسخه',
+        adm_rc_field_theme: 'تم',
+        adm_rc_field_max_spins_user: 'حداکثر اسپین/کاربر',
+        adm_rc_field_cooldown: 'کوپل‌داون',
+        adm_rc_field_max_reward_day: 'حداکثر پاداش/روز',
+        adm_rc_opt_1h: '۱ ساعت',
+        adm_rc_opt_6h: '۶ ساعت',
+        adm_rc_opt_12h: '۱۲ ساعت',
+        adm_rc_opt_24h: '۲۴ ساعت',
+        adm_rc_opt_42h: '۴۲ ساعت',
+        adm_rc_opt_72h: '۷۲ ساعت',
+        adm_rc_opt_weekly: 'هفتگی',
+        adm_rc_opt_custom: 'سفارشی',
+        adm_rc_ph_seconds: 'ثانیه',
+        // Reward center wheel rewards
+        adm_rc_rewards_title: 'پاداش‌های گردونه',
+        adm_rc_th_name: 'نام',
+        adm_rc_th_type: 'نوع',
+        adm_rc_th_amount: 'مقدار',
+        adm_rc_th_weight: 'وزن',
+        adm_rc_th_campaign: 'کمپین',
+        adm_rc_no_rewards: 'پاداشی موجود نیست',
+        adm_rc_add_reward: 'افزودن پاداش',
+        adm_rc_new_reward_title: 'پاداش جدید',
+        adm_rc_field_reward_name: 'نام پاداش',
+        adm_rc_opt_type_token: 'توکن',
+        adm_rc_opt_type_spin: 'اسپین',
+        adm_rc_opt_type_voucher: 'ووچر',
+        adm_rc_opt_type_nft: 'NFT',
+        adm_rc_opt_type_premium: 'ویژه',
+        adm_rc_opt_type_coupon: 'کوپن',
+        adm_rc_opt_type_external: 'خارجی',
+        adm_rc_opt_type_avatar: 'آواتار',
+        adm_rc_opt_type_badge: 'بج',
+        adm_rc_field_amount: 'مقدار',
+        adm_rc_field_weight: 'وزن',
+        adm_rc_field_campaign_opt: 'کمپین (اختیاری)',
+        adm_rc_opt_yes: 'بله',
+        adm_rc_opt_no: 'خیر',
+        adm_rc_create_btn: 'ایجاد',
+        // Reward center referral tiers
+        adm_rc_referral_tiers_title: 'طبقات پاداش رفرال',
+        adm_rc_th_invites: 'تعداد دعوت',
+        adm_rc_th_tokens: 'توکن',
+        adm_rc_th_free_spins: 'اسپین رایگان',
+        adm_rc_no_tiers: 'طبقه‌ای موجود نیست',
+        adm_rc_add_tier: 'افزودن طبقه',
+        adm_rc_new_tier_title: 'طبقه جدید',
+        adm_rc_field_invites: 'تعداد دعوت',
+        adm_rc_field_tokens: 'توکن',
+        adm_rc_field_free_spins: 'اسپین رایگان',
+        // Reward center missions
+        adm_rc_mission_rewards_title: 'پاداش ماموریت‌ها',
+        adm_rc_th_mission: 'ماموریت',
+        adm_rc_th_spin: 'اسپین',
+        adm_rc_no_missions: 'ماموریتی موجود نیست',
+        adm_rc_add_mission: 'افزودن ماموریت',
+        adm_rc_new_mission_title: 'ماموریت جدید',
+        adm_rc_field_mission_id: 'ID ماموریت',
+        adm_rc_field_name: 'نام',
+        adm_rc_field_spin: 'اسپین',
+        // Reward center campaigns
+        adm_rc_campaigns_title: 'کمپین‌ها',
+        adm_rc_th_start: 'شروع',
+        adm_rc_th_end: 'پایان',
+        adm_rc_th_priority: 'اولویت',
+        adm_rc_no_campaigns: 'کمپینی موجود نیست',
+        adm_rc_add_campaign: 'افزودن کمپین',
+        adm_rc_new_campaign_title: 'کمپین جدید',
+        adm_rc_field_start_date: 'تاریخ شروع',
+        adm_rc_field_end_date: 'تاریخ پایان',
+        adm_rc_field_priority: 'اولویت',
+        adm_rc_apply_wheel: 'اعمال روی گردونه',
+        adm_rc_apply_referral: 'اعمال روی رفرال',
+        adm_rc_apply_mission: 'اعمال روی ماموریت',
+        // Reward center library
+        adm_rc_library_title: 'کتابخانه پاداش',
+        adm_rc_th_category: 'دسته',
+        adm_rc_no_items: 'آیتمی موجود نیست',
+        adm_rc_field_category: 'دسته',
+        // Reward center analytics
+        adm_rc_analytics_title_distribution: 'توزیع پاداش‌ها',
+        adm_rc_analytics_th_reward: 'پاداش',
+        adm_rc_analytics_th_count: 'تعداد',
+        adm_rc_analytics_th_total: 'کل',
+        adm_rc_analytics_top_winners: 'برترین برندگان',
+        adm_rc_analytics_th_user: 'کاربر',
+        adm_rc_analytics_th_total_reward: 'کل پاداش',
+        adm_rc_analytics_avg_reward: 'میانگین پاداش',
+        adm_rc_analytics_total_tokens: 'کل توکن توزیع شده',
+        adm_rc_spins_week: 'اسپین هفته',
+        adm_rc_spins_month: 'اسپین ماه',
+        // Reward center emergency
+        adm_rc_emergency_title: 'کنترل‌های اضطراری',
+        adm_rc_emergency_desc: 'این کنترل‌ها فوراً اعمال می‌شوند و تمام سیستم پاداش را متوقف می‌کنند.',
+        adm_rc_disable_wheel: 'غیرفعال کردن گردونه',
+        adm_rc_disable_referral: 'غیرفعال کردن پاداش رفرال',
+        adm_rc_disable_mission: 'غیرفعال کردن پاداش ماموریت',
+        adm_rc_disable_campaigns: 'غیرفعال کردن کمپین‌ها',
+        adm_rc_disable_engine: 'غیرفعال کردن کل موتور پاداش',
+        adm_rc_save_btn_short: 'ذخیره',
+        // Notification center
+        adm_np_total_7d: 'کل اعلان‌ها (۷ روز)',
+        adm_np_unread: 'خوانده نشده',
+        adm_np_today: 'اعلان امروز',
+        adm_np_new_broadcast_title: 'ارسال همگانی جدید',
+        adm_np_field_title: 'عنوان',
+        adm_np_field_category: 'دسته',
+        adm_np_field_priority: 'اولویت',
+        adm_np_field_channel: 'کانال',
+        adm_np_field_target: 'هدف',
+        adm_np_field_message: 'پیام',
+        adm_np_opt_announcement: 'اطلاعیه',
+        adm_np_opt_system: 'سیستم',
+        adm_np_opt_market: 'بازار',
+        adm_np_opt_news: 'خبر',
+        adm_np_opt_low: 'پایین',
+        adm_np_opt_medium: 'متوسط',
+        adm_np_opt_high: 'بالا',
+        adm_np_opt_critical: 'بحرانی',
+        adm_np_opt_mini_app: 'Mini App',
+        adm_np_opt_telegram: 'Telegram Bot',
+        adm_np_opt_both: 'هر دو',
+        adm_np_opt_active: 'فعال',
+        adm_np_send_btn: 'ارسال',
+        adm_np_send_count: 'ارسال شد: {n} کاربر',
+        adm_np_send_error: 'خطا در ارسال',
+        adm_np_history_title: 'تاریخچه ارسال‌ها',
+        adm_np_th_sent: 'ارسال شده',
+        adm_np_no_records: 'رکوردی موجود نیست',
+        adm_np_templates_title: 'قالب‌های اعلان',
+        adm_np_add_template: 'افزودن قالب',
+        adm_np_th_key: 'کلید',
+        adm_np_no_templates: 'قالبی موجود نیست',
+        adm_np_new_template_title: 'قالب جدید',
+        adm_np_field_title_ph: 'عنوان اعلان',
+        adm_np_field_message_ph: 'متن اعلان...',
+        adm_np_cancel_btn: 'انصراف',
+        adm_np_template_saved: 'قالب ذخیره شد',
+        adm_np_template_not_found: 'قالب یافت نشد',
+        adm_np_edit_template_title: 'ویرایش قالب: {key}',
+        adm_np_delete_confirm: 'از حذف این قالب مطمئن هستید؟',
+        adm_np_template_deleted: 'قالب حذف شد',
+        adm_np_template_delete_error: 'خطا در حذف',
+        adm_np_analytics_total_30d: 'کل (۳۰ روز)',
+        adm_np_analytics_by_category: 'بر اساس دسته',
+        adm_np_analytics_by_priority: 'بر اساس اولویت',
+        // Alert economy
+        adm_ae_active_status: '✅ فعال',
+        adm_ae_inactive_status: '⛔ غیرفعال',
+        adm_ae_active_alerts: 'هشدارهای فعال',
+        adm_ae_triggered_today: 'اجراشده امروز',
+        adm_ae_quota_used: 'سهمیه استفاده شده',
+        adm_ae_paid_alerts: 'هشدارهای پولی',
+        adm_ae_ab_spent: 'AB مصرف شده',
+        adm_ae_price_alert: 'هشدار قیمت',
+        adm_ae_calendar_alert: 'هشدار تقویم اقتصادی',
+        adm_ae_breaking_news: 'هشدار اخبار فوری',
+        adm_ae_free_per_day: 'رایگان در روز',
+        adm_ae_cost_extra: 'هزینه اضافه (AB)',
+        // Ads common
+        adm_ads_no_data: 'موردی موجود نیست',
+        adm_ads_load_error: 'بارگذاری اطلاعات انجام نشد',
+        adm_ads_retry_btn: 'تلاش مجدد',
+        adm_ads_status_draft: 'پیش‌نویس',
+        adm_ads_status_paused: 'متوقف',
+        adm_ads_status_archived: 'بایگانی',
+        adm_ads_change_status: 'تغییر وضعیت',
+        adm_ads_ch_mini_app: 'مینی‌اپ',
+        adm_ads_ch_telegram: 'تلگرام',
+        adm_ads_aud_free: 'رایگان',
+        adm_ads_aud_premium: 'ویژه',
+        adm_ads_img_size_err: 'حجم تصویر باید کمتر از ۵۰۰ کیلوبایت باشد',
+        adm_ads_img_format_err: 'فرمت تصویر پشتیبانی نمی‌شود (JPEG/PNG/WEBP/GIF/AVIF)',
+        adm_ads_img_uploading: 'در حال آپلود تصویر...',
+        adm_ads_img_uploaded: 'تصویر آپلود شد',
+        adm_ads_img_upload_err: 'خطا در آپلود تصویر',
+        adm_ads_img_upload_err_prefix: 'خطا در آپلود: ',
+        adm_ads_img_read_err: 'خطا در خواندن فایل تصویر',
+        adm_ads_yes_short: 'نمایش: بله',
+        adm_ads_no_short: 'نمایش: خیر',
+        adm_ads_order_label: 'ترتیب: {val}',
+        adm_ads_edit_btn: 'ویرایش',
+        // Ads channels
+        adm_ads_channels_intro: 'این کانال‌ها به عنوان کانال‌های موردنیاز عضویت تنظیم می‌شوند. کاربر باید عضو همه کانال‌های فعال باشد.',
+        adm_ads_channels_title: 'کانال‌های عضویت',
+        adm_ads_add_channel: 'افزودن کانال',
+        adm_ads_channels_empty_title: 'هنوز کانالی اضافه نشده است',
+        adm_ads_add_first_channel: 'افزودن اولین کانال',
+        adm_ads_no_data_received: 'داده‌ای دریافت نشد',
+        adm_ads_channels_load_err: 'بارگذاری کانال‌ها انجام نشد',
+        adm_ads_new_channel_title: 'کانال جدید',
+        adm_ads_field_username: 'یوزرنیم کانال (بدون @)',
+        adm_ads_field_channel_title: 'عنوان کانال',
+        adm_ads_field_join_url: 'لینک عضویت',
+        adm_ads_field_display_order: 'ترتیب نمایش',
+        adm_ads_field_campaign_status: 'وضعیت کمپین',
+        adm_ads_field_show: 'نمایش',
+        adm_ads_show_active: 'فعال برای نمایش',
+        adm_ads_create_channel_btn: 'ایجاد کانال',
+        adm_ads_channel_not_found: 'کانال یافت نشد',
+        adm_ads_edit_channel_title: 'ویرایش کانال: @{username}',
+        adm_ads_join_url_err: 'لینک عضویت باید با https://t.me/ شروع شود',
+        adm_ads_saving: 'در حال ذخیره...',
+        adm_ads_channel_updated: 'کانال به‌روزرسانی شد',
+        adm_ads_channel_created: 'کانال ایجاد شد',
+        adm_ads_save_error: 'خطا در ذخیره',
+        adm_ads_save_error_prefix: 'خطا در ذخیره: ',
+        adm_ads_delete_confirm: 'از حذف این کانال مطمئن هستید؟',
+        adm_ads_channel_deleted: 'کانال حذف شد',
+        adm_ads_delete_error: 'خطا در حذف',
+        adm_ads_status_change_error: 'خطا در تغییر وضعیت',
+        adm_ads_cooldown_tag: 'کوئل‌داون: {val}',
+        adm_ads_last_change_tag: 'آخرین تغییر: {val}',
+        // Ads popups
+        adm_ads_popups_intro: 'قالب پاپ‌آپ ثابت است: تصویر ← عنوان ← متن ← دکمه. فقط محتوا قابل تغییر است. کوئل‌داون به معنای مدت زمانی است که پس از نمایش پاپ‌آپ به یک کاربر، تا آن مدت دوباره نمایش داده نمی‌شود.',
+        adm_ads_popups_title: 'پاپ‌آپ مینی‌اپ',
+        adm_ads_add_popup: 'افزودن پاپ‌آپ',
+        adm_ads_popups_empty_title: 'هنوز پاپ‌آپی ساخته نشده است',
+        adm_ads_add_first_popup: 'افزودن اولین پاپ‌آپ',
+        adm_ads_popups_load_err: 'بارگذاری پاپ‌آپ‌ها انجام نشد',
+        adm_ads_edit_popup_title: 'ویرایش پاپ‌آپ: {title}',
+        adm_ads_new_popup_title: 'پاپ‌آپ جدید',
+        adm_ads_create_popup_btn: 'ایجاد پاپ‌آپ',
+        adm_ads_field_body_text: 'متن پیام',
+        adm_ads_field_btn_text: 'متن دکمه',
+        adm_ads_field_btn_url: 'لینک دکمه',
+        adm_ads_field_image_optional: 'تصویر (اختیاری)',
+        adm_ads_field_image: 'تصویر',
+        adm_ads_select_image: 'انتخاب تصویر',
+        adm_ads_img_hint: 'می‌توانید یک URL تصویر https وارد کنید یا تصویر را آپلود کنید (حداکثر ۵۰۰KB).',
+        adm_ads_popup_not_found: 'پاپ‌آپ یافت نشد',
+        adm_ads_title_required: 'عنوان پاپ‌آپ الزامی است',
+        adm_ads_popup_updated: 'پاپ‌آپ به‌روزرسانی شد',
+        adm_ads_popup_created: 'پاپ‌آپ ایجاد شد',
+        adm_ads_delete_popup_confirm: 'از حذف این پاپ‌آپ مطمئن هستید؟',
+        adm_ads_popup_deleted: 'پاپ‌آپ حذف شد',
+        // Ads messages
+        adm_ads_messages_intro: 'فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.',
+        adm_ads_messages_title: 'پیام‌های تبلیغاتی',
+        adm_ads_add_message: 'افزودن پیام',
+        adm_ads_messages_empty_title: 'هنوز پیامی ساخته نشده است',
+        adm_ads_add_first_message: 'افزودن اولین پیام',
+        adm_ads_messages_load_err: 'بارگذاری پیام‌ها انجام نشد',
+        adm_ads_edit_message_title: 'ویرایش پیام: {title}',
+        adm_ads_new_message_title: 'پیام جدید',
+        adm_ads_create_message_btn: 'ایجاد پیام',
+        adm_ads_field_destination: 'مقصد ارسال',
+        adm_ads_field_audience: 'مخاطب هدف',
+        adm_ads_aud_free_label: 'کاربران رایگان',
+        adm_ads_aud_premium_label: 'کاربران ویژه',
+        adm_ads_aud_all_label: 'همه کاربران',
+        adm_ads_message_not_found: 'پیام یافت نشد',
+        adm_ads_msg_title_required: 'عنوان پیام الزامی است',
+        adm_ads_msg_body_required: 'متن پیام الزامی است',
+        adm_ads_message_updated: 'پیام به‌روزرسانی شد',
+        adm_ads_message_created: 'پیام ایجاد شد',
+        adm_ads_delete_message_confirm: 'از حذف این پیام مطمئن هستید؟',
+        adm_ads_message_deleted: 'پیام حذف شد',
+        adm_ads_send_message_intro: 'ارسال این پیام به مخاطبان هدف؟ این عملیات ممکن است چند ثانیه طول بکشد.',
+        adm_ads_sending: 'در حال ارسال...',
+        adm_ads_send_no_users: 'هیچ کاربری پیام را دریافت نکرد. تحویل: 0 / رد شده: {skipped}. ممکن است تنظیمات اعلان کاربران مانع ارسال باشد.',
+        adm_ads_send_success: 'ارسال شد — تحویل: {delivered} / رد شده: {skipped}',
+        adm_ads_send_recent: 'این کمپین اخیراً ارسال شده. {retry_after} ثانیه صبر کنید.',
+        adm_ads_send_duplicate: 'عملیات تکراری. {retry_after} ثانیه صبر کنید.',
+        adm_ads_send_error_prefix: 'خطا در ارسال: ',
+        adm_ads_send_error: 'خطا در ارسال',
+        // VPN purchases
+        adm_vpn_no_data: 'موردی یافت نشد',
+        adm_vpn_status_pending: 'در انتظار ارسال',
+        adm_vpn_status_fulfilled: 'ارسال شده',
+        adm_vpn_status_cancelled: 'لغو شده',
+        adm_vpn_status_failed: 'خطا / Retry',
+        adm_vpn_duration_month: '۱ ماه',
+        adm_vpn_duration_week: '۷ روز',
+        adm_vpn_send_link_btn: 'ارسال لینک',
+        adm_vpn_sent_pill: 'ارسال شد',
+        adm_vpn_send_modal_title: 'ارسال VPN',
+        adm_vpn_modal_user: 'کاربر:',
+        adm_vpn_modal_plan: 'بسته:',
+        adm_vpn_modal_cost: 'هزینه:',
+        adm_vpn_modal_credit: 'اعتبار:',
+        adm_vpn_modal_tracking: 'کد رهگیری:',
+        adm_vpn_modal_link_label: 'لینک VPN:',
+        adm_vpn_send_to_user_btn: 'ارسال برای کاربر',
+        adm_vpn_link_invalid: 'لطفاً لینک VPN معتبر وارد کنید (حداقل ۱۰ کاراکتر).',
+        adm_vpn_send_confirm: 'ارسال لینک برای کاربر تأیید می‌شود؟',
+        adm_vpn_send_failed: 'ارسال ناموفق بود',
+        adm_vpn_send_failed_pending: 'Purchase در وضعیت pending باقی مانده. می‌توانید دوباره تلاش کنید.',
+        adm_vpn_communication_error: 'خطا در برقراری ارتباط: ',
+        // ── i18n AUDIT: admin.js (additional keys for hardcoded strings) ──
+        adm_admins_initial: 'م',
+        adm_users_initial: 'ک',
+        adm_th_status: 'وضعیت',
+        adm_th_actions: 'عملیات',
+        adm_rc_field_active: 'فعال',
+        adm_ae_service_label: '{type} ({free} رایگان / {cost} AB)',
+        adm_np_today_label: 'امروز',
+        adm_np_th_category: 'دسته',
+        adm_np_th_priority: 'اولویت',
+        adm_np_th_title: 'عنوان',
+        adm_np_th_status: 'وضعیت',
+        adm_np_th_actions: 'عملیات',
+        adm_rc_th_status: 'وضعیت',
+        adm_rc_th_actions: 'عملیات',
+        adm_np_analytics_th_count: 'تعداد',
+        adm_health_overall_label: 'سیستم'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -883,7 +1952,6 @@ const i18n = {
         analysis_label_symbol: 'Symbol',
         analysis_label_timeframe: 'Timeframe',
         analysis_label_category: 'Category',
-        market_subtitle: 'Explore global markets and trading opportunities',
         about_title: 'About Us',
         terms_title: 'Terms & Conditions',
         privacy_title: 'Privacy Policy',
@@ -901,15 +1969,1094 @@ const i18n = {
         ns_system: 'System',
         ns_system_desc: 'Important system announcements',
         ns_ticket: 'Support Ticket',
-        ns_ticket_desc: 'Replies to support tickets'
+        ns_ticket_desc: 'Replies to support tickets',
+        // ── i18n AUDIT EN: timeAgo ──
+        time_just_now: 'Just now',
+        time_m_ago: '{n}m ago',
+        time_h_ago: '{n}h ago',
+        time_d_ago: '{n}d ago',
+        // ── i18n AUDIT EN: analysis / market labels ──
+        decision_range: 'Decision Zone',
+        saved_chip: 'Saved',
+        saved_chip_count: '🔖 Saved ({n})',
+        featured_badge: '⭐ Featured',
+        stat_total: 'Total',
+        stat_featured: 'Featured',
+        stat_normal: 'Normal',
+        stat_today: 'Today',
+        resistance: 'Resistance',
+        support_level: 'Support',
+        view_cta: 'View →',
+        analysis_empty_title: 'No analysis posted yet',
+        analysis_empty_desc_add: 'Tap the + button to publish your first analysis',
+        analysis_empty_desc_soon: 'New analyses will appear here soon',
+        no_result_found: 'No results found',
+        analysis_filter_empty_desc: 'No analysis found with the current filters. Change filters or view all analyses.',
+        clear_filters: 'Clear filters',
+        read_time_mins: '{n} min',
+        load_more: 'Show more',
+        // ── i18n AUDIT EN: pull-to-refresh ──
+        ptr_release: 'Release to refresh',
+        ptr_pull: 'Pull down to refresh',
+        ptr_updating: 'Updating...',
+        // ── i18n AUDIT EN: market search/info ──
+        coins_count: '{n} coins',
+        search_in_coins: 'Search {n}+ coins',
+        // ── i18n AUDIT EN: fear & greed insights ──
+        fg_insight_extreme_fear: 'Extreme fear in the market — possible buying opportunity for brave investors',
+        fg_insight_fear: 'Fear dominates the market — proceed with caution but look for opportunities',
+        fg_insight_neutral: 'Market is neutral — wait for a clear direction',
+        fg_insight_greed: 'Greed in the market — good time for profit-taking and risk management',
+        fg_insight_extreme_greed: 'Extreme greed — be cautious, a market correction is likely',
+        // ── i18n AUDIT EN: forex market ──
+        forex_auth_title: 'Forex data requires Telegram login',
+        forex_auth_desc: 'Open the app inside Telegram to view forex and gold rates',
+        forex_retry_title: 'Reload',
+        forex_retry_desc: 'Failed to load forex data',
+        forex_cat_major: 'Major Pair',
+        forex_cat_cross: 'Cross',
+        forex_cat_metal: 'Precious Metal',
+        forex_cat_stock: 'Stock',
+        forex_group_metal: 'Precious Metals',
+        forex_group_major: 'Major Pairs',
+        forex_group_cross: 'Cross Pairs',
+        forex_group_stock: 'Global Stocks',
+        forex_type_forex: 'Forex',
+        forex_type_metal: 'Metal',
+        forex_type_stock: 'Stock',
+        forex_type_market: 'Market',
+        // ── i18n AUDIT EN: watchlist ──
+        remove_from_watchlist: 'Remove from watchlist',
+        add_to_watchlist: 'Add to watchlist',
+        // ── i18n AUDIT EN: missions ──
+        mission_completed_badge: '✓ Claimed',
+        mission_complete_title: 'Mission Complete!',
+        // ── i18n AUDIT EN: news ──
+        news_sent_macro: 'Macro',
+        news_empty: 'No news found',
+        news_save: 'Save',
+        news_share: 'Share',
+        news_unsave: 'Remove save',
+        saved_news_empty: 'No saved items',
+        news_time_group_news: 'News',
+        news_time_group_events: 'Economic Events',
+        news_auth_title: 'Open the app in Telegram to see news',
+        news_auth_desc: 'Live market news is available inside the Mini App',
+        open_in_telegram: 'Open in Telegram',
+        news_cat_crypto: 'Crypto',
+        news_cat_forex: 'Forex',
+        news_cat_economy: 'Economy',
+        news_analysis_label: 'News Analysis',
+        news_ai_smart_label: 'Smart Analysis',
+        news_ai_unavailable: 'Analysis for this news is not available yet. You can read the original source.',
+        news_ai_rate_limited: 'AI services are currently rate-limited. Analysis will be generated soon.',
+        news_ai_error: 'Analysis generation encountered an error and is retrying. It will complete in a few minutes.',
+        news_ai_preparing: 'Preparing...',
+        news_filter_title: 'News Filters',
+        news_filter_sentiment: 'Market Sentiment',
+        news_filter_priority: 'Priority',
+        news_filter_category: 'Category',
+        news_filter_time: 'Time Range',
+        news_filter_breaking: 'Breaking',
+        news_filter_trending: 'Trending',
+        news_filter_bitcoin: 'Bitcoin',
+        news_filter_ethereum: 'Ethereum',
+        news_filter_solana: 'Solana',
+        news_filter_regulation: 'Regulation',
+        news_filter_macro: 'Macro',
+        news_filter_market_structure: 'Market Structure',
+        news_filter_1h: 'Last hour',
+        news_filter_24h: 'Last 24 hours',
+        news_filter_7d: 'Last 7 days',
+        news_filter_reset: 'Reset',
+        news_filter_apply: 'Apply Filters',
+        news_search_placeholder: 'Search news, coin, country...',
+        // ── i18n AUDIT EN: calendar ──
+        cal_status_ended: 'Ended',
+        cal_status_running: 'Running',
+        cal_status_waiting: 'Upcoming',
+        cal_event_empty: 'No economic events found',
+        cal_filter_empty: 'No events found for this filter',
+        cal_impact: 'Impact',
+        time_morning: 'Morning',
+        time_afternoon: 'Afternoon',
+        time_evening: 'Evening',
+        reminder_title: 'Event Reminder',
+        reminder_active: 'Reminder active',
+        reminder_set: 'Set reminder',
+        reminder_15m: '15 minutes before',
+        reminder_1h: '1 hour before',
+        reminder_24h: '24 hours before',
+        reminder_remove: 'Remove reminder',
+        // ── i18n AUDIT EN: share sheet ──
+        share_title: 'Share',
+        share_telegram: 'Telegram',
+        share_whatsapp: 'WhatsApp',
+        share_copy_link: 'Copy Link',
+        // ── i18n AUDIT EN: coin detail ──
+        cd_current_price: 'Current Price',
+        cd_daily_change: 'Daily Change',
+        cd_category: 'Category',
+        cd_type: 'Type',
+        cd_alerts_active: '{n} active',
+        alert_when_below: 'When below',
+        alert_when_above: 'When above',
+        alert_inactive: 'Inactive',
+        alert_status_label: 'Alert Status',
+        alert_active_count_label: 'Active Alerts',
+        alert_current_label: 'Current Price',
+        alert_register_btn: 'Set Alert',
+        cd_market_stats: 'Market Stats',
+        cd_market_cap: 'Market Cap',
+        cd_ai_analysis: 'AMIRBTC AI Analysis',
+        cd_price_section: 'Price Alert',
+        chart_source_search: 'Searching alternative source',
+        chart_unavailable_title: 'Chart for this asset is currently unavailable',
+        chart_unavailable_sub: 'Please try again later or check another symbol.',
+        alert_trigger_msg: '🔔 Price alert triggered\n{symbol} reached {price} USDT.',
+        alert_trigger_title: '🔔 Price Alert: {symbol}',
+        // ── i18n AUDIT EN: analysis form ──
+        af_chart_image: 'Chart Image URL',
+        af_support_opt: 'Support (optional)',
+        af_current_price_opt: 'Current Price (optional)',
+        af_resistance_opt: 'Resistance (optional)',
+        af_body: 'Analysis Text',
+        af_body_ph: 'Main scenario: ...\nAlternative scenario: ...',
+        af_publish: 'Publish Analysis',
+        af_cancel: 'Cancel',
+        af_featured_toggle: '⭐ Featured Analysis',
+        af_confirm_title: 'Are you sure?',
+        af_confirm_desc: 'This action cannot be undone.',
+        af_confirm_continue: 'Continue',
+        af_permanent_title: 'Permanently delete?',
+        af_permanent_desc: 'The analysis will be permanently deleted.',
+        af_permanent_delete: 'Delete permanently',
+        // ── i18n AUDIT EN: delete account modal ──
+        delete_account_warning: '⚠️ Serious Warning\n\nAre you sure you want to delete your account?\n\n• All your rewards and tokens will be erased\n• Referral history will be deleted\n• Wallet, alerts, and watchlist will be cleared\n• This action is irreversible\n\nAfter deletion, you can re-register with a referral link.',
+        delete_account_telegram_error: 'Error: Sign in via Telegram first',
+        delete_account_success_msg: '✅ Account deleted. You can re-register.',
+        delete_account_deleted_title: 'Account Deleted',
+        delete_account_deleted_desc: 'To re-register, start the bot in Telegram. If you enter with a referral link, your referral will be registered.',
+        reload: 'Reload',
+        error_prefix: 'Error: ',
+        network_error_retry: 'Network error — try again',
+        unknown_error: 'Unknown',
+        // ── i18n AUDIT EN: content editor ──
+        content_version: 'Version',
+        official_channel_label: 'Official channel: amir_btc_2024',
+        content_edit_about: 'Edit: About',
+        content_edit_terms: 'Edit: Terms',
+        content_edit_privacy: 'Edit: Privacy',
+        content_edit_default: 'Edit Content',
+        content_load_error: 'Error loading content',
+        content_json_error: 'JSON error: ',
+        content_save_progress: 'Saving...',
+        content_save_success: '✓ Saved successfully',
+        content_save_btn: 'Save',
+        content_title_label: 'Title',
+        content_version_label: 'App Version (About only)',
+        content_sections_label: 'Sections (JSON)',
+        content_sections_ph: '[{"heading":"Section title","body":"Section body"}]',
+        // ── i18n AUDIT EN: notification settings ──
+        notif_critical_alerts: 'Critical Alerts',
+        notif_account_alerts: 'Account Notifications',
+        notif_select_channel: 'Select delivery channel',
+        ch_price_alert: 'Price Alerts',
+        ch_price_alert_desc: 'When price reaches your target',
+        ch_analysis: 'Analysis',
+        ch_analysis_desc: 'New market analysis published',
+        ch_calendar: 'Calendar Events',
+        ch_calendar_desc: 'Important economic events',
+        ch_tickets: 'Tickets',
+        ch_tickets_desc: 'Support ticket replies',
+        ch_announcements: 'Announcements',
+        ch_announcements_desc: 'System and app announcements',
+        ch_wheel: 'Spin Rewards',
+        ch_wheel_desc: 'Wheel rewards and free spins',
+        ch_referral: 'Referral',
+        ch_referral_desc: 'New invites and referral rewards',
+        ch_wallet: 'Wallet',
+        ch_wallet_desc: 'Token received, daily reward',
+        ch_promotions: 'Promotions',
+        ch_promotions_desc: 'Special offers and promotions',
+        notif_off: 'Off',
+        notif_app: 'App',
+        notif_bot: 'Bot',
+        notif_both: 'Both',
+        premium_only_label: 'Premium members only',
+        notif_all_disabled_title: 'All notifications disabled',
+        notif_all_disabled_desc: 'You will not receive any notifications',
+        notif_system_active_title: 'Notification system active',
+        notif_system_active_desc: '{active} active · {both} on both channels',
+        notif_important_active_title: 'Important alerts active',
+        notif_important_active_desc: '{active} of {total} categories active',
+        // ── i18n AUDIT EN: tickets ──
+        ticket_title_min: 'Title must be at least 3 characters',
+        ticket_body_min: 'At least {n} characters',
+        ticket_max_chars: 'Max ({n} chars)',
+        ticket_title_required: 'Title is required',
+        ticket_body_required: 'Message is required',
+        ticket_body_min_needed: 'At least {n} characters required',
+        ticket_new: 'New Ticket',
+        ticket_title_label: 'Title',
+        ticket_body_label: 'Message',
+        ticket_char_counter: '{n} / {max}',
+        // ── i18n AUDIT EN: maintenance ──
+        maint_optimizing: 'Optimizing system...',
+        maint_updating: 'Updating services...',
+        maint_syncing: 'Syncing data...',
+        maint_security: 'Checking security...',
+        maint_new_version: 'Preparing new version...',
+        maint_bypass: 'Bypass maintenance',
+        maint_progress: 'Progress',
+        // ── i18n AUDIT EN: join-lock dynamic ──
+        jl_checking_access: 'Checking access...',
+        jl_membership_checking: 'Checking membership…',
+        jl_membership_verified: 'Membership verified ✓',
+        jl_membership_required: 'Channel membership required',
+        jl_join_btn: 'Join',
+        jl_connection_error: 'Connection error',
+        jl_retry_btn: 'Retry',
+        jl_required_channels: 'Required channels:',
+        jl_lock_desc_full: 'To use the app, please join our official channel first.',
+        jl_not_verified_msg: 'Your membership is not verified yet. Please join the channel first, then verify membership again.',
+        // ── i18n AUDIT EN: misc ──
+        premium_membership: 'Premium Membership',
+        premium_activate: 'Activate Premium',
+        admin_author: 'Admin',
+        admin_panel: 'Admin Panel',
+        fl_confirm_yes: 'Yes, continue',
+        support_center_desc: 'AMIRBTC Support Center',
+        add_to_watchlist_title: 'Add to Watchlist',
+        coin_search_ph: 'Search...',
+        // ── i18n AUDIT EN: analysis detail ──
+        adp_back: 'Back',
+        adp_edit: 'Edit',
+        adp_delete: 'Delete',
+        adp_related: 'Related Analysis',
+        adp_save: 'Save',
+        adp_copy_text: 'Copy Text',
+        adp_share: 'Share',
+        adp_analysis_title: 'Market Analysis',
+        // ── i18n AUDIT EN: month names ──
+        month_jan: 'January', month_feb: 'February', month_mar: 'March', month_apr: 'April',
+        month_may: 'May', month_jun: 'June', month_jul: 'July', month_aug: 'August',
+        month_sep: 'September', month_oct: 'October', month_nov: 'November', month_dec: 'December',
+        // ── i18n AUDIT EN: market headers ──
+        mkt_header_coin: 'Coin',
+        mkt_header_price: 'Price',
+        mkt_status_title: 'Market Status',
+        mkt_trend_title: 'Market Trend',
+        mkt_tab_crypto: 'Crypto',
+        mkt_tab_forex: 'Forex',
+        mkt_tab_watchlist: 'Watchlist',
+        mkt_search_ph: 'Search coin or symbol...',
+        news_search_label: 'Search',
+        news_filter_label: 'Filter',
+        // ── i18n AUDIT EN: admin panel ──
+        adm_menu: 'Menu',
+        adm_back_to_app: 'Back to App',
+        adm_section_label: 'Dashboard',
+        adm_sidebar_overview: 'Overview',
+        adm_sidebar_management: 'Management',
+        adm_sidebar_content: 'Content',
+        adm_sidebar_system: 'System',
+        adm_sidebar_dashboard: 'Dashboard',
+        adm_sidebar_users: 'Users',
+        adm_sidebar_admins: 'Admins',
+        adm_sidebar_tickets: 'Tickets',
+        adm_sidebar_rewards: 'Rewards',
+        adm_sidebar_transactions: 'Transactions',
+        adm_sidebar_referral: 'Referral',
+        adm_sidebar_reward_center: 'Reward Center',
+        adm_sidebar_notification_center: 'Notification Center',
+        adm_sidebar_vpn: 'VPN Purchases',
+        adm_sidebar_alert_economy: 'Alert Economy',
+        adm_sidebar_ads: 'Advertisements',
+        adm_sidebar_membership: 'Membership',
+        adm_sidebar_system_control: 'System Control',
+        adm_sidebar_health: 'System Health',
+        adm_sidebar_logs: 'Logs',
+        adm_username: 'Admin',
+        adm_dashboard_title: 'Dashboard',
+        adm_dashboard_desc: 'System overview at a glance',
+        adm_maint_status_checking: 'Maintenance status: checking...',
+        adm_maint_loading: 'Loading system status',
+        adm_stat_users: 'Users',
+        adm_stat_tickets: 'Tickets',
+        adm_stat_broadcast: 'Broadcast',
+        adm_stat_maintenance: 'Maintenance',
+        adm_recent_activity: 'Recent Activity',
+        adm_admins_title: 'Admin Management',
+        adm_admins_desc: 'Add, edit, and delete system admins',
+        adm_add_admin: 'Add Admin',
+        adm_telegram_id: 'Telegram ID',
+        adm_telegram_id_ph: 'e.g. 123456789',
+        adm_role: 'Role',
+        adm_permissions: 'Permissions — populated by role, editable',
+        adm_add_btn: 'Add',
+        adm_users_title: 'Users',
+        adm_users_desc: 'Search and manage mini-app users',
+        adm_users_search_ph: 'Search by ID, username, name...',
+        adm_tickets_title: 'Ticket Center',
+        adm_tickets_desc: 'Manage and reply to user tickets',
+        adm_filter_all: 'All',
+        adm_filter_open: 'Open',
+        adm_filter_answered: 'Answered',
+        adm_filter_closed: 'Closed',
+        adm_filter_pending: 'Pending',
+        adm_filter_approved: 'Approved',
+        adm_filter_delivered: 'Delivered',
+        adm_rewards_title: 'Rewards',
+        adm_rewards_desc: 'Manage user reward requests',
+        adm_wallet_title: 'Wallet & Transactions',
+        adm_wallet_desc: 'View and filter AB Token transactions',
+        adm_tx_user_id: 'User ID',
+        adm_tx_all_types: 'All types',
+        adm_tx_daily_claim: 'Daily Check-in',
+        adm_tx_referral: 'Referral',
+        adm_tx_admin_grant: 'Admin Grant',
+        adm_tx_wheel: 'Spin Wheel',
+        adm_referral_title: 'Referral System',
+        adm_referral_desc: 'Invite stats and referrer rewards',
+        adm_referral_search_ph: 'Search by user ID...',
+        adm_system_title: 'System Control',
+        adm_system_desc: 'Manage mini-app status and maintenance mode',
+        adm_maint_mode_title: 'Maintenance Mode',
+        adm_maint_mode_desc: 'When enabled, the mini-app is disabled for regular users.',
+        adm_maint_display_title: 'Display Title',
+        adm_maint_title_ph: 'Building a better future!',
+        adm_maint_desc_label: 'Description',
+        adm_maint_desc_ph: 'Upgrading systems and adding new features...',
+        adm_save_settings: 'Save Settings',
+        adm_reload: 'Reload',
+        adm_maint_status_off: 'Off',
+        adm_maint_status_label: 'Maintenance Status',
+        adm_maint_progress_label: 'Progress',
+        adm_last_update: 'Last Updated',
+        adm_presets_title: 'Ready Scenarios',
+        adm_presets_hint: 'Apply maintenance settings with one click',
+        adm_preset_new_release: 'New Release',
+        adm_preset_upgrade: 'System Upgrade',
+        adm_preset_migration: 'Database Migration',
+        adm_preset_hotfix: 'Hotfix',
+        adm_preset_end: 'End Maintenance',
+        adm_preset_disable: 'Disable',
+        adm_preset_progress_25: 'Progress 25%',
+        adm_preset_progress_50: 'Progress 50%',
+        adm_preset_progress_75: 'Progress 75%',
+        adm_preset_progress_10: 'Progress 10%',
+        maint_title_default: 'Building a better future!',
+        maint_desc_default_full: 'Upgrading systems and adding new features. We will be back soon with a better experience!',
+        news_modal_default_title: 'News Title',
+        ai_welcome_msg: 'Hello 👋🏻 Welcome\nIf you have any questions, I\'m here',
+        ai_title: 'AMIRBTC AI Assistant',
+        ai_online: 'Online',
+        ai_placeholder: 'Ask about the market, cryptocurrencies, news, and daily info',
+        ai_suggestion_1: 'What is AMIRBTC AI Assistant and what can it do?',
+        ai_suggestion_2: 'What market and crypto information can I get from AMIRBTC?',
+        ai_suggestion_3: 'How can I use the news and analysis section to find profitable opportunities?',
+        adm_health_title: 'System Health',
+        adm_health_desc: 'Performance metrics and service status',
+        adm_logs_title: 'Security Logs',
+        adm_logs_desc: 'Security events and admin activity',
+        adm_rc_title: 'Reward Center',
+        adm_rc_desc: 'Full management of rewards, wheel, campaigns, and settings',
+        adm_rc_tab_overview: 'Overview',
+        adm_rc_tab_wheel: 'Spin Wheel',
+        adm_rc_tab_referral: 'Referral Reward',
+        adm_rc_tab_mission: 'Mission Reward',
+        adm_rc_tab_campaigns: 'Campaigns',
+        adm_rc_tab_library: 'Reward Library',
+        adm_rc_tab_analytics: 'Analytics',
+        adm_rc_tab_settings: 'Settings',
+        adm_loading: 'Loading...',
+        adm_vpn_title: 'VPN Purchases — Queue',
+        adm_vpn_desc: 'Premium user VPN purchase requests. After sending the VPN link, mark as "Done".',
+        adm_vpn_fulfilled: 'Fulfilled',
+        adm_vpn_th_user: 'User',
+        adm_vpn_th_plan: 'Plan',
+        adm_vpn_th_cost: 'Cost',
+        adm_vpn_th_credit: 'Credit',
+        adm_vpn_th_tracking: 'Tracking ID',
+        adm_vpn_th_date: 'Date',
+        adm_vpn_th_status: 'Status',
+        adm_vpn_th_action: 'Action',
+        adm_notif_title: 'Notification Center',
+        adm_notif_desc: 'Unified management of notifications, messages, and broadcasts',
+        adm_np_tab_dashboard: 'Dashboard',
+        adm_np_tab_broadcast: 'Broadcast',
+        adm_np_tab_templates: 'Templates',
+        adm_np_tab_analytics: 'Analytics',
+        adm_ae_title: 'Alert Economy',
+        adm_ae_desc: 'Manage alert quotas, costs, and activation',
+        adm_ads_title: 'Advertisements',
+        adm_ads_desc: 'Manage membership channels, mini-app popups, and ad messages',
+        adm_mb_title: 'Premium Membership',
+        adm_mb_desc: 'Manage exchange membership requests and VIP users',
+        adm_update_btn: 'Update',
+        adm_mb_search_ph: 'Search by ID, name, exchange, UID...',
+        adm_mb_all_status: 'All statuses',
+        adm_mb_pending: 'Pending',
+        adm_mb_approved: 'Approved',
+        adm_mb_rejected: 'Rejected',
+        adm_mb_all_exchanges: 'All exchanges',
+        adm_csv_export: 'CSV Export',
+        adm_empty: 'No data available',
+        adm_operation_error: 'Operation failed',
+        adm_logout_error: 'Logout failed',
+        adm_error_prefix: 'Error: ',
+        // ── i18n AUDIT EN: premium / membership ──
+        mem_premium_badge: 'Premium',
+        mem_exchange_label: 'Exchange',
+        mem_uid_label: 'Exchange UID',
+        mem_status_label: 'Status',
+        mem_actions_label: 'Actions',
+        mem_approve: 'Approve',
+        mem_reject: 'Reject',
+        mem_vip: 'VIP',
+        // ── i18n AUDIT EN: membership-user.js ──
+        mem_activate_premium: 'Activate Premium',
+        mem_vip_member: 'AMIRBTC VIP Member',
+        mem_upgrade_to_vip: 'Upgrade to Premium',
+        mem_level_premium: 'Premium',
+        mem_level_elite: 'Elite',
+        mem_welcome_title: 'Congratulations!',
+        mem_welcome_subtitle: 'Your {level} membership activated successfully',
+        mem_welcome_desc: 'All premium features are now active.<br>Enjoy your exclusive AmirBTC Assistant experience.',
+        mem_benefit_charts: 'Exclusive charts and analysis',
+        mem_benefit_premium_badge: 'Premium badge on profile',
+        mem_benefit_priority_features: 'Priority access to new features',
+        mem_benefit_campaigns: 'Special campaigns and rewards',
+        mem_welcome_cta: 'Get started',
+        mem_vip_status_active: 'Active membership',
+        mem_vip_status_subtitle: 'Your membership is active. All exclusive features are available with higher quota.',
+        mem_label_level: 'Level',
+        mem_label_activation_date: 'Activation Date',
+        mem_label_membership_type: 'Membership Type',
+        mem_no_expiry: 'No expiry date',
+        mem_label_expiry: 'Expiry',
+        mem_benefits_premium_title: 'Premium Benefits',
+        mem_benefits_exclusive_title: 'Exclusive Access',
+        mem_benefit_ai: 'AI Chat',
+        mem_benefit_ai_desc: '100 messages/day with advanced models',
+        mem_benefit_alerts: 'Price Alerts',
+        mem_benefit_alerts_desc: '10 free alerts per day',
+        mem_benefit_wheel: 'Spin Wheel',
+        mem_benefit_wheel_desc: '5 spins per day with special rewards',
+        mem_benefit_watchlist: 'Watchlist',
+        mem_benefit_watchlist_desc: '20 symbols in watchlist',
+        mem_benefit_daily: 'Daily Reward',
+        mem_benefit_daily_desc: '20 free AB Tokens daily',
+        mem_benefit_pro_badge: 'Pro Badge Access',
+        mem_benefit_pro_badge_desc: 'Show exclusive Premium badge on your profile',
+        mem_benefit_ad_control: 'Ad Control',
+        mem_benefit_ad_control_desc: 'Manage and disable ads and promotional notifications',
+        mem_benefit_early_access: 'Early Access to New Features',
+        mem_benefit_early_access_desc: 'Early access to new capabilities',
+        mem_benefit_priority_support: 'Priority Support',
+        mem_benefit_priority_support_desc: 'Priority response from support team',
+        mem_benefit_permanent: 'Permanent Premium Access',
+        mem_benefit_permanent_desc: 'No expiry • subject to membership terms',
+        mem_activation_subtitle: 'Activate Premium for higher quotas, exclusive features, and permanent account benefits.',
+        mem_timeline_step1: 'Sign up via the official {exchange} link',
+        mem_timeline_step2: 'Submit Exchange UID',
+        mem_timeline_step3: 'Initial deposit to exchange account',
+        mem_timeline_step4: 'First Trade',
+        mem_timeline_step5: 'Team review',
+        mem_timeline_step6: 'Premium activation',
+        mem_timeline_note: 'Premium membership activates after all steps are completed and verified by the team.',
+        mem_uid_form_label: 'Submit Membership Request',
+        mem_submit_btn: 'Submit Request',
+        mem_submit_accept_first: 'Accept rules first',
+        mem_submit_loading_accept: 'Recording rules acceptance...',
+        mem_submit_loading: 'Sending...',
+        mem_rejected_reason_label: 'Previous rejection reason:',
+        mem_rules_title: 'Membership Rules',
+        mem_rules_title_full: 'Premium Membership Rules',
+        mem_rules_unavailable: 'Active rules are currently unavailable. You may submit your request; the team will contact you after review if needed.',
+        mem_rules_summary: 'Please read and accept the Premium membership rules to continue.',
+        mem_rules_view_full: 'View Full Rules',
+        mem_rules_accept_label: 'I have read and agree to the Premium membership rules.',
+        mem_rules_body_fallback: 'Rules text is unavailable.',
+        mem_rules_ok: 'Got it',
+        mem_pending_title: 'Your Request Is Under Review',
+        mem_pending_subtitle: 'Your membership request has been submitted and is under review by the management team.',
+        mem_pending_exchange_uid: 'Exchange: {exchange} · UID: {uid}',
+        mem_success_title: 'Your Request Was Successfully Submitted',
+        mem_success_msg: 'After team review, your membership status will change to Premium.',
+        mem_err_invalid_uid: 'Invalid UID',
+        mem_err_rules_required: 'Please read and accept the membership rules before submitting your request.',
+        mem_err_accept_failed: 'Failed to record rules acceptance. Please try again.',
+        mem_err_rules_updated: 'Rules version has been updated. Please read and accept the new version.',
+        mem_err_rules_changed: 'Active rules version has changed. Please accept the new version.',
+        mem_err_server: 'Server connection error. Please try again.',
+        mem_err_rules_updated_request: 'Membership rules have been updated. Please read and accept the new version.',
+        mem_err_submit_failed: 'Failed to submit request',
+        mem_err_server_internet: 'Server connection error. Please check your internet connection.',
+        mem_uid_label_default: 'Enter your {exchange} user ID',
+        mem_register_btn: 'Sign up on {exchange}',
+        mem_loading_module: 'Loading membership module...',
+        // ── i18n AUDIT EN: membership-admin.js ──
+        mba_now: 'Just now',
+        mba_minutes_ago: '{n} minutes ago',
+        mba_hours_ago: '{n} hours ago',
+        mba_days_ago: '{n} days ago',
+        mba_total_requests: 'Total Membership Requests',
+        mba_active_premium: 'Active Premium',
+        mba_suspended: 'Suspended',
+        mba_no_data: 'No data found',
+        mba_load_error: 'Load failed',
+        mba_suspend_btn: 'Suspend',
+        mba_label_submitted: 'Submitted',
+        mba_label_note: 'Note: ',
+        mba_records_count: '{n} records',
+        mba_confirm_approve: 'Are you sure you want to approve this request? The user will be upgraded to VIP.',
+        mba_confirm_reject: 'Are you sure you want to reject this request?',
+        mba_confirm_suspend: 'Are you sure you want to suspend this user?',
+        mba_op_success: 'Operation successful',
+        mba_export_error: 'Export failed',
+        // ── i18n AUDIT EN: admin.js (permissions + section labels) ──
+        adm_role_admin: 'Admin',
+        adm_perm_count: '{n} permissions',
+        adm_no_access: 'You do not have access to this section',
+        adm_status_active: 'Active',
+        adm_status_inactive: 'Inactive',
+        adm_status_unknown: 'Unknown',
+        adm_status_draft: 'Draft',
+        adm_status_paused: 'Paused',
+        adm_status_archived: 'Archived',
+        adm_channel_mini_app: 'Mini App',
+        adm_channel_telegram: 'Telegram',
+        adm_channel_both: 'Both',
+        adm_audience_free: 'Free',
+        adm_audience_premium: 'Premium',
+        adm_audience_all: 'All',
+        adm_change_status: 'Change status',
+        adm_image_size_error: 'Image size must be less than 500KB',
+        adm_load_error_status: 'Status load error: ',
+        adm_maint_desc_default: 'Upgrading systems and adding new features. We will be back soon with a better experience!',
+        adm_maint_saved_cache_prefix: '⚠ Settings saved (in-memory) — ',
+        adm_maint_saved_ok: '✓ Settings saved successfully',
+        adm_maint_saved_cache_toast: 'Saved (in-memory)',
+        adm_maint_saved_toast: 'Maintenance settings saved',
+        adm_maint_save_error_prefix: '✗ Save error: ',
+        adm_maint_save_error_toast: 'Failed to save settings',
+        adm_no_cooldown: 'No cooldown',
+        adm_cooldown_weeks: '{n} weeks',
+        adm_cooldown_days: '{n} days',
+        adm_cooldown_hours: '{n} hours',
+        adm_cooldown_seconds: '{n} seconds',
+        // Permission labels
+        adm_perm_analysis_publish: 'Publish Analysis',
+        adm_perm_analysis_edit: 'Edit Analysis',
+        adm_perm_analysis_delete: 'Delete Analysis',
+        adm_perm_news_publish: 'Publish News',
+        adm_perm_news_edit: 'Edit News',
+        adm_perm_news_delete: 'Delete News',
+        adm_perm_users_view: 'View Users',
+        adm_perm_users_manage: 'Manage Users',
+        adm_perm_users_block: 'Block Users',
+        adm_perm_admins_view: 'View Admins',
+        adm_perm_admins_add: 'Add Admin',
+        adm_perm_admins_edit: 'Edit Admin',
+        adm_perm_admins_delete: 'Delete Admin',
+        adm_perm_wallet_view: 'View Wallet',
+        adm_perm_wallet_manage: 'Manage Balance',
+        adm_perm_wallet_reward: 'Record Reward',
+        adm_perm_referral_manage: 'Manage Referral',
+        adm_perm_referral_reward: 'Record Referral Reward',
+        adm_perm_tickets_view: 'View Tickets',
+        adm_perm_tickets_reply: 'Reply to Tickets',
+        adm_perm_tickets_close: 'Close Tickets',
+        adm_perm_notifications_send: 'Send Notifications',
+        adm_perm_notifications_manage: 'Manage Notifications',
+        adm_perm_market_manage: 'Manage Market Status',
+        adm_perm_market_alerts: 'Manage Alerts',
+        adm_perm_system_logs: 'View Logs',
+        adm_perm_system_settings: 'System Settings',
+        adm_perm_system_maintenance: 'Maintenance Mode',
+        adm_perm_ads_banners: 'Manage Banners',
+        adm_perm_ads_manage: 'Manage Ads',
+        // Permission groups
+        adm_perm_group_analysis: 'Analysis',
+        adm_perm_group_news: 'News',
+        adm_perm_group_users: 'Users',
+        adm_perm_group_admins: 'Admins',
+        adm_perm_group_wallet: 'Wallet',
+        adm_perm_group_referral: 'Referral',
+        adm_perm_group_tickets: 'Tickets',
+        adm_perm_group_notifications: 'Notifications',
+        adm_perm_group_market: 'Market',
+        adm_perm_group_system: 'System',
+        adm_perm_group_ads: 'Ads',
+        // Maintenance presets
+        adm_preset_new_release_title: 'New release in progress',
+        adm_preset_new_release_desc: 'Releasing a new app version with better features. We will be back soon!',
+        adm_preset_upgrade_title: 'System upgrade in progress',
+        adm_preset_upgrade_desc: 'Upgrading infrastructure and improving system performance. We will be back in a few minutes.',
+        adm_preset_migration_title: 'Database Migration',
+        adm_preset_migration_desc: 'Migrating database to improve speed and stability. This may take a while.',
+        adm_preset_hotfix_title: 'Urgent System Hotfix',
+        adm_preset_hotfix_desc: 'Sorry! We identified an urgent issue and are fixing it. We will be back soon.',
+        adm_preset_end_title: 'Building a better future!',
+        adm_preset_unknown: 'Unknown preset',
+        adm_preset_enable_confirm: '⚠️ Enable maintenance mode?\n\nAll regular users will be locked out; only admins can log in.\n\nPreset: {title}',
+        adm_preset_end_confirm: '✓ End maintenance mode?\n\nUsers will be able to log in again.',
+        // Dashboard stats
+        adm_stat_total_users: 'Total Users',
+        adm_stat_new_today: 'New Today',
+        adm_stat_new_this_week: 'New This Week',
+        adm_stat_new_this_month: 'New This Month',
+        adm_stat_joined_channel: 'Channel Members',
+        adm_stat_join_percentage: 'Join Percentage',
+        adm_stat_joined_bot: 'Bot Users',
+        adm_stat_opened_mini_app: 'Opened Mini App',
+        adm_stat_active_alerts: 'Active Alerts',
+        adm_stat_triggered_today: 'Alerts Triggered Today',
+        adm_stat_open_tickets: 'Open Tickets',
+        adm_stat_total_transactions: 'Transactions',
+        adm_stat_admins_count: 'Admins',
+        adm_stat_no_stats: 'No stats available',
+        adm_stat_users_joined_bot: 'Started the bot',
+        adm_stat_users_opened_app: 'Opened Mini App',
+        adm_stat_users_join_pct: 'Channel Join Percentage',
+        adm_stat_active_today: 'Active Today',
+        adm_stat_active_this_week: 'Active This Week',
+        adm_stat_active_this_month: 'Active This Month',
+        // Recent activity
+        adm_act_new_analysis: 'New analysis: {coin}',
+        adm_act_analysis_by_author: ' by {author}',
+        adm_act_ticket: 'Ticket: {title} ({status})',
+        adm_act_no_recent: 'No recent activity',
+        adm_act_load_failed: 'Failed to load dashboard',
+        // Maintenance status
+        adm_maint_status_off_text: 'Maintenance status: Off',
+        adm_maint_status_on_text: 'Maintenance status: On ⚠',
+        adm_maint_status_off_ok: 'Maintenance status: Off ✓',
+        adm_maint_status_unknown_text: 'Maintenance status: Unknown',
+        adm_maint_system_normal: 'System operating normally',
+        adm_maint_progress_label_full: 'Progress: {pct}% — users locked out',
+        adm_maint_status_error: 'Failed to fetch status',
+        // Admins
+        adm_admins_no_perms: 'No permissions',
+        adm_admins_label_membership: 'Membership',
+        adm_admins_label_last_login: 'Last Login',
+        adm_admins_label_perms: 'Permissions',
+        adm_admins_btn_deactivate: 'Deactivate',
+        adm_admins_btn_activate: 'Activate',
+        adm_admins_protected: 'Protected',
+        adm_admins_err_tg_id_required: 'Please enter a Telegram ID',
+        adm_admins_err_tg_id_invalid: 'Telegram ID must be a valid number',
+        adm_admins_added: 'Admin added successfully',
+        adm_admins_add_error: 'Failed to add admin: ',
+        // Users
+        adm_users_default_name: 'User',
+        adm_users_label_last_active: 'Last Active',
+        adm_users_label_tokens: 'Tokens',
+        adm_users_stats_error: 'No stats available.',
+        adm_users_stats_load_error: 'Failed to load stats.',
+        // Tickets
+        adm_tk_status_open: 'Open',
+        adm_tk_status_answered: 'Answered',
+        adm_tk_status_closed: 'Closed',
+        adm_tk_subject_default: 'Ticket #{id}',
+        adm_tk_updated: '· Updated: {date}',
+        adm_tk_replies: '💬 {n} replies',
+        adm_tk_admin_label: 'Admin',
+        adm_tk_reply_ph: 'Type your reply...',
+        adm_tk_reply_btn: 'Send Reply',
+        adm_tk_close_btn: 'Close',
+        adm_tk_open_btn: 'Reopen',
+        adm_tk_answered_btn: 'Mark Answered',
+        // Broadcast
+        adm_bc_target_channel: 'Channel Member',
+        adm_bc_sent_by: 'Sent by: {name}',
+        adm_bc_recipients: ' &bull; Recipients: {n}',
+        // Rewards
+        adm_rw_approved: 'Reward approved',
+        adm_rw_approve_error: 'Failed to approve reward',
+        adm_rw_rejected: 'Reward rejected',
+        adm_rw_reject_error: 'Failed to reject reward',
+        adm_rw_server_error: 'Server connection error',
+        // Transactions
+        adm_tx_user_label: 'User: {name}',
+        // System health
+        adm_health_checking: 'Checking services...',
+        adm_health_overall_problem: 'System has issues',
+        adm_health_overall_warning: 'System with warnings',
+        adm_health_overall_healthy: 'System healthy',
+        adm_health_summary: '🟢 {healthy} Healthy &nbsp; • &nbsp; 🟡 {warning} Warning &nbsp; • &nbsp; 🔴 {down} Down',
+        adm_health_last_check: 'Last check: {date}',
+        adm_health_db_postgres: 'PostgreSQL Database',
+        adm_health_notif_queue: 'Notification Queue',
+        adm_health_status_healthy: 'Healthy',
+        adm_health_status_warning: 'Warning',
+        adm_health_status_down: 'Down',
+        adm_health_load_error: 'Failed to load system health',
+        // Reward center common
+        adm_rc_load_error: 'Load failed',
+        adm_rc_load_config_error: 'Failed to load config',
+        adm_rc_saved: 'Settings saved',
+        adm_rc_save_error: 'Failed to save',
+        adm_rc_saved_short: 'Saved',
+        adm_rc_status_changed: 'Status changed',
+        adm_rc_created: 'Created',
+        adm_rc_create_error: 'Failed to create',
+        adm_rc_error: 'Error',
+        adm_rc_deleted: 'Deleted',
+        adm_rc_delete_confirm: 'Delete this reward?',
+        adm_rc_delete_confirm_short: 'Delete?',
+        adm_rc_error_short: 'Error',
+        adm_rc_no_data: 'No data',
+        // Reward center wheel overview
+        adm_rc_wheel_status_label: 'Wheel Status',
+        adm_rc_spins_today: 'Spins Today',
+        adm_rc_rewards_today: 'Rewards Today',
+        adm_rc_tokens_distributed_today: 'Tokens Distributed Today',
+        adm_rc_active_campaigns: 'Active Campaigns',
+        adm_rc_active_wheel_rewards: 'Active Wheel Rewards',
+        adm_rc_active_referral_tiers: 'Active Referral Tiers',
+        adm_rc_active_missions: 'Active Missions',
+        adm_rc_pending_rewards: 'Pending Rewards',
+        adm_rc_most_frequent_reward: 'Most Frequent Reward',
+        adm_rc_highest_reward: 'Highest Reward',
+        adm_rc_wheel_version: 'Wheel Version',
+        // Reward center wheel config
+        adm_rc_wheel_config_title: 'General Wheel Settings',
+        adm_rc_enable_wheel: 'Enable Wheel',
+        adm_rc_daily_spin: 'Daily Spin',
+        adm_rc_referral_spin: 'Referral Spin',
+        adm_rc_mission_spin: 'Mission Spin',
+        adm_rc_premium_spin: 'Premium Spin',
+        adm_rc_campaign_spin: 'Campaign Spin',
+        adm_rc_maintenance_mode: 'Maintenance Mode',
+        adm_rc_status_maintenance: 'Maintenance',
+        adm_rc_field_segments: 'Segment Count',
+        adm_rc_field_version: 'Version',
+        adm_rc_field_theme: 'Theme',
+        adm_rc_field_max_spins_user: 'Max Spins/User',
+        adm_rc_field_cooldown: 'Cooldown',
+        adm_rc_field_max_reward_day: 'Max Reward/Day',
+        adm_rc_opt_1h: '1 hour',
+        adm_rc_opt_6h: '6 hours',
+        adm_rc_opt_12h: '12 hours',
+        adm_rc_opt_24h: '24 hours',
+        adm_rc_opt_42h: '42 hours',
+        adm_rc_opt_72h: '72 hours',
+        adm_rc_opt_weekly: 'Weekly',
+        adm_rc_opt_custom: 'Custom',
+        adm_rc_ph_seconds: 'seconds',
+        // Reward center wheel rewards
+        adm_rc_rewards_title: 'Wheel Rewards',
+        adm_rc_th_name: 'Name',
+        adm_rc_th_type: 'Type',
+        adm_rc_th_amount: 'Amount',
+        adm_rc_th_weight: 'Weight',
+        adm_rc_th_campaign: 'Campaign',
+        adm_rc_no_rewards: 'No rewards available',
+        adm_rc_add_reward: 'Add Reward',
+        adm_rc_new_reward_title: 'New Reward',
+        adm_rc_field_reward_name: 'Reward Name',
+        adm_rc_opt_type_token: 'Token',
+        adm_rc_opt_type_spin: 'Spin',
+        adm_rc_opt_type_voucher: 'Voucher',
+        adm_rc_opt_type_nft: 'NFT',
+        adm_rc_opt_type_premium: 'Premium',
+        adm_rc_opt_type_coupon: 'Coupon',
+        adm_rc_opt_type_external: 'External',
+        adm_rc_opt_type_avatar: 'Avatar',
+        adm_rc_opt_type_badge: 'Badge',
+        adm_rc_field_amount: 'Amount',
+        adm_rc_field_weight: 'Weight',
+        adm_rc_field_campaign_opt: 'Campaign (optional)',
+        adm_rc_opt_yes: 'Yes',
+        adm_rc_opt_no: 'No',
+        adm_rc_create_btn: 'Create',
+        // Reward center referral tiers
+        adm_rc_referral_tiers_title: 'Referral Reward Tiers',
+        adm_rc_th_invites: 'Invites',
+        adm_rc_th_tokens: 'Tokens',
+        adm_rc_th_free_spins: 'Free Spins',
+        adm_rc_no_tiers: 'No tiers available',
+        adm_rc_add_tier: 'Add Tier',
+        adm_rc_new_tier_title: 'New Tier',
+        adm_rc_field_invites: 'Number of Invites',
+        adm_rc_field_tokens: 'Tokens',
+        adm_rc_field_free_spins: 'Free Spins',
+        // Reward center missions
+        adm_rc_mission_rewards_title: 'Mission Rewards',
+        adm_rc_th_mission: 'Mission',
+        adm_rc_th_spin: 'Spin',
+        adm_rc_no_missions: 'No missions available',
+        adm_rc_add_mission: 'Add Mission',
+        adm_rc_new_mission_title: 'New Mission',
+        adm_rc_field_mission_id: 'Mission ID',
+        adm_rc_field_name: 'Name',
+        adm_rc_field_spin: 'Spin',
+        // Reward center campaigns
+        adm_rc_campaigns_title: 'Campaigns',
+        adm_rc_th_start: 'Start',
+        adm_rc_th_end: 'End',
+        adm_rc_th_priority: 'Priority',
+        adm_rc_no_campaigns: 'No campaigns available',
+        adm_rc_add_campaign: 'Add Campaign',
+        adm_rc_new_campaign_title: 'New Campaign',
+        adm_rc_field_start_date: 'Start Date',
+        adm_rc_field_end_date: 'End Date',
+        adm_rc_field_priority: 'Priority',
+        adm_rc_apply_wheel: 'Apply to Wheel',
+        adm_rc_apply_referral: 'Apply to Referral',
+        adm_rc_apply_mission: 'Apply to Mission',
+        // Reward center library
+        adm_rc_library_title: 'Reward Library',
+        adm_rc_th_category: 'Category',
+        adm_rc_no_items: 'No items available',
+        adm_rc_field_category: 'Category',
+        // Reward center analytics
+        adm_rc_analytics_title_distribution: 'Reward Distribution',
+        adm_rc_analytics_th_reward: 'Reward',
+        adm_rc_analytics_th_count: 'Count',
+        adm_rc_analytics_th_total: 'Total',
+        adm_rc_analytics_top_winners: 'Top Winners',
+        adm_rc_analytics_th_user: 'User',
+        adm_rc_analytics_th_total_reward: 'Total Reward',
+        adm_rc_analytics_avg_reward: 'Average Reward',
+        adm_rc_analytics_total_tokens: 'Total Tokens Distributed',
+        adm_rc_spins_week: 'Spins This Week',
+        adm_rc_spins_month: 'Spins This Month',
+        // Reward center emergency
+        adm_rc_emergency_title: 'Emergency Controls',
+        adm_rc_emergency_desc: 'These controls apply immediately and halt the entire reward system.',
+        adm_rc_disable_wheel: 'Disable Wheel',
+        adm_rc_disable_referral: 'Disable Referral Rewards',
+        adm_rc_disable_mission: 'Disable Mission Rewards',
+        adm_rc_disable_campaigns: 'Disable Campaigns',
+        adm_rc_disable_engine: 'Disable Entire Reward Engine',
+        adm_rc_save_btn_short: 'Save',
+        // Notification center
+        adm_np_total_7d: 'Total Notifications (7 days)',
+        adm_np_unread: 'Unread',
+        adm_np_today: 'Notifications Today',
+        adm_np_new_broadcast_title: 'New Broadcast',
+        adm_np_field_title: 'Title',
+        adm_np_field_category: 'Category',
+        adm_np_field_priority: 'Priority',
+        adm_np_field_channel: 'Channel',
+        adm_np_field_target: 'Target',
+        adm_np_field_message: 'Message',
+        adm_np_opt_announcement: 'Announcement',
+        adm_np_opt_system: 'System',
+        adm_np_opt_market: 'Market',
+        adm_np_opt_news: 'News',
+        adm_np_opt_low: 'Low',
+        adm_np_opt_medium: 'Medium',
+        adm_np_opt_high: 'High',
+        adm_np_opt_critical: 'Critical',
+        adm_np_opt_mini_app: 'Mini App',
+        adm_np_opt_telegram: 'Telegram Bot',
+        adm_np_opt_both: 'Both',
+        adm_np_opt_active: 'Active',
+        adm_np_send_btn: 'Send',
+        adm_np_send_count: 'Sent to {n} users',
+        adm_np_send_error: 'Failed to send',
+        adm_np_history_title: 'Send History',
+        adm_np_th_sent: 'Sent',
+        adm_np_no_records: 'No records available',
+        adm_np_templates_title: 'Notification Templates',
+        adm_np_add_template: 'Add Template',
+        adm_np_th_key: 'Key',
+        adm_np_no_templates: 'No templates available',
+        adm_np_new_template_title: 'New Template',
+        adm_np_field_title_ph: 'Notification Title',
+        adm_np_field_message_ph: 'Notification message...',
+        adm_np_cancel_btn: 'Cancel',
+        adm_np_template_saved: 'Template saved',
+        adm_np_template_not_found: 'Template not found',
+        adm_np_edit_template_title: 'Edit Template: {key}',
+        adm_np_delete_confirm: 'Are you sure you want to delete this template?',
+        adm_np_template_deleted: 'Template deleted',
+        adm_np_template_delete_error: 'Failed to delete',
+        adm_np_analytics_total_30d: 'Total (30 days)',
+        adm_np_analytics_by_category: 'By Category',
+        adm_np_analytics_by_priority: 'By Priority',
+        // Alert economy
+        adm_ae_active_status: '✅ Active',
+        adm_ae_inactive_status: '⛔ Inactive',
+        adm_ae_active_alerts: 'Active Alerts',
+        adm_ae_triggered_today: 'Triggered Today',
+        adm_ae_quota_used: 'Quota Used',
+        adm_ae_paid_alerts: 'Paid Alerts',
+        adm_ae_ab_spent: 'AB Spent',
+        adm_ae_price_alert: 'Price Alert',
+        adm_ae_calendar_alert: 'Calendar Alert',
+        adm_ae_breaking_news: 'Breaking News Alert',
+        adm_ae_free_per_day: 'Free per day',
+        adm_ae_cost_extra: 'Extra cost (AB)',
+        // Ads common
+        adm_ads_no_data: 'No items available',
+        adm_ads_load_error: 'Failed to load data',
+        adm_ads_retry_btn: 'Retry',
+        adm_ads_status_draft: 'Draft',
+        adm_ads_status_paused: 'Paused',
+        adm_ads_status_archived: 'Archived',
+        adm_ads_change_status: 'Change Status',
+        adm_ads_ch_mini_app: 'Mini App',
+        adm_ads_ch_telegram: 'Telegram',
+        adm_ads_aud_free: 'Free',
+        adm_ads_aud_premium: 'Premium',
+        adm_ads_img_size_err: 'Image size must be under 500 KB',
+        adm_ads_img_format_err: 'Unsupported image format (JPEG/PNG/WEBP/GIF/AVIF)',
+        adm_ads_img_uploading: 'Uploading image...',
+        adm_ads_img_uploaded: 'Image uploaded',
+        adm_ads_img_upload_err: 'Failed to upload image',
+        adm_ads_img_upload_err_prefix: 'Failed to upload: ',
+        adm_ads_img_read_err: 'Failed to read image file',
+        adm_ads_yes_short: 'Show: Yes',
+        adm_ads_no_short: 'Show: No',
+        adm_ads_order_label: 'Order: {val}',
+        adm_ads_edit_btn: 'Edit',
+        // Ads channels
+        adm_ads_channels_intro: 'These channels are set as required membership channels. Users must join all active channels.',
+        adm_ads_channels_title: 'Membership Channels',
+        adm_ads_add_channel: 'Add Channel',
+        adm_ads_channels_empty_title: 'No channels added yet',
+        adm_ads_add_first_channel: 'Add first channel',
+        adm_ads_no_data_received: 'No data received',
+        adm_ads_channels_load_err: 'Failed to load channels',
+        adm_ads_new_channel_title: 'New Channel',
+        adm_ads_field_username: 'Channel username (without @)',
+        adm_ads_field_channel_title: 'Channel Title',
+        adm_ads_field_join_url: 'Join URL',
+        adm_ads_field_display_order: 'Display Order',
+        adm_ads_field_campaign_status: 'Campaign Status',
+        adm_ads_field_show: 'Show',
+        adm_ads_show_active: 'Active for display',
+        adm_ads_create_channel_btn: 'Create Channel',
+        adm_ads_channel_not_found: 'Channel not found',
+        adm_ads_edit_channel_title: 'Edit Channel: @{username}',
+        adm_ads_join_url_err: 'Join URL must start with https://t.me/',
+        adm_ads_saving: 'Saving...',
+        adm_ads_channel_updated: 'Channel updated',
+        adm_ads_channel_created: 'Channel created',
+        adm_ads_save_error: 'Failed to save',
+        adm_ads_save_error_prefix: 'Failed to save: ',
+        adm_ads_delete_confirm: 'Are you sure you want to delete this channel?',
+        adm_ads_channel_deleted: 'Channel deleted',
+        adm_ads_delete_error: 'Failed to delete',
+        adm_ads_status_change_error: 'Failed to change status',
+        adm_ads_cooldown_tag: 'Cooldown: {val}',
+        adm_ads_last_change_tag: 'Last change: {val}',
+        // Ads popups
+        adm_ads_popups_intro: 'Popup layout is fixed: image → title → body → button. Only content can be edited. Cooldown is the period after showing a popup to a user before it can be shown again.',
+        adm_ads_popups_title: 'Mini App Popups',
+        adm_ads_add_popup: 'Add Popup',
+        adm_ads_popups_empty_title: 'No popups created yet',
+        adm_ads_add_first_popup: 'Add first popup',
+        adm_ads_popups_load_err: 'Failed to load popups',
+        adm_ads_edit_popup_title: 'Edit Popup: {title}',
+        adm_ads_new_popup_title: 'New Popup',
+        adm_ads_create_popup_btn: 'Create Popup',
+        adm_ads_field_body_text: 'Message Text',
+        adm_ads_field_btn_text: 'Button Text',
+        adm_ads_field_btn_url: 'Button URL',
+        adm_ads_field_image_optional: 'Image (optional)',
+        adm_ads_field_image: 'Image',
+        adm_ads_select_image: 'Select Image',
+        adm_ads_img_hint: 'You can enter an HTTPS image URL or upload an image (max 500KB).',
+        adm_ads_popup_not_found: 'Popup not found',
+        adm_ads_title_required: 'Popup title is required',
+        adm_ads_popup_updated: 'Popup updated',
+        adm_ads_popup_created: 'Popup created',
+        adm_ads_delete_popup_confirm: 'Are you sure you want to delete this popup?',
+        adm_ads_popup_deleted: 'Popup deleted',
+        // Ads messages
+        adm_ads_messages_intro: 'Only active campaigns are sent. Draft/Paused/Archived are not sent. The "Send" button delivers the message to the target audience (based on selected channel and audience). Free users only receive the message if "All" or "Free" is selected.',
+        adm_ads_messages_title: 'Ad Messages',
+        adm_ads_add_message: 'Add Message',
+        adm_ads_messages_empty_title: 'No messages created yet',
+        adm_ads_add_first_message: 'Add first message',
+        adm_ads_messages_load_err: 'Failed to load messages',
+        adm_ads_edit_message_title: 'Edit Message: {title}',
+        adm_ads_new_message_title: 'New Message',
+        adm_ads_create_message_btn: 'Create Message',
+        adm_ads_field_destination: 'Destination',
+        adm_ads_field_audience: 'Target Audience',
+        adm_ads_aud_free_label: 'Free Users',
+        adm_ads_aud_premium_label: 'Premium Users',
+        adm_ads_aud_all_label: 'All Users',
+        adm_ads_message_not_found: 'Message not found',
+        adm_ads_msg_title_required: 'Message title is required',
+        adm_ads_msg_body_required: 'Message body is required',
+        adm_ads_message_updated: 'Message updated',
+        adm_ads_message_created: 'Message created',
+        adm_ads_delete_message_confirm: 'Are you sure you want to delete this message?',
+        adm_ads_message_deleted: 'Message deleted',
+        adm_ads_send_message_intro: 'Send this message to the target audience? This operation may take a few seconds.',
+        adm_ads_sending: 'Sending...',
+        adm_ads_send_no_users: 'No users received the message. Delivered: 0 / Skipped: {skipped}. User notification settings may have prevented delivery.',
+        adm_ads_send_success: 'Sent — Delivered: {delivered} / Skipped: {skipped}',
+        adm_ads_send_recent: 'This campaign was recently sent. Wait {retry_after} seconds.',
+        adm_ads_send_duplicate: 'Duplicate operation. Wait {retry_after} seconds.',
+        adm_ads_send_error_prefix: 'Failed to send: ',
+        adm_ads_send_error: 'Failed to send',
+        // VPN purchases
+        adm_vpn_no_data: 'No items found',
+        adm_vpn_status_pending: 'Pending Send',
+        adm_vpn_status_fulfilled: 'Sent',
+        adm_vpn_status_cancelled: 'Cancelled',
+        adm_vpn_status_failed: 'Error / Retry',
+        adm_vpn_duration_month: '1 month',
+        adm_vpn_duration_week: '7 days',
+        adm_vpn_send_link_btn: 'Send Link',
+        adm_vpn_sent_pill: 'Sent',
+        adm_vpn_send_modal_title: 'Send VPN',
+        adm_vpn_modal_user: 'User:',
+        adm_vpn_modal_plan: 'Plan:',
+        adm_vpn_modal_cost: 'Cost:',
+        adm_vpn_modal_credit: 'Credit:',
+        adm_vpn_modal_tracking: 'Tracking ID:',
+        adm_vpn_modal_link_label: 'VPN Link:',
+        adm_vpn_send_to_user_btn: 'Send to User',
+        adm_vpn_link_invalid: 'Please enter a valid VPN link (at least 10 characters).',
+        adm_vpn_send_confirm: 'Confirm sending link to user?',
+        adm_vpn_send_failed: 'Send failed',
+        adm_vpn_send_failed_pending: 'Purchase remains pending. You can retry.',
+        adm_vpn_communication_error: 'Communication error: ',
+        // ── i18n AUDIT EN: admin.js (additional keys for hardcoded strings) ──
+        adm_admins_initial: 'A',
+        adm_users_initial: 'U',
+        adm_th_status: 'Status',
+        adm_th_actions: 'Actions',
+        adm_rc_field_active: 'Active',
+        adm_ae_service_label: '{type} ({free} free / {cost} AB)',
+        adm_np_today_label: 'Today',
+        adm_np_th_category: 'Category',
+        adm_np_th_priority: 'Priority',
+        adm_np_th_title: 'Title',
+        adm_np_th_status: 'Status',
+        adm_np_th_actions: 'Actions',
+        adm_rc_th_status: 'Status',
+        adm_rc_th_actions: 'Actions',
+        adm_np_analytics_th_count: 'Count',
+        adm_health_overall_label: 'System'
     }
 };
 /**
  * رشته ترجمه‌شده متناظر با کلید ورودی را از دیکشنری زبان فعال برمی‌گرداند.
- * ورودی: پارامترهای `key` را دریافت می‌کند.
- * خروجی: مقدار محاسبه‌شده یا داده نهایی مرتبط با این عملیات را برمی‌گرداند.
+ * ورودی: `key` و اختیاری `params` برای interpolation (جایگزینی {name}).
+ * خروجی: مقدار ترجمه‌شده با پارامترها جایگزین شده.
+ * Backward compatible: t(key) همچنان کار می‌کند. t(key, {n:5}) → '{n}' جایگزین می‌شود.
  */
-function t(key) { return i18n[currentLang]?.[key] || i18n.fa[key] || key; }
+function t(key, params) {
+    let s = i18n[currentLang]?.[key] || i18n.fa[key] || key;
+    if (params && typeof s === 'string') {
+        for (const pk in params) {
+            s = s.split('{' + pk + '}').join(params[pk]);
+        }
+    }
+    return s;
+}
 
 /**
  * مقدار referrer id را بازیابی می‌کند.
@@ -1669,10 +3816,10 @@ function timeAgo(dateStr) {
     const now = Date.now();
     const d = new Date(dateStr).getTime();
     const diff = Math.floor((now - d) / 1000);
-    if (diff < 60) return 'لحظاتی پیش';
-    if (diff < 3600) return Math.floor(diff / 60) + ' دقیقه پیش';
-    if (diff < 86400) return Math.floor(diff / 3600) + ' ساعت پیش';
-    if (diff < 604800) return Math.floor(diff / 86400) + ' روز پیش';
+    if (diff < 60) return t('time_just_now');
+    if (diff < 3600) return t('time_m_ago', { n: Math.floor(diff / 60) });
+    if (diff < 86400) return t('time_h_ago', { n: Math.floor(diff / 3600) });
+    if (diff < 604800) return t('time_d_ago', { n: Math.floor(diff / 86400) });
     return new Date(dateStr).toLocaleDateString('fa-IR');
 }
 
@@ -1712,22 +3859,22 @@ function getSentiment(a) {
 // ── Sentiment Badge HTML Generator ──
 const SENTIMENT_CONFIG = {
     bullish: {
-        label: 'صعودی',
+        labelKey: 'sentiment_bullish',
         cls: 'bullish',
         icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20L12 4L21 20" fill="rgba(34,197,94,0.15)"/><path d="M12 4"/><path d="M7 15l5-7 5 7"/><path d="M9.5 13h5" stroke-width="2.5"/></svg>',
     },
     bearish: {
-        label: 'نزولی',
+        labelKey: 'sentiment_bearish',
         cls: 'bearish',
         icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4L12 20L21 4" fill="rgba(239,68,68,0.15)"/><path d="M7 9l5 7 5-7"/><path d="M9.5 11h5" stroke-width="2.5"/></svg>',
     },
     neutral: {
-        label: 'خنثی',
+        labelKey: 'sentiment_neutral',
         cls: 'neutral',
         icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4" fill="rgba(148,163,184,0.1)"/><path d="M8 12h8" stroke-width="2.5"/><path d="M12 8v8" stroke-width="2.5"/></svg>',
     },
     decision: {
-        label: 'محدوده تصمیم',
+        labelKey: 'decision_range',
         cls: 'decision',
         icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="rgba(168,85,247,0.12)"/><path d="M12 7v5" stroke-width="2.5"/><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 3.5" stroke-dasharray="2 2" opacity="0.4"/></svg>',
     },
@@ -1736,7 +3883,7 @@ const SENTIMENT_CONFIG = {
 function getSentimentBadgeHTML(sentiment, badgeClass = 'acv-sentiment') {
     if (!sentiment || !SENTIMENT_CONFIG[sentiment]) return '';
     const cfg = SENTIMENT_CONFIG[sentiment];
-    return `<span class="${badgeClass} ${badgeClass}-${cfg.cls}">${cfg.icon} ${cfg.label}</span>`;
+    return `<span class="${badgeClass} ${badgeClass}-${cfg.cls}">${cfg.icon} ${t(cfg.labelKey)}</span>`;
 }
 
 /**
@@ -1776,7 +3923,7 @@ function updateSavedChipCount() {
     const chip = document.querySelector('.tf-chip[data-tf="saved"]');
     if (!chip) return;
     const count = analysisBookmarks.length;
-    chip.innerHTML = count > 0 ? `🔖 ذخیره‌شده (${count})` : '🔖 ذخیره‌شده';
+    chip.innerHTML = count > 0 ? t('saved_chip_count', { n: count }) : t('saved_chip');
 }
 
 function updateDetailBookmarkButton(id) {
@@ -1818,15 +3965,15 @@ function buildFeaturedPriceBoxes(a) {
     return `
         <div class="fs-price-boxes">
             <div class="price-box price-box-resistance">
-                <span class="price-box-label">مقاومت</span>
+                <span class="price-box-label">${t('resistance')}</span>
                 <span class="price-box-value">${escapeHtml(a.resistance_level || '—')}</span>
             </div>
             <div class="price-box price-box-current">
-                <span class="price-box-label">قیمت فعلی</span>
+                <span class="price-box-label">${t('current_price')}</span>
                 <span class="price-box-value">${escapeHtml(a.current_price || '—')}</span>
             </div>
             <div class="price-box price-box-support">
-                <span class="price-box-label">حمایت</span>
+                <span class="price-box-label">${t('support_level')}</span>
                 <span class="price-box-value">${escapeHtml(a.support_level || '—')}</span>
             </div>
         </div>
@@ -1835,8 +3982,8 @@ function buildFeaturedPriceBoxes(a) {
 
 function renderFeaturedSlideHTML(a) {
     const sentiment = getSentiment(a);
-    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentiment}">${SENTIMENT_CONFIG[sentiment].icon} ${SENTIMENT_CONFIG[sentiment].label}</span>` : '';
-    const featuredHTML = a.featured ? `<span class="fs-featured-badge">⭐ ویژه</span>` : '';
+    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentiment}">${SENTIMENT_CONFIG[sentiment].icon} ${t(SENTIMENT_CONFIG[sentiment].labelKey)}</span>` : '';
+    const featuredHTML = a.featured ? `<span class="fs-featured-badge">${t('featured_badge')}</span>` : '';
 
     // ANPOST-002 FIX: Validate URL scheme via sanitizeNewsUrl before escapeHtml.
     // This is the 4th analysis image render site (the other 3 were fixed in
@@ -1873,7 +4020,7 @@ function renderFeaturedSlideHTML(a) {
                 <div class="fs-card-meta">
                     <span class="fs-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
                     <span class="fs-meta-item">${SVG_CLOCK} ${timeAgo(a.created_at)}</span>
-                    <span class="fs-card-cta">مشاهده ←</span>
+                    <span class="fs-card-cta">${t('view_cta')}</span>
                 </div>
             </div>
         </div>
@@ -2005,7 +4152,7 @@ function renderAnalysisStats() {
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.total}</span>
-                <span class="stat-label">کل</span>
+                <span class="stat-label">${t('stat_total')}</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item featured">
@@ -2013,7 +4160,7 @@ function renderAnalysisStats() {
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 </div>
                 <span class="stat-value">${featuredCount}</span>
-                <span class="stat-label">ویژه</span>
+                <span class="stat-label">${t('stat_featured')}</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item active">
@@ -2021,7 +4168,7 @@ function renderAnalysisStats() {
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.active}</span>
-                <span class="stat-label">عادی</span>
+                <span class="stat-label">${t('stat_normal')}</span>
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item today">
@@ -2029,7 +4176,7 @@ function renderAnalysisStats() {
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
                 </div>
                 <span class="stat-value">${analysisStats.today}</span>
-                <span class="stat-label">امروز</span>
+                <span class="stat-label">${t('stat_today')}</span>
             </div>
         </div>
     `;
@@ -2129,11 +4276,11 @@ function renderAnalysisList() {
             const titleEl = $('aes-title');
             const descEl  = $('aes-desc');
             if (adminUser) {
-                if (titleEl) titleEl.textContent = 'هنوز تحلیلی منتشر نشده است';
-                if (descEl)  descEl.textContent  = 'برای انتشار اولین تحلیل روی دکمه + کلیک کنید';
+                if (titleEl) titleEl.textContent = t('analysis_empty_title');
+                if (descEl)  descEl.textContent  = t('analysis_empty_desc_add');
             } else {
-                if (titleEl) titleEl.textContent = 'هنوز تحلیلی منتشر نشده است';
-                if (descEl)  descEl.textContent  = 'به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند';
+                if (titleEl) titleEl.textContent = t('analysis_empty_title');
+                if (descEl)  descEl.textContent  = t('analysis_empty_desc_soon');
             }
             emptyState.style.display = '';
         }
@@ -2153,11 +4300,11 @@ function renderAnalysisList() {
                 <div class="anr-icon">
                     <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/><line x1="8" y1="8" x2="8" y2="8" stroke-width="2.5"/></svg>
                 </div>
-                <p class="anr-title">نتیجه‌ای یافت نشد</p>
-                <p class="anr-desc">با فیلترهای فعلی هیچ تحلیلی پیدا نشد. فیلترها را تغییر دهید یا همه تحلیل‌ها را ببینید.</p>
+                <p class="anr-title">${t('no_result_found')}</p>
+                <p class="anr-desc">${t('analysis_filter_empty_desc')}</p>
                 <button type="button" class="anr-reset-btn" onclick="resetAnalysisFilters()">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 4 3 12 11 12"/></svg>
-                    پاک کردن فیلترها
+                    ${t('clear_filters')}
                 </button>
             </div>
         `;
@@ -2228,10 +4375,10 @@ function renderAnalysisList() {
                 <div class="acv-meta-icons">
                     <span class="acv-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
                     <span class="acv-meta-item">${SVG_CLOCK} ${timeAgo(a.created_at)}</span>
-                    <span class="acv-meta-item">${SVG_BOOK} ${readTime} دقیقه</span>
+                    <span class="acv-meta-item">${SVG_BOOK} ${t('read_time_mins', { n: readTime })}</span>
                 </div>
                 <div class="acv-action-btns" onclick="event.stopPropagation()">
-                    <button class="acv-bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="toggleAnalysisBookmark('${escapeHtml(a.id)}', event)" aria-label="ذخیره">
+                    <button class="acv-bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="toggleAnalysisBookmark('${escapeHtml(a.id)}', event)" aria-label="${t('adp_save')}">
                         ${bookmarked
                             ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" stroke-width="1.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
                             : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'}
@@ -2252,7 +4399,7 @@ function renderAnalysisList() {
             <div class="analysis-load-more" id="analysis-load-more">
                 <button class="alm-btn" onclick="loadMoreAnalyses()">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
-                    <span>${t('load_more') || 'مشاهده بیشتر'}</span>
+                    <span>${t('load_more')}</span>
                 </button>
             </div>`;
     }
@@ -2378,7 +4525,7 @@ function initPullToRefresh() {
             ptr.style.height = Math.min(pullDistance, threshold) + 'px';
             const text = ptrText();
             if (text) {
-                text.textContent = pullDistance >= threshold ? 'رها کنید برای refresh' : 'برای refresh پایین بکشید';
+                text.textContent = pullDistance >= threshold ? t('ptr_release') : t('ptr_pull');
             }
         }
     }, { passive: true });
@@ -2395,7 +4542,7 @@ function initPullToRefresh() {
             ptr.classList.add('refreshing');
             ptr.style.height = '';
             const text = ptrText();
-            if (text) text.textContent = 'در حال به‌روزرسانی...';
+            if (text) text.textContent = t('ptr_updating');
             try {
                 await fetchAnalyses(true);
                 renderAnalysisFeatured();
@@ -2409,7 +4556,7 @@ function initPullToRefresh() {
                 setTimeout(() => {
                     ptr.classList.remove('refreshing');
                     const text2 = ptrText();
-                    if (text2) text2.textContent = 'برای refresh پایین بکشید';
+                    if (text2) text2.textContent = t('ptr_pull');
                 }, 600);
             }
         } else {
@@ -2599,11 +4746,11 @@ function animateViewCount(el, target, readTime) {
         // Ease-out cubic for smooth deceleration
         const eased = 1 - Math.pow(1 - progress, 3);
         const current = Math.round(targetNum * eased);
-        el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${current} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${readTime} دقیقه`;
+        el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${current} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${t('read_time_mins', { n: readTime })}`;
         if (progress < 1) {
             requestAnimationFrame(update);
         } else {
-            el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${targetNum} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${readTime} دقیقه`;
+            el.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> ${targetNum} <span style="margin:0 4px;opacity:0.4">·</span> <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;opacity:0.7"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> ${t('read_time_mins', { n: readTime })}`;
         }
     }
     requestAnimationFrame(update);
@@ -2708,9 +4855,9 @@ function renderAnalysisDetailPage() {
         if (a.support_level || a.current_price || a.resistance_level) {
             levelsEl.style.display = '';
             levelsEl.innerHTML = `
-                ${a.resistance_level ? `<div class="adp-level adp-resistance"><span class="adp-level-label">مقاومت</span><span class="adp-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
-                ${a.current_price ? `<div class="adp-level adp-current"><span class="adp-level-label">قیمت فعلی</span><span class="adp-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
-                ${a.support_level ? `<div class="adp-level adp-support"><span class="adp-level-label">حمایت</span><span class="adp-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
+                ${a.resistance_level ? `<div class="adp-level adp-resistance"><span class="adp-level-label">${t('resistance')}</span><span class="adp-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
+                ${a.current_price ? `<div class="adp-level adp-current"><span class="adp-level-label">${t('current_price')}</span><span class="adp-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
+                ${a.support_level ? `<div class="adp-level adp-support"><span class="adp-level-label">${t('support_level')}</span><span class="adp-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
             `;
         } else {
             levelsEl.style.display = 'none';
@@ -2763,8 +4910,8 @@ function renderPriceRangeVisualizer(a) {
     // Update labels with actual values
     const supportLabel = $('adp-pr-support');
     const resistanceLabel = $('adp-pr-resistance');
-    if (supportLabel) supportLabel.textContent = `حمایت ${formatPrice(support)}`;
-    if (resistanceLabel) resistanceLabel.textContent = `مقاومت ${formatPrice(resistance)}`;
+    if (supportLabel) supportLabel.textContent = t('support_level') + ' ' + formatPrice(support);
+    if (resistanceLabel) resistanceLabel.textContent = t('resistance') + ' ' + formatPrice(resistance);
 
     // Set fill width and marker position (start at 0, then animate)
     const fill = $('adp-pr-fill');
@@ -2901,9 +5048,9 @@ function copyAnalysisContent() {
     text += a.content || a.text || '';
     if (a.support_level || a.current_price || a.resistance_level) {
         text += '\n\n';
-        if (a.resistance_level) text += `مقاومت: ${a.resistance_level} | `;
-        if (a.current_price) text += `قیمت فعلی: ${a.current_price} | `;
-        if (a.support_level) text += `حمایت: ${a.support_level}`;
+        if (a.resistance_level) text += t('resistance') + ': ' + a.resistance_level + ' | ';
+        if (a.current_price) text += t('current_price') + ': ' + a.current_price + ' | ';
+        if (a.support_level) text += t('support_level') + ': ' + a.support_level;
     }
     text += '\n\n📎 AMIRBTC';
 
@@ -3245,11 +5392,11 @@ function showFeaturedLimitConfirm(onConfirm, onCancel) {
         <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;padding:24px;max-width:340px;width:100%;text-align:center;">
             <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
             <p style="font-size:14px;line-height:1.8;color:var(--text-primary,#fff);margin:0 0 20px;">
-                ' + t('featured_limit_warn') + '
+                ${t('featured_limit_warn')}
             </p>
             <div style="display:flex;gap:10px;">
-                <button id="fl-confirm-yes" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e74c3c;color:#fff;font-size:14px;cursor:pointer;font-weight:bold;">بله، ادامه</button>
-                <button id="fl-confirm-no" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--bg-secondary,#2a2a4a);color:var(--text-primary,#fff);font-size:14px;cursor:pointer;">انصراف</button>
+                <button id="fl-confirm-yes" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e74c3c;color:#fff;font-size:14px;cursor:pointer;font-weight:bold;">${t('fl_confirm_yes')}</button>
+                <button id="fl-confirm-no" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--bg-secondary,#2a2a4a);color:var(--text-primary,#fff);font-size:14px;cursor:pointer;">${t('af_cancel')}</button>
             </div>
         </div>
     `;
@@ -3292,7 +5439,7 @@ function submitAnalysis() {
         }
 
         // ── Step 4: Build payload ──
-        const author = getTelegramUser()?.first_name || 'مدیر';
+        const author = getTelegramUser()?.first_name || t('admin_author');
         const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured, category };
 
         // ── Step 5: Disable button ──
@@ -3328,7 +5475,7 @@ function submitAnalysis() {
                             if (retryResult && retryResult.status === 'success') {
                                 _applySaveResult(retryResult, wasEditing);
                             } else {
-                                showToast(retryResult?.detail || retryResult?.message || 'خطا در ذخیره تحلیل.');
+                                showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
                             }
                         },
                         () => {
@@ -3344,7 +5491,7 @@ function submitAnalysis() {
                                 if (retryResult && retryResult.status === 'success') {
                                     _applySaveResult(retryResult, wasEditing);
                                 } else {
-                                    showToast(retryResult?.detail || retryResult?.message || 'خطا در ذخیره تحلیل.');
+                                    showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
                                 }
                             })();
                         }
@@ -3353,7 +5500,7 @@ function submitAnalysis() {
                 }
 
                 if (result.status !== 'success') {
-                    showToast(result.detail || result.message || 'خطا در ذخیره تحلیل.');
+                    showToast(result.detail || result.message || t('toast_analysis_save_error'));
                     return;
                 }
 
@@ -3476,7 +5623,7 @@ function executeDeleteAnalysis() {
                 return;
             }
             if (result.status !== 'success') {
-                showToast(result.detail || result.message || 'خطا در حذف تحلیل.');
+                showToast(result.detail || result.message || t('toast_analysis_delete_error'));
                 return;
             }
 
@@ -3549,7 +5696,7 @@ function renderAnalysisSlider() {
     const dots = document.getElementById('slider-dots');
     if (!track) return;
     if (!analyses.length) {
-        track.innerHTML = `<div class="slide-empty">تحلیلی موجود نیست</div>`;
+        track.innerHTML = `<div class="slide-empty">${t('no_analysis')}</div>`;
         if (dots) dots.innerHTML = '';
         return;
     }
@@ -3822,11 +5969,9 @@ function formatCalendarTime(timestamp) {
     const tz = 'Asia/Tehran';
     const hh = d.toLocaleString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
     const day = d.toLocaleString('en-GB', { timeZone: tz, day: 'numeric' });
-    const monthNames = currentLang === 'fa'
-        ? ['ژانویه','فوریه','مارس','آوریل','مه','ژوئن','ژوئیه','اوت','سپتامبر','اکتبر','نوامبر','دسامبر']
-        : ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthKeys = ['month_jan','month_feb','month_mar','month_apr','month_may','month_jun','month_jul','month_aug','month_sep','month_oct','month_nov','month_dec'];
     const monthIndex = Number(d.toLocaleString('en-GB', { timeZone: tz, month: 'numeric' })) - 1;
-    const monthName = monthNames[monthIndex] || '';
+    const monthName = t(monthKeys[monthIndex] || 'month_jan');
     return { time: hh, dayStr: `${day} ${monthName}` };
 }
 
@@ -4168,19 +6313,27 @@ function updateLangChecks() {
 // Set to null whenever dynamic content is rendered so next applyLanguage() re-queries.
 let _i18nElements = null;
 let _i18nPlaceholderElements = null;
+let _i18nHtmlElements = null;
+let _i18nAriaElements = null;
 
 function invalidateI18nCache() {
     _i18nElements = null;
     _i18nPlaceholderElements = null;
+    _i18nHtmlElements = null;
+    _i18nAriaElements = null;
 }
 
 function applyLanguage() {
     if (!_i18nElements) {
         _i18nElements = document.querySelectorAll('[data-i18n]');
         _i18nPlaceholderElements = document.querySelectorAll('[data-i18n-placeholder]');
+        _i18nHtmlElements = document.querySelectorAll('[data-i18n-html]');
+        _i18nAriaElements = document.querySelectorAll('[data-i18n-aria-label]');
     }
     _i18nElements.forEach(el => { const key = el.dataset.i18n; if (key) el.innerText = t(key); });
     _i18nPlaceholderElements.forEach(el => { const key = el.dataset.i18nPlaceholder; if (key) el.placeholder = t(key); });
+    if (_i18nHtmlElements) _i18nHtmlElements.forEach(el => { const key = el.dataset.i18nHtml; if (key) el.innerHTML = t(key); });
+    if (_i18nAriaElements) _i18nAriaElements.forEach(el => { const key = el.dataset.i18nAriaLabel; if (key) el.setAttribute('aria-label', t(key)); });
     document.documentElement.lang = currentLang;
     document.documentElement.dir = currentLang === 'fa' ? 'rtl' : 'ltr';
     saveLangToStorage();
@@ -4281,8 +6434,9 @@ function selectLang(lang) {
             window.ReferralApp.openReferral();
         }
         const walletPage = document.getElementById('wallet-full-page');
-        if (walletPage && walletPage.classList.contains('open') && window.WalletApp?.isOpen) {
-            if (typeof window.WalletApp.refresh === 'function') window.WalletApp.refresh();
+        if (walletPage && walletPage.classList.contains('open') && window.WalletApp) {
+            // Re-render wallet UI with new language (openWallet rebuilds HTML via WT())
+            if (typeof window.WalletApp.openWallet === 'function') window.WalletApp.openWallet();
         }
 
         // Re-render analysis list (if analysis page is active)
@@ -4310,6 +6464,20 @@ function selectLang(lang) {
             if (typeof _renderRequiredChannelsList === 'function') {
                 _renderRequiredChannelsList();
             }
+        }
+
+        // Admin panel — re-render dynamic content if open
+        const adminPanel = document.getElementById('admin-panel');
+        if (adminPanel && adminPanel.style.display !== 'none' && adminPanel.style.display !== '') {
+            // Re-query data-i18n elements inside admin panel (new ones may have been rendered)
+            invalidateI18nCache();
+            applyLanguage();
+        }
+
+        // Membership modal — re-render if open
+        const memModal = document.getElementById('membership-modal');
+        if (memModal && memModal.style.display !== 'none' && window.MembershipApp && typeof window.MembershipApp.refresh === 'function') {
+            try { window.MembershipApp.refresh(); } catch (e) {}
         }
     } catch (e) { /* non-critical — dynamic content will update on next interaction */ }
 }
@@ -4987,7 +7155,7 @@ function renderMarketInsights() {
     // Total coins count
     var totalEl = document.getElementById('mkt-status-total');
     if (totalEl) {
-        var totalLabel = currentLang === 'fa' ? `${total} ارز` : `${total} coins`;
+        var totalLabel = t('coins_count', { n: total });
         totalEl.textContent = totalLabel;
     }
 
@@ -4995,9 +7163,9 @@ function renderMarketInsights() {
     var sentimentValueEl = document.getElementById('mkt-sentiment-value');
     if (sentimentValueEl) {
         var senLabel, senClass;
-        if (ratio > 0.6) { senLabel = t('sentiment_bullish') || 'صعودی'; senClass = 'bullish'; }
-        else if (ratio >= 0.4) { senLabel = t('sentiment_neutral') || 'خنثی'; senClass = 'neutral'; }
-        else { senLabel = t('sentiment_bearish') || 'نزولی'; senClass = 'bearish'; }
+        if (ratio > 0.6) { senLabel = t('sentiment_bullish'); senClass = 'bullish'; }
+        else if (ratio >= 0.4) { senLabel = t('sentiment_neutral'); senClass = 'neutral'; }
+        else { senLabel = t('sentiment_bearish'); senClass = 'bearish'; }
         sentimentValueEl.textContent = senLabel;
         sentimentValueEl.className = 'mkt-status-sentiment-value ' + senClass;
     }
@@ -5006,9 +7174,9 @@ function renderMarketInsights() {
     var trendValueEl = document.getElementById('mkt-trend-value');
     if (trendValueEl) {
         var trendLabel, trendClass;
-        if (ratio > 0.6) { trendLabel = currentLang === 'fa' ? 'صعودی' : 'Bullish'; trendClass = 'trend-up'; }
-        else if (ratio >= 0.4) { trendLabel = currentLang === 'fa' ? 'خنثی' : 'Neutral'; trendClass = 'trend-neutral'; }
-        else { trendLabel = currentLang === 'fa' ? 'نزولی' : 'Bearish'; trendClass = 'trend-down'; }
+        if (ratio > 0.6) { trendLabel = t('dashboard_trend_bullish'); trendClass = 'trend-up'; }
+        else if (ratio >= 0.4) { trendLabel = t('dashboard_trend_neutral'); trendClass = 'trend-neutral'; }
+        else { trendLabel = t('dashboard_trend_bearish'); trendClass = 'trend-down'; }
         trendValueEl.textContent = trendLabel;
         trendValueEl.className = 'mkt-trend-value ' + trendClass;
     }
@@ -5054,19 +7222,11 @@ function renderMarketInsights() {
         var insightEl = document.getElementById('mkt-status-insight');
         if (insightEl) {
             var insight = '';
-            if (currentLang === 'fa') {
-                if (fgIndex <= 25) insight = 'ترس شدید در بازار — فرصت خرید احتمالی برای سرمایه‌گذاران شجاع';
-                else if (fgIndex <= 45) insight = 'ترس در بازار غالب است — احتیاط کنید اما فرصت‌ها را بررسی کنید';
-                else if (fgIndex <= 55) insight = 'بازار در حالت خنثی — منتظر جهت‌گیری مشخص باشید';
-                else if (fgIndex <= 75) insight = 'حریصیت در بازار — زمان مناسب برای سودگیری و مدیریت ریسک';
-                else insight = 'حریصیت شدید — احتیاط کنید، اصلاح بازار محتمل است';
-            } else {
-                if (fgIndex <= 25) insight = 'Extreme fear — potential buying opportunity for bold investors';
-                else if (fgIndex <= 45) insight = 'Fear dominates — be cautious but watch for opportunities';
-                else if (fgIndex <= 55) insight = 'Market is neutral — wait for a clear direction';
-                else if (fgIndex <= 75) insight = 'Greed in the market — good time to take profits and manage risk';
-                else insight = 'Extreme greed — be cautious, market correction is likely';
-            }
+            if (fgIndex <= 25) insight = t('fg_insight_extreme_fear');
+            else if (fgIndex <= 45) insight = t('fg_insight_fear');
+            else if (fgIndex <= 55) insight = t('fg_insight_neutral');
+            else if (fgIndex <= 75) insight = t('fg_insight_greed');
+            else insight = t('fg_insight_extreme_greed');
             insightEl.textContent = insight;
         }
 
@@ -5221,7 +7381,7 @@ function renderMarket() {
 
                 if (!data || !data.results || data.results.length === 0) {
                     const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
-                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result') || 'نتیجه‌ای یافت نشد'}</div>`;
+                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
                     return;
                 }
 
@@ -5252,7 +7412,7 @@ function renderMarket() {
                 ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
 
                 const allResults = [...searchResults, ...forexResults];
-                list.innerHTML = buildInfoBar(allResults.length, `جستجو در ${data.total_index || 1700}+ ارز`) + allResults.map(item => renderMarketItem(item)).join('');
+                list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
             })
             .catch(() => {
                 if (currentSearch !== _lastSearchTerm) return;
@@ -5263,9 +7423,9 @@ function renderMarket() {
                 ).slice(0, 50).map(c => ({...c, _type: 'crypto'}));
 
                 if (cryptoResults.length > 0) {
-                    list.innerHTML = buildInfoBar(cryptoResults.length, t('search_results') || 'result') + cryptoResults.map(item => renderMarketItem(item)).join('');
+                    list.innerHTML = buildInfoBar(cryptoResults.length, t('search_results')) + cryptoResults.map(item => renderMarketItem(item)).join('');
                 } else {
-                    list.innerHTML = `<div class="empty-state">${t('search_no_result') || 'نتیجه‌ای یافت نشد'}</div>`;
+                    list.innerHTML = `<div class="empty-state">${t('search_no_result')}</div>`;
                 }
             });
         return;
@@ -5284,18 +7444,18 @@ function renderMarket() {
                     <div class="market-error-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
-                    <div class="market-error-title">داده فارکس نیاز به ورود از تلگرام دارد</div>
-                    <div class="market-error-desc">برای مشاهده نرخ فارکس و طلا، اپ را داخل تلگرام باز کنید</div>
+                    <div class="market-error-title">${t('forex_auth_title')}</div>
+                    <div class="market-error-desc">${t('forex_auth_desc')}</div>
                 </div>`
                 : `<div class="market-error-state">
                     <div class="market-error-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
                     </div>
-                    <div class="market-error-title">بارگذاری مجدد</div>
-                    <div class="market-error-desc">دریافت داده فارکس ناموفق بود</div>
+                    <div class="market-error-title">${t('forex_retry_title')}</div>
+                    <div class="market-error-desc">${t('forex_retry_desc')}</div>
                     <button class="market-error-retry" onclick="loadForexData().then(()=>renderMarket()).catch(()=>{})">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
-                        تلاش مجدد
+                        ${t('retry')}
                     </button>
                 </div>`;
             return;
@@ -5365,7 +7525,7 @@ function renderMarket() {
                 let html = visible.map((p, i) => renderBtcPairItem(p, i)).join('');
                 if (hasMore) {
                     const remaining = pairs.length - visibleCount;
-                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button></div>`;
+                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more')} (${remaining})</button></div>`;
                 }
                 list.innerHTML = html;
                 return;
@@ -5379,7 +7539,7 @@ function renderMarket() {
                 let html = buildInfoBar(filtered.length, totalLabel) + visible.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
                 if (hasMore) {
                     const remaining = filtered.length - marketVisibleCount;
-                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more') || 'نمایش بیشتر'} (${remaining})</button></div>`;
+                    html += `<div class="mkt-load-more"><button class="mkt-load-more-btn" onclick="loadMoreCoins()">${t('load_more')} (${remaining})</button></div>`;
                 }
                 list.innerHTML = html;
             } else {
@@ -5507,10 +7667,10 @@ function renderForexItem(f) {
 
     // Category config: colors, labels, precision
     const catConfig = {
-        major:     { color: '#22C55E', gradColor: '#16A34A', label: 'Major',     labelFa: 'جفت اصلی',       decimals: 4 },
-        cross:     { color: '#F5A623', gradColor: '#D97706', label: 'Cross',     labelFa: 'کراس',           decimals: 4 },
-        metal:     { color: '#FFD700', gradColor: '#B8860B', label: 'Metal',     labelFa: 'فلز گران‌بها',   decimals: 2 },
-        stock:     { color: '#60A5FA', gradColor: '#2563EB', label: 'Stock',     labelFa: 'سهم',            decimals: 2 },
+        major:     { color: '#22C55E', gradColor: '#16A34A', labelKey: 'forex_cat_major',       decimals: 4 },
+        cross:     { color: '#F5A623', gradColor: '#D97706', labelKey: 'forex_cat_cross',       decimals: 4 },
+        metal:     { color: '#FFD700', gradColor: '#B8860B', labelKey: 'forex_cat_metal',       decimals: 2 },
+        stock:     { color: '#60A5FA', gradColor: '#2563EB', labelKey: 'forex_cat_stock',       decimals: 2 },
     };
     const cfg = catConfig[cat] || catConfig.major;
     const decimals = cfg.decimals;
@@ -5586,7 +7746,7 @@ function renderForexItem(f) {
             </div>
             <span class="mkt-coin-price">${priceStr}</span>
             <span class="mkt-coin-change ${changeCls}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'حذف از واچ‌لیست' : 'افزودن به واچ‌لیست'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? t('remove_from_watchlist') : t('add_to_watchlist')}">
                 ${starSvg}
             </span>
         </div>
@@ -5618,10 +7778,10 @@ function renderForexGroupedList() {
 
     // Group by category
     const groups = {
-        metal:     { label: 'Precious Metals',  labelFa: 'فلزات گران‌بها',    items: [] },
-        major:     { label: 'Major Pairs',      labelFa: 'جفت‌های اصلی',     items: [] },
-        cross:     { label: 'Cross Pairs',      labelFa: 'کراس‌ها',          items: [] },
-        stock:     { label: 'Global Stocks',    labelFa: 'سهام جهانی',       items: [] },
+        metal:     { labelKey: 'forex_group_metal', items: [] },
+        major:     { labelKey: 'forex_group_major', items: [] },
+        cross:     { labelKey: 'forex_group_cross', items: [] },
+        stock:     { labelKey: 'forex_group_stock', items: [] },
     };
 
     for (const f of allForexPairs) {
@@ -5636,7 +7796,7 @@ function renderForexGroupedList() {
         const g = groups[cat];
         if (!g.items.length) continue;
 
-        const groupLabel = currentLang === 'fa' ? g.labelFa : g.label;
+        const groupLabel = t(g.labelKey);
         const catCfg = {
             major:     { color: '#22C55E' },
             cross:     { color: '#F5A623' },
@@ -6231,7 +8391,7 @@ function updateMissionCards() {
             // PHASE 3 FIX: add clear "✓ دریافت شد" badge for completed missions
             // (in addition to the checkmark icon) — makes completion status unambiguous.
             const completedBadgeHtml = isCompleted
-                ? '<div class="mission-completed-badge">✓ دریافت شد</div>'
+                ? '<div class="mission-completed-badge">' + t('mission_completed_badge') + '</div>'
                 : '';
             const progressHtml = progressText && !isCompleted
                 ? `<div class="mission-progress-text">${progressText}</div>`
@@ -6300,7 +8460,7 @@ function showMissionRewardPopup(label, amount) {
         </div>
         <div class="mrp-icon">🎉</div>
         <div class="mrp-content">
-            <div class="mrp-title">ماموریت کامل شد!</div>
+            <div class="mrp-title">${t('mission_complete_title')}</div>
             <div class="mrp-desc">${escapeHtml(label)}</div>
             <div class="mrp-reward">+${amount} AB</div>
         </div>
@@ -6646,11 +8806,11 @@ const NI_ICONS = {
 function niBadgeHtml(sentiment) {
     const s = (sentiment || '').toLowerCase();
     const map = {
-        bullish: `<span class="ni-badge ni-badge-bullish">${NI_ICONS.arrowUp} صعودی</span>`,
-        bearish: `<span class="ni-badge ni-badge-bearish">${NI_ICONS.arrowDown} نزولی</span>`,
-        macro: `<span class="ni-badge ni-badge-macro">کلان</span>`,
-        neutral: `<span class="ni-badge ni-badge-neutral">خنثی</span>`,
-        breaking: `<span class="ni-badge ni-badge-breaking">${NI_ICONS.alert} فوری</span>`,
+        bullish: `<span class="ni-badge ni-badge-bullish">${NI_ICONS.arrowUp} ${t('sentiment_bullish')}</span>`,
+        bearish: `<span class="ni-badge ni-badge-bearish">${NI_ICONS.arrowDown} ${t('sentiment_bearish')}</span>`,
+        macro: `<span class="ni-badge ni-badge-macro">${t('news_sent_macro')}</span>`,
+        neutral: `<span class="ni-badge ni-badge-neutral">${t('sentiment_neutral')}</span>`,
+        breaking: `<span class="ni-badge ni-badge-breaking">${NI_ICONS.alert} ${t('news_filter_breaking')}</span>`,
     };
     return map[s] || map.neutral;
 }
@@ -6675,7 +8835,7 @@ function niImpactLevel(news) {
  */
 function niImpactHtml(news) {
     const level = niImpactLevel(news);
-    const labels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+    const labels = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
     return `<span class="ni-impact ni-impact-${level}"><span class="ni-impact-dot"></span>${labels[level]}</span>`;
 }
 
@@ -7014,17 +9174,17 @@ function renderNews(category) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="56" height="56">
                     <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
                 </svg>
-                <div class="ni-auth-title">${isFa ? 'برای مشاهده اخبار، اپ را داخل تلگرام باز کنید' : 'Open in Telegram to see news'}</div>
-                <div class="ni-auth-sub">${isFa ? 'اخبار بازار به‌صورت لحظه‌ای داخل Mini App نمایش داده می‌شود' : 'Live market news is available inside the Mini App'}</div>
+                <div class="ni-auth-title">${t('news_auth_title')}</div>
+                <div class="ni-auth-sub">${t('news_auth_desc')}</div>
                 <a href="https://t.me/Amir_BTC_AssistantBot" class="ni-auth-btn" target="_blank" rel="noopener">
-                    ${isFa ? 'باز کردن در تلگرام' : 'Open in Telegram'}
+                    ${t('open_in_telegram')}
                 </a>
             </div>`;
         return;
     }
 
     if (!filtered.length) {
-        container.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>خبری یافت نشد</div></div>`;
+        container.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>${t('news_empty')}</div></div>`;
         return;
     }
 
@@ -7087,10 +9247,10 @@ function renderNews(category) {
                     <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
-                    <button class="ni-card-action ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
+                    <button class="ni-card-action ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="${t('news_save')}">
                         ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
                     </button>
-                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="اشتراک‌گذاری">
+                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="${t('news_share')}">
                         ${NI_ICONS.share}
                     </button>
                 </div>
@@ -7147,10 +9307,10 @@ function niRenderHeroSlider(items) {
                 <div class="ni-hero-meta">
                     <div class="ni-hero-source">${NI_ICONS.clock}<span>${escapeHtml(n.source || '')} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span></div>
                     <div class="ni-hero-actions">
-                        <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="ذخیره">
+                        <button class="ni-hero-action-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveNews(${idx})" aria-label="${t('news_save')}">
                             ${isSaved ? NI_ICONS.bookmarkFilled : NI_ICONS.bookmark}
                         </button>
-                        <button class="ni-hero-action-btn" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="اشتراک‌گذاری">
+                        <button class="ni-hero-action-btn" onclick="event.stopPropagation(); openShareSheet(${idx})" aria-label="${t('news_share')}">
                             ${NI_ICONS.share}
                         </button>
                     </div>
@@ -7399,7 +9559,7 @@ function renderSavedNews() {
     if (!container) return;
 
     if (!_niSavedNews.length) {
-        container.innerHTML = `<div class="ni-empty">${NI_ICONS.bookmarkEmpty}<div>هیچ مورد ذخیره شده‌ای وجود ندارد</div></div>`;
+        container.innerHTML = `<div class="ni-empty">${NI_ICONS.bookmarkEmpty}<div>${t('saved_news_empty')}</div></div>`;
         return;
     }
 
@@ -7431,10 +9591,10 @@ function renderSavedNews() {
                     <span>${escapeHtml(n.source)} • ${escapeHtml(formatNewsTimeTehran(n.pub_date, n.time))}</span>
                 </div>
                 <div class="ni-card-actions">
-                    <button class="ni-card-action saved" onclick="event.stopPropagation(); toggleSaveNews(${i})" aria-label="حذف ذخیره">
+                    <button class="ni-card-action saved" onclick="event.stopPropagation(); toggleSaveNews(${i})" aria-label="${t('news_unsave')}">
                         ${NI_ICONS.bookmarkFilled}
                     </button>
-                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${i})" aria-label="اشتراک‌گذاری">
+                    <button class="ni-card-action" onclick="event.stopPropagation(); openShareSheet(${i})" aria-label="${t('news_share')}">
                         ${NI_ICONS.share}
                     </button>
                 </div>
@@ -7564,7 +9724,7 @@ function onNewsSearchInput(query) {
     }).slice(0, 5);
 
     if (!newsResults.length && !calResults.length) {
-        results.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>نتیجه‌ای یافت نشد</div></div>`;
+        results.innerHTML = `<div class="ni-empty">${NI_ICONS.searchEmpty}<div>${t('no_result_found')}</div></div>`;
         return;
     }
 
@@ -7572,7 +9732,7 @@ function onNewsSearchInput(query) {
     const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3C/svg%3E';
 
     if (newsResults.length) {
-        html += '<div class="ni-cal-time-group">اخبار</div>';
+        html += '<div class="ni-cal-time-group">' + t('news_time_group_news') + '</div>';
         newsResults.forEach(n => {
             const idx = newsCache.indexOf(n);
             html += `
@@ -7589,7 +9749,7 @@ function onNewsSearchInput(query) {
     }
 
     if (calResults.length) {
-        html += '<div class="ni-cal-time-group">رویدادهای اقتصادی</div>';
+        html += '<div class="ni-cal-time-group">' + t('news_time_group_events') + '</div>';
         calResults.forEach(e => {
             html += `
             <div class="ni-cal-event impact-${e.impact || 'medium'}" onclick="closeNewsSearch(); switchTab('news-page'); setTimeout(() => switchNewsTab('calendar'), 300)">
@@ -7627,7 +9787,7 @@ function getTimeGroup(hour) {
 }
 
 const timeGroupLabels = {
-    fa: { morning: 'صبح', afternoon: 'بعدازظهر', evening: 'عصر/شب' },
+    fa: { morning: t('time_morning'), afternoon: t('time_afternoon'), evening: t('time_evening') },
     en: { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' }
 };
 
@@ -7699,9 +9859,9 @@ function getCalendarTabCounts(events) {
 function buildCalendarSegmentsHtml(counts) {
     const c = counts || { today: 0, tomorrow: 0, week: 0 };
     const tabs = [
-        { key: 'today',    label: 'امروز',     count: c.today },
-        { key: 'tomorrow', label: 'فردا',      count: c.tomorrow },
-        { key: 'week',     label: 'این هفته',  count: c.week }
+        { key: 'today',    label: t('cal_today'),     count: c.today },
+        { key: 'tomorrow', label: t('cal_tomorrow'),      count: c.tomorrow },
+        { key: 'week',     label: t('cal_week'),  count: c.week }
     ];
     return `<div class="ni-cal-segments">` + tabs.map(t => `
         <button class="ni-cal-segment${currentCalendarTab === t.key ? ' active' : ''}" data-cal-tab="${t.key}" onclick="switchCalendarTab('${t.key}', this)">
@@ -7746,9 +9906,9 @@ function startCalCountdown() {
                 // Event has started — show "در حال اجرا" (live) for 30 min,
                 // then "پایان یافت" after the live window passes.
                 if (Math.abs(diff) > LIVE_WINDOW_MS) {
-                    el.textContent = 'پایان یافت';
+                    el.textContent = t('cal_status_ended');
                 } else {
-                    el.textContent = 'در حال اجرا';
+                    el.textContent = t('cal_status_running');
                 }
                 el.removeAttribute('data-ts');
             } else {
@@ -7836,7 +9996,7 @@ function renderCalendarV2() {
             container.dataset.calSignature = emptySig;
             if (calCountdownInterval) { clearInterval(calCountdownInterval); calCountdownInterval = null; }
             const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
-            container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویداد اقتصادی یافت نشد</div></div>`;
+            container.innerHTML = segmentsHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>${t('cal_event_empty')}</div></div>`;
             return;
         }
 
@@ -7897,13 +10057,13 @@ function renderCalendarV2() {
             const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
             const countriesHtml = `
             <div class="ni-cal-countries">
-                <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+                <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">${t('cal_all')}</button>
                 ${allCountries.filter(c => c !== 'all').map(c => {
                     const flag = filteredEvents.find(e => e.country === c)?.flag || '';
                     return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
                 }).join('')}
             </div>`;
-            container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>رویدادی برای این فیلتر یافت نشد</div></div>`;
+            container.innerHTML = segmentsHtml + countriesHtml + `<div class="ni-empty">${NI_ICONS.clock}<div>${t('cal_filter_empty')}</div></div>`;
             return;
         }
 
@@ -7953,15 +10113,15 @@ function renderCalendarV2() {
         // the sort correctly put upcoming first. Now we render the flat sorted
         // list so the status order (upcoming → live → past) is always respected.
         const lang = currentLang || 'fa';
-        const impactLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
-        const statusLabel = { past: 'گذشته', live: 'در حال اجرا', upcoming: 'در انتظار' };
+        const impactLabels = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
+        const statusLabel = { past: t('cal_status_past'), live: t('cal_status_running'), upcoming: t('cal_status_waiting') };
 
         // Segmented control with count badges (today/tomorrow/week/all)
         const segmentsHtml = buildCalendarSegmentsHtml(tabCounts);
 
         const countriesHtml = `
         <div class="ni-cal-countries">
-            <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">همه</button>
+            <button class="ni-cal-country${currentCalCountry === 'all' ? ' active' : ''}" onclick="filterCalCountry('all', this)">${t('cal_all')}</button>
             ${allCountries.filter(c => c !== 'all').map(c => {
                 const flag = filteredEvents.find(e => e.country === c)?.flag || '';
                 return `<button class="ni-cal-country${currentCalCountry === c ? ' active' : ''}" onclick="filterCalCountry('${escapeHtml(c)}', this)">${flag} ${escapeHtml(c)}</button>`;
@@ -8010,15 +10170,15 @@ function renderCalendarV2() {
                 </div>
                 <div class="ni-cal-event-title">${escapeHtml(e.title)}</div>
                 <div class="ni-cal-event-stats">
-                    ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">پیش‌بینی</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
-                    ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">قبلی</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
-                    ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">واقعی</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
-                    <div class="ni-cal-stat"><div class="ni-cal-stat-label">تأثیر</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
+                    ${e.forecast ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">${t('cal_forecast')}</div><div class="ni-cal-stat-value">${escapeHtml(e.forecast)}</div></div>` : ''}
+                    ${e.previous ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">${t('cal_previous')}</div><div class="ni-cal-stat-value">${escapeHtml(e.previous)}</div></div>` : ''}
+                    ${e.actual ? `<div class="ni-cal-stat"><div class="ni-cal-stat-label">${t('cal_actual')}</div><div class="ni-cal-stat-value actual">${escapeHtml(e.actual)}${surpriseHtml}</div></div>` : ''}
+                    <div class="ni-cal-stat"><div class="ni-cal-stat-label">${t('cal_impact')}</div><div class="ni-cal-stat-value">${impactLabels[impact] || impactLabels.medium}</div></div>
                 </div>
                 <div class="ni-cal-event-footer">
                     <button class="ni-cal-event-reminder ${hasReminder ? 'active' : ''}" onclick="openReminderSheet('${escapeHtml(eventKey)}', '${escapeHtml(e.title || '')}', '${escapeHtml(e.country || '')}', '${timeText}', '${escapeHtml(e.timestamp || '')}')">
                         ${hasReminder ? NI_ICONS.bell : NI_ICONS.bellOff}
-                        <span>${hasReminder ? 'یادآور فعال' : 'یادآوری'}</span>
+                        <span>${hasReminder ? t('reminder_active') : t('reminder_set')}</span>
                     </button>
                 </div>
             </div>`;
@@ -8063,9 +10223,9 @@ function closeReminderSheet() {
  * Backend accepts: 15, 60, or 1440.
  */
 function _niReminderWhenToMinutes(when) {
-    if (when === '۱۵ دقیقه قبل' || when === '15m' || when === 15) return 15;
-    if (when === '۱ ساعت قبل' || when === '1h' || when === 60) return 60;
-    if (when === '۲۴ ساعت قبل' || when === '24h' || when === 1440) return 1440;
+    if (when === t('reminder_15m') || when === '15m' || when === 15) return 15;
+    if (when === t('reminder_1h') || when === '1h' || when === 60) return 60;
+    if (when === t('reminder_24h') || when === '24h' || when === 1440) return 1440;
     return 60; // default
 }
 
@@ -8128,11 +10288,11 @@ async function syncRemindersFromBackend() {
         const data = await apiFetch('/api/calendar/reminders');
         if (data && data.status === 'success' && Array.isArray(data.reminders)) {
             for (const r of data.reminders) {
-                // Convert lead_minutes back to Persian label for UI
+                // Convert lead_minutes back to label for UI (uses t() for current language)
                 let when;
-                if (r.lead_minutes === 15) when = '۱۵ دقیقه قبل';
-                else if (r.lead_minutes === 1440) when = '۲۴ ساعت قبل';
-                else when = '۱ ساعت قبل';
+                if (r.lead_minutes === 15) when = t('reminder_15m');
+                else if (r.lead_minutes === 1440) when = t('reminder_24h');
+                else when = t('reminder_1h');
                 _niCalendarReminders[r.event_key] = when;
             }
             localStorage.setItem('ni_cal_reminders', JSON.stringify(_niCalendarReminders));
@@ -8253,7 +10413,7 @@ function openNewsModal(idx) {
     const categoryEl = el('news-modal-category');
     if (categoryEl) {
         const cat = n.category || 'crypto';
-        const catLabels = { crypto: 'کریپتو', forex: 'فارکس', economy: 'اقتصاد' };
+        const catLabels = { crypto: t('news_cat_crypto'), forex: t('news_cat_forex'), economy: t('news_cat_economy') };
         categoryEl.innerText = catLabels[cat] || cat;
     }
 
@@ -8273,7 +10433,7 @@ function openNewsModal(idx) {
                 '<div class="news-modal-summary-box">' +
                     '<div class="news-modal-summary-header">' +
                         '<svg class="news-modal-ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-                        '<span>تحلیل خبر</span>' +
+                        '<span>' + t('news_analysis_label') + '</span>' +
                     '</div>' +
                     '<div class="news-modal-summary-text">' + escapeHtmlForNews(n.ai_summary) + '</div>' +
                 '</div>';
@@ -8281,12 +10441,12 @@ function openNewsModal(idx) {
             let tagsHtml = '<div class="news-modal-tags">';
             if (n.sentiment) {
                 const sentEmoji = { bullish: '🟢', bearish: '🔴', neutral: '🟡', breaking: '⚡', macro: '🌐' };
-                const sentLabels = { bullish: 'صعودی', bearish: 'نزولی', neutral: 'خنثی', breaking: 'فوری', macro: 'کلان' };
+                const sentLabels = { bullish: t('sentiment_bullish'), bearish: t('sentiment_bearish'), neutral: t('sentiment_neutral'), breaking: t('news_filter_breaking'), macro: t('news_sent_macro') };
                 tagsHtml += '<span class="news-tag news-tag-sentiment">' + (sentEmoji[n.sentiment] || '•') + ' ' + (sentLabels[n.sentiment] || n.sentiment) + '</span>';
             }
             if (n.impact) {
                 const impEmoji = { high: '⚡', medium: '⭐', low: '📉' };
-                const impLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+                const impLabels = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
                 tagsHtml += '<span class="news-tag news-tag-impact-' + (n.impact || 'low') + '">' + (impEmoji[n.impact] || '•') + ' ' + (impLabels[n.impact] || n.impact) + '</span>';
             }
             if (n.coins && Array.isArray(n.coins) && n.coins.length > 0) {
@@ -8375,23 +10535,23 @@ function buildNewsPendingBox(aiStatus) {
 
     let message, boxClass, iconClass, showShimmer;
     if (isFailed) {
-        message = 'تحلیل این خبر فعلاً در دسترس نیست. می‌توانید منبع اصلی را مطالعه کنید.';
+        message = t('news_ai_unavailable');
         boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-unavailable';
         iconClass = 'news-modal-ai-icon-unavailable';
         showShimmer = false;
     } else if (isRateLimited) {
-        message = 'سرویس‌های هوش مصنوعی در حال حاضر دارای محدودیت نرخ هستند. تحلیل خبر بزودی تولید خواهد شد.';
+        message = t('news_ai_rate_limited');
         boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-retry';
         iconClass = '';
         showShimmer = true;
     } else if (isRetry) {
-        message = 'تولید تحلیل این خبر با خطا مواجه شد و در حال تلاش مجدد است. طی چند دقیقه آینده تکمیل خواهد شد.';
+        message = t('news_ai_error');
         boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-retry';
         iconClass = '';
         showShimmer = true;
     } else {
         // pending, unknown, processing — premium "preparing" state
-        message = 'در حال آماده‌سازی...';
+        message = t('news_ai_preparing');
         boxClass = 'news-modal-summary-box news-modal-loading news-modal-ai-pending';
         iconClass = '';
         showShimmer = true;
@@ -8400,7 +10560,7 @@ function buildNewsPendingBox(aiStatus) {
     return '<div class="' + boxClass + '">' +
         '<div class="news-modal-summary-header">' +
             '<svg class="news-modal-ai-icon ' + iconClass + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-            '<span>تحلیل هوشمند</span>' +
+            '<span>' + t('news_ai_smart_label') + '</span>' +
         '</div>' +
         '<div class="news-modal-summary-text news-modal-pending-text">' +
             (showShimmer ? '<div class="news-modal-shimmer-bar"></div>' : '') +
@@ -8562,7 +10722,7 @@ function resetDetailState() {
     setText('alert-current-price-value', '--');
     const alertList = document.getElementById('active-alerts');
     if (alertList) alertList.innerHTML = '';
-    setText('cd-alert-status-value', 'غیرفعال');
+    setText('cd-alert-status-value', t('alert_inactive'));
     setText('cd-alert-count-num', '0');
 
     // ── Reset statistics grid ──
@@ -8936,7 +11096,7 @@ function showChartFallbackSearching(exchangeName) {
         '<div class="cd-chart-status">' +
             '<div class="cd-chart-fallback-search">' +
                 '<div class="cd-chart-mini-spinner"></div>' +
-                '<span>جستجوی منبع جایگزین' + (exchangeName ? ' (' + exchangeName + ')' : '') + '...</span>' +
+                '<span>' + t('chart_source_search') + (exchangeName ? ' (' + exchangeName + ')' : '') + '...</span>' +
             '</div>' +
         '</div>';
 }
@@ -8957,8 +11117,8 @@ function showChartUnavailable() {
                     '<path d="M7 16l4-8 4 5 5-9"/>' +
                 '</svg>' +
             '</div>' +
-            '<div class="cd-chart-status-title">نمودار این دارایی در حال حاضر در دسترس نیست</div>' +
-            '<div class="cd-chart-status-sub">لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.</div>' +
+            '<div class="cd-chart-status-title">' + t('chart_unavailable_title') + '</div>' +
+            '<div class="cd-chart-status-sub">' + t('chart_unavailable_sub') + '</div>' +
         '</div>';
 }
 
@@ -9217,12 +11377,10 @@ async function openForexDetail(symbol) {
 
     // Extra info
     const cat = pair.category || 'major';
-    const catLabels = { major: 'Major', cross: 'Cross', metal: 'Metal', stock: 'Stock' };
-    const catLabelFa = { major: 'جفت اصلی', cross: 'کراس', metal: 'فلز گران‌بها', stock: 'سهم' };
-    const catLabel = currentLang === 'fa' ? (catLabelFa[cat] || cat) : (catLabels[cat] || cat);
-    const typeLabel = currentLang === 'fa'
-        ? ({ major: 'فارکس', cross: 'فارکس', metal: 'فلز', stock: 'سهم' }[cat] || 'بازار')
-        : ({ major: 'Forex', cross: 'Forex', metal: 'Metal', stock: 'Stock' }[cat] || 'Market');
+    const catLabelMap = { major: 'forex_cat_major', cross: 'forex_cat_cross', metal: 'forex_cat_metal', stock: 'forex_cat_stock' };
+    const catLabel = t(catLabelMap[cat] || cat);
+    const typeLabelMap = { major: 'forex_type_forex', cross: 'forex_type_forex', metal: 'forex_type_metal', stock: 'forex_type_stock' };
+    const typeLabel = t(typeLabelMap[cat] || 'forex_type_market');
 
     // ── Premium stats grid for forex/metals ──
     // Previously this rendered bare .info-item spans (whose CSS is scoped under
@@ -9242,10 +11400,10 @@ async function openForexDetail(symbol) {
                 : '$' + pair.price.toFixed(4))
         : '--';
     document.getElementById('detail-stats').innerHTML =
-        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'قیمت فعلی' : 'Current Price'}</span><span class="cd-stat-value">${priceDisplay}</span></div>` +
-        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'تغییر روزانه' : 'Daily Change'}</span><span class="cd-stat-value ${changeCls}">${changeStr}</span></div>` +
-        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'دسته‌بندی' : 'Category'}</span><span class="cd-stat-value" style="font-size:13px;">${catLabel}</span></div>` +
-        `<div class="cd-stat-item"><span class="cd-stat-label">${currentLang === 'fa' ? 'نوع' : 'Type'}</span><span class="cd-stat-value" style="font-size:13px;">${typeLabel}</span></div>`;
+        `<div class="cd-stat-item"><span class="cd-stat-label">${t('cd_current_price')}</span><span class="cd-stat-value">${priceDisplay}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${t('cd_daily_change')}</span><span class="cd-stat-value ${changeCls}">${changeStr}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${t('cd_category')}</span><span class="cd-stat-value" style="font-size:13px;">${catLabel}</span></div>` +
+        `<div class="cd-stat-item"><span class="cd-stat-label">${t('cd_type')}</span><span class="cd-stat-value" style="font-size:13px;">${typeLabel}</span></div>`;
 
     // ── BUG 1 FIX: Alert card stays VISIBLE for every asset type ──
     // Previously this tried to hide the alert card with a dead `.alert-section`
@@ -9307,8 +11465,8 @@ function updateCdAlertStatus(symbol) {
     if (statusIconEl) statusIconEl.classList.toggle('active', count > 0);
     if (statusValueEl) {
         statusValueEl.textContent = count > 0
-            ? (currentLang === 'fa' ? `${count} هشدار فعال` : `${count} active`)
-            : (currentLang === 'fa' ? 'غیرفعال' : 'Inactive');
+            ? t('cd_alerts_active', { n: count })
+            : t('alert_inactive');
         statusValueEl.classList.toggle('active', count > 0);
     }
 }
@@ -9354,7 +11512,7 @@ function renderActiveAlerts(symbol) {
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                     <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                 </svg>
-                ${t('alert_empty') || 'هیچ هشدار فعالی وجود ندارد'}
+                ${t('alert_empty')}
             </div>
         `;
         return;
@@ -9366,8 +11524,8 @@ function renderActiveAlerts(symbol) {
             ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>'
             : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>';
         const dirLabel = dir === 'below'
-            ? (currentLang === 'fa' ? 'وقتی پایین‌تر رفت' : 'When below')
-            : (currentLang === 'fa' ? 'وقتی بالاتر رفت' : 'When above');
+            ? t('alert_when_below')
+            : t('alert_when_above');
         const createdAt = a.createdAt ? new Date(a.createdAt).toLocaleDateString(currentLang === 'fa' ? 'fa-IR' : 'en-US', { month: 'short', day: 'numeric' }) : '';
         return `
         <div class="cd-alert-item">
@@ -9620,10 +11778,10 @@ async function triggerAlert(alert, currentPrice) {
     const priceStr = currentPrice >= 1
         ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : Number(currentPrice).toFixed(6);
-    const msg = `🔔 هشدار قیمت فعال شد\nقیمت ${alert.symbol} به ${priceStr} USDT رسید.`;
+    const msg = t('alert_trigger_msg', { symbol: alert.symbol, price: priceStr });
     getTg()?.HapticFeedback?.notificationOccurred('warning');
-    addNotification(`🔔 هشدار قیمت ${alert.symbol}`, msg, { sendToTelegram: false, playSound: true });
-    getTg()?.showPopup?.({ title: `🔔 هشدار قیمت ${alert.symbol}`, message: msg, buttons: [{ type: 'ok' }] });
+    addNotification(t('alert_trigger_title', { symbol: alert.symbol }), msg, { sendToTelegram: false, playSound: true });
+    getTg()?.showPopup?.({ title: t('alert_trigger_title', { symbol: alert.symbol }), message: msg, buttons: [{ type: 'ok' }] });
 
     // CRITICAL: Immediately fetch new notifications from DB.
     // The backend cron may have already created a DB notification for this alert.
@@ -10419,9 +12577,7 @@ function closeSettingsModal() { document.getElementById('settings-modal').style.
 function requestDeleteAccount() {
     // Step 1: Show confirmation dialog
     const fa = currentLang === 'fa';
-    const message = fa
-        ? '⚠️ هشدار جدی\n\nآیا واقعاً می‌خواهید حساب خود را حذف کنید؟\n\n• تمام پاداش‌ها و توکن‌های شما پاک می‌شود\n• تاریخچه دعوت‌ها حذف می‌شود\n• کیف پول، هشدارها و واچ‌لیست پاک می‌شود\n• این عملیات قابل بازگشت نیست\n\nپس از حذف، می‌توانید دوباره با لینک دعوت ثبت‌نام کنید.'
-        : '⚠️ SERIOUS WARNING\n\nDo you really want to delete your account?\n\n• All rewards and tokens will be erased\n• Referral history will be deleted\n• Wallet, alerts, and watchlist will be cleared\n• This action is IRREVERSIBLE\n\nAfter deletion, you can re-register with a referral link.';
+    const message = t('delete_account_warning');
 
     // Use a custom modal for better UX than the native confirm()
     showDeleteAccountModal(message, fa);
@@ -10444,17 +12600,17 @@ function showDeleteAccountModal(message, fa) {
                     <line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
             </div>
-            <h3 class="delete-account-modal-title">${fa ? 'حذف حساب کاربری' : 'Delete Account'}</h3>
+            <h3 class="delete-account-modal-title">${t('delete_account')}</h3>
             <p class="delete-account-modal-message">${message.replace(/\n/g, '<br>')}</p>
             <div class="delete-account-modal-input-wrap">
-                <label class="delete-account-modal-label">${fa ? 'برای تأیید، تایپ کنید:' : 'Type to confirm:'}</label>
+                <label class="delete-account-modal-label">${t('delete_account_typing')}</label>
                 <input type="text" id="delete-account-confirm-input" class="delete-account-modal-input" placeholder="DELETE" autocomplete="off">
             </div>
             <div class="delete-account-modal-actions">
-                <button class="delete-account-modal-cancel" onclick="closeDeleteAccountModal()">${fa ? 'انصراف' : 'Cancel'}</button>
+                <button class="delete-account-modal-cancel" onclick="closeDeleteAccountModal()">${t('delete_account_cancel')}</button>
                 <button class="delete-account-modal-confirm" id="delete-account-confirm-btn" onclick="executeDeleteAccount()" disabled>
                     <span class="da-spinner" style="display:none;"></span>
-                    <span class="da-btn-text">${fa ? 'حذف دائمی' : 'Permanently Delete'}</span>
+                    <span class="da-btn-text">${t('delete_account_confirm')}</span>
                 </button>
             </div>
         </div>
@@ -10484,15 +12640,15 @@ async function executeDeleteAccount() {
     if (confirmBtn) confirmBtn.disabled = true;
     if (spinner) spinner.style.display = 'inline-block';
     const fa = currentLang === 'fa';
-    if (btnText) btnText.textContent = fa ? 'در حال حذف...' : 'Deleting...';
+    if (btnText) btnText.textContent = t('delete_account_progress');
 
     try {
         const initData = getTelegramInitData();
         if (!initData) {
-            showMiniToast(fa ? 'خطا: ابتدا از طریق تلگرام وارد شوید' : 'Error: Sign in via Telegram first');
+            showMiniToast(t('delete_account_telegram_error'));
             if (confirmBtn) confirmBtn.disabled = false;
             if (spinner) spinner.style.display = 'none';
-            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+            if (btnText) btnText.textContent = t('delete_account_confirm');
             return;
         }
 
@@ -10511,7 +12667,7 @@ async function executeDeleteAccount() {
 
         if (response.ok && data.status === 'success') {
             closeDeleteAccountModal();
-            showMiniToast(fa ? '✅ حساب حذف شد. می‌توانید دوباره ثبت‌نام کنید.' : '✅ Account deleted. You can re-register.');
+            showMiniToast(t('delete_account_success_msg'));
 
             // Clear local state
             try {
@@ -10525,24 +12681,24 @@ async function executeDeleteAccount() {
                 document.body.innerHTML = `
                     <div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b1220;color:#fff;font-family:inherit;padding:24px;text-align:center;">
                         <div style="font-size:48px;margin-bottom:16px;">👋</div>
-                        <h2 style="font-size:22px;margin-bottom:12px;">${fa2 ? 'حساب شما حذف شد' : 'Account Deleted'}</h2>
-                        <p style="color:rgba(255,255,255,0.6);max-width:320px;line-height:1.6;margin-bottom:24px;">${fa2 ? 'برای ثبت‌نام مجدد، ربات را در تلگرام استارت کنید. اگر با لینک دعوت وارد شوید، دعوت شما ثبت خواهد شد.' : 'To re-register, start the bot in Telegram. If you enter via a referral link, your referral will be registered.'}</p>
-                        <button onclick="location.reload()" style="padding:12px 32px;background:#f7931a;color:#fff;border:none;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;">${fa2 ? 'بارگذاری مجدد' : 'Reload'}</button>
+                        <h2 style="font-size:22px;margin-bottom:12px;">${t('delete_account_deleted_title')}</h2>
+                        <p style="color:rgba(255,255,255,0.6);max-width:320px;line-height:1.6;margin-bottom:24px;">${t('delete_account_deleted_desc')}</p>
+                        <button onclick="location.reload()" style="padding:12px 32px;background:#f7931a;color:#fff;border:none;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;">${t('reload')}</button>
                     </div>
                 `;
             }, 1500);
         } else {
-            showMiniToast((fa ? 'خطا: ' : 'Error: ') + (data.message || data.error || 'Unknown'));
+            showMiniToast(t('error_prefix') + (data.message || data.error || t('unknown_error')));
             if (confirmBtn) confirmBtn.disabled = false;
             if (spinner) spinner.style.display = 'none';
-            if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+            if (btnText) btnText.textContent = t('delete_account_confirm');
         }
     } catch (e) {
         console.error('[DELETE-ACCOUNT] Network error:', e);
-        showMiniToast(fa ? 'خطای شبکه — دوباره تلاش کنید' : 'Network error — try again');
+        showMiniToast(t('network_error_retry'));
         if (confirmBtn) confirmBtn.disabled = false;
         if (spinner) spinner.style.display = 'none';
-        if (btnText) btnText.textContent = fa ? 'حذف دائمی' : 'Permanently Delete';
+        if (btnText) btnText.textContent = t('delete_account_confirm');
     }
 }
 
@@ -10670,7 +12826,7 @@ function renderAboutContent(content) {
 
     // Version badge
     if (content.version) {
-        html += '<div class="content-version-badge"> نسخه ' + content.version + '</div>';
+        html += '<div class="content-version-badge"> ' + t('content_version') + ' ' + content.version + '</div>';
     }
 
     // Sections as cards
@@ -10686,7 +12842,7 @@ function renderAboutContent(content) {
     // Channel link
     html += '<a class="content-channel-link" href="https://t.me/amir_btc_2024" target="_blank" rel="noopener">';
     html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 4.5L2.5 12.5l6 2 2 6 4-4 5 4 2-16z"/></svg>';
-    html += '<span>کانال رسمی: amir_btc_2024</span>';
+    html += '<span>' + t('official_channel_label') + '</span>';
     html += '</a>';
 
     return html;
@@ -10699,7 +12855,7 @@ function renderAccordionContent(content) {
     let html = '';
 
     if (!Array.isArray(content.sections) || content.sections.length === 0) {
-        return '<div class="content-loading">محتوایی موجود نیست.</div>';
+        return '<div class="content-loading">' + t('empty_content') + '</div>';
     }
 
     for (let i = 0; i < content.sections.length; i++) {
@@ -10753,19 +12909,19 @@ function openContentEditor(type) {
         .then(data => {
             if (data.status === 'success' && data.data) {
                 const content = data.data;
-                const titles = { about: 'ویرایش: درباره ما', terms: 'ویرایش: قوانین', privacy: 'ویرایش: حریم خصوصی' };
-                editorTitle.textContent = titles[type] || 'ویرایش محتوا';
+                const titles = { about: t('content_edit_about'), terms: t('content_edit_terms'), privacy: t('content_edit_privacy') };
+                editorTitle.textContent = titles[type] || t('content_edit_default');
                 titleInput.value = content.title || '';
                 versionInput.value = content.version || '1.0.0';
                 sectionsTextarea.value = JSON.stringify(content.sections || [], null, 2);
                 document.getElementById('content-editor-modal').style.display = 'flex';
             } else {
-                statusEl.textContent = 'خطا در بارگذاری محتوا';
+                statusEl.textContent = t('content_load_error');
                 statusEl.className = 'editor-status error';
             }
         })
         .catch(e => {
-            statusEl.textContent = 'خطا: ' + e.message;
+            statusEl.textContent = t('error_prefix') + e.message;
             statusEl.className = 'editor-status error';
         });
 }
@@ -10790,15 +12946,15 @@ async function saveContentFromEditor() {
     let sections;
     try {
         sections = JSON.parse(sectionsTextarea.value);
-        if (!Array.isArray(sections)) throw new Error('بخش‌ها باید یک آرایه باشند');
+        if (!Array.isArray(sections)) throw new Error(t('content_json_error'));
     } catch (e) {
-        statusEl.textContent = 'خطا در JSON: ' + e.message;
+        statusEl.textContent = t('content_json_error') + e.message;
         statusEl.className = 'editor-status error';
         return;
     }
 
     saveBtn.disabled = true;
-    saveBtn.textContent = 'در حال ذخیره...';
+    saveBtn.textContent = t('content_save_progress');
 
     try {
         const data = await apiFetch('/api/admin/content/' + _editingContentType, {
@@ -10811,7 +12967,7 @@ async function saveContentFromEditor() {
         });
 
         if (data.status === 'success') {
-            statusEl.textContent = '✓ با موفقیت ذخیره شد';
+            statusEl.textContent = t('content_save_success');
             statusEl.className = 'editor-status success';
             // Reload content in the background
             // Save type BEFORE closeContentEditor sets _editingContentType = null
@@ -10821,15 +12977,15 @@ async function saveContentFromEditor() {
                 loadContent(savedType);
             }, 1000);
         } else {
-            statusEl.textContent = 'خطا: ' + (data.message || 'نامشخص');
+            statusEl.textContent = t('error_prefix') + (data.message || t('unknown_error'));
             statusEl.className = 'editor-status error';
         }
     } catch (e) {
-        statusEl.textContent = 'خطا: ' + e.message;
+        statusEl.textContent = t('error_prefix') + e.message;
         statusEl.className = 'editor-status error';
     } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = 'ذخیره';
+        saveBtn.textContent = t('content_save_btn');
     }
 }
 
@@ -10970,37 +13126,37 @@ async function renderNotifSettings() {
     // Category definitions — grouped by importance
     const groups = [
         {
-            label: isFa ? 'اعلان‌های حیاتی' : 'Critical Alerts',
+            label: t('notif_critical_alerts'),
             items: [
-                { key: 'ch_price_alert', svg: NS_ICONS.price, ic: 'ic-price', t: isFa ? 'هشدار قیمت' : 'Price Alerts', d: isFa ? 'هنگام رسیدن قیمت به مقدار تعیین شده' : 'When price reaches your target', def: 'both' },
-                { key: 'ch_analysis', svg: NS_ICONS.analysis, ic: 'ic-analysis', t: isFa ? 'تحلیل‌های جدید' : 'Analysis', d: isFa ? 'انتشار تحلیل جدید بازار' : 'New market analysis published', def: 'both' },
-                { key: 'ch_calendar', svg: NS_ICONS.calendar, ic: 'ic-calendar', t: isFa ? 'تقویم اقتصادی' : 'Calendar Events', d: isFa ? 'هشدار رویدادهای مهم اقتصادی' : 'Important economic events', def: 'both' },
+                { key: 'ch_price_alert', svg: NS_ICONS.price, ic: 'ic-price', t: t('ch_price_alert'), d: t('ch_price_alert_desc'), def: 'both' },
+                { key: 'ch_analysis', svg: NS_ICONS.analysis, ic: 'ic-analysis', t: t('ch_analysis'), d: t('ch_analysis_desc'), def: 'both' },
+                { key: 'ch_calendar', svg: NS_ICONS.calendar, ic: 'ic-calendar', t: t('ch_calendar'), d: t('ch_calendar_desc'), def: 'both' },
                 // Phase 5: Removed ch_breaking_news, ch_security — no producer emits these.
             ]
         },
         {
-            label: isFa ? 'اعلان‌های حساب کاربری' : 'Account Notifications',
+            label: t('notif_account_alerts'),
             items: [
-                { key: 'ch_tickets', svg: NS_ICONS.ticket, ic: 'ic-ticket', t: isFa ? 'تیکت‌ها' : 'Tickets', d: isFa ? 'پاسخ به تیکت‌های پشتیبانی' : 'Support ticket replies', def: 'both' },
-                { key: 'ch_announcements', svg: NS_ICONS.announce, ic: 'ic-announce', t: isFa ? 'اطلاعیه‌ها' : 'Announcements', d: isFa ? 'اطلاعیه‌های سیستم و برنامه' : 'System and app announcements', def: 'mini_app' },
-                { key: 'ch_wheel', svg: NS_ICONS.wheel, ic: 'ic-wheel', t: isFa ? 'گردونه شانس' : 'Spin Rewards', d: isFa ? 'پاداش گردونه و اسپین رایگان' : 'Wheel rewards and free spins', def: 'mini_app' },
-                { key: 'ch_referral', svg: NS_ICONS.referral, ic: 'ic-referral', t: isFa ? 'رفرال' : 'Referral', d: isFa ? 'دعوت کاربران جدید و پاداش' : 'New invites and referral rewards', def: 'mini_app' },
-                { key: 'ch_wallet', svg: NS_ICONS.wallet, ic: 'ic-wallet', t: isFa ? 'کیف پول' : 'Wallet', d: isFa ? 'دریافت توکن، پاداش روزانه' : 'Token received, daily reward', def: 'mini_app' },
+                { key: 'ch_tickets', svg: NS_ICONS.ticket, ic: 'ic-ticket', t: t('ch_tickets'), d: t('ch_tickets_desc'), def: 'both' },
+                { key: 'ch_announcements', svg: NS_ICONS.announce, ic: 'ic-announce', t: t('ch_announcements'), d: t('ch_announcements_desc'), def: 'mini_app' },
+                { key: 'ch_wheel', svg: NS_ICONS.wheel, ic: 'ic-wheel', t: t('ch_wheel'), d: t('ch_wheel_desc'), def: 'mini_app' },
+                { key: 'ch_referral', svg: NS_ICONS.referral, ic: 'ic-referral', t: t('ch_referral'), d: t('ch_referral_desc'), def: 'mini_app' },
+                { key: 'ch_wallet', svg: NS_ICONS.wallet, ic: 'ic-wallet', t: t('ch_wallet'), d: t('ch_wallet_desc'), def: 'mini_app' },
             ]
         },
         {
-            label: isFa ? 'اعلان‌های تبلیغاتی' : 'Promotional',
+            label: t('ns_marketing'),
             items: [
-                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: isFa ? 'تبلیغات' : 'Promotions', d: isFa ? 'پیشنهادات ویژه و تبلیغات' : 'Special offers and promotions', def: 'none', premiumOnly: true },
+                { key: 'ch_promotions', svg: NS_ICONS.promo, ic: 'ic-promo', t: t('ch_promotions'), d: t('ch_promotions_desc'), def: 'none', premiumOnly: true },
             ]
         },
     ];
 
     const channels = [
-        { val: 'none', label: isFa ? 'خاموش' : 'Off', cls: 'off' },
-        { val: 'mini_app', label: isFa ? 'اپ' : 'App', cls: 'app' },
-        { val: 'telegram', label: isFa ? 'ربات' : 'Bot', cls: 'bot' },
-        { val: 'both', label: isFa ? 'هر دو' : 'Both', cls: 'both' },
+        { val: 'none', label: t('notif_off'), cls: 'off' },
+        { val: 'mini_app', label: t('notif_app'), cls: 'app' },
+        { val: 'telegram', label: t('notif_bot'), cls: 'bot' },
+        { val: 'both', label: t('notif_both'), cls: 'both' },
     ];
 
     // Use DocumentFragment for performance — no string concatenation
@@ -11096,7 +13252,7 @@ async function renderNotifSettings() {
             const descEl = document.createElement('div');
             descEl.className = 'ns-prem-desc';
             descEl.textContent = isLocked
-                ? (isFa ? 'فقط برای اعضای Premium' : 'Premium members only')
+                ? t('premium_only_label')
                 : cat.d;
             textBox.appendChild(titleEl);
             textBox.appendChild(descEl);
@@ -11206,16 +13362,16 @@ async function renderNotifSettings() {
         let statusClass, statusTitle, statusDesc;
         if (activeCount === 0) {
             statusClass = 'inactive';
-            statusTitle = isFa ? 'همه اعلان‌ها غیرفعال هستند' : 'All notifications disabled';
-            statusDesc = isFa ? 'هیچ اعلانی دریافت نخواهید کرد' : 'You will not receive any notifications';
+            statusTitle = t('notif_all_disabled_title');
+            statusDesc = t('notif_all_disabled_desc');
         } else if (bothCount >= 3) {
             statusClass = 'active';
-            statusTitle = isFa ? 'سیستم اعلان فعال است' : 'Notification system active';
-            statusDesc = isFa ? `${activeCount} دسته فعال · ${bothCount} روی هر دو کانال` : `${activeCount} active · ${bothCount} on both channels`;
+            statusTitle = t('notif_system_active_title');
+            statusDesc = t('notif_system_active_desc', { active: activeCount, both: bothCount });
         } else {
             statusClass = 'partial';
-            statusTitle = isFa ? 'اعلان‌های مهم فعال هستند' : 'Important alerts active';
-            statusDesc = isFa ? `${activeCount} از ${allCats.length} دسته فعال` : `${activeCount} of ${allCats.length} categories active`;
+            statusTitle = t('notif_important_active_title');
+            statusDesc = t('notif_important_active_desc', { active: activeCount, total: allCats.length });
         }
 
         const statusIcon = statusClass === 'active'
@@ -11379,9 +13535,9 @@ function validateTicketField(field) {
     let valid = true;
     let errMsg = '';
     if (field === 'title') {
-        if (val && val.length < 3) { valid = false; errMsg = 'عنوان حداقل ۳ کاراکتر باشد'; }
+        if (val && val.length < 3) { valid = false; errMsg = t('ticket_title_min'); }
     } else {
-        if (val && val.length < TICKET_MIN_BODY) { valid = false; errMsg = `حداقل ${TICKET_MIN_BODY} کاراکتر`; }
+        if (val && val.length < TICKET_MIN_BODY) { valid = false; errMsg = t('ticket_body_min', { n: TICKET_MIN_BODY }); }
     }
     errorEl.textContent = errMsg;
     input.classList.toggle('tk-error-state', !valid && val.length > 0);
@@ -11405,7 +13561,7 @@ function updateTicketCharCount() {
     counter.textContent = `${faLen} / ${faMax}`;
     counter.classList.toggle('tk-limit', len >= TICKET_MAX_BODY);
     if (len >= TICKET_MAX_BODY) {
-        counter.textContent = `سقف مجاز (${faMax} کاراکتر)`;
+        counter.textContent = t('ticket_max_chars', { n: faMax });
     }
 }
 
@@ -11489,23 +13645,23 @@ async function submitTicket() {
     if (!title) {
         valid = false;
         const errEl = document.getElementById('ticket-title-error');
-        if (errEl) errEl.textContent = 'عنوان الزامی است';
+        if (errEl) errEl.textContent = t('ticket_title_required');
         if (titleEl) titleEl.classList.add('tk-error-state');
     } else if (title.length < 3) {
         valid = false;
         const errEl = document.getElementById('ticket-title-error');
-        if (errEl) errEl.textContent = 'عنوان حداقل ۳ کاراکتر باشد';
+        if (errEl) errEl.textContent = t('ticket_title_min');
         if (titleEl) titleEl.classList.add('tk-error-state');
     }
     if (!body) {
         valid = false;
         const errEl = document.getElementById('ticket-body-error');
-        if (errEl) errEl.textContent = 'متن پیام الزامی است';
+        if (errEl) errEl.textContent = t('ticket_body_required');
         if (bodyEl) bodyEl.classList.add('tk-error-state');
     } else if (body.length < TICKET_MIN_BODY) {
         valid = false;
         const errEl = document.getElementById('ticket-body-error');
-        if (errEl) errEl.textContent = `حداقل ${TICKET_MIN_BODY} کاراکتر نیاز است`;
+        if (errEl) errEl.textContent = t('ticket_body_min_needed', { n: TICKET_MIN_BODY });
         if (bodyEl) bodyEl.classList.add('tk-error-state');
     }
     if (!valid) { showToast(t('toast_form_errors')); return; }
@@ -11914,7 +14070,7 @@ function openNewsModalWith(n) {
     const categoryEl = el('news-modal-category');
     if (categoryEl) {
         const cat = n.category || 'crypto';
-        const catLabels = { crypto: 'کریپتو', forex: 'فارکس', economy: 'اقتصاد' };
+        const catLabels = { crypto: t('news_cat_crypto'), forex: t('news_cat_forex'), economy: t('news_cat_economy') };
         categoryEl.innerText = catLabels[cat] || cat;
     }
 
@@ -11928,7 +14084,7 @@ function openNewsModalWith(n) {
                 '<div class="news-modal-summary-box">' +
                     '<div class="news-modal-summary-header">' +
                         '<svg class="news-modal-ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" stroke-linejoin="round"/><circle cx="12" cy="20" r="1"/></svg>' +
-                        '<span>تحلیل خبر</span>' +
+                        '<span>' + t('news_analysis_label') + '</span>' +
                     '</div>' +
                     '<div class="news-modal-summary-text">' + escapeHtmlForNews(n.ai_summary) + '</div>' +
                 '</div>';
@@ -11936,12 +14092,12 @@ function openNewsModalWith(n) {
             let tagsHtml = '<div class="news-modal-tags">';
             if (n.sentiment) {
                 const sentEmoji = { bullish: '🟢', bearish: '🔴', neutral: '🟡', breaking: '⚡', macro: '🌐' };
-                const sentLabels = { bullish: 'صعودی', bearish: 'نزولی', neutral: 'خنثی', breaking: 'فوری', macro: 'کلان' };
+                const sentLabels = { bullish: t('sentiment_bullish'), bearish: t('sentiment_bearish'), neutral: t('sentiment_neutral'), breaking: t('news_filter_breaking'), macro: t('news_sent_macro') };
                 tagsHtml += '<span class="news-tag news-tag-sentiment">' + (sentEmoji[n.sentiment] || '•') + ' ' + (sentLabels[n.sentiment] || n.sentiment) + '</span>';
             }
             if (n.impact) {
                 const impEmoji = { high: '⚡', medium: '⭐', low: '📉' };
-                const impLabels = { high: 'تأثیر بالا', medium: 'تأثیر متوسط', low: 'تأثیر کم' };
+                const impLabels = { high: t('cal_impact_high'), medium: t('cal_impact_med'), low: t('cal_impact_low') };
                 tagsHtml += '<span class="news-tag news-tag-impact-' + (n.impact || 'low') + '">' + (impEmoji[n.impact] || '•') + ' ' + (impLabels[n.impact] || n.impact) + '</span>';
             }
             if (n.coins && Array.isArray(n.coins) && n.coins.length > 0) {
@@ -13111,11 +15267,11 @@ let _maintStatusInterval = null;
 function _startMaintenanceStatusRotation() {
     if (_maintStatusInterval) return; // Already running
     const messages = [
-        'در حال بهینه‌سازی سیستم...',
-        'در حال بروزرسانی سرویس‌ها...',
-        'در حال همگام‌سازی داده‌ها...',
-        'در حال بررسی امنیت...',
-        'آماده‌سازی نسخه جدید...',
+        t('maint_optimizing'),
+        t('maint_updating'),
+        t('maint_syncing'),
+        t('maint_security'),
+        t('maint_new_version'),
     ];
     let idx = 0;
     const el = document.getElementById('maint-status-rotator');
@@ -13178,7 +15334,7 @@ function _showMaintCheckingIndicator() {
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="animation:maint-spin 1s linear infinite;">
             <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
         </svg>
-        <span>در حال بررسی دسترسی...</span>
+        <span>${t('jl_checking_access')}</span>
     `;
     // Insert after the bypass button's parent (maint-bypass-area)
     const bypassArea = overlay.querySelector('.maint-bypass-area') || overlay.querySelector('#maint-admin-bypass')?.parentElement;
@@ -13892,7 +16048,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (window.MembershipApp.isPremiumCached()) {
             const upsellCta = document.querySelector('.hero-slide[data-slide="0"] .hero-cta--premium-v2');
             if (upsellCta) {
-              upsellCta.textContent = 'عضویت Premium';
+              upsellCta.textContent = t('premium_membership');
               upsellCta.classList.add('hero-cta--premium-active');
               _premiumCtaUpdated = true;
             }
@@ -14223,15 +16379,15 @@ function showJoinStatusBar(state, opts = {}) {
 
     if (state === 'checking') {
         icon = JSB_ICONS.spinner;
-        text = isFa ? 'در حال بررسی عضویت…' : 'Checking membership…';
+        text = t('jl_membership_checking');
     } else if (state === 'verified') {
         icon = JSB_ICONS.check;
-        text = isFa ? 'عضویت تأیید شد ✓' : 'Membership verified ✓';
+        text = t('jl_membership_verified');
     } else if (state === 'required') {
         icon = JSB_ICONS.alert;
-        text = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
+        text = t('jl_membership_required');
         actionDisplay = 'inline-flex';
-        actionText = isFa ? 'عضویت' : 'Join';
+        actionText = t('jl_join_btn');
         actionHandler = () => {
             const tg = getTg();
             tg?.openTelegramLink?.('https://t.me/amir_btc_2024') ||
@@ -14242,9 +16398,9 @@ function showJoinStatusBar(state, opts = {}) {
         // H2 FIX: allow a custom message (e.g. "Open in Telegram" when not
         // inside Telegram). Previously hardcoded to "Connection error" which
         // was misleading for auth-required states.
-        text = (opts.message || (isFa ? 'خطای اتصال' : 'Connection error'));
+        text = (opts.message || t('jl_connection_error'));
         actionDisplay = 'inline-flex';
-        actionText = isFa ? 'تلاش مجدد' : 'Retry';
+        actionText = t('jl_retry_btn');
         actionHandler = () => {
             // Re-trigger bootstrap from scratch
             setJoinLockState('loading');
@@ -14345,7 +16501,7 @@ async function _renderRequiredChannelsList() {
         const isFa = currentLang === 'fa';
         const header = document.createElement('div');
         header.className = 'jl-channels-header';
-        header.textContent = isFa ? 'کانال‌های موردنیاز:' : 'Required channels:';
+        header.textContent = t('jl_required_channels');
         container.appendChild(header);
 
         for (const ch of data.channels) {
@@ -14375,7 +16531,7 @@ async function _renderRequiredChannelsList() {
             link.href = ch.joinUrl || ('https://t.me/' + (ch.username || ''));
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
-            link.textContent = isFa ? 'عضویت' : 'Join';
+            link.textContent = t('jl_join_btn');
             row.appendChild(link);
 
             container.appendChild(row);
@@ -14437,8 +16593,8 @@ function setJoinLockState(state, errorMsg) {
         const actionsEl = document.getElementById('join-lock-actions');
         const loadingEl = document.getElementById('join-lock-loading');
         const errorEl = document.getElementById('join-lock-error');
-        if (titleEl) titleEl.textContent = isFa ? 'عضویت در کانال الزامی است' : 'Channel membership required';
-        if (descEl) descEl.textContent = isFa ? 'برای استفاده از امکانات برنامه، ابتدا باید عضو کانال رسمی شوید.' : 'To use the app, please join our official channel first.';
+        if (titleEl) titleEl.textContent = t('jl_membership_required');
+        if (descEl) descEl.textContent = t('jl_lock_desc_full');
         if (actionsEl) actionsEl.style.display = 'flex';
         if (loadingEl) loadingEl.style.display = 'none';
         if (errorEl) {
@@ -14499,9 +16655,7 @@ async function recheckJoinMembership() {
             }, 600);
         } else {
             // Still not a member — show full lock again with explanation
-            const errorMsg = isFa
-                ? 'هنوز عضویت شما تأیید نشده است. لطفاً ابتدا عضو کانال شوید و سپس دوباره تأیید عضویت را انتخاب کنید.'
-                : 'Membership not confirmed yet. Please join the channel first, then click verify again.';
+            const errorMsg = t('jl_not_verified_msg');
             setJoinLockState('not-joined', errorMsg);
             getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
@@ -14874,7 +17028,7 @@ function openAdPopup(popup) {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'ad-popup-close';
     closeBtn.setAttribute('type', 'button');
-    closeBtn.setAttribute('aria-label', 'بستن');
+    closeBtn.setAttribute('aria-label', t('close'));
     closeBtn.innerHTML = '&times;';
     closeBtn.addEventListener('click', function() { closeAdPopup(popup.id); });
     card.appendChild(closeBtn);

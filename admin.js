@@ -32,46 +32,46 @@ let _adminLogsPage = 1;
 
 const ADMIN_PERMISSIONS = {
     // Analysis
-    'analysis.publish':  { label: 'انتشار تحلیل', group: 'تحلیل' },
-    'analysis.edit':     { label: 'ویرایش تحلیل', group: 'تحلیل' },
-    'analysis.delete':   { label: 'حذف تحلیل', group: 'تحلیل' },
+    'analysis.publish':  { label: t('adm_perm_analysis_publish'),  group: t('adm_perm_group_analysis') },
+    'analysis.edit':     { label: t('adm_perm_analysis_edit'),     group: t('adm_perm_group_analysis') },
+    'analysis.delete':   { label: t('adm_perm_analysis_delete'),   group: t('adm_perm_group_analysis') },
     // News
-    'news.publish':      { label: 'انتشار خبر', group: 'اخبار' },
-    'news.edit':         { label: 'ویرایش خبر', group: 'اخبار' },
-    'news.delete':       { label: 'حذف خبر', group: 'اخبار' },
+    'news.publish':      { label: t('adm_perm_news_publish'),      group: t('adm_perm_group_news') },
+    'news.edit':         { label: t('adm_perm_news_edit'),         group: t('adm_perm_group_news') },
+    'news.delete':       { label: t('adm_perm_news_delete'),       group: t('adm_perm_group_news') },
     // Users
-    'users.view':        { label: 'مشاهده کاربران', group: 'کاربران' },
-    'users.manage':      { label: 'مدیریت کاربران', group: 'کاربران' },
-    'users.block':       { label: 'مسدودسازی کاربران', group: 'کاربران' },
+    'users.view':        { label: t('adm_perm_users_view'),        group: t('adm_perm_group_users') },
+    'users.manage':      { label: t('adm_perm_users_manage'),      group: t('adm_perm_group_users') },
+    'users.block':       { label: t('adm_perm_users_block'),       group: t('adm_perm_group_users') },
     // Admins
-    'admins.view':       { label: 'مشاهده مدیران', group: 'مدیران' },
-    'admins.add':        { label: 'افزودن مدیر', group: 'مدیران' },
-    'admins.edit':       { label: 'ویرایش مدیر', group: 'مدیران' },
-    'admins.delete':     { label: 'حذف مدیر', group: 'مدیران' },
+    'admins.view':       { label: t('adm_perm_admins_view'),       group: t('adm_perm_group_admins') },
+    'admins.add':        { label: t('adm_perm_admins_add'),        group: t('adm_perm_group_admins') },
+    'admins.edit':       { label: t('adm_perm_admins_edit'),       group: t('adm_perm_group_admins') },
+    'admins.delete':     { label: t('adm_perm_admins_delete'),     group: t('adm_perm_group_admins') },
     // Wallet
-    'wallet.view':       { label: 'مشاهده کیف پول', group: 'کیف پول' },
-    'wallet.manage':     { label: 'مدیریت موجودی', group: 'کیف پول' },
-    'wallet.reward':     { label: 'ثبت پاداش', group: 'کیف پول' },
+    'wallet.view':       { label: t('adm_perm_wallet_view'),       group: t('adm_perm_group_wallet') },
+    'wallet.manage':     { label: t('adm_perm_wallet_manage'),     group: t('adm_perm_group_wallet') },
+    'wallet.reward':     { label: t('adm_perm_wallet_reward'),     group: t('adm_perm_group_wallet') },
     // Referral
-    'referral.manage':   { label: 'مدیریت ریفرال', group: 'ریفرال' },
-    'referral.reward':   { label: 'ثبت پاداش ریفرال', group: 'ریفرال' },
+    'referral.manage':   { label: t('adm_perm_referral_manage'),   group: t('adm_perm_group_referral') },
+    'referral.reward':   { label: t('adm_perm_referral_reward'),   group: t('adm_perm_group_referral') },
     // Tickets
-    'tickets.view':      { label: 'مشاهده تیکت', group: 'تیکت' },
-    'tickets.reply':     { label: 'پاسخ به تیکت', group: 'تیکت' },
-    'tickets.close':     { label: 'بستن تیکت', group: 'تیکت' },
+    'tickets.view':      { label: t('adm_perm_tickets_view'),      group: t('adm_perm_group_tickets') },
+    'tickets.reply':     { label: t('adm_perm_tickets_reply'),      group: t('adm_perm_group_tickets') },
+    'tickets.close':     { label: t('adm_perm_tickets_close'),      group: t('adm_perm_group_tickets') },
     // Notifications
-    'notifications.send':    { label: 'ارسال اعلان', group: 'اعلان‌ها' },
-    'notifications.manage':  { label: 'مدیریت اعلان', group: 'اعلان‌ها' },
+    'notifications.send':    { label: t('adm_perm_notifications_send'),  group: t('adm_perm_group_notifications') },
+    'notifications.manage':  { label: t('adm_perm_notifications_manage'),group: t('adm_perm_group_notifications') },
     // Market
-    'market.manage':     { label: 'مدیریت وضعیت بازار', group: 'بازار' },
-    'market.alerts':     { label: 'مدیریت هشدارها', group: 'بازار' },
+    'market.manage':     { label: t('adm_perm_market_manage'),     group: t('adm_perm_group_market') },
+    'market.alerts':     { label: t('adm_perm_market_alerts'),     group: t('adm_perm_group_market') },
     // System
-    'system.logs':       { label: 'مشاهده لاگ', group: 'سیستم' },
-    'system.settings':   { label: 'تنظیمات سیستم', group: 'سیستم' },
-    'system.maintenance':{ label: 'حالت نگهداری', group: 'سیستم' },
+    'system.logs':       { label: t('adm_perm_system_logs'),       group: t('adm_perm_group_system') },
+    'system.settings':   { label: t('adm_perm_system_settings'),   group: t('adm_perm_group_system') },
+    'system.maintenance':{ label: t('adm_perm_system_maintenance'), group: t('adm_perm_group_system') },
     // Advertisement
-    'ads.banners':       { label: 'مدیریت بنرها', group: 'تبلیغات' },
-    'ads.manage':        { label: 'مدیریت تبلیغات', group: 'تبلیغات' },
+    'ads.banners':       { label: t('adm_perm_ads_banners'),       group: t('adm_perm_group_ads') },
+    'ads.manage':        { label: t('adm_perm_ads_manage'),        group: t('adm_perm_group_ads') },
 };
 
 // Each role maps to a fixed set of permissions. Super Admin always gets ['*'].
@@ -214,13 +214,13 @@ function adminFormatNumber(n) {
 
 function _formatCooldownHuman(seconds) {
     seconds = Number(seconds) || 0;
-    if (seconds <= 0) return 'بدون کوپل‌داون';
+    if (seconds <= 0) return t('adm_no_cooldown');
     var hours = Math.floor(seconds / 3600);
     var days = Math.floor(hours / 24);
-    if (days >= 7) return (days / 7) + ' هفته';
-    if (days >= 1) return days + ' روز';
-    if (hours >= 1) return hours + ' ساعت';
-    return seconds + ' ثانیه';
+    if (days >= 7) return t('adm_cooldown_weeks', { n: (days / 7) });
+    if (days >= 1) return t('adm_cooldown_days', { n: days });
+    if (hours >= 1) return t('adm_cooldown_hours', { n: hours });
+    return t('adm_cooldown_seconds', { n: seconds });
 }
 
 /**
@@ -257,8 +257,8 @@ function adminSkeletonGrid(count) {
  */
 function adminErrorState(message, retryFn) {
     return '<div class="admin-empty" style="color:#f87171;border-color:rgba(239,68,68,0.20);">' +
-        adminEscapeHtml(message || 'خطا در بارگذاری') +
-        (retryFn ? '<button class="adm-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">تلاش مجدد</button>' : '') +
+        adminEscapeHtml(message || t('adm_rc_load_error')) +
+        (retryFn ? '<button class="adm-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">' + t('adm_ads_retry_btn') + '</button>' : '') +
         '</div>';
 }
 
@@ -507,22 +507,22 @@ function _applySidebarPermissions() {
 
 // Section labels (Persian) for the header subtitle
 const _adminSectionLabels = {
-    'dashboard': 'داشبورد',
-    'users': 'کاربران',
-    'admins': 'مدیران',
-    'tickets': 'تیکت‌ها',
-    'broadcast': 'پیام همگانی',
-    'rewards': 'پاداش‌ها',
-    'transactions': 'تراکنش‌ها',
-    'referrals': 'رفرال',
-    'reward-center': 'مرکز پاداش',
-    'notification-center': 'مرکز اعلانات',
-    'alert-economy': 'اقتصاد هشدارها',
-    'advertisements': 'تبلیغات',
-    'system-controls': 'کنترل سیستم',
-    'system-health': 'سلامت سیستم',
-    'logs': 'لاگ‌ها',
-    'membership': 'عضویت ویژه',
+    'dashboard': t('adm_sidebar_dashboard'),
+    'users': t('adm_sidebar_users'),
+    'admins': t('adm_sidebar_admins'),
+    'tickets': t('adm_sidebar_tickets'),
+    'broadcast': t('adm_stat_broadcast'),
+    'rewards': t('adm_sidebar_rewards'),
+    'transactions': t('adm_sidebar_transactions'),
+    'referrals': t('adm_sidebar_referral'),
+    'reward-center': t('adm_sidebar_reward_center'),
+    'notification-center': t('adm_sidebar_notification_center'),
+    'alert-economy': t('adm_sidebar_alert_economy'),
+    'advertisements': t('adm_sidebar_ads'),
+    'system-controls': t('adm_sidebar_system_control'),
+    'system-health': t('adm_sidebar_health'),
+    'logs': t('adm_sidebar_logs'),
+    'membership': t('adm_sidebar_membership'),
 };
 
 function openAdminPanel() {
@@ -601,15 +601,15 @@ function _updateAdminSidebarUser() {
         const avatarEl = document.querySelector('.adm-sidebar-avatar');
         if (u) {
             const fullName = ((u.first_name || '') + ' ' + (u.last_name || '')).trim();
-            if (nameEl) nameEl.textContent = fullName || 'مدیر';
+            if (nameEl) nameEl.textContent = fullName || t('adm_role_admin');
             if (avatarEl) avatarEl.textContent = (u.first_name || 'A').charAt(0).toUpperCase();
         }
         // Show the admin's real role + permission count from _adminData
         if (roleEl) {
             const role = _adminData.role || '';
-            const roleLabel = ADMIN_ROLES[role] ? ADMIN_ROLES[role].label : (role || 'مدیر');
+            const roleLabel = ADMIN_ROLES[role] ? ADMIN_ROLES[role].label : (role || t('adm_role_admin'));
             const permCount = _adminData.is_super ? '∞' : (_adminData.permissions || []).length;
-            roleEl.textContent = roleLabel + ' · ' + permCount + ' دسترسی';
+            roleEl.textContent = roleLabel + ' · ' + t('adm_perm_count', { n: permCount });
         }
     } catch (e) { /* ignore */ }
 }
@@ -617,7 +617,7 @@ function _updateAdminSidebarUser() {
 function switchAdminSection(section, btn) {
     // Permission guard: if the admin can't access this section, refuse + toast
     if (!_adminCanAccessSection(section)) {
-        showAdminToast('شما به این بخش دسترسی ندارید', 'error');
+        showAdminToast(t('adm_no_access'), 'error');
         return;
     }
     _currentAdminSection = section;
@@ -707,7 +707,7 @@ async function loadMaintenanceSettings() {
         if (progressVal) progressVal.textContent = pct + '%';
         if (progressFill) progressFill.style.width = pct + '%';
         if (statStatus) {
-            statStatus.textContent = maint.enabled ? 'فعال' : 'غیرفعال';
+            statStatus.textContent = maint.enabled ? t('adm_status_active') : t('adm_status_inactive');
             statStatus.style.color = maint.enabled ? '#f7b950' : '#a8b2c5';
         }
         if (statProgress) statProgress.textContent = pct + '%';
@@ -715,7 +715,7 @@ async function loadMaintenanceSettings() {
     } catch (e) {
         if (statusEl) {
             statusEl.className = 'adm-maint-status error';
-            statusEl.textContent = 'خطا در بارگذاری وضعیت: ' + (e.message || 'نامشخص');
+            statusEl.textContent = t('adm_load_error_status') + (e.message || t('adm_status_unknown'));
         }
         console.error('loadMaintenanceSettings:', e);
     }
@@ -743,8 +743,8 @@ async function saveMaintenanceSettings() {
 
     const payload = {
         enabled: Boolean(toggle && toggle.checked),
-        title: (titleInput && titleInput.value.trim()) || 'در حال ساخت آینده‌ای بهتر!',
-        description: (descInput && descInput.value.trim()) || 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        title: (titleInput && titleInput.value.trim()) || t('adm_maint_title_ph'),
+        description: (descInput && descInput.value.trim()) || t('adm_maint_desc_default'),
         progress: Math.max(0, Math.min(100, Number(progressInput && progressInput.value) || 0)),
     };
 
@@ -766,7 +766,7 @@ async function saveMaintenanceSettings() {
             if (body) body.style.display = Boolean(m.enabled) ? 'flex' : 'none';
             const statStatus = document.getElementById('adm-stat-maint-status');
             if (statStatus) {
-                statStatus.textContent = m.enabled ? 'فعال' : 'غیرفعال';
+                statStatus.textContent = m.enabled ? t('adm_status_active') : t('adm_status_inactive');
                 statStatus.style.color = m.enabled ? '#f7b950' : '#a8b2c5';
             }
             const statProgress = document.getElementById('adm-stat-maint-progress');
@@ -778,21 +778,21 @@ async function saveMaintenanceSettings() {
         if (statusEl) {
             statusEl.className = 'adm-maint-status success';
             if (data && data.warning) {
-                statusEl.textContent = '⚠ تنظیمات ذخیره شد (حافظه موقت) — ' + data.warning;
+                statusEl.textContent = t('adm_maint_saved_cache_prefix') + data.warning;
             } else {
-                statusEl.textContent = '✓ تنظیمات با موفقیت ذخیره شد';
+                statusEl.textContent = t('adm_maint_saved_ok');
             }
         }
-        showAdminToast(data && data.warning ? 'ذخیره شد (حافظه موقت)' : 'تنظیمات نگهداری ذخیره شد', 'success');
+        showAdminToast(data && data.warning ? t('adm_maint_saved_cache_toast') : t('adm_maint_saved_toast'), 'success');
 
         // Reload to confirm state persisted (but the UI already shows the correct state)
         loadMaintenanceSettings();
     } catch (e) {
         if (statusEl) {
             statusEl.className = 'adm-maint-status error';
-            statusEl.textContent = '✗ خطا در ذخیره: ' + (e.message || 'نامشخص');
+            statusEl.textContent = t('adm_maint_save_error_prefix') + (e.message || t('adm_status_unknown'));
         }
-        showAdminToast('خطا در ذخیره تنظیمات', 'error');
+        showAdminToast(t('adm_maint_save_error_toast'), 'error');
         console.error('saveMaintenanceSettings:', e);
     }
 }
@@ -805,32 +805,32 @@ async function saveMaintenanceSettings() {
 const MAINT_PRESETS = {
     deploy: {
         enabled: true,
-        title: 'در حال استقرار نسخه جدید',
-        description: 'در حال انتشار نسخه جدید اپلیکیشن با قابلیت‌های بهتر هستیم. به‌زودی بازمی‌گردیم!',
+        title: t('adm_preset_new_release_title'),
+        description: t('adm_preset_new_release_desc'),
         progress: 25,
     },
     upgrade: {
         enabled: true,
-        title: 'ارتقای سیستم در حال انجام است',
-        description: 'در حال ارتقاء زیرساخت و بهبود عملکرد سیستم هستیم. چند دقیقه دیگر بازمی‌گردیم.',
+        title: t('adm_preset_upgrade_title'),
+        description: t('adm_preset_upgrade_desc'),
         progress: 50,
     },
     database: {
         enabled: true,
-        title: 'مهاجرت دیتابیس',
-        description: 'در حال مهاجرت دیتابیس برای بهبود سرعت و پایداری هستیم. این عملیات کمی طول می‌کشد.',
+        title: t('adm_preset_migration_title'),
+        description: t('adm_preset_migration_desc'),
         progress: 75,
     },
     emergency: {
         enabled: true,
-        title: 'اصلاح فوری سیستم',
-        description: 'متأسفیم! یک مشکل فوری شناسایی کردیم که در حال رفع آن هستیم. به‌زودی بازمی‌گردیم.',
+        title: t('adm_preset_hotfix_title'),
+        description: t('adm_preset_hotfix_desc'),
         progress: 10,
     },
     end: {
         enabled: false,
-        title: 'در حال ساخت آینده‌ای بهتر!',
-        description: 'در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.',
+        title: t('adm_preset_end_title'),
+        description: t('adm_maint_desc_default'),
         progress: 100,
     },
 };
@@ -838,20 +838,18 @@ const MAINT_PRESETS = {
 async function applyMaintenancePreset(presetKey) {
     const preset = MAINT_PRESETS[presetKey];
     if (!preset) {
-        showAdminToast('سناریو نامشخص', 'error');
+        showAdminToast(t('adm_preset_unknown'), 'error');
         return;
     }
 
     // Confirm before enabling maintenance (not for 'end' preset)
     if (preset.enabled) {
         const confirmed = confirm(
-            '⚠️ فعال‌سازی حالت نگهداری؟\n\n' +
-            'تمام کاربران عادی قفل خواهند شد و فقط ادمین‌ها می‌توانند وارد شوند.\n\n' +
-            'سناریو: ' + preset.title
+            t('adm_preset_enable_confirm', { title: preset.title })
         );
         if (!confirmed) return;
     } else {
-        const confirmed = confirm('✓ پایان حالت نگهداری؟\n\nکاربران دوباره می‌توانند وارد شوند.');
+        const confirmed = confirm(t('adm_preset_end_confirm'));
         if (!confirmed) return;
     }
 
@@ -909,23 +907,23 @@ async function loadAdminDashboard() {
             // Helper: show '--' for null values (metrics we can't compute)
             const fmt = function (v) { return (v == null) ? '--' : adminFormatNumber(v); };
             // User metrics (top row — most important)
-            statsHtml += adminStatCardV2(fmt(s.total_users), 'کل کاربران', 'users', 'blue');
-            statsHtml += adminStatCardV2(fmt(s.new_today), 'جدید امروز', 'new', 'green');
-            statsHtml += adminStatCardV2(fmt(s.new_this_week), 'جدید این هفته', 'week', 'purple');
-            statsHtml += adminStatCardV2(fmt(s.new_this_month), 'جدید این ماه', 'month', 'purple');
-            statsHtml += adminStatCardV2(fmt(s.joined_channel), 'عضو کانال', 'channel', 'green');
-            statsHtml += adminStatCardV2(fmt(s.join_percentage) + '%', 'درصد عضویت', 'percent', 'orange');
-            statsHtml += adminStatCardV2(fmt(s.joined_bot), 'کاربران بات', 'bot', 'blue');
-            statsHtml += adminStatCardV2(fmt(s.opened_mini_app), 'بازکردن Mini App', 'app', 'blue');
+            statsHtml += adminStatCardV2(fmt(s.total_users), t('adm_stat_total_users'), 'users', 'blue');
+            statsHtml += adminStatCardV2(fmt(s.new_today), t('adm_stat_new_today'), 'new', 'green');
+            statsHtml += adminStatCardV2(fmt(s.new_this_week), t('adm_stat_new_this_week'), 'week', 'purple');
+            statsHtml += adminStatCardV2(fmt(s.new_this_month), t('adm_stat_new_this_month'), 'month', 'purple');
+            statsHtml += adminStatCardV2(fmt(s.joined_channel), t('adm_stat_joined_channel'), 'channel', 'green');
+            statsHtml += adminStatCardV2(fmt(s.join_percentage) + '%', t('adm_stat_join_percentage'), 'percent', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.joined_bot), t('adm_stat_joined_bot'), 'bot', 'blue');
+            statsHtml += adminStatCardV2(fmt(s.opened_mini_app), t('adm_stat_opened_mini_app'), 'app', 'blue');
             // Alert metrics
-            statsHtml += adminStatCardV2(fmt(s.active_alerts), 'هشدارهای فعال', 'alerts', 'orange');
-            statsHtml += adminStatCardV2(fmt(s.triggered_today), 'هشدارهای فعال‌شده امروز', 'triggered', 'green');
+            statsHtml += adminStatCardV2(fmt(s.active_alerts), t('adm_stat_active_alerts'), 'alerts', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.triggered_today), t('adm_stat_triggered_today'), 'triggered', 'green');
             // Other metrics
-            statsHtml += adminStatCardV2(fmt(s.open_tickets), 'تیکت‌های باز', 'open', 'red');
-            statsHtml += adminStatCardV2(fmt(s.total_transactions), 'تراکنش‌ها', 'tx', 'orange');
-            statsHtml += adminStatCardV2(fmt(s.admins_count), 'مدیران', 'admins', 'purple');
+            statsHtml += adminStatCardV2(fmt(s.open_tickets), t('adm_stat_open_tickets'), 'open', 'red');
+            statsHtml += adminStatCardV2(fmt(s.total_transactions), t('adm_stat_total_transactions'), 'tx', 'orange');
+            statsHtml += adminStatCardV2(fmt(s.admins_count), t('adm_stat_admins_count'), 'admins', 'purple');
         }
-        grid.innerHTML = statsHtml || adminEmpty('آماری موجود نیست');
+        grid.innerHTML = statsHtml || adminEmpty(t('adm_stat_no_stats'));
 
         // Activity
         if (activityList && data.recent_activity) {
@@ -948,7 +946,7 @@ async function loadAdminDashboard() {
                 ra.analyses.forEach(function (a) {
                     activities.push({
                         type: 'analysis',
-                        message: 'تحلیل جدید: ' + adminEscapeHtml(a.coin || '') + (a.author ? ' توسط ' + adminEscapeHtml(a.author) : ''),
+                        message: t('adm_act_new_analysis', { coin: adminEscapeHtml(a.coin || '') }) + (a.author ? t('adm_act_analysis_by_author', { author: adminEscapeHtml(a.author) }) : ''),
                         created_at: a.created_at,
                     });
                 });
@@ -957,7 +955,7 @@ async function loadAdminDashboard() {
                 ra.tickets.forEach(function (t) {
                     activities.push({
                         type: 'user',
-                        message: 'تیکت: ' + adminEscapeHtml(t.title || '') + ' (' + adminEscapeHtml(t.status || '') + ')',
+                        message: t('adm_act_ticket', { title: adminEscapeHtml(t.title || ''), status: adminEscapeHtml(t.status || '') }),
                         created_at: t.created_at,
                     });
                 });
@@ -969,7 +967,7 @@ async function loadAdminDashboard() {
             const topActivities = activities.slice(0, 10);
 
             if (topActivities.length === 0) {
-                activityList.innerHTML = adminEmpty('فعالیتی اخیر وجود ندارد');
+                activityList.innerHTML = adminEmpty(t('adm_act_no_recent'));
             } else {
                 let actHtml = '';
                 topActivities.forEach(function (act) {
@@ -986,7 +984,7 @@ async function loadAdminDashboard() {
             }
         }
     } catch (e) {
-        grid.innerHTML = adminErrorState('بارگذاری داشبورد ناموفق بود', 'loadAdminDashboard');
+        grid.innerHTML = adminErrorState(t('adm_act_load_failed'), 'loadAdminDashboard');
         console.error('loadAdminDashboard:', e);
     }
 }
@@ -1005,25 +1003,25 @@ async function loadDashboardMaintenanceBanner() {
     try {
         const data = await adminApiFetch('/api/system/status');
         if (!data || !data.maintenance) {
-            titleEl.textContent = 'وضعیت نگهداری: غیرفعال';
-            subEl.textContent = 'سیستم در حالت عادی';
+            titleEl.textContent = t('adm_maint_status_off_text');
+            subEl.textContent = t('adm_maint_system_normal');
             banner.classList.remove('is-active');
             return;
         }
         const m = data.maintenance;
         if (m.enabled) {
-            titleEl.textContent = 'وضعیت نگهداری: فعال ⚠';
+            titleEl.textContent = t('adm_maint_status_on_text');
             const pct = Math.max(0, Math.min(100, Number(m.progress) || 0));
-            subEl.textContent = 'پیشرفت: ' + pct + '% — کاربران قفل شده‌اند';
+            subEl.textContent = t('adm_maint_progress_label_full', { pct: pct });
             banner.classList.add('is-active');
         } else {
-            titleEl.textContent = 'وضعیت نگهداری: غیرفعال ✓';
-            subEl.textContent = 'سیستم در حالت عادی';
+            titleEl.textContent = t('adm_maint_status_off_ok');
+            subEl.textContent = t('adm_maint_system_normal');
             banner.classList.remove('is-active');
         }
     } catch (e) {
-        titleEl.textContent = 'وضعیت نگهداری: نامشخص';
-        subEl.textContent = 'خطا در دریافت وضعیت';
+        titleEl.textContent = t('adm_maint_status_unknown_text');
+        subEl.textContent = t('adm_maint_status_error');
         banner.classList.remove('is-active');
     }
 }
@@ -1055,7 +1053,7 @@ async function loadAdminList() {
             const isSuper = role === 'super_admin' || admin.is_super;
             const perms = admin.permissions || [];
             const roleLabel = ADMIN_ROLES[role] ? ADMIN_ROLES[role].label : (isSuper ? 'Super Admin' : role);
-            const displayName = admin.name || admin.username || (admin.first_name ? (admin.first_name + (admin.last_name ? ' ' + admin.last_name : '')) : 'مدیر');
+            const displayName = admin.name || admin.username || (admin.first_name ? (admin.first_name + (admin.last_name ? ' ' + admin.last_name : '')) : t('adm_role_admin'));
             const tgId = String(admin.telegram_id || admin.id || '');
             const username = admin.username ? '@' + admin.username : null;
             const permCount = perms.includes('*') ? Object.keys(ADMIN_PERMISSIONS).length : perms.length;
@@ -1078,13 +1076,13 @@ async function loadAdminList() {
                 const extra = permCount > 3 ? ' <span class="admin-badge admin-badge-gray">+' + (permCount - 3) + '</span>' : '';
                 permBadgesHtml = shown + extra;
             } else {
-                permBadgesHtml = adminBadge('بدون دسترسی', 'gray');
+                permBadgesHtml = adminBadge(t('adm_admins_no_perms'), 'gray');
             }
 
             html += '<div class="admin-list-item adm-user-card">' +
                 // Row 1: avatar + name + role badge + status badge
                 '<div class="adm-card-top">' +
-                    '<div class="adm-card-avatar">' + adminEscapeHtml((displayName || 'م').charAt(0)) + '</div>' +
+                    '<div class="adm-card-avatar">' + adminEscapeHtml((displayName || t('adm_admins_initial')).charAt(0)) + '</div>' +
                     '<div class="adm-card-id">' +
                         '<div class="adm-card-name">' + adminEscapeHtml(displayName) + '</div>' +
                         '<div class="adm-card-sub">' +
@@ -1099,9 +1097,9 @@ async function loadAdminList() {
                 '</div>' +
                 // Row 2: meta info (joined, last active, perm count)
                 '<div class="adm-card-meta">' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(admin.created_at) + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین ورود</span><span class="adm-meta-val adm-meta-val-date">' + (admin.last_active ? adminFormatDate(admin.last_active) : '—') + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">دسترسی‌ها</span><span class="adm-meta-val">' + permCount + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_admins_label_membership') + '</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(admin.created_at) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_admins_label_last_login') + '</span><span class="adm-meta-val adm-meta-val-date">' + (admin.last_active ? adminFormatDate(admin.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_admins_label_perms') + '</span><span class="adm-meta-val">' + permCount + '</span></span>' +
                 '</div>' +
                 // Row 3: permission badges
                 '<div class="adm-card-perms">' + permBadgesHtml + '</div>' +
@@ -1109,8 +1107,8 @@ async function loadAdminList() {
                 '<div class="adm-card-actions">' +
                     '<button class="admin-btn admin-btn-sm admin-btn-' + (isActive ? 'ghost' : 'green') +
                     '" onclick="toggleAdminActive(\'' + adminEscapeJsId(admin.id) + '\', ' + isActive + ')">' +
-                    (isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی') + '</button>' +
-                    (!isSuper ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + adminEscapeJsId(admin.id) + '\', \'' + adminEscapeJsId(admin.telegram_id) + '\')">حذف</button>' : '<span class="adm-card-protected">حفاظت‌شده</span>') +
+                    (isActive ? t('adm_admins_btn_deactivate') : t('adm_admins_btn_activate')) + '</button>' +
+                    (!isSuper ? '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="removeAdmin(\'' + adminEscapeJsId(admin.id) + '\', \'' + adminEscapeJsId(admin.telegram_id) + '\')">' + t('delete') + '</button>' : '<span class="adm-card-protected">' + t('adm_admins_protected') + '</span>') +
                 '</div>' +
                 '</div>';
         });
@@ -1176,11 +1174,11 @@ async function submitAddAdmin() {
     const permChecks = document.querySelectorAll('#admin-new-permissions input[type="checkbox"]');
 
     if (!telegramId || !telegramId.value.trim()) {
-        showAdminToast('لطفاً شناسه تلگرام را وارد کنید', 'error');
+        showAdminToast(t('adm_admins_err_tg_id_required'), 'error');
         return;
     }
     if (!/^\d{5,20}$/.test(telegramId.value.trim())) {
-        showAdminToast('شناسه تلگرام باید عدد معتبر باشد', 'error');
+        showAdminToast(t('adm_admins_err_tg_id_invalid'), 'error');
         return;
     }
 
@@ -1199,12 +1197,12 @@ async function submitAddAdmin() {
                 permissions: permissions
             })
         });
-        showAdminToast('مدیر با موفقیت افزوده شد', 'success');
+        showAdminToast(t('adm_admins_added'), 'success');
         closeAddAdminForm();
         if (telegramId) telegramId.value = '';
         loadAdminList();
     } catch (e) {
-        showAdminToast('خطا در افزودن مدیر: ' + (e.message || 'Unknown error'), 'error');
+        showAdminToast(t('adm_admins_add_error') + (e.message || 'Unknown error'), 'error');
         console.error('submitAddAdmin:', e);
     }
 }
@@ -1284,7 +1282,7 @@ async function loadAdminUsers(page) {
             const membershipLevel = u.membership_level || 'FREE';
             const membershipStatus = u.membership_status || 'INACTIVE';
             const channelJoined = u.channel_joined;
-            const displayName = (u.first_name || u.name || 'کاربر') + (u.last_name ? ' ' + u.last_name : '');
+            const displayName = (u.first_name || u.name || t('adm_users_default_name')) + (u.last_name ? ' ' + u.last_name : '');
             const tgId = String(u.telegram_id || u.id || '');
             const username = u.username ? '@' + u.username : null;
             const tokens = (u.token_balance !== undefined && u.token_balance !== null) ? u.token_balance : (u.tokens || 0);
@@ -1315,7 +1313,7 @@ async function loadAdminUsers(page) {
             html += '<div class="admin-list-item adm-user-card">' +
                 // Row 1: avatar + name + badges
                 '<div class="adm-card-top">' +
-                    '<div class="adm-card-avatar' + (isAppPremium ? ' adm-card-avatar--premium' : '') + '">' + adminEscapeHtml((displayName || 'ک').charAt(0)) + '</div>' +
+                    '<div class="adm-card-avatar' + (isAppPremium ? ' adm-card-avatar--premium' : '') + '">' + adminEscapeHtml((displayName || t('adm_users_initial')).charAt(0)) + '</div>' +
                     '<div class="adm-card-id">' +
                         '<div class="adm-card-name">' + adminEscapeHtml(displayName) + '</div>' +
                         '<div class="adm-card-sub">' +
@@ -1329,9 +1327,9 @@ async function loadAdminUsers(page) {
                 '</div>' +
                 // Row 2: meta grid — uniform columns
                 '<div class="adm-card-meta">' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">عضویت</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(u.created_at || u.join_date) + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">آخرین فعالیت</span><span class="adm-meta-val adm-meta-val-date">' + (u.last_active ? adminFormatDate(u.last_active) : '—') + '</span></span>' +
-                    '<span class="adm-meta-item"><span class="adm-meta-label">توکن</span><span class="adm-meta-val">' + adminEscapeHtml(String(tokens)) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_admins_label_membership') + '</span><span class="adm-meta-val adm-meta-val-date">' + adminFormatDate(u.created_at || u.join_date) + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_users_label_last_active') + '</span><span class="adm-meta-val adm-meta-val-date">' + (u.last_active ? adminFormatDate(u.last_active) : '—') + '</span></span>' +
+                    '<span class="adm-meta-item"><span class="adm-meta-label">' + t('adm_users_label_tokens') + '</span><span class="adm-meta-val">' + adminEscapeHtml(String(tokens)) + '</span></span>' +
                 '</div>' +
                 '</div>';
         });
@@ -1358,29 +1356,29 @@ async function loadUsersStats() {
         if (_isLoadTokenStale(token)) return; // Section switched, discard stale response
         if (!data || !data.stats) {
             // Show retry button instead of empty grid
-            grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;">داده آماری موجود نیست. <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">تلاش مجدد</button></div>';
+            grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;">' + t('adm_users_stats_error') + ' <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">' + t('adm_ads_retry_btn') + '</button></div>';
             return;
         }
         const s = data.stats;
         const fmt = function (v) { return (v == null) ? '--' : adminFormatNumber(v); };
         let html = '';
-        html += adminStatCardV2(fmt(s.total_users), 'کل کاربران', 'users', 'blue');
-        html += adminStatCardV2(fmt(s.new_today), 'جدید امروز', 'new', 'green');
-        html += adminStatCardV2(fmt(s.new_this_week), 'جدید این هفته', 'week', 'purple');
-        html += adminStatCardV2(fmt(s.new_this_month), 'جدید این ماه', 'month', 'purple');
-        html += adminStatCardV2(fmt(s.joined_bot), 'بات را استارت زده‌اند', 'bot', 'blue');
-        html += adminStatCardV2(fmt(s.joined_channel), 'عضو کانال', 'channel', 'green');
-        html += adminStatCardV2(fmt(s.opened_mini_app), 'Mini App را باز کرده‌اند', 'app', 'blue');
-        html += adminStatCardV2(fmt(s.join_percentage) + '%', 'درصد عضویت کانال', 'percent', 'orange');
-        html += adminStatCardV2(fmt(s.active_today), 'فعال امروز', 'active-today', 'green');
-        html += adminStatCardV2(fmt(s.active_this_week), 'فعال این هفته', 'active-week', 'green');
-        html += adminStatCardV2(fmt(s.active_this_month), 'فعال این ماه', 'active-month', 'green');
+        html += adminStatCardV2(fmt(s.total_users), t('adm_stat_total_users'), 'users', 'blue');
+        html += adminStatCardV2(fmt(s.new_today), t('adm_stat_new_today'), 'new', 'green');
+        html += adminStatCardV2(fmt(s.new_this_week), t('adm_stat_new_this_week'), 'week', 'purple');
+        html += adminStatCardV2(fmt(s.new_this_month), t('adm_stat_new_this_month'), 'month', 'purple');
+        html += adminStatCardV2(fmt(s.joined_bot), t('adm_stat_users_joined_bot'), 'bot', 'blue');
+        html += adminStatCardV2(fmt(s.joined_channel), t('adm_stat_joined_channel'), 'channel', 'green');
+        html += adminStatCardV2(fmt(s.opened_mini_app), t('adm_stat_users_opened_app'), 'app', 'blue');
+        html += adminStatCardV2(fmt(s.join_percentage) + '%', t('adm_stat_users_join_pct'), 'percent', 'orange');
+        html += adminStatCardV2(fmt(s.active_today), t('adm_stat_active_today'), 'active-today', 'green');
+        html += adminStatCardV2(fmt(s.active_this_week), t('adm_stat_active_this_week'), 'active-week', 'green');
+        html += adminStatCardV2(fmt(s.active_this_month), t('adm_stat_active_this_month'), 'active-month', 'green');
         grid.innerHTML = html;
     } catch (e) {
         if (_isLoadTokenStale(token)) return; // Section switched, don't render error
         console.warn('loadUsersStats:', e);
         // Show retry button instead of empty grid
-        grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;color:#ef4444;">خطا در بارگذاری آمار. <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">تلاش مجدد</button></div>';
+        grid.innerHTML = '<div class="admin-empty" style="grid-column:1/-1;color:#ef4444;">' + t('adm_users_stats_load_error') + ' <button onclick="loadUsersStats()" class="admin-btn" style="padding:4px 12px;font-size:11px;margin-right:8px;">' + t('adm_ads_retry_btn') + '</button></div>';
     }
 }
 
@@ -1428,9 +1426,9 @@ async function loadAdminTickets(page) {
         let html = '';
         tickets.forEach(function (t) {
             const statusInfo = {
-                open: { label: 'باز', cls: 'tk-status-open', icon: '🔵' },
-                answered: { label: 'پاسخ داده شده', cls: 'tk-status-answered', icon: '🟡' },
-                closed: { label: 'بسته شده', cls: 'tk-status-closed', icon: '⚫' },
+                open: { label: t('adm_tk_status_open'), cls: 'tk-status-open', icon: '🔵' },
+                answered: { label: t('adm_tk_status_answered'), cls: 'tk-status-answered', icon: '🟡' },
+                closed: { label: t('adm_tk_status_closed'), cls: 'tk-status-closed', icon: '⚫' },
             };
             const si = statusInfo[t.status] || { label: String(t.status || ''), cls: 'tk-status-closed', icon: '⚪' };
             const isExpanded = !!_adminTicketsExpanded[t.id];
@@ -1442,8 +1440,8 @@ async function loadAdminTickets(page) {
                     '<div class="tk-card-header-left">' +
                         '<span class="tk-card-icon ' + si.cls + '">' + si.icon + '</span>' +
                         '<div class="tk-card-header-text">' +
-                            '<span class="tk-card-subject">' + adminEscapeHtml(t.subject || t.title || 'تیکت #' + (t.id || '')) + '</span>' +
-                            '<span class="tk-card-user">' + adminEscapeHtml(t.user_name || t.username || 'کاربر') + ' · ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + '</span>' +
+                            '<span class="tk-card-subject">' + adminEscapeHtml(t.subject || t.title || t('adm_tk_subject_default', { id: (t.id || '') })) + '</span>' +
+                            '<span class="tk-card-user">' + adminEscapeHtml(t.user_name || t.username || t('adm_users_default_name')) + ' · ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + '</span>' +
                         '</div>' +
                     '</div>' +
                     '<div class="tk-card-header-right">' +
@@ -1454,8 +1452,8 @@ async function loadAdminTickets(page) {
                 '<div class="tk-card-preview">' + adminEscapeHtml((t.message || t.last_message || '').substring(0, 120)) + (t.message && t.message.length > 120 ? '…' : '') + '</div>' +
                 '<div class="tk-card-footer">' +
                     '<span class="tk-card-date">' + adminFormatDate(t.created_at || t.date) + '</span>' +
-                    (t.updated_at ? '<span class="tk-card-updated">· به‌روزرسانی: ' + adminFormatDate(t.updated_at) + '</span>' : '') +
-                    (replies.length ? '<span class="tk-card-replies">💬 ' + replies.length + ' پاسخ</span>' : '') +
+                    (t.updated_at ? '<span class="tk-card-updated">' + t('adm_tk_updated', { date: adminFormatDate(t.updated_at) }) + '</span>' : '') +
+                    (replies.length ? '<span class="tk-card-replies">' + t('adm_tk_replies', { n: replies.length }) + '</span>' : '') +
                 '</div>';
 
             // Expanded detail: conversation history + reply form + status controls
@@ -1466,14 +1464,14 @@ async function loadAdminTickets(page) {
                 html += '<div class="tk-thread adm-ticket-thread">';
                 // Original message
                 html += '<div class="tk-msg tk-msg-user">' +
-                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(t.user_name || 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(t.created_at) + '</span></div>' +
+                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(t.user_name || t('adm_users_default_name')) + '</span><span class="tk-msg-time">' + adminFormatDate(t.created_at) + '</span></div>' +
                     '<div class="tk-msg-body">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
                     '</div>';
                 // Replies
                 replies.forEach(function (r) {
                     var isAdmin = r.from === 'admin' || r.is_admin;
                     html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
-                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : adminEscapeHtml(t.user_name || 'کاربر')) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
+                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? t('adm_tk_admin_label') : adminEscapeHtml(t.user_name || t('adm_users_default_name'))) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
                         '<div class="tk-msg-body">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
                         '</div>';
                 });
@@ -1481,22 +1479,22 @@ async function loadAdminTickets(page) {
 
                 // Reply form
                 html += '<div class="tk-reply-form">' +
-                    '<textarea id="adm-reply-' + adminEscapeHtml(String(t.id)) + '" class="tk-reply-input" placeholder="پاسخ خود را بنویسید..." rows="3"></textarea>' +
-                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال پاسخ</button>' +
+                    '<textarea id="adm-reply-' + adminEscapeHtml(String(t.id)) + '" class="tk-reply-input" placeholder="' + t('adm_tk_reply_ph') + '" rows="3"></textarea>' +
+                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('adm_tk_reply_btn') + '</button>' +
                     '</div>';
 
                 // Status controls
                 html += '<div class="tk-actions">';
                 if (t.status !== 'closed') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> بستن</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> ' + t('adm_tk_close_btn') + '</button>';
                 }
                 if (t.status !== 'open') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> باز کردن</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> ' + t('adm_tk_open_btn') + '</button>';
                 }
                 if (t.status !== 'answered') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> پاسخ داده شده</button>';
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ' + t('adm_tk_answered_btn') + '</button>';
                 }
-                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> حذف</button>';
+                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ' + t('delete') + '</button>';
                 html += '</div>';
 
                 html += '</div>';
@@ -1537,7 +1535,7 @@ async function fetchTicketReplies(ticketId) {
         data.replies.forEach(function (r) {
             const isAdmin = r.is_admin_reply;
             html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
-                '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? 'مدیر' : 'کاربر') + '</span><span class="tk-msg-time">' + adminFormatDate(r.created_at) + '</span></div>' +
+                '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? t('adm_tk_admin_label') : t('adm_users_default_name')) + '</span><span class="tk-msg-time">' + adminFormatDate(r.created_at) + '</span></div>' +
                 '<div class="tk-msg-body">' + adminEscapeHtml(r.body || '') + '</div>' +
                 '</div>';
         });
@@ -1697,8 +1695,8 @@ async function loadAdminBroadcasts() {
             // Backend returns: sender_id, sent_count, target_type, content, created_at
             // (was reading sent_by, recipients, target, message → all blank)
             const targetLabel = b.target_type === 'specific' ? ('→ ' + adminEscapeHtml(b.target_value || '')) :
-                                b.target_type === 'channel_joined' ? 'عضو کانال' :
-                                b.target_type === 'all' ? 'همه' : adminEscapeHtml(b.target_type || 'all');
+                                b.target_type === 'channel_joined' ? t('adm_bc_target_channel') :
+                                b.target_type === 'all' ? t('adm_filter_all') : adminEscapeHtml(b.target_type || 'all');
             html += '<div class="admin-list-item">' +
                 '<div class="admin-list-item-header">' +
                 '<span class="admin-list-item-title">' + adminEscapeHtml(b.content || b.message || '').substring(0, 60) +
@@ -1706,8 +1704,8 @@ async function loadAdminBroadcasts() {
                 adminBadge(targetLabel, 'blue') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
-                'ارسال توسط: ' + adminEscapeHtml(b.sender_id || b.sent_by || b.admin_name || 'Admin') +
-                (b.sent_count != null ? ' &bull; گیرندگان: ' + adminFormatNumber(b.sent_count) : '') +
+                t('adm_bc_sent_by', { name: adminEscapeHtml(b.sender_id || b.sent_by || b.admin_name || 'Admin') }) +
+                (b.sent_count != null ? t('adm_bc_recipients', { n: adminFormatNumber(b.sent_count) }) : '') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
                 adminFormatDate(b.created_at || b.sent_at || b.date) +
@@ -1775,8 +1773,8 @@ async function loadAdminRewards() {
                 '</div>' +
                 (r.status === 'pending' ?
                     '<div class="admin-list-item-actions" style="margin-top:8px;display:flex;gap:6px;">' +
-                        '<button class="admin-btn admin-btn-sm admin-btn-green" onclick="adminApproveReward(\'' + adminEscapeJsId(r.id) + '\')">تأیید</button>' +
-                        '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="adminRejectReward(\'' + adminEscapeJsId(r.id) + '\')">رد</button>' +
+                        '<button class="admin-btn admin-btn-sm admin-btn-green" onclick="adminApproveReward(\'' + adminEscapeJsId(r.id) + '\')">' + t('mem_approve') + '</button>' +
+                        '<button class="admin-btn admin-btn-sm admin-btn-red" onclick="adminRejectReward(\'' + adminEscapeJsId(r.id) + '\')">' + t('mem_reject') + '</button>' +
                     '</div>'
                 : '') +
                 '</div>';
@@ -1811,13 +1809,13 @@ async function adminApproveReward(rewardId) {
             body: JSON.stringify({ status: 'approved' }),
         });
         if (data && data.status === 'success') {
-            adminToast('پاداش تأیید شد', 'success');
+            adminToast(t('adm_rw_approved'), 'success');
             loadAdminRewards();
         } else {
-            adminToast(data?.message || 'خطا در تأیید پاداش', 'error');
+            adminToast(data?.message || t('adm_rw_approve_error'), 'error');
         }
     } catch (e) {
-        adminToast('خطا در ارتباط با سرور', 'error');
+        adminToast(t('adm_rw_server_error'), 'error');
         console.error('adminApproveReward:', e);
     } finally {
         _adminRewardActionInProgress = false;
@@ -1833,13 +1831,13 @@ async function adminRejectReward(rewardId) {
             body: JSON.stringify({ status: 'rejected' }),
         });
         if (data && data.status === 'success') {
-            adminToast('پاداش رد شد', 'success');
+            adminToast(t('adm_rw_rejected'), 'success');
             loadAdminRewards();
         } else {
-            adminToast(data?.message || 'خطا در رد پاداش', 'error');
+            adminToast(data?.message || t('adm_rw_reject_error'), 'error');
         }
     } catch (e) {
-        adminToast('خطا در ارتباط با سرور', 'error');
+        adminToast(t('adm_rw_server_error'), 'error');
         console.error('adminRejectReward:', e);
     } finally {
         _adminRewardActionInProgress = false;
@@ -1909,7 +1907,7 @@ async function loadAdminTransactions(page) {
                 adminBadge(String(tx.amount || tx.tokens || 0) + ' AB', 'green') +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
-                'کاربر: ' + adminEscapeHtml(tx.user_name || tx.username || 'User') +
+                t('adm_tx_user_label', { name: adminEscapeHtml(tx.user_name || tx.username || 'User') }) +
                 ' (ID: ' + adminEscapeHtml(String(tx.telegram_id || tx.user_id || '')) + ')' +
                 '</div>' +
                 '<div class="admin-list-item-meta">' +
@@ -1995,7 +1993,7 @@ function debounceAdminReferralSearch() {
 async function loadAdminSystemHealth() {
     const grid = document.getElementById('admin-health-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="admin-empty">در حال بررسی سرویس‌ها...</div>';
+    grid.innerHTML = '<div class="admin-empty">' + t('adm_health_checking') + '</div>';
 
     const token = _adminLoadToken;
     try {
@@ -2009,33 +2007,31 @@ async function loadAdminSystemHealth() {
         if (data.summary) {
             const sum = data.summary;
             const overallStatus = sum.down > 0 ? '🔴' : (sum.warning > 0 ? '🟡' : '🟢');
-            const overallText = sum.down > 0 ? 'سیستم دارای مشکل' : (sum.warning > 0 ? 'سیستم با هشدار' : 'سیستم سالم');
+            const overallText = sum.down > 0 ? t('adm_health_overall_problem') : (sum.warning > 0 ? t('adm_health_overall_warning') : t('adm_health_overall_healthy'));
             html += '<div class="adm-health-summary" style="grid-column:1/-1;padding:16px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);margin-bottom:8px;">' +
                 '<div style="font-size:24px;">' + overallStatus + '</div>' +
                 '<div style="font-size:18px;font-weight:700;margin-top:4px;">' + overallText + '</div>' +
                 '<div style="font-size:13px;color:#a0aec0;margin-top:4px;">' +
-                '🟢 ' + sum.healthy + ' سالم &nbsp; • &nbsp; ' +
-                '🟡 ' + sum.warning + ' هشدار &nbsp; • &nbsp; ' +
-                '🔴 ' + sum.down + ' از کار افتاده' +
+                t('adm_health_summary', { healthy: sum.healthy, warning: sum.warning, down: sum.down }) +
                 '</div>' +
-                '<div style="font-size:11px;color:#718096;margin-top:8px;">آخرین بررسی: ' + adminFormatDate(data.timestamp) + '</div>' +
+                '<div style="font-size:11px;color:#718096;margin-top:8px;">' + t('adm_health_last_check', { date: adminFormatDate(data.timestamp) }) + '</div>' +
                 '</div>';
         }
 
         // Service cards
         if (data.services) {
             const labels = {
-                database: 'دیتابیس PostgreSQL',
+                database: t('adm_health_db_postgres'),
                 telegram: 'Telegram Bot API',
                 coinmarketcap: 'CoinMarketCap',
                 alternative_me: 'Alternative.me (Fear & Greed)',
                 cloudflare_kv: 'Cloudflare KV',
                 workers_ai: 'Cloudflare Workers AI',
                 cron: 'Cron Scheduler',
-                notification_queue: 'صف اعلان‌ها',
+                notification_queue: t('adm_health_notif_queue'),
             };
             const statusIcon = { healthy: '🟢', warning: '🟡', down: '🔴' };
-            const statusText = { healthy: 'سالم', warning: 'هشدار', down: 'از کار افتاده' };
+            const statusText = { healthy: t('adm_health_status_healthy'), warning: t('adm_health_status_warning'), down: t('adm_health_status_down') };
             const statusColor = { healthy: '#22c55e', warning: '#f59e0b', down: '#ef4444' };
 
             Object.keys(data.services).forEach(function (key) {
@@ -2058,9 +2054,9 @@ async function loadAdminSystemHealth() {
             });
         }
 
-        grid.innerHTML = html || adminEmpty('داده‌ای موجود نیست');
+        grid.innerHTML = html || adminEmpty(t('adm_empty'));
     } catch (e) {
-        grid.innerHTML = adminEmpty('بارگذاری وضعیت سیستم ناموفق بود');
+        grid.innerHTML = adminEmpty(t('adm_health_load_error'));
         console.error('loadAdminSystemHealth:', e);
     }
 }
@@ -2198,7 +2194,7 @@ window.switchRewardCenterTab = switchRewardCenterTab;
 async function loadRewardCenterOverview() {
     const grid = document.getElementById('rc-overview-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    grid.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/overview');
@@ -2206,26 +2202,26 @@ async function loadRewardCenterOverview() {
         if (data && data.status === 'success' && data.overview) {
             const o = data.overview;
             const statusColor = o.wheel_status === 'active' ? 'green' : (o.wheel_status === 'maintenance' ? 'orange' : 'red');
-            const statusText = o.wheel_status === 'active' ? 'فعال' : (o.wheel_status === 'maintenance' ? 'تعمیرات' : 'غیرفعال');
+            const statusText = o.wheel_status === 'active' ? t('adm_status_active') : (o.wheel_status === 'maintenance' ? t('adm_rc_status_maintenance') : t('adm_status_inactive'));
             grid.innerHTML = `
-                <div class="rc-stat-card"><div class="rc-stat-icon green">●</div><div class="rc-stat-val">${statusText}</div><div class="rc-stat-lbl">وضعیت گردونه</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_spins_today)}</div><div class="rc-stat-lbl">اسپین امروز</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.rewards_given_today)}</div><div class="rc-stat-lbl">پاداش امروز</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_ab_distributed)} AB</div><div class="rc-stat-lbl">توکن توزیع شده امروز</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_campaigns)}</div><div class="rc-stat-lbl">کمپین‌های فعال</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_wheel_rewards)}</div><div class="rc-stat-lbl">پاداش‌های فعال گردونه</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_referral_tiers)}</div><div class="rc-stat-lbl">طبقات رفرال فعال</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_missions)}</div><div class="rc-stat-lbl">ماموریت‌های فعال</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.pending_rewards)}</div><div class="rc-stat-lbl">پاداش‌های در انتظار</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${o.most_won_reward ? adminEscapeHtml(o.most_won_reward.label || '') : '--'}</div><div class="rc-stat-lbl">پرتکرارترین پاداش</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.highest_reward)} AB</div><div class="rc-stat-lbl">بزرگ‌ترین پاداش</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminEscapeHtml(o.wheel_version || '1.0.0')}</div><div class="rc-stat-lbl">نسخه گردونه</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-icon green">●</div><div class="rc-stat-val">${statusText}</div><div class="rc-stat-lbl">${t('adm_rc_wheel_status_label')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_spins_today)}</div><div class="rc-stat-lbl">${t('adm_rc_spins_today')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.rewards_given_today)}</div><div class="rc-stat-lbl">${t('adm_rc_rewards_today')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.total_ab_distributed)} AB</div><div class="rc-stat-lbl">${t('adm_rc_tokens_distributed_today')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_campaigns)}</div><div class="rc-stat-lbl">${t('adm_rc_active_campaigns')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_wheel_rewards)}</div><div class="rc-stat-lbl">${t('adm_rc_active_wheel_rewards')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_referral_tiers)}</div><div class="rc-stat-lbl">${t('adm_rc_active_referral_tiers')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.active_missions)}</div><div class="rc-stat-lbl">${t('adm_rc_active_missions')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.pending_rewards)}</div><div class="rc-stat-lbl">${t('adm_rc_pending_rewards')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${o.most_won_reward ? adminEscapeHtml(o.most_won_reward.label || '') : '--'}</div><div class="rc-stat-lbl">${t('adm_rc_most_frequent_reward')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(o.highest_reward)} AB</div><div class="rc-stat-lbl">${t('adm_rc_highest_reward')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminEscapeHtml(o.wheel_version || '1.0.0')}</div><div class="rc-stat-lbl">${t('adm_rc_wheel_version')}</div></div>
             `;
         } else {
-            grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>';
+            grid.innerHTML = '<div class="admin-empty">' + t('adm_empty') + '</div>';
         }
     } catch (e) {
-        grid.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        grid.innerHTML = '<div class="admin-empty">' + t('adm_rc_load_error') + '</div>';
         console.error('loadRewardCenterOverview:', e);
     }
 }
@@ -2235,7 +2231,7 @@ async function loadRewardCenterOverview() {
 async function loadRcWheelConfig() {
     const section = document.getElementById('rc-wheel-config-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/config');
@@ -2245,32 +2241,32 @@ async function loadRcWheelConfig() {
             const c = data.config;
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">تنظیمات عمومی گردونه</h4>
+                    <h4 class="rc-card-title">${t('adm_rc_wheel_config_title')}</h4>
                     <div class="rc-form-grid">
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-enabled" ${c.is_enabled ? 'checked' : ''}><span>فعال‌سازی گردونه</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-daily" ${c.daily_spin_enabled ? 'checked' : ''}><span>اسپین روزانه</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-referral" ${c.referral_spin_enabled ? 'checked' : ''}><span>اسپین رفرال</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-mission" ${c.mission_spin_enabled ? 'checked' : ''}><span>اسپین ماموریت</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-premium" ${c.premium_spin_enabled ? 'checked' : ''}><span>اسپین ویژه</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-campaign" ${c.campaign_spin_enabled ? 'checked' : ''}><span>اسپین کمپین</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-maintenance" ${c.maintenance_mode ? 'checked' : ''}><span>حالت تعمیرات</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-enabled" ${c.is_enabled ? 'checked' : ''}><span>${t('adm_rc_enable_wheel')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-daily" ${c.daily_spin_enabled ? 'checked' : ''}><span>${t('adm_rc_daily_spin')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-referral" ${c.referral_spin_enabled ? 'checked' : ''}><span>${t('adm_rc_referral_spin')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-mission" ${c.mission_spin_enabled ? 'checked' : ''}><span>${t('adm_rc_mission_spin')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-premium" ${c.premium_spin_enabled ? 'checked' : ''}><span>${t('adm_rc_premium_spin')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-campaign" ${c.campaign_spin_enabled ? 'checked' : ''}><span>${t('adm_rc_campaign_spin')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-wc-maintenance" ${c.maintenance_mode ? 'checked' : ''}><span>${t('adm_rc_maintenance_mode')}</span></label>
                     </div>
                     <div class="rc-form-grid" style="margin-top:12px;">
-                        <div class="rc-field"><label>تعداد بخش‌ها</label><select id="rc-wc-segments"><option value="6" ${c.segment_count==6?'selected':''}>۶</option><option value="8" ${c.segment_count==8?'selected':''}>۸</option><option value="10" ${c.segment_count==10?'selected':''}>۱۰</option><option value="12" ${c.segment_count==12?'selected':''}>۱۲</option><option value="16" ${c.segment_count==16?'selected':''}>۱۶</option></select></div>
-                        <div class="rc-field"><label>نسخه</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
-                        <div class="rc-field"><label>تم</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
-                        <div class="rc-field"><label>حداکثر اسپین/کاربر</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
-                        <div class="rc-field"><label>کوپل‌داون</label><select id="rc-wc-cooldown" onchange="document.getElementById('rc-wc-cooldown-custom').style.display = this.value === 'custom' ? '' : 'none'"><option value="0">بدون کوپل‌داون</option><option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option></select><input type="number" id="rc-wc-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>
-                        <div class="rc-field"><label>حداکثر پاداش/روز</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_segments')}</label><select id="rc-wc-segments"><option value="6" ${c.segment_count==6?'selected':''}>۶</option><option value="8" ${c.segment_count==8?'selected':''}>۸</option><option value="10" ${c.segment_count==10?'selected':''}>۱۰</option><option value="12" ${c.segment_count==12?'selected':''}>۱۲</option><option value="16" ${c.segment_count==16?'selected':''}>۱۶</option></select></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_version')}</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_theme')}</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_max_spins_user')}</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_cooldown')}</label><select id="rc-wc-cooldown" onchange="document.getElementById('rc-wc-cooldown-custom').style.display = this.value === 'custom' ? '' : 'none'"><option value="0">${t('adm_no_cooldown')}</option><option value="3600">${t('adm_rc_opt_1h')}</option><option value="21600">${t('adm_rc_opt_6h')}</option><option value="43200">${t('adm_rc_opt_12h')}</option><option value="86400">${t('adm_rc_opt_24h')}</option><option value="151200">${t('adm_rc_opt_42h')}</option><option value="259200">${t('adm_rc_opt_72h')}</option><option value="604800">${t('adm_rc_opt_weekly')}</option><option value="custom">${t('adm_rc_opt_custom')}</option></select><input type="number" id="rc-wc-cooldown-custom" style="display:none;" placeholder="${t('adm_rc_ph_seconds')}" min="60"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_max_reward_day')}</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
                     </div>
-                    <button class="adm-btn adm-btn-primary" onclick="saveRcWheelConfig()" style="margin-top:12px;">ذخیره تنظیمات</button>
+                    <button class="adm-btn adm-btn-primary" onclick="saveRcWheelConfig()" style="margin-top:12px;">${t('adm_save_settings')}</button>
                 </div>
             `;
         } else {
-            section.innerHTML = '<div class="admin-empty">خطا در بارگذاری تنظیمات</div>';
+            section.innerHTML = '<div class="admin-empty">' + t('adm_rc_load_config_error') + '</div>';
         }
     } catch (e) {
-        section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>';
+        section.innerHTML = '<div class="admin-empty">' + t('adm_rc_load_error') + '</div>';
         console.error('loadRcWheelConfig:', e);
     }
 }
@@ -2299,11 +2295,11 @@ async function saveRcWheelConfig() {
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/config', { method: 'PUT', body: JSON.stringify(payload) });
         if (data && data.status === 'success') {
-            adminToast('تنظیمات ذخیره شد', 'success');
+            adminToast(t('adm_rc_saved'), 'success');
         } else {
-            adminToast('خطا در ذخیره', 'error');
+            adminToast(t('adm_rc_save_error'), 'error');
         }
-    } catch (e) { adminToast('خطا در ذخیره', 'error'); console.error(e); }
+    } catch (e) { adminToast(t('adm_rc_save_error'), 'error'); console.error(e); }
 }
 window.saveRcWheelConfig = saveRcWheelConfig;
 
@@ -2312,7 +2308,7 @@ window.saveRcWheelConfig = saveRcWheelConfig;
 async function loadRcWheelRewards() {
     const section = document.getElementById('rc-wheel-rewards-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards');
@@ -2325,28 +2321,28 @@ async function loadRcWheelRewards() {
                     <td>${adminFormatNumber(r.reward_amount)}</td>
                     <td>${adminFormatNumber(r.weight)}</td>
                     <td>${adminEscapeHtml(r.campaign_id || '--')}</td>
-                    <td>${r.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td>${r.is_active ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
                     <td>
-                        <button class="adm-btn-sm" onclick="toggleRcWheelReward(${adminEscapeHtml(String(r.id))}, ${!r.is_active})">${r.is_active ? 'غیرفعال' : 'فعال'}</button>
-                        <button class="adm-btn-sm adm-btn-danger" onclick="deleteRcWheelReward(${adminEscapeHtml(String(r.id))})">حذف</button>
+                        <button class="adm-btn-sm" onclick="toggleRcWheelReward(${adminEscapeHtml(String(r.id))}, ${!r.is_active})">${r.is_active ? t('adm_status_inactive') : t('adm_status_active')}</button>
+                        <button class="adm-btn-sm adm-btn-danger" onclick="deleteRcWheelReward(${adminEscapeHtml(String(r.id))})">${t('delete')}</button>
                     </td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">پاداش‌های گردونه</h4>
+                    <h4 class="rc-card-title">${t('adm_rc_rewards_title')}</h4>
                     <div class="adm-table-wrap">
                         <table class="adm-table">
-                            <thead><tr><th>نام</th><th>نوع</th><th>مقدار</th><th>وزن</th><th>کمپین</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-                            <tbody>${rows || '<tr><td colspan="7" class="admin-empty">پاداشی موجود نیست</td></tr>'}</tbody>
+                            <thead><tr><th>${t('adm_rc_th_name')}</th><th>${t('adm_rc_th_type')}</th><th>${t('adm_rc_th_amount')}</th><th>${t('adm_rc_th_weight')}</th><th>${t('adm_rc_th_campaign')}</th><th>${t('adm_rc_th_status')}</th><th>${t('adm_rc_th_actions')}</th></tr></thead>
+                            <tbody>${rows || '<tr><td colspan="7" class="admin-empty">' + t('adm_rc_no_rewards') + '</td></tr>'}</tbody>
                         </table>
                     </div>
-                    <button class="adm-btn adm-btn-primary" onclick="showRcWheelRewardForm()" style="margin-top:12px;">افزودن پاداش</button>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcWheelRewardForm()" style="margin-top:12px;">${t('adm_rc_add_reward')}</button>
                     <div id="rc-wheel-reward-form" style="display:none;margin-top:12px;"></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_load_error') + '</div>'; console.error(e); }
 }
 window.loadRcWheelRewards = loadRcWheelRewards;
 
@@ -2356,16 +2352,16 @@ function showRcWheelRewardForm() {
     form.style.display = form.style.display === 'none' ? '' : 'none';
     form.innerHTML = `
         <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
-            <h4 class="rc-card-title">پاداش جدید</h4>
+            <h4 class="rc-card-title">${t('adm_rc_new_reward_title')}</h4>
             <div class="rc-form-grid">
-                <div class="rc-field"><label>نام پاداش</label><input type="text" id="rc-wr-label" placeholder="+5 AB"></div>
-                <div class="rc-field"><label>نوع</label><select id="rc-wr-type"><option value="token">توکن</option><option value="spin">اسپین</option><option value="voucher">ووچر</option><option value="nft">NFT</option><option value="premium">ویژه</option><option value="coupon">کوپن</option><option value="external">خارجی</option></select></div>
-                <div class="rc-field"><label>مقدار</label><input type="number" id="rc-wr-amount" value="1" min="0"></div>
-                <div class="rc-field"><label>وزن</label><input type="number" id="rc-wr-weight" value="1" min="1"></div>
-                <div class="rc-field"><label>کمپین (اختیاری)</label><input type="text" id="rc-wr-campaign" placeholder="camp_id"></div>
-                <div class="rc-field"><label>فعال</label><select id="rc-wr-active"><option value="true">بله</option><option value="false">خیر</option></select></div>
+                <div class="rc-field"><label>${t('adm_rc_field_reward_name')}</label><input type="text" id="rc-wr-label" placeholder="+5 AB"></div>
+                <div class="rc-field"><label>${t('adm_rc_th_type')}</label><select id="rc-wr-type"><option value="token">${t('adm_rc_opt_type_token')}</option><option value="spin">${t('adm_rc_opt_type_spin')}</option><option value="voucher">${t('adm_rc_opt_type_voucher')}</option><option value="nft">NFT</option><option value="premium">${t('adm_rc_opt_type_premium')}</option><option value="coupon">${t('adm_rc_opt_type_coupon')}</option><option value="external">${t('adm_rc_opt_type_external')}</option></select></div>
+                <div class="rc-field"><label>${t('adm_rc_field_amount')}</label><input type="number" id="rc-wr-amount" value="1" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_weight')}</label><input type="number" id="rc-wr-weight" value="1" min="1"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_campaign_opt')}</label><input type="text" id="rc-wr-campaign" placeholder="camp_id"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_active')}</label><select id="rc-wr-active"><option value="true">${t('adm_rc_opt_yes')}</option><option value="false">${t('adm_rc_opt_no')}</option></select></div>
             </div>
-            <button class="adm-btn adm-btn-primary" onclick="createRcWheelReward()" style="margin-top:10px;">ایجاد</button>
+            <button class="adm-btn adm-btn-primary" onclick="createRcWheelReward()" style="margin-top:10px;">${t('adm_rc_create_btn')}</button>
         </div>
     `;
 }
@@ -2382,26 +2378,26 @@ async function createRcWheelReward() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('پاداش ایجاد شد', 'success'); loadRcWheelRewards(); }
-        else { adminToast('خطا در ایجاد', 'error'); }
-    } catch (e) { adminToast('خطا در ایجاد', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_created'), 'success'); loadRcWheelRewards(); }
+        else { adminToast(t('adm_rc_create_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_create_error'), 'error'); console.error(e); }
 }
 window.createRcWheelReward = createRcWheelReward;
 
 async function toggleRcWheelReward(id, makeActive) {
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'PUT', body: JSON.stringify({ is_active: makeActive }) });
-        if (data && data.status === 'success') { adminToast('وضعیت تغییر کرد', 'success'); loadRcWheelRewards(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_status_changed'), 'success'); loadRcWheelRewards(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.toggleRcWheelReward = toggleRcWheelReward;
 
 async function deleteRcWheelReward(id) {
-    if (!confirm('حذف این پاداش؟')) return;
+    if (!confirm(t('adm_rc_delete_confirm'))) return;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/wheel/rewards/' + id, { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcWheelRewards(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_deleted'), 'success'); loadRcWheelRewards(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.deleteRcWheelReward = deleteRcWheelReward;
 
@@ -2410,7 +2406,7 @@ window.deleteRcWheelReward = deleteRcWheelReward;
 async function loadRcReferralTiers() {
     const section = document.getElementById('rc-referral-tiers-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/referral-tiers');
@@ -2422,20 +2418,20 @@ async function loadRcReferralTiers() {
                     <td>${adminFormatNumber(t.token_amount)} AB</td>
                     <td>${adminFormatNumber(t.bonus_spins)}</td>
                     <td>${adminEscapeHtml(t.campaign_id || '--')}</td>
-                    <td>${t.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${adminEscapeHtml(String(t.id))})">حذف</button></td>
+                    <td>${t.is_enabled ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${adminEscapeHtml(String(t.id))})">${t('delete')}</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">طبقات پاداش رفرال</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>تعداد دعوت</th><th>توکن</th><th>اسپین رایگان</th><th>کمپین</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">طبقه‌ای موجود نیست</td></tr>'}</tbody></table></div>
-                    <button class="adm-btn adm-btn-primary" onclick="showRcReferralTierForm()" style="margin-top:12px;">افزودن طبقه</button>
+                    <h4 class="rc-card-title">${t('adm_rc_referral_tiers_title')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_rc_th_invites')}</th><th>${t('adm_rc_th_tokens')}</th><th>${t('adm_rc_th_free_spins')}</th><th>${t('adm_rc_th_campaign')}</th><th>${t('adm_rc_th_status')}</th><th>${t('adm_rc_th_actions')}</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">' + t('adm_rc_no_tiers') + '</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcReferralTierForm()" style="margin-top:12px;">${t('adm_rc_add_tier')}</button>
                     <div id="rc-referral-tier-form" style="display:none;margin-top:12px;"></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcReferralTiers = loadRcReferralTiers;
 
@@ -2445,14 +2441,14 @@ function showRcReferralTierForm() {
     form.style.display = form.style.display === 'none' ? '' : 'none';
     form.innerHTML = `
         <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
-            <h4 class="rc-card-title">طبقه جدید</h4>
+            <h4 class="rc-card-title">${t('adm_rc_new_tier_title')}</h4>
             <div class="rc-form-grid">
-                <div class="rc-field"><label>تعداد دعوت</label><input type="number" id="rc-rt-invites" value="1" min="1"></div>
-                <div class="rc-field"><label>توکن</label><input type="number" id="rc-rt-tokens" value="3" min="0"></div>
-                <div class="rc-field"><label>اسپین رایگان</label><input type="number" id="rc-rt-spins" value="0" min="0"></div>
-                <div class="rc-field"><label>فعال</label><select id="rc-rt-enabled"><option value="true">بله</option><option value="false">خیر</option></select></div>
+                <div class="rc-field"><label>${t('adm_rc_field_invites')}</label><input type="number" id="rc-rt-invites" value="1" min="1"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_tokens')}</label><input type="number" id="rc-rt-tokens" value="3" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_free_spins')}</label><input type="number" id="rc-rt-spins" value="0" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_active')}</label><select id="rc-rt-enabled"><option value="true">${t('adm_rc_opt_yes')}</option><option value="false">${t('adm_rc_opt_no')}</option></select></div>
             </div>
-            <button class="adm-btn adm-btn-primary" onclick="createRcReferralTier()" style="margin-top:10px;">ایجاد</button>
+            <button class="adm-btn adm-btn-primary" onclick="createRcReferralTier()" style="margin-top:10px;">${t('adm_rc_create_btn')}</button>
         </div>
     `;
 }
@@ -2467,18 +2463,18 @@ async function createRcReferralTier() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/referral-tiers', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcReferralTiers(); }
-        else { adminToast('خطا', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_created'), 'success'); loadRcReferralTiers(); }
+        else { adminToast(t('adm_rc_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.createRcReferralTier = createRcReferralTier;
 
 async function deleteRcReferralTier(id) {
-    if (!confirm('حذف؟')) return;
+    if (!confirm(t('adm_rc_delete_confirm_short'))) return;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/referral-tiers/' + id, { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcReferralTiers(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_deleted'), 'success'); loadRcReferralTiers(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.deleteRcReferralTier = deleteRcReferralTier;
 
@@ -2487,7 +2483,7 @@ window.deleteRcReferralTier = deleteRcReferralTier;
 async function loadRcMissionRewards() {
     const section = document.getElementById('rc-mission-rewards-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/mission-rewards');
@@ -2498,20 +2494,20 @@ async function loadRcMissionRewards() {
                     <td>${adminEscapeHtml(m.mission_name)}</td>
                     <td>${adminFormatNumber(m.token_amount)} AB</td>
                     <td>${adminFormatNumber(m.bonus_spins)}</td>
-                    <td>${m.is_enabled ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcMissionReward(${adminEscapeHtml(String(m.id))})">حذف</button></td>
+                    <td>${m.is_enabled ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcMissionReward(${adminEscapeHtml(String(m.id))})">${t('delete')}</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">پاداش ماموریت‌ها</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>ماموریت</th><th>توکن</th><th>اسپین</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="admin-empty">ماموریتی موجود نیست</td></tr>'}</tbody></table></div>
-                    <button class="adm-btn adm-btn-primary" onclick="showRcMissionForm()" style="margin-top:12px;">افزودن ماموریت</button>
+                    <h4 class="rc-card-title">${t('adm_rc_mission_rewards_title')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_rc_th_mission')}</th><th>${t('adm_rc_th_tokens')}</th><th>${t('adm_rc_th_spin')}</th><th>${t('adm_rc_th_status')}</th><th>${t('adm_rc_th_actions')}</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="admin-empty">' + t('adm_rc_no_missions') + '</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcMissionForm()" style="margin-top:12px;">${t('adm_rc_add_mission')}</button>
                     <div id="rc-mission-form" style="display:none;margin-top:12px;"></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcMissionRewards = loadRcMissionRewards;
 
@@ -2521,14 +2517,14 @@ function showRcMissionForm() {
     form.style.display = form.style.display === 'none' ? '' : 'none';
     form.innerHTML = `
         <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
-            <h4 class="rc-card-title">ماموریت جدید</h4>
+            <h4 class="rc-card-title">${t('adm_rc_new_mission_title')}</h4>
             <div class="rc-form-grid">
-                <div class="rc-field"><label>ID ماموریت</label><input type="text" id="rc-mr-id" placeholder="invite_5"></div>
-                <div class="rc-field"><label>نام</label><input type="text" id="rc-mr-name" placeholder="۵ دعوت موفق"></div>
-                <div class="rc-field"><label>توکن</label><input type="number" id="rc-mr-tokens" value="15" min="0"></div>
-                <div class="rc-field"><label>اسپین</label><input type="number" id="rc-mr-spins" value="0" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_mission_id')}</label><input type="text" id="rc-mr-id" placeholder="invite_5"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_name')}</label><input type="text" id="rc-mr-name" placeholder="۵ دعوت موفق"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_tokens')}</label><input type="number" id="rc-mr-tokens" value="15" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_spin')}</label><input type="number" id="rc-mr-spins" value="0" min="0"></div>
             </div>
-            <button class="adm-btn adm-btn-primary" onclick="createRcMissionReward()" style="margin-top:10px;">ایجاد</button>
+            <button class="adm-btn adm-btn-primary" onclick="createRcMissionReward()" style="margin-top:10px;">${t('adm_rc_create_btn')}</button>
         </div>
     `;
 }
@@ -2543,18 +2539,18 @@ async function createRcMissionReward() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/mission-rewards', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcMissionRewards(); }
-        else { adminToast('خطا', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_created'), 'success'); loadRcMissionRewards(); }
+        else { adminToast(t('adm_rc_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.createRcMissionReward = createRcMissionReward;
 
 async function deleteRcMissionReward(id) {
-    if (!confirm('حذف؟')) return;
+    if (!confirm(t('adm_rc_delete_confirm_short'))) return;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/mission-rewards/' + id, { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcMissionRewards(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_deleted'), 'success'); loadRcMissionRewards(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.deleteRcMissionReward = deleteRcMissionReward;
 
@@ -2563,7 +2559,7 @@ window.deleteRcMissionReward = deleteRcMissionReward;
 async function loadRcCampaigns() {
     const section = document.getElementById('rc-campaigns-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/campaigns');
@@ -2574,21 +2570,21 @@ async function loadRcCampaigns() {
                     <td>${adminEscapeHtml(c.name)}</td>
                     <td>${c.start_date || '--'}</td>
                     <td>${c.end_date || '--'}</td>
-                    <td>${c.status === 'active' ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
+                    <td>${c.status === 'active' ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
                     <td>${adminFormatNumber(c.priority)}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcCampaign('${adminEscapeHtml(c.id)}')">حذف</button></td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcCampaign('${adminEscapeHtml(c.id)}')">${t('delete')}</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">کمپین‌ها</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نام</th><th>شروع</th><th>پایان</th><th>وضعیت</th><th>اولویت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">کمپینی موجود نیست</td></tr>'}</tbody></table></div>
-                    <button class="adm-btn adm-btn-primary" onclick="showRcCampaignForm()" style="margin-top:12px;">افزودن کمپین</button>
+                    <h4 class="rc-card-title">${t('adm_rc_campaigns_title')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_rc_th_name')}</th><th>${t('adm_rc_th_start')}</th><th>${t('adm_rc_th_end')}</th><th>${t('adm_rc_th_status')}</th><th>${t('adm_rc_th_priority')}</th><th>${t('adm_rc_th_actions')}</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">' + t('adm_rc_no_campaigns') + '</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcCampaignForm()" style="margin-top:12px;">${t('adm_rc_add_campaign')}</button>
                     <div id="rc-campaign-form" style="display:none;margin-top:12px;"></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcCampaigns = loadRcCampaigns;
 
@@ -2598,19 +2594,19 @@ function showRcCampaignForm() {
     form.style.display = form.style.display === 'none' ? '' : 'none';
     form.innerHTML = `
         <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
-            <h4 class="rc-card-title">کمپین جدید</h4>
+            <h4 class="rc-card-title">${t('adm_rc_new_campaign_title')}</h4>
             <div class="rc-form-grid">
-                <div class="rc-field"><label>نام</label><input type="text" id="rc-cm-name" placeholder="تابستان ۲۰۲۶"></div>
-                <div class="rc-field"><label>تاریخ شروع</label><input type="datetime-local" id="rc-cm-start"></div>
-                <div class="rc-field"><label>تاریخ پایان</label><input type="datetime-local" id="rc-cm-end"></div>
-                <div class="rc-field"><label>اولویت</label><input type="number" id="rc-cm-priority" value="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_name')}</label><input type="text" id="rc-cm-name" placeholder="تابستان ۲۰۲۶"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_start_date')}</label><input type="datetime-local" id="rc-cm-start"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_end_date')}</label><input type="datetime-local" id="rc-cm-end"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_priority')}</label><input type="number" id="rc-cm-priority" value="0"></div>
             </div>
             <div class="rc-form-grid" style="margin-top:8px;">
-                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-wheel" checked><span>اعمال روی گردونه</span></label>
-                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-referral"><span>اعمال روی رفرال</span></label>
-                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-mission"><span>اعمال روی ماموریت</span></label>
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-wheel" checked><span>${t('adm_rc_apply_wheel')}</span></label>
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-referral"><span>${t('adm_rc_apply_referral')}</span></label>
+                <label class="rc-toggle-row"><input type="checkbox" id="rc-cm-mission"><span>${t('adm_rc_apply_mission')}</span></label>
             </div>
-            <button class="adm-btn adm-btn-primary" onclick="createRcCampaign()" style="margin-top:10px;">ایجاد</button>
+            <button class="adm-btn adm-btn-primary" onclick="createRcCampaign()" style="margin-top:10px;">${t('adm_rc_create_btn')}</button>
         </div>
     `;
 }
@@ -2628,18 +2624,18 @@ async function createRcCampaign() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/campaigns', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcCampaigns(); }
-        else { adminToast('خطا', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_created'), 'success'); loadRcCampaigns(); }
+        else { adminToast(t('adm_rc_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.createRcCampaign = createRcCampaign;
 
 async function deleteRcCampaign(id) {
-    if (!confirm('حذف؟')) return;
+    if (!confirm(t('adm_rc_delete_confirm_short'))) return;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcCampaigns(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_deleted'), 'success'); loadRcCampaigns(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.deleteRcCampaign = deleteRcCampaign;
 
@@ -2648,7 +2644,7 @@ window.deleteRcCampaign = deleteRcCampaign;
 async function loadRcLibrary() {
     const section = document.getElementById('rc-library-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/library');
@@ -2660,20 +2656,20 @@ async function loadRcLibrary() {
                     <td>${adminEscapeHtml(item.reward_type)}</td>
                     <td>${adminFormatNumber(item.amount)}</td>
                     <td>${adminEscapeHtml(item.category)}</td>
-                    <td>${item.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcLibraryItem(${adminEscapeHtml(String(item.id))})">حذف</button></td>
+                    <td>${item.is_active ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcLibraryItem(${adminEscapeHtml(String(item.id))})">${t('delete')}</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
                 <div class="rc-card">
-                    <h4 class="rc-card-title">کتابخانه پاداش</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>نام</th><th>نوع</th><th>مقدار</th><th>دسته</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">آیتمی موجود نیست</td></tr>'}</tbody></table></div>
-                    <button class="adm-btn adm-btn-primary" onclick="showRcLibraryForm()" style="margin-top:12px;">افزودن پاداش</button>
+                    <h4 class="rc-card-title">${t('adm_rc_library_title')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_rc_th_name')}</th><th>${t('adm_rc_th_type')}</th><th>${t('adm_rc_th_amount')}</th><th>${t('adm_rc_field_category')}</th><th>${t('adm_rc_th_status')}</th><th>${t('adm_rc_th_actions')}</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">' + t('adm_rc_no_items') + '</td></tr>'}</tbody></table></div>
+                    <button class="adm-btn adm-btn-primary" onclick="showRcLibraryForm()" style="margin-top:12px;">${t('adm_rc_add_reward')}</button>
                     <div id="rc-library-form" style="display:none;margin-top:12px;"></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcLibrary = loadRcLibrary;
 
@@ -2683,14 +2679,14 @@ function showRcLibraryForm() {
     form.style.display = form.style.display === 'none' ? '' : 'none';
     form.innerHTML = `
         <div class="rc-card" style="border-color:rgba(245,166,35,0.3);">
-            <h4 class="rc-card-title">پاداش جدید</h4>
+            <h4 class="rc-card-title">${t('adm_rc_new_reward_title')}</h4>
             <div class="rc-form-grid">
-                <div class="rc-field"><label>نام</label><input type="text" id="rc-lib-name" placeholder="50 AB Token"></div>
-                <div class="rc-field"><label>نوع</label><select id="rc-lib-type"><option value="token">توکن</option><option value="spin">اسپین</option><option value="voucher">ووچر</option><option value="nft">NFT</option><option value="premium">ویژه</option><option value="coupon">کوپن</option><option value="avatar">آواتار</option><option value="badge">بج</option></select></div>
-                <div class="rc-field"><label>مقدار</label><input type="number" id="rc-lib-amount" value="1" min="0"></div>
-                <div class="rc-field"><label>دسته</label><input type="text" id="rc-lib-category" value="token"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_name')}</label><input type="text" id="rc-lib-name" placeholder="50 AB Token"></div>
+                <div class="rc-field"><label>${t('adm_rc_th_type')}</label><select id="rc-lib-type"><option value="token">${t('adm_rc_opt_type_token')}</option><option value="spin">${t('adm_rc_opt_type_spin')}</option><option value="voucher">${t('adm_rc_opt_type_voucher')}</option><option value="nft">NFT</option><option value="premium">${t('adm_rc_opt_type_premium')}</option><option value="coupon">${t('adm_rc_opt_type_coupon')}</option><option value="avatar">${t('adm_rc_opt_type_avatar')}</option><option value="badge">${t('adm_rc_opt_type_badge')}</option></select></div>
+                <div class="rc-field"><label>${t('adm_rc_field_amount')}</label><input type="number" id="rc-lib-amount" value="1" min="0"></div>
+                <div class="rc-field"><label>${t('adm_rc_field_category')}</label><input type="text" id="rc-lib-category" value="token"></div>
             </div>
-            <button class="adm-btn adm-btn-primary" onclick="createRcLibraryItem()" style="margin-top:10px;">ایجاد</button>
+            <button class="adm-btn adm-btn-primary" onclick="createRcLibraryItem()" style="margin-top:10px;">${t('adm_rc_create_btn')}</button>
         </div>
     `;
 }
@@ -2705,18 +2701,18 @@ async function createRcLibraryItem() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/library', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ایجاد شد', 'success'); loadRcLibrary(); }
-        else { adminToast('خطا', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_created'), 'success'); loadRcLibrary(); }
+        else { adminToast(t('adm_rc_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.createRcLibraryItem = createRcLibraryItem;
 
 async function deleteRcLibraryItem(id) {
-    if (!confirm('حذف؟')) return;
+    if (!confirm(t('adm_rc_delete_confirm_short'))) return;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/library/' + id, { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('حذف شد', 'success'); loadRcLibrary(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_deleted'), 'success'); loadRcLibrary(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.deleteRcLibraryItem = deleteRcLibraryItem;
 
@@ -2725,7 +2721,7 @@ window.deleteRcLibraryItem = deleteRcLibraryItem;
 async function loadRcAnalytics() {
     const section = document.getElementById('rc-analytics-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/analytics?range=30d');
@@ -2740,24 +2736,24 @@ async function loadRcAnalytics() {
             }).join('');
             section.innerHTML = `
                 <div class="rc-overview-grid">
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_spins)}</div><div class="rc-stat-lbl">اسپین امروز</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.weekly_spins)}</div><div class="rc-stat-lbl">اسپین هفته</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.monthly_spins)}</div><div class="rc-stat-lbl">اسپین ماه</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${a.average_reward}</div><div class="rc-stat-lbl">میانگین پاداش</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.highest_reward)} AB</div><div class="rc-stat-lbl">بزرگ‌ترین پاداش</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_tokens)} AB</div><div class="rc-stat-lbl">کل توکن توزیع شده</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_spins)}</div><div class="rc-stat-lbl">${t('adm_rc_spins_today')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.weekly_spins)}</div><div class="rc-stat-lbl">${t('adm_rc_spins_week')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.monthly_spins)}</div><div class="rc-stat-lbl">${t('adm_rc_spins_month')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${a.average_reward}</div><div class="rc-stat-lbl">${t('adm_rc_analytics_avg_reward')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.highest_reward)} AB</div><div class="rc-stat-lbl">${t('adm_rc_highest_reward')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_tokens)} AB</div><div class="rc-stat-lbl">${t('adm_rc_analytics_total_tokens')}</div></div>
                 </div>
                 <div class="rc-card" style="margin-top:16px;">
-                    <h4 class="rc-card-title">توزیع پاداش‌ها</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>پاداش</th><th>تعداد</th><th>کل</th></tr></thead><tbody>${distRows || '<tr><td colspan="3" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                    <h4 class="rc-card-title">${t('adm_rc_analytics_title_distribution')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_rc_analytics_th_reward')}</th><th>${t('adm_rc_analytics_th_count')}</th><th>${t('adm_rc_analytics_th_total')}</th></tr></thead><tbody>${distRows || '<tr><td colspan="3" class="admin-empty">' + t('adm_rc_no_data') + '</td></tr>'}</tbody></table></div>
                 </div>
                 <div class="rc-card" style="margin-top:16px;">
-                    <h4 class="rc-card-title">برترین برندگان</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>#</th><th>کاربر</th><th>اسپین</th><th>کل پاداش</th></tr></thead><tbody>${winnersRows || '<tr><td colspan="4" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                    <h4 class="rc-card-title">${t('adm_rc_analytics_top_winners')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>#</th><th>${t('adm_rc_analytics_th_user')}</th><th>${t('adm_rc_th_spin')}</th><th>${t('adm_rc_analytics_th_total_reward')}</th></tr></thead><tbody>${winnersRows || '<tr><td colspan="4" class="admin-empty">' + t('adm_rc_no_data') + '</td></tr>'}</tbody></table></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcAnalytics = loadRcAnalytics;
 
@@ -2766,7 +2762,7 @@ window.loadRcAnalytics = loadRcAnalytics;
 async function loadRcSettings() {
     const section = document.getElementById('rc-settings-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/reward-center/emergency');
@@ -2776,20 +2772,20 @@ async function loadRcSettings() {
             const c = data.controls;
             section.innerHTML = `
                 <div class="rc-card" style="border-color:rgba(255,77,77,0.3);">
-                    <h4 class="rc-card-title">کنترل‌های اضطراری</h4>
-                    <p style="font-size:12px;color:var(--admin-text-dim);margin-bottom:12px;">این کنترل‌ها فوراً اعمال می‌شوند و تمام سیستم پاداش را متوقف می‌کنند.</p>
+                    <h4 class="rc-card-title">${t('adm_rc_emergency_title')}</h4>
+                    <p style="font-size:12px;color:var(--admin-text-dim);margin-bottom:12px;">${t('adm_rc_emergency_desc')}</p>
                     <div class="rc-form-grid">
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-wheel" ${c.disable_wheel ? 'checked' : ''}><span>غیرفعال کردن گردونه</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-referral" ${c.disable_referral_rewards ? 'checked' : ''}><span>غیرفعال کردن پاداش رفرال</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-mission" ${c.disable_mission_rewards ? 'checked' : ''}><span>غیرفعال کردن پاداش ماموریت</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-campaign" ${c.disable_campaigns ? 'checked' : ''}><span>غیرفعال کردن کمپین‌ها</span></label>
-                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-engine" ${c.disable_reward_engine ? 'checked' : ''}><span>غیرفعال کردن کل موتور پاداش</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-wheel" ${c.disable_wheel ? 'checked' : ''}><span>${t('adm_rc_disable_wheel')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-referral" ${c.disable_referral_rewards ? 'checked' : ''}><span>${t('adm_rc_disable_referral')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-mission" ${c.disable_mission_rewards ? 'checked' : ''}><span>${t('adm_rc_disable_mission')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-campaign" ${c.disable_campaigns ? 'checked' : ''}><span>${t('adm_rc_disable_campaigns')}</span></label>
+                        <label class="rc-toggle-row"><input type="checkbox" id="rc-em-engine" ${c.disable_reward_engine ? 'checked' : ''}><span>${t('adm_rc_disable_engine')}</span></label>
                     </div>
-                    <button class="adm-btn adm-btn-primary" onclick="saveRcEmergency()" style="margin-top:12px;">ذخیره</button>
+                    <button class="adm-btn adm-btn-primary" onclick="saveRcEmergency()" style="margin-top:12px;">${t('adm_rc_save_btn_short')}</button>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadRcSettings = loadRcSettings;
 
@@ -2803,9 +2799,9 @@ async function saveRcEmergency() {
     };
     try {
         const data = await adminApiFetch('/api/admin/reward-center/emergency', { method: 'PUT', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ذخیره شد', 'success'); }
-        else { adminToast('خطا', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_saved_short'), 'success'); }
+        else { adminToast(t('adm_rc_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.saveRcEmergency = saveRcEmergency;
 
@@ -2834,7 +2830,7 @@ window.switchNotificationTab = switchNotificationTab;
 async function loadNpOverview() {
     const grid = document.getElementById('np-overview-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    grid.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/notifications/analytics?range=7d');
@@ -2843,20 +2839,20 @@ async function loadNpOverview() {
             const a = data.analytics;
             const catRows = (a.by_category || []).map(function (c) { return '<div class="rc-stat-card"><div class="rc-stat-val">' + adminFormatNumber(c.count) + '</div><div class="rc-stat-lbl">' + adminEscapeHtml(c.category) + '</div></div>'; }).join('');
             grid.innerHTML = `
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">کل اعلان‌ها (۷ روز)</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">خوانده نشده</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">اعلان امروز</div></div>
-                ${catRows || '<div class="rc-stat-card"><div class="rc-stat-val">--</div><div class="rc-stat-lbl">داده‌ای نیست</div></div>'}
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">${t('adm_np_total_7d')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">${t('adm_np_unread')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">${t('adm_np_today')}</div></div>
+                ${catRows || '<div class="rc-stat-card"><div class="rc-stat-val">--</div><div class="rc-stat-lbl">' + t('adm_rc_no_data') + '</div></div>'}
             `;
-        } else { grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>'; }
-    } catch (e) { grid.innerHTML = '<div class="admin-empty">خطا در بارگذاری</div>'; console.error(e); }
+        } else { grid.innerHTML = '<div class="admin-empty">' + t('adm_empty') + '</div>'; }
+    } catch (e) { grid.innerHTML = '<div class="admin-empty">' + t('adm_rc_load_error') + '</div>'; console.error(e); }
 }
 window.loadNpOverview = loadNpOverview;
 
 async function loadNpBroadcast() {
     const section = document.getElementById('np-broadcast-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/notifications/broadcasts?limit=20');
@@ -2864,28 +2860,28 @@ async function loadNpBroadcast() {
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.broadcasts)) {
             rows = data.broadcasts.map(function (b) {
-                return '<tr><td>' + adminEscapeHtml(b.title) + '</td><td>' + adminEscapeHtml(b.category) + '</td><td>' + adminEscapeHtml(b.priority) + '</td><td>' + adminFormatNumber(b.total_sent) + '</td><td>' + adminEscapeHtml(b.status) + '</td><td>' + (b.status === 'pending' ? '<button class="adm-btn-sm" onclick="sendNpBroadcast(' + b.id + ')">ارسال</button>' : '--') + '</td></tr>';
+                return '<tr><td>' + adminEscapeHtml(b.title) + '</td><td>' + adminEscapeHtml(b.category) + '</td><td>' + adminEscapeHtml(b.priority) + '</td><td>' + adminFormatNumber(b.total_sent) + '</td><td>' + adminEscapeHtml(b.status) + '</td><td>' + (b.status === 'pending' ? '<button class="adm-btn-sm" onclick="sendNpBroadcast(' + b.id + ')">' + t('adm_np_send_btn') + '</button>' : '--') + '</td></tr>';
             }).join('');
         }
         section.innerHTML = `
             <div class="rc-card">
-                <h4 class="rc-card-title">ارسال همگانی جدید</h4>
+                <h4 class="rc-card-title">${t('adm_np_new_broadcast_title')}</h4>
                 <div class="rc-form-grid">
-                    <div class="rc-field"><label>عنوان</label><input type="text" id="np-bc-title" placeholder="اطلاعیه مهم"></div>
-                    <div class="rc-field"><label>دسته</label><select id="np-bc-category"><option value="announcement">اطلاعیه</option><option value="system">سیستم</option><option value="market">بازار</option><option value="news">خبر</option></select></div>
-                    <div class="rc-field"><label>اولویت</label><select id="np-bc-priority"><option value="low">پایین</option><option value="medium" selected>متوسط</option><option value="high">بالا</option><option value="critical">بحرانی</option></select></div>
-                    <div class="rc-field"><label>کانال</label><select id="np-bc-channel"><option value="mini_app">Mini App</option><option value="telegram">Telegram Bot</option><option value="both">هر دو</option></select></div>
-                    <div class="rc-field"><label>هدف</label><select id="np-bc-target"><option value="all">همه</option><option value="active">فعال</option></select></div>
+                    <div class="rc-field"><label>${t('adm_np_field_title')}</label><input type="text" id="np-bc-title" placeholder="${t('adm_np_opt_announcement')}"></div>
+                    <div class="rc-field"><label>${t('adm_np_field_category')}</label><select id="np-bc-category"><option value="announcement">${t('adm_np_opt_announcement')}</option><option value="system">${t('adm_np_opt_system')}</option><option value="market">${t('adm_np_opt_market')}</option><option value="news">${t('adm_np_opt_news')}</option></select></div>
+                    <div class="rc-field"><label>${t('adm_np_field_priority')}</label><select id="np-bc-priority"><option value="low">${t('adm_np_opt_low')}</option><option value="medium" selected>${t('adm_np_opt_medium')}</option><option value="high">${t('adm_np_opt_high')}</option><option value="critical">${t('adm_np_opt_critical')}</option></select></div>
+                    <div class="rc-field"><label>${t('adm_np_field_channel')}</label><select id="np-bc-channel"><option value="mini_app">${t('adm_np_opt_mini_app')}</option><option value="telegram">${t('adm_np_opt_telegram')}</option><option value="both">${t('adm_np_opt_both')}</option></select></div>
+                    <div class="rc-field"><label>${t('adm_np_field_target')}</label><select id="np-bc-target"><option value="all">${t('adm_filter_all')}</option><option value="active">${t('adm_np_opt_active')}</option></select></div>
                 </div>
-                <div class="rc-field" style="margin-top:10px;"><label>پیام</label><textarea id="np-bc-message" rows="3" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:9px;padding:8px 10px;color:#FFF;font-size:13px;font-family:inherit;" placeholder="متن پیام..."></textarea></div>
-                <button class="adm-btn adm-btn-primary" onclick="createNpBroadcast()" style="margin-top:10px;">ارسال</button>
+                <div class="rc-field" style="margin-top:10px;"><label>${t('adm_np_field_message')}</label><textarea id="np-bc-message" rows="3" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:9px;padding:8px 10px;color:#FFF;font-size:13px;font-family:inherit;" placeholder="${t('adm_np_field_message_ph')}"></textarea></div>
+                <button class="adm-btn adm-btn-primary" onclick="createNpBroadcast()" style="margin-top:10px;">${t('adm_np_send_btn')}</button>
             </div>
             <div class="rc-card" style="margin-top:16px;">
-                <h4 class="rc-card-title">تاریخچه ارسال‌ها</h4>
-                <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>عنوان</th><th>دسته</th><th>اولویت</th><th>ارسال شده</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">رکوردی موجود نیست</td></tr>'}</tbody></table></div>
+                <h4 class="rc-card-title">${t('adm_np_history_title')}</h4>
+                <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_np_th_title')}</th><th>${t('adm_np_th_category')}</th><th>${t('adm_np_th_priority')}</th><th>${t('adm_np_th_sent')}</th><th>${t('adm_np_th_status')}</th><th>${t('adm_np_th_actions')}</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="admin-empty">' + t('adm_np_no_records') + '</td></tr>'}</tbody></table></div>
             </div>
         `;
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadNpBroadcast = loadNpBroadcast;
 
@@ -2900,24 +2896,24 @@ async function createNpBroadcast() {
     };
     try {
         const data = await adminApiFetch('/api/admin/notifications/broadcasts', { method: 'POST', body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
-        else { adminToast('خطا در ارسال', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_np_send_count', { n: (data.sent || 0) }), 'success'); loadNpBroadcast(); }
+        else { adminToast(t('adm_np_send_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.createNpBroadcast = createNpBroadcast;
 
 async function sendNpBroadcast(id) {
     try {
         const data = await adminApiFetch('/api/admin/notifications/broadcasts/' + id + '/send', { method: 'POST' });
-        if (data && data.status === 'success') { adminToast('ارسال شد: ' + (data.sent || 0) + ' کاربر', 'success'); loadNpBroadcast(); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_np_send_count', { n: (data.sent || 0) }), 'success'); loadNpBroadcast(); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.sendNpBroadcast = sendNpBroadcast;
 
 async function loadNpTemplates() {
     const section = document.getElementById('np-templates-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/notifications/templates');
@@ -2931,15 +2927,15 @@ async function loadNpTemplates() {
                     '<td>' + adminEscapeHtml(t.category) + '</td>' +
                     '<td>' + adminEscapeHtml(t.priority) + '</td>' +
                     '<td>' + adminEscapeHtml(t.channel) + '</td>' +
-                    '<td>' + (t.is_active ? '<span class="admin-badge green">فعال</span>' : '<span class="admin-badge gray">غیرفعال</span>') + '</td>' +
-                    '<td><button class="adm-btn-sm" onclick="editNpTemplate(\'' + adminEscapeJsId(t.id) + '\')">ویرایش</button></td>' +
+                    '<td>' + (t.is_active ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>') + '</td>' +
+                    '<td><button class="adm-btn-sm" onclick="editNpTemplate(\'' + adminEscapeJsId(t.id) + '\')">' + t('adm_ads_edit_btn') + '</button></td>' +
                 '</tr>';
             }).join('');
         }
-        section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب‌های اعلان</h4>' +
-            '<button class="adm-btn adm-btn-primary" onclick="showNpTemplateForm()" style="margin-bottom:10px;">افزودن قالب</button>' +
-            '<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>کلید</th><th>دسته</th><th>اولویت</th><th>کانال</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6" class="admin-empty">قالبی موجود نیست</td></tr>') + '</tbody></table></div></div>';
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+        section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">' + t('adm_np_templates_title') + '</h4>' +
+            '<button class="adm-btn adm-btn-primary" onclick="showNpTemplateForm()" style="margin-bottom:10px;">' + t('adm_np_add_template') + '</button>' +
+            '<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>' + t('adm_np_th_key') + '</th><th>' + t('adm_np_th_category') + '</th><th>' + t('adm_np_th_priority') + '</th><th>' + t('adm_np_field_channel') + '</th><th>' + t('adm_np_th_status') + '</th><th>' + t('adm_np_th_actions') + '</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6" class="admin-empty">' + t('adm_np_no_templates') + '</td></tr>') + '</tbody></table></div></div>';
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadNpTemplates = loadNpTemplates;
 
@@ -2949,38 +2945,38 @@ var _npTemplateCache = [];
 function showNpTemplateForm() {
     var section = document.getElementById('np-templates-section');
     if (!section) return;
-    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">قالب جدید</h4>' +
+    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">' + t('adm_np_new_template_title') + '</h4>' +
         '<div class="rc-form-grid">' +
-        '<div class="rc-field"><label>کلید</label><input type="text" id="np-tpl-key" placeholder="wheel_reward"></div>' +
-        '<div class="rc-field"><label>دسته</label><input type="text" id="np-tpl-category" value="system"></div>' +
-        '<div class="rc-field"><label>اولویت</label><select id="np-tpl-priority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>' +
-        '<div class="rc-field"><label>کانال</label><select id="np-tpl-channel"><option value="mini_app">mini_app</option><option value="telegram">telegram</option><option value="both" selected>both</option></select></div>' +
-        '<div class="rc-field"><label>عنوان</label><input type="text" id="np-tpl-title" placeholder="عنوان اعلان"></div>' +
-        '<div class="rc-field"><label>فعال</label><select id="np-tpl-active"><option value="true">بله</option><option value="false">خیر</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_key') + '</label><input type="text" id="np-tpl-key" placeholder="wheel_reward"></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_category') + '</label><input type="text" id="np-tpl-category" value="system"></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_priority') + '</label><select id="np-tpl-priority"><option value="low">low</option><option value="medium" selected>medium</option><option value="high">high</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_field_channel') + '</label><select id="np-tpl-channel"><option value="mini_app">mini_app</option><option value="telegram">telegram</option><option value="both" selected>both</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_field_title') + '</label><input type="text" id="np-tpl-title" placeholder="' + t('adm_np_field_title_ph') + '"></div>' +
+        '<div class="rc-field"><label>' + t('adm_rc_field_active') + '</label><select id="np-tpl-active"><option value="true">' + t('adm_rc_opt_yes') + '</option><option value="false">' + t('adm_rc_opt_no') + '</option></select></div>' +
         '</div>' +
-        '<div class="rc-field" style="margin-top:10px;"><label>متن پیام</label><textarea id="np-tpl-message" rows="4" placeholder="متن اعلان..."></textarea></div>' +
-        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(null)" style="margin-top:10px;">ذخیره</button> ' +
-        '<button class="adm-btn" onclick="loadNpTemplates()">انصراف</button>' +
+        '<div class="rc-field" style="margin-top:10px;"><label>' + t('adm_ads_field_body_text') + '</label><textarea id="np-tpl-message" rows="4" placeholder="' + t('adm_np_field_message_ph') + '"></textarea></div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(null)" style="margin-top:10px;">' + t('adm_rc_save_btn_short') + '</button> ' +
+        '<button class="adm-btn" onclick="loadNpTemplates()">' + t('adm_np_cancel_btn') + '</button>' +
         '</div>';
 }
 
 function editNpTemplate(templateId) {
     var tpl = _npTemplateCache.find(function (t) { return String(t.id) === String(templateId); });
-    if (!tpl) { adminToast('قالب یافت نشد', 'error'); return; }
+    if (!tpl) { adminToast(t('adm_np_template_not_found'), 'error'); return; }
     var section = document.getElementById('np-templates-section');
     if (!section) return;
-    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">ویرایش قالب: ' + adminEscapeHtml(tpl.key) + '</h4>' +
+    section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">' + t('adm_np_edit_template_title', { key: adminEscapeHtml(tpl.key) }) + '</h4>' +
         '<div class="rc-form-grid">' +
-        '<div class="rc-field"><label>دسته</label><input type="text" id="np-tpl-category" value="' + adminEscapeHtml(tpl.category || '') + '"></div>' +
-        '<div class="rc-field"><label>اولویت</label><select id="np-tpl-priority"><option value="low"' + (tpl.priority === 'low' ? ' selected' : '') + '>low</option><option value="medium"' + (tpl.priority === 'medium' ? ' selected' : '') + '>medium</option><option value="high"' + (tpl.priority === 'high' ? ' selected' : '') + '>high</option></select></div>' +
-        '<div class="rc-field"><label>کانال</label><select id="np-tpl-channel"><option value="mini_app"' + (tpl.channel === 'mini_app' ? ' selected' : '') + '>mini_app</option><option value="telegram"' + (tpl.channel === 'telegram' ? ' selected' : '') + '>telegram</option><option value="both"' + (tpl.channel === 'both' ? ' selected' : '') + '>both</option></select></div>' +
-        '<div class="rc-field"><label>عنوان</label><input type="text" id="np-tpl-title" value="' + adminEscapeHtml(tpl.title || '') + '"></div>' +
-        '<div class="rc-field"><label>فعال</label><select id="np-tpl-active"><option value="true"' + (tpl.is_active ? ' selected' : '') + '>بله</option><option value="false"' + (!tpl.is_active ? ' selected' : '') + '>خیر</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_category') + '</label><input type="text" id="np-tpl-category" value="' + adminEscapeHtml(tpl.category || '') + '"></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_priority') + '</label><select id="np-tpl-priority"><option value="low"' + (tpl.priority === 'low' ? ' selected' : '') + '>low</option><option value="medium"' + (tpl.priority === 'medium' ? ' selected' : '') + '>medium</option><option value="high"' + (tpl.priority === 'high' ? ' selected' : '') + '>high</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_field_channel') + '</label><select id="np-tpl-channel"><option value="mini_app"' + (tpl.channel === 'mini_app' ? ' selected' : '') + '>mini_app</option><option value="telegram"' + (tpl.channel === 'telegram' ? ' selected' : '') + '>telegram</option><option value="both"' + (tpl.channel === 'both' ? ' selected' : '') + '>both</option></select></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_field_title') + '</label><input type="text" id="np-tpl-title" value="' + adminEscapeHtml(tpl.title || '') + '"></div>' +
+        '<div class="rc-field"><label>' + t('adm_rc_field_active') + '</label><select id="np-tpl-active"><option value="true"' + (tpl.is_active ? ' selected' : '') + '>' + t('adm_rc_opt_yes') + '</option><option value="false"' + (!tpl.is_active ? ' selected' : '') + '>' + t('adm_rc_opt_no') + '</option></select></div>' +
         '</div>' +
-        '<div class="rc-field" style="margin-top:10px;"><label>متن پیام</label><textarea id="np-tpl-message" rows="4">' + adminEscapeHtml(tpl.message || '') + '</textarea></div>' +
-        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(\'' + adminEscapeJsId(templateId) + '\')" style="margin-top:10px;">به‌روزرسانی</button> ' +
-        '<button class="adm-btn" onclick="loadNpTemplates()">انصراف</button> ' +
-        '<button class="adm-btn adm-btn-red" onclick="deleteNpTemplate(\'' + adminEscapeJsId(templateId) + '\')">حذف</button>' +
+        '<div class="rc-field" style="margin-top:10px;"><label>' + t('adm_ads_field_body_text') + '</label><textarea id="np-tpl-message" rows="4">' + adminEscapeHtml(tpl.message || '') + '</textarea></div>' +
+        '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(\'' + adminEscapeJsId(templateId) + '\')" style="margin-top:10px;">' + t('adm_update_btn') + '</button> ' +
+        '<button class="adm-btn" onclick="loadNpTemplates()">' + t('adm_np_cancel_btn') + '</button> ' +
+        '<button class="adm-btn adm-btn-red" onclick="deleteNpTemplate(\'' + adminEscapeJsId(templateId) + '\')">' + t('delete') + '</button>' +
         '</div>';
 }
 
@@ -3001,18 +2997,18 @@ async function saveNpTemplate(templateId) {
         var method = 'POST';
         if (templateId) { url = '/api/admin/notifications/templates/' + encodeURIComponent(templateId); method = 'PUT'; }
         var data = await adminApiFetch(url, { method: method, body: JSON.stringify(payload) });
-        if (data && data.status === 'success') { adminToast('قالب ذخیره شد', 'success'); loadNpTemplates(); }
-        else { adminToast(data?.message || 'خطا در ذخیره', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error('saveNpTemplate:', e); }
+        if (data && data.status === 'success') { adminToast(t('adm_np_template_saved'), 'success'); loadNpTemplates(); }
+        else { adminToast(data?.message || t('adm_ads_save_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error('saveNpTemplate:', e); }
 }
 
 async function deleteNpTemplate(templateId) {
-    if (!confirm('از حذف این قالب مطمئن هستید؟')) return;
+    if (!confirm(t('adm_np_delete_confirm'))) return;
     try {
         var data = await adminApiFetch('/api/admin/notifications/templates/' + encodeURIComponent(templateId), { method: 'DELETE' });
-        if (data && data.status === 'success') { adminToast('قالب حذف شد', 'success'); loadNpTemplates(); }
-        else { adminToast(data?.message || 'خطا در حذف', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error('deleteNpTemplate:', e); }
+        if (data && data.status === 'success') { adminToast(t('adm_np_template_deleted'), 'success'); loadNpTemplates(); }
+        else { adminToast(data?.message || t('adm_np_template_delete_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error('deleteNpTemplate:', e); }
 }
 window.showNpTemplateForm = showNpTemplateForm;
 window.editNpTemplate = editNpTemplate;
@@ -3022,7 +3018,7 @@ window.deleteNpTemplate = deleteNpTemplate;
 async function loadNpAnalytics() {
     const section = document.getElementById('np-analytics-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/notifications/analytics?range=30d');
@@ -3033,21 +3029,21 @@ async function loadNpAnalytics() {
             const priRows = (a.by_priority || []).map(function (p) { return '<tr><td>' + adminEscapeHtml(p.priority) + '</td><td>' + adminFormatNumber(p.count) + '</td></tr>'; }).join('');
             section.innerHTML = `
                 <div class="rc-overview-grid">
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">کل (۳۰ روز)</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">خوانده نشده</div></div>
-                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">امروز</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_sent)}</div><div class="rc-stat-lbl">${t('adm_np_analytics_total_30d')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.total_unread)}</div><div class="rc-stat-lbl">${t('adm_np_unread')}</div></div>
+                    <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(a.today_count)}</div><div class="rc-stat-lbl">${t('adm_np_today_label')}</div></div>
                 </div>
                 <div class="rc-card" style="margin-top:16px;">
-                    <h4 class="rc-card-title">بر اساس دسته</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>دسته</th><th>تعداد</th></tr></thead><tbody>${catRows || '<tr><td colspan="2" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                    <h4 class="rc-card-title">${t('adm_np_analytics_by_category')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_np_th_category')}</th><th>${t('adm_np_analytics_th_count')}</th></tr></thead><tbody>${catRows || '<tr><td colspan="2" class="admin-empty">' + t('adm_rc_no_data') + '</td></tr>'}</tbody></table></div>
                 </div>
                 <div class="rc-card" style="margin-top:16px;">
-                    <h4 class="rc-card-title">بر اساس اولویت</h4>
-                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>اولویت</th><th>تعداد</th></tr></thead><tbody>${priRows || '<tr><td colspan="2" class="admin-empty">داده‌ای نیست</td></tr>'}</tbody></table></div>
+                    <h4 class="rc-card-title">${t('adm_np_analytics_by_priority')}</h4>
+                    <div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>${t('adm_np_th_priority')}</th><th>${t('adm_np_analytics_th_count')}</th></tr></thead><tbody>${priRows || '<tr><td colspan="2" class="admin-empty">' + t('adm_rc_no_data') + '</td></tr>'}</tbody></table></div>
                 </div>
             `;
         }
-    } catch (e) { section.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+    } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadNpAnalytics = loadNpAnalytics;
 
@@ -3058,7 +3054,7 @@ window.loadNpAnalytics = loadNpAnalytics;
 async function loadAlertEconomyDashboard() {
     const grid = document.getElementById('ae-dashboard-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    grid.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/alert-economy/dashboard');
@@ -3066,25 +3062,25 @@ async function loadAlertEconomyDashboard() {
         if (data && data.status === 'success' && data.dashboard) {
             const d = data.dashboard;
             const svcHtml = (d.services || []).map(function (s) {
-                return '<div class="rc-stat-card"><div class="rc-stat-val">' + (s.is_enabled ? '✅ فعال' : '⛔ غیرفعال') + '</div><div class="rc-stat-lbl">' + adminEscapeHtml(s.alert_type) + ' (' + s.free_per_day + ' رایگان / ' + s.cost_per_extra + ' AB)</div></div>';
+                return '<div class="rc-stat-card"><div class="rc-stat-val">' + (s.is_enabled ? t('adm_ae_active_status') : t('adm_ae_inactive_status')) + '</div><div class="rc-stat-lbl">' + t('adm_ae_service_label', { type: adminEscapeHtml(s.alert_type), free: s.free_per_day, cost: s.cost_per_extra }) + '</div></div>';
             }).join('');
             grid.innerHTML = `
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.active_alerts)}</div><div class="rc-stat-lbl">هشدارهای فعال</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.triggered_today)}</div><div class="rc-stat-lbl">اجراشده امروز</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.quota_used_today)}</div><div class="rc-stat-lbl">سهمیه استفاده شده</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.paid_alerts_today)}</div><div class="rc-stat-lbl">هشدارهای پولی</div></div>
-                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.ab_spent_today)} AB</div><div class="rc-stat-lbl">AB مصرف شده</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.active_alerts)}</div><div class="rc-stat-lbl">${t('adm_ae_active_alerts')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.triggered_today)}</div><div class="rc-stat-lbl">${t('adm_ae_triggered_today')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.quota_used_today)}</div><div class="rc-stat-lbl">${t('adm_ae_quota_used')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.paid_alerts_today)}</div><div class="rc-stat-lbl">${t('adm_ae_paid_alerts')}</div></div>
+                <div class="rc-stat-card"><div class="rc-stat-val">${adminFormatNumber(d.ab_spent_today)} AB</div><div class="rc-stat-lbl">${t('adm_ae_ab_spent')}</div></div>
                 ${svcHtml}
             `;
-        } else { grid.innerHTML = '<div class="admin-empty">داده‌ای موجود نیست</div>'; }
-    } catch (e) { grid.innerHTML = '<div class="admin-empty">خطا</div>'; console.error(e); }
+        } else { grid.innerHTML = '<div class="admin-empty">' + t('adm_empty') + '</div>'; }
+    } catch (e) { grid.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadAlertEconomyDashboard = loadAlertEconomyDashboard;
 
 async function loadAlertEconomyConfigs() {
     const section = document.getElementById('ae-configs-section');
     if (!section) return;
-    section.innerHTML = '<div class="admin-empty">در حال بارگذاری...</div>';
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
     const token = _adminLoadToken;
     try {
         const data = await adminApiFetch('/api/admin/alert-economy/configs');
@@ -3092,9 +3088,9 @@ async function loadAlertEconomyConfigs() {
         if (data && data.status === 'success' && Array.isArray(data.configs)) {
             // PHASE 5: Full config UI — each alert type has a card with toggle + inputs
             const labels = {
-                price_alert: 'هشدار قیمت',
-                calendar_alert: 'هشدار تقویم اقتصادی',
-                breaking_news: 'هشدار اخبار فوری',
+                price_alert: t('adm_ae_price_alert'),
+                calendar_alert: t('adm_ae_calendar_alert'),
+                breaking_news: t('adm_ae_breaking_news'),
             };
             const cards = data.configs.map(function (c) {
                 const label = labels[c.alert_type] || c.alert_type;
@@ -3110,19 +3106,19 @@ async function loadAlertEconomyConfigs() {
                         '</label>' +
                     '</div>' +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
-                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">رایگان در روز</label>' +
+                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">' + t('adm_ae_free_per_day') + '</label>' +
                             '<input type="number" id="ae-cfg-free-' + adminEscapeHtml(c.alert_type) + '" value="' + c.free_per_day + '" min="0" class="adm-input" style="padding:8px;border-radius:8px;">' +
                         '</div>' +
-                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">هزینه اضافه (AB)</label>' +
+                        '<div><label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px;">' + t('adm_ae_cost_extra') + '</label>' +
                             '<input type="number" id="ae-cfg-cost-' + adminEscapeHtml(c.alert_type) + '" value="' + c.cost_per_extra + '" min="0" class="adm-input" style="padding:8px;border-radius:8px;">' +
                         '</div>' +
                     '</div>' +
-                    '<button class="adm-btn adm-btn-primary" onclick="saveAlertConfig(\'' + adminEscapeHtml(c.alert_type) + '\')" style="margin-top:12px;padding:8px 20px;font-size:12px;">ذخیره</button>' +
+                    '<button class="adm-btn adm-btn-primary" onclick="saveAlertConfig(\'' + adminEscapeHtml(c.alert_type) + '\')" style="margin-top:12px;padding:8px 20px;font-size:12px;">' + t('adm_rc_save_btn_short') + '</button>' +
                 '</div>';
             }).join('');
-            section.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;">' + (cards || '<div class="admin-empty">داده‌ای نیست</div>') + '</div>';
+            section.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;">' + (cards || '<div class="admin-empty">' + t('adm_rc_no_data') + '</div>') + '</div>';
         }
-    } catch (e) { section.innerHTML = adminErrorState('خطا در بارگذاری', 'loadAlertEconomyConfigs'); console.error(e); }
+    } catch (e) { section.innerHTML = adminErrorState(t('adm_rc_load_error'), 'loadAlertEconomyConfigs'); console.error(e); }
 }
 window.loadAlertEconomyConfigs = loadAlertEconomyConfigs;
 
@@ -3139,9 +3135,9 @@ async function saveAlertConfig(alertType) {
                 cost_per_extra: costPerExtra,
             }),
         });
-        if (data && data.status === 'success') { adminToast('تنظیمات ذخیره شد', 'success'); loadAlertEconomyConfigs(); }
-        else { adminToast('خطا در ذخیره', 'error'); }
-    } catch (e) { adminToast('خطا', 'error'); console.error(e); }
+        if (data && data.status === 'success') { adminToast(t('adm_rc_saved'), 'success'); loadAlertEconomyConfigs(); }
+        else { adminToast(t('adm_rc_save_error'), 'error'); }
+    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
 }
 window.saveAlertConfig = saveAlertConfig;
 
@@ -3214,7 +3210,7 @@ function _adsEmptyState(iconKey, message, ctaFn, ctaLabel) {
         : '';
     return '<div class="ads-empty-state">' +
         '<div class="ads-empty-icon">' + _adsIcon(iconKey || 'inbox', 'ads-empty-svg') + '</div>' +
-        '<div class="ads-empty-text">' + adminEscapeHtml(message || 'موردی موجود نیست') + '</div>' +
+        '<div class="ads-empty-text">' + adminEscapeHtml(message || t('adm_ads_no_data')) + '</div>' +
         cta +
     '</div>';
 }
@@ -3222,8 +3218,8 @@ function _adsEmptyState(iconKey, message, ctaFn, ctaLabel) {
 function _adsErrorState(message, retryFn) {
     return '<div class="ads-error-state">' +
         '<div class="ads-error-icon">' + _adsIcon('alertCircle', 'ads-error-svg') + '</div>' +
-        '<div class="ads-error-text">' + adminEscapeHtml(message || 'بارگذاری اطلاعات انجام نشد') + '</div>' +
-        '<button class="adm-btn ads-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">' + _adsIcon('refresh', 'adm-btn-icon') + 'تلاش مجدد</button>' +
+        '<div class="ads-error-text">' + adminEscapeHtml(message || t('adm_ads_load_error')) + '</div>' +
+        '<button class="adm-btn ads-retry-btn" onclick="' + adminEscapeHtml(retryFn) + '()">' + _adsIcon('refresh', 'adm-btn-icon') + t('adm_ads_retry_btn') + '</button>' +
     '</div>';
 }
 
@@ -3274,13 +3270,13 @@ function _adsItemCard(opts) {
 function _adsStatusPill(setterFnName, id, currentStatus) {
     var meta = _adStatusMeta(currentStatus);
     var opts = [
-        { value: 'draft', label: 'پیش‌نویس' },
-        { value: 'active', label: 'فعال' },
-        { value: 'paused', label: 'متوقف' },
-        { value: 'archived', label: 'بایگانی' },
+        { value: 'draft', label: t('adm_status_draft') },
+        { value: 'active', label: t('adm_status_active') },
+        { value: 'paused', label: t('adm_status_paused') },
+        { value: 'archived', label: t('adm_status_archived') },
     ];
     var html = '<select class="ads-status-pill ads-status-' + meta.color + '" onchange="' + adminEscapeHtml(setterFnName) +
-        '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" title="تغییر وضعیت">';
+        '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" title="' + t('adm_change_status') + '">';
     opts.forEach(function (o) {
         html += '<option value="' + adminEscapeHtml(o.value) + '"' + (currentStatus === o.value ? ' selected' : '') + '>' + adminEscapeHtml(o.label) + '</option>';
     });
@@ -3313,10 +3309,10 @@ function _adsSetBtnLoading(btnSelector, loading, loadingText) {
 // Now archived uses a distinct dark-gray with strikethrough styling (see CSS).
 function _adStatusMeta(status) {
     switch (status) {
-        case 'active':   return { label: 'فعال',    color: 'green' };
-        case 'paused':   return { label: 'متوقف',   color: 'orange' };
-        case 'archived': return { label: 'بایگانی', color: 'gray-dark' };
-        case 'draft': default: return { label: 'پیش‌نویس', color: 'gray' };
+        case 'active':   return { label: t('adm_status_active'),    color: 'green' };
+        case 'paused':   return { label: t('adm_status_paused'),   color: 'orange' };
+        case 'archived': return { label: t('adm_status_archived'), color: 'gray-dark' };
+        case 'draft': default: return { label: t('adm_status_draft'), color: 'gray' };
     }
 }
 
@@ -3328,10 +3324,10 @@ function _adStatusBadge(status) {
 // Build a small inline status dropdown for a campaign row
 function _adStatusSelect(setterFnName, id, currentStatus) {
     var opts = [
-        { value: 'draft', label: 'پیش‌نویس' },
-        { value: 'active', label: 'فعال' },
-        { value: 'paused', label: 'متوقف' },
-        { value: 'archived', label: 'بایگانی' },
+        { value: 'draft', label: t('adm_status_draft') },
+        { value: 'active', label: t('adm_status_active') },
+        { value: 'paused', label: t('adm_status_paused') },
+        { value: 'archived', label: t('adm_status_archived') },
     ];
     var html = '<select class="adm-input adm-input-sm" onchange="' + adminEscapeHtml(setterFnName) +
         '(\'' + adminEscapeJsId(String(id)) + '\', this.value)" style="padding:5px 8px;font-size:11px;min-width:96px;">';
@@ -3345,9 +3341,9 @@ function _adStatusSelect(setterFnName, id, currentStatus) {
 // Persian labels + color classes for destinations (mini_app/telegram/both)
 function _adsDestinationMeta(dest) {
     switch (dest) {
-        case 'mini_app': return { iconKey: 'smartphone', label: 'مینی‌اپ', color: 'blue' };
-        case 'telegram': return { iconKey: 'send', label: 'تلگرام', color: 'blue' };
-        case 'both': default: return { iconKey: 'both', label: 'هر دو', color: 'blue' };
+        case 'mini_app': return { iconKey: 'smartphone', label: t('adm_channel_mini_app'), color: 'blue' };
+        case 'telegram': return { iconKey: 'send', label: t('adm_channel_telegram'), color: 'blue' };
+        case 'both': default: return { iconKey: 'both', label: t('adm_channel_both'), color: 'blue' };
     }
 }
 
@@ -3356,9 +3352,9 @@ function _adsDestinationMeta(dest) {
 // the existing 'orange' badge which is the amber accent), all=gray.
 function _adsAudienceMeta(aud) {
     switch (aud) {
-        case 'free':    return { label: 'رایگان',  color: 'blue' };
-        case 'premium': return { label: 'ویژه',    color: 'orange' };
-        case 'all': default: return { label: 'همه', color: 'gray' };
+        case 'free':    return { label: t('adm_audience_free'),  color: 'blue' };
+        case 'premium': return { label: t('adm_audience_premium'),    color: 'orange' };
+        case 'all': default: return { label: t('adm_audience_all'), color: 'gray' };
     }
 }
 
@@ -3397,7 +3393,7 @@ window.loadAdvertisementsOverview = loadAdvertisementsOverview;
 async function uploadAdImage(file, targetInputId, previewImgId) {
     if (!file) return;
     if (file.size > 500 * 1024) {
-        adminToast('حجم تصویر باید کمتر از ۵۰۰ کیلوبایت باشد', 'error');
+        adminToast(t('adm_image_size_error'), 'error');
         return;
     }
     var allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];

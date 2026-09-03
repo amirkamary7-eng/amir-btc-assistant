@@ -2326,7 +2326,7 @@ test('CALRESTORE-006 (real exec): buildCalendarSegmentsHtml executes and produce
   const src = fs.readFileSync(APP_JS_PATH, 'utf8');
   const fnSrc = extractFnBody(src, 'buildCalendarSegmentsHtml');
   // The function uses `currentCalendarTab` — inject as a parameter
-  const wrapper = 'let currentCalendarTab = "week";\n' + fnSrc + '\nreturn { build: buildCalendarSegmentsHtml, setTab: (t) => currentCalendarTab = t };';
+  const wrapper = 'let currentCalendarTab = "week";\nfunction t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}\n' + fnSrc + '\nreturn { build: buildCalendarSegmentsHtml, setTab: (tab) => currentCalendarTab = tab };';
   const mod = new Function(wrapper)();
   const build = mod.build;
 
@@ -2447,8 +2447,8 @@ test('CALRESTORE-008 (real DOM): renderCalendarV2 with restored functions render
   // Globals — IMPORTANT: do NOT stub getCalendarTabCounts/buildCalendarSegmentsHtml/startCalCountdown
   // They must be the REAL functions extracted from app.js
   const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
-  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
-  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
 
   let calCountdownInterval = null;
   const globals = {
@@ -2458,6 +2458,7 @@ test('CALRESTORE-008 (real DOM): renderCalendarV2 with restored functions render
     currentCalendarTab: 'week',
     currentCalCountry: 'all',
     currentLang: 'fa',
+    t: (k, p) => { let s = k; if (p) { for (const pk in p) { s = s.split('{' + pk + '}').join(p[pk]); } } return s; },
     _niCalendarReminders: {},
     calCountdownInterval: null,
     MAJOR_CURRENCIES: ['USD', 'EUR', 'GBP', 'JPY'],
@@ -2551,8 +2552,8 @@ test('CALRESTORE-009 (real DOM): Crypto → Calendar → Crypto → Calendar ren
   ];
 
   const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
-  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
-  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
 
   const newsCache = [
     { title: 'BTC pumps', url: 'https://example.com/btc', source: 'CD', category: 'crypto', time: '2h', pub_date: '2026-08-11T08:00:00Z', sentiment: 'positive', summary: '', ai_summary: null, ai_status: 'pending', image: '', impact: 'medium' },
@@ -2565,6 +2566,7 @@ test('CALRESTORE-009 (real DOM): Crypto → Calendar → Crypto → Calendar ren
     currentCalendarTab: 'week',
     currentCalCountry: 'all',
     currentLang: 'fa',
+    t: (k, p) => { let s = k; if (p) { for (const pk in p) { s = s.split('{' + pk + '}').join(p[pk]); } } return s; },
     newsCache,
     newsHasMore: false,
     newsPage: 1,
@@ -2707,8 +2709,8 @@ test('CALRESTORE-010 (real DOM): Calendar today/tomorrow/week sub-tabs all rende
   ];
 
   const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
-  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
-  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
 
   let currentCalendarTab = 'week';
   const globals = {
@@ -2719,6 +2721,7 @@ test('CALRESTORE-010 (real DOM): Calendar today/tomorrow/week sub-tabs all rende
     set currentCalendarTab(v) { currentCalendarTab = v; },
     currentCalCountry: 'all',
     currentLang: 'fa',
+    t: (k, p) => { let s = k; if (p) { for (const pk in p) { s = s.split('{' + pk + '}').join(p[pk]); } } return s; },
     _niCalendarReminders: {},
     calCountdownInterval: null,
     MAJOR_CURRENCIES: ['USD'],
@@ -2787,8 +2790,8 @@ test('CALRESTORE-011 (real DOM): Calendar with empty events shows empty state (n
   };
 
   const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
-  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
-  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
 
   const globals = {
     document,
@@ -2797,6 +2800,7 @@ test('CALRESTORE-011 (real DOM): Calendar with empty events shows empty state (n
     currentCalendarTab: 'week',
     currentCalCountry: 'all',
     currentLang: 'fa',
+    t: (k, p) => { let s = k; if (p) { for (const pk in p) { s = s.split('{' + pk + '}').join(p[pk]); } } return s; },
     _niCalendarReminders: {},
     calCountdownInterval: null,
     MAJOR_CURRENCIES: [],
@@ -2853,8 +2857,8 @@ test('CALRESTORE-012 (real DOM): Calendar with country filter no-match shows no-
   ];
 
   const realGetCalendarTabCounts = new Function(extractFnBody(src, 'getCalendarTabCounts') + '\nreturn getCalendarTabCounts;')();
-  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
-  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
+  const realBuildCalendarSegmentsHtml = new Function('let currentCalendarTab="week";function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}' + extractFnBody(src, 'buildCalendarSegmentsHtml') + '\nreturn buildCalendarSegmentsHtml;')();
+  const realStartCalCountdown = new Function('let calCountdownInterval=null;const clearInterval=()=>{};const setInterval=()=>999;function formatCountdown(){return "1m";};function t(k,p){let s=k;if(p){for(var pk in p){s=s.split("{"+pk+"}").join(p[pk]);}}return s;}const document={querySelectorAll:()=>[]};' + extractFnBody(src, 'startCalCountdown') + '\nreturn startCalCountdown;')();
 
   const globals = {
     document,
@@ -2863,6 +2867,7 @@ test('CALRESTORE-012 (real DOM): Calendar with country filter no-match shows no-
     currentCalendarTab: 'week',
     currentCalCountry: 'JPY', // filter that matches nothing
     currentLang: 'fa',
+    t: (k, p) => { let s = k; if (p) { for (const pk in p) { s = s.split('{' + pk + '}').join(p[pk]); } } return s; },
     _niCalendarReminders: {},
     calCountdownInterval: null,
     MAJOR_CURRENCIES: ['USD', 'EUR', 'JPY'],

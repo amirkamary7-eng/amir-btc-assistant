@@ -959,10 +959,10 @@ test('ADS-FIX-UI2: Premium Features includes Advertisement Control benefit', () 
   const memSrc = fs.readFileSync(path.join(__dirname, 'membership-user.js'), 'utf8');
   assert.ok(memSrc.includes("'megaphone'"),
     'megaphone icon must be defined for the Advertisement Control benefit');
-  assert.ok(memSrc.includes('کنترل تبلیغات'),
-    'benefit title "کنترل تبلیغات" must be present');
-  assert.ok(memSrc.includes('مدیریت و غیرفعال‌سازی تبلیغات'),
-    'benefit description "مدیریت و غیرفعال‌سازی تبلیغات" must be present');
+  assert.ok(memSrc.includes("t('mem_benefit_ad_control')"),
+    'benefit title must use t("mem_benefit_ad_control") for i18n');
+  assert.ok(memSrc.includes("t('mem_benefit_ad_control_desc')"),
+    'benefit description must use t("mem_benefit_ad_control_desc") for i18n');
   // Count occurrences — should appear in both the status popup and activation popup
   const matches = memSrc.match(/benefitRow\('megaphone'/g) || [];
   assert.ok(matches.length >= 2,
@@ -1308,8 +1308,8 @@ test('ADS-FIX-UI-EMPTY-02: _adsErrorState helper exists with retry button', () =
     '_adsErrorState must use ads-error-state CSS class');
   assert.ok(fnBlock.includes('ads-retry-btn'),
     '_adsErrorState must include a retry button');
-  assert.ok(fnBlock.includes('تلاش مجدد'),
-    '_adsErrorState retry button must say "تلاش مجدد"');
+  assert.ok(fnBlock.includes("t('adm_ads_retry_btn')"),
+    '_adsErrorState retry button must use t("adm_ads_retry_btn") for i18n');
 });
 
 test('ADS-FIX-UI-EMPTY-03: loadAdChannels uses premium empty + error states', () => {

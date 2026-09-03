@@ -33,12 +33,12 @@
     active: true,
     exchange_name: 'Bitunix',
     exchange_register_url: 'https://www.bitunix.com/register?vipCode=AMIRBTC',
-    uid_label: 'شناسه کاربری Bitunix خود را وارد کنید',
+    uid_label: t('mem_uid_label_default', { exchange: 'Bitunix' }),
     referral_code: 'AMIRBTC',
     label: 'Bitunix + First Trade',
     metadata: {
-      timeline_step_1: 'ثبت‌نام از طریق لینک رسمی Bitunix',
-      button_text: 'ثبت‌نام در Bitunix',
+      timeline_step_1: t('mem_timeline_step1', { exchange: 'Bitunix' }),
+      button_text: t('mem_register_btn', { exchange: 'Bitunix' }),
     },
   };
 
@@ -196,8 +196,8 @@
         '<div class="mb-diamond-shimmer"></div>' +
         (!premium ? '<div class="mb-lock-icon">' + LOCK_SVG + '</div>' : '') +
       '</div>' +
-      '<span class="mb-badge-text">' + (premium ? 'PREMIUM' : 'فعال‌سازی Premium') + '</span>';
-    badge.title = premium ? 'عضو ویژه AMIRBTC' : 'ارتقا به عضویت ویژه';
+      '<span class="mb-badge-text">' + (premium ? 'PREMIUM' : t('mem_activate_premium')) + '</span>';
+    badge.title = premium ? t('mem_vip_member') : t('mem_upgrade_to_vip');
 
     // Apply/remove premium effects on profile card
     if (profileCard) {
@@ -354,7 +354,7 @@
     closePopup();
     _popupOpen = true;
 
-    var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
+    var levelLabel = { VIP: 'VIP', PREMIUM: t('mem_level_premium'), ELITE: t('mem_level_elite') }[status.level] || status.level;
 
     // Build sparkle particles (12 floating dots)
     var sparkles = '';
@@ -386,27 +386,27 @@
             '<div class="mb-welcome-diamond-shimmer"></div>' +
           '</div>' +
           '<div class="mb-welcome-badge">PREMIUM</div>' +
-          '<h2 class="mb-welcome-title">تبریک!</h2>' +
-          '<p class="mb-welcome-subtitle">عضویت ' + esc(levelLabel) + ' شما با موفقیت فعال شد</p>' +
+          '<h2 class="mb-welcome-title">' + t('mem_welcome_title') + '</h2>' +
+          '<p class="mb-welcome-subtitle">' + t('mem_welcome_subtitle', { level: esc(levelLabel) }) + '</p>' +
           '<div class="mb-welcome-divider"></div>' +
-          '<p class="mb-welcome-desc">اکنون تمام امکانات ویژه برای شما فعال است.<br>از تجربه اختصاصی AmirBTC Assistant لذت ببرید.</p>' +
+          '<p class="mb-welcome-desc">' + t('mem_welcome_desc') + '</p>' +
           '<div class="mb-welcome-benefits">' +
             '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 3 5-6"/><polyline points="18 3 21 3 21 6"/></svg>' +
-            '</span><span>چارت‌ها و تحلیل‌های اختصاصی</span></div>' +
+            '</span><span>' + t('mem_benefit_charts') + '</span></div>' +
             '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>' +
-            '</span><span>نشان Premium در پروفایل</span></div>' +
+            '</span><span>' + t('mem_benefit_premium_badge') + '</span></div>' +
             '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' +
-            '</span><span>اولویت در قابلیت‌های جدید</span></div>' +
+            '</span><span>' + t('mem_benefit_priority_features') + '</span></div>' +
             '<div class="mb-welcome-benefit"><span class="mb-welcome-b-icon">' +
               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>' +
-            '</span><span>کمپین‌ها و جوایز ویژه</span></div>' +
+            '</span><span>' + t('mem_benefit_campaigns') + '</span></div>' +
           '</div>' +
           '<button class="mb-welcome-cta" onclick="MembershipApp.closeWelcomePopup()">' +
             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
-            'شروع استفاده' +
+            t('mem_welcome_cta') +
           '</button>' +
         '</div>' +
       '</div>';
@@ -450,7 +450,7 @@
   function openVipStatusPopup(status) {
     closePopup();
     _popupOpen = true;
-    var levelLabel = { VIP: 'VIP', PREMIUM: 'پرمیوم', ELITE: 'الیت' }[status.level] || status.level;
+    var levelLabel = { VIP: 'VIP', PREMIUM: t('mem_level_premium'), ELITE: t('mem_level_elite') }[status.level] || status.level;
 
     // Phase 8M: Removed cosmetic display from VIP popup — cosmetics will be
     // accessed from the Shop/Cosmetics area, not the Premium info page.
@@ -464,7 +464,7 @@
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
     overlay.innerHTML =
       '<div class="mb-popup">' +
-        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="بستن">' +
+        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="' + t('close') + '">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
         '<div class="mb-popup-header">' +
@@ -475,29 +475,29 @@
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
           '<h2 class="mb-popup-title">PREMIUM</h2>' +
-          '<p class="mb-popup-subtitle">عضویت شما فعال است. تمام امکانات اختصاصی با سهمیه بالاتر در دسترس شماست.</p>' +
+          '<p class="mb-popup-subtitle">' + t('mem_vip_status_subtitle') + '</p>' +
         '</div>' +
         '<div class="mb-vip-status">' +
           '<div class="mb-vip-badge">' +
             '<div class="mb-diamond-svg" style="width:14px;height:14px">' + DIAMOND_SVG + '</div>' +
-            '<span class="mb-vip-badge-text">عضویت فعال</span>' +
+            '<span class="mb-vip-badge-text">' + t('mem_vip_status_active') + '</span>' +
           '</div>' +
           '<div class="mb-vip-info">' +
             '<div class="mb-vip-info-item">' +
-              '<div class="mb-vip-info-label">سطح</div>' +
+              '<div class="mb-vip-info-label">' + t('mem_label_level') + '</div>' +
               '<div class="mb-vip-info-val">' + esc(levelLabel) + '</div>' +
             '</div>' +
             '<div class="mb-vip-info-item">' +
-              '<div class="mb-vip-info-label">تاریخ فعال‌سازی</div>' +
+              '<div class="mb-vip-info-label">' + t('mem_label_activation_date') + '</div>' +
               '<div class="mb-vip-info-val">' + esc(formatFaDate(status.approvedAt)) + '</div>' +
             '</div>' +
             (status.lifetime
               ? '<div class="mb-vip-info-item mb-vip-lifetime">' +
-                  '<div class="mb-vip-info-label">نوع عضویت</div>' +
-                  '<div class="mb-vip-info-val">بدون تاریخ انقضا</div>' +
+                  '<div class="mb-vip-info-label">' + t('mem_label_membership_type') + '</div>' +
+                  '<div class="mb-vip-info-val">' + t('mem_no_expiry') + '</div>' +
                 '</div>'
               : '<div class="mb-vip-info-item">' +
-                  '<div class="mb-vip-info-label">انقضا</div>' +
+                  '<div class="mb-vip-info-label">' + t('mem_label_expiry') + '</div>' +
                   '<div class="mb-vip-info-val">' + esc(formatFaDate(status.expireAt)) + '</div>' +
                 '</div>'
             ) +
@@ -506,19 +506,19 @@
           quotaHtml +
           // Phase 8M: Unified benefits structure — same as activation popup
           '<div class="mb-benefits">' +
-            '<div class="mb-benefits-section-title">مزایای Premium</div>' +
-            benefitRow('ai', 'چت هوش مصنوعی', '۱۰۰ پیام در روز با مدل‌های پیشرفته') +
-            benefitRow('bell', 'هشدارهای قیمتی', '۱۰ هشدار رایگان در روز') +
-            benefitRow('wheel', 'چرخ شانس', '۵ اسپین در روز با جوایز ویژه') +
-            benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
-            benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
-            benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
-            benefitRow('megaphone', 'کنترل تبلیغات', 'مدیریت و غیرفعال‌سازی تبلیغات و اعلان‌های تبلیغاتی') +
+            '<div class="mb-benefits-section-title">' + t('mem_benefits_premium_title') + '</div>' +
+            benefitRow('ai', t('mem_benefit_ai'), t('mem_benefit_ai_desc')) +
+            benefitRow('bell', t('mem_benefit_alerts'), t('mem_benefit_alerts_desc')) +
+            benefitRow('wheel', t('mem_benefit_wheel'), t('mem_benefit_wheel_desc')) +
+            benefitRow('star', t('mem_benefit_watchlist'), t('mem_benefit_watchlist_desc')) +
+            benefitRow('gift', t('mem_benefit_daily'), t('mem_benefit_daily_desc')) +
+            benefitRow('badge', t('mem_benefit_pro_badge'), t('mem_benefit_pro_badge_desc')) +
+            benefitRow('megaphone', t('mem_benefit_ad_control'), t('mem_benefit_ad_control_desc')) +
             '<div class="mb-benefits-divider"></div>' +
-            '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
-            benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
-            benefitRow('shield', 'اولویت پشتیبانی', 'پاسخگویی اولویت‌دار تیم پشتیبانی') +
-            benefitRow('diamond', 'دسترسی دائمی Premium', 'بدون تاریخ انقضا • مطابق شرایط و قوانین عضویت') +
+            '<div class="mb-benefits-section-title">' + t('mem_benefits_exclusive_title') + '</div>' +
+            benefitRow('bolt', t('mem_benefit_early_access'), t('mem_benefit_early_access_desc')) +
+            benefitRow('shield', t('mem_benefit_priority_support'), t('mem_benefit_priority_support_desc')) +
+            benefitRow('diamond', t('mem_benefit_permanent'), t('mem_benefit_permanent_desc')) +
           '</div>' +
         '</div>' +
       '</div>';
@@ -558,9 +558,9 @@
 
     // Phase 2: Data-driven exchange requirement values.
     var req = getRequirement();
-    var uidLabel = req.uid_label || ('شناسه کاربری ' + (req.exchange_name || 'Bitunix') + ' خود را وارد کنید');
-    var buttonText = (req.metadata && req.metadata.button_text) || ('ثبت‌نام در ' + (req.exchange_name || 'Bitunix'));
-    var timelineStep1Text = (req.metadata && req.metadata.timeline_step_1) || ('ثبت‌نام از طریق لینک رسمی ' + (req.exchange_name || 'Bitunix'));
+    var uidLabel = req.uid_label || t('mem_uid_label_default', { exchange: (req.exchange_name || 'Bitunix') });
+    var buttonText = (req.metadata && req.metadata.button_text) || t('mem_register_btn', { exchange: (req.exchange_name || 'Bitunix') });
+    var timelineStep1Text = (req.metadata && req.metadata.timeline_step_1) || t('mem_timeline_step1', { exchange: (req.exchange_name || 'Bitunix') });
 
     // PHASE 7B (B1): Build the rules section HTML.
     var rulesSectionHtml = buildRulesSectionHtml(rules);
@@ -570,7 +570,7 @@
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
     overlay.innerHTML =
       '<div class="mb-popup">' +
-        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="بستن">' +
+        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="' + t('close') + '">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
         '<div class="mb-popup-header">' +
@@ -581,35 +581,35 @@
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
           '<h2 class="mb-popup-title">PREMIUM</h2>' +
-          '<p class="mb-popup-subtitle">با فعال‌سازی عضویت Premium، سهمیه بالاتر، امکانات اختصاصی و مزایای دائمی حساب شما فعال خواهد شد.</p>' +
+          '<p class="mb-popup-subtitle">' + t('mem_activation_subtitle') + '</p>' +
         '</div>' +
         // Phase 8M: Removed duplicate quota preview grid — benefits are listed below
         // Phase 8L: Clean benefits structure — Premium Benefits + Exclusive Access
         '<div class="mb-benefits">' +
-          '<div class="mb-benefits-section-title">مزایای Premium</div>' +
-          benefitRow('ai', 'چت هوش مصنوعی', '۱۰۰ پیام در روز با مدل‌های پیشرفته') +
-          benefitRow('bell', 'هشدارهای قیمتی', '۱۰ هشدار رایگان در روز') +
-          benefitRow('wheel', 'چرخ شانس', '۵ اسپین در روز با جوایز ویژه') +
-          benefitRow('star', 'واچ‌لیست', '۲۰ نماد در واچ‌لیست') +
-          benefitRow('gift', 'پاداش روزانه', '۲۰ AB Token رایگان هر روز') +
-          benefitRow('badge', 'دسترسی به Badge حرفه‌ای', 'نمایش نشان اختصاصی Premium در پروفایل شما') +
-          benefitRow('megaphone', 'کنترل تبلیغات', 'مدیریت و غیرفعال‌سازی تبلیغات و اعلان‌های تبلیغاتی') +
+          '<div class="mb-benefits-section-title">' + t('mem_benefits_premium_title') + '</div>' +
+          benefitRow('ai', t('mem_benefit_ai'), t('mem_benefit_ai_desc')) +
+          benefitRow('bell', t('mem_benefit_alerts'), t('mem_benefit_alerts_desc')) +
+          benefitRow('wheel', t('mem_benefit_wheel'), t('mem_benefit_wheel_desc')) +
+          benefitRow('star', t('mem_benefit_watchlist'), t('mem_benefit_watchlist_desc')) +
+          benefitRow('gift', t('mem_benefit_daily'), t('mem_benefit_daily_desc')) +
+          benefitRow('badge', t('mem_benefit_pro_badge'), t('mem_benefit_pro_badge_desc')) +
+          benefitRow('megaphone', t('mem_benefit_ad_control'), t('mem_benefit_ad_control_desc')) +
           '<div class="mb-benefits-divider"></div>' +
-          '<div class="mb-benefits-section-title">دسترسی‌های اختصاصی</div>' +
-          benefitRow('bolt', 'اولویت دریافت قابلیت‌های جدید', 'دسترسی زودهنگام به امکانات جدید') +
-          benefitRow('shield', 'اولویت پشتیبانی', 'پاسخگویی اولویت‌دار تیم پشتیبانی') +
-          benefitRow('diamond', 'دسترسی دائمی Premium', 'بدون تاریخ انقضا • مطابق شرایط و قوانین عضویت') +
+          '<div class="mb-benefits-section-title">' + t('mem_benefits_exclusive_title') + '</div>' +
+          benefitRow('bolt', t('mem_benefit_early_access'), t('mem_benefit_early_access_desc')) +
+          benefitRow('shield', t('mem_benefit_priority_support'), t('mem_benefit_priority_support_desc')) +
+          benefitRow('diamond', t('mem_benefit_permanent'), t('mem_benefit_permanent_desc')) +
         '</div>' +
         // Timeline — 6 steps
         '<ul class="mb-timeline">' +
           timelineStep(1, timelineStep1Text, steps[0]) +
-          timelineStep(2, 'ثبت UID صرافی', steps[1]) +
-          timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
-          timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
-          timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
-          timelineStep(6, 'فعال‌سازی پریمیوم', steps[5]) +
+          timelineStep(2, t('mem_timeline_step2'), steps[1]) +
+          timelineStep(3, t('mem_timeline_step3'), steps[2]) +
+          timelineStep(4, t('mem_timeline_step4'), steps[3]) +
+          timelineStep(5, t('mem_timeline_step5'), steps[4]) +
+          timelineStep(6, t('mem_timeline_step6'), steps[5]) +
         '</ul>' +
-        '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
+        '<div class="mb-timeline-note">' + t('mem_timeline_note') + '</div>' +
         // PHASE 7B (B1): Rules + Acceptance section
         rulesSectionHtml +
         // Register button
@@ -619,15 +619,15 @@
         '</button>' +
         // UID form — submit button starts disabled when rules.active is true
         '<div class="mb-uid-form">' +
-          '<label class="mb-uid-label">ثبت درخواست عضویت</label>' +
+          '<label class="mb-uid-label">' + t('mem_uid_form_label') + '</label>' +
           '<input type="text" class="mb-uid-input" id="mb-uid-input" placeholder="' + esc(uidLabel) + '" dir="ltr" />' +
           '<button class="mb-uid-submit' + (rules.active ? ' mb-uid-submit--disabled' : '') + '" id="mb-uid-submit" onclick="MembershipApp.submitUid()"' + (rules.active ? ' disabled' : '') + ' aria-disabled="' + (rules.active ? 'true' : 'false') + '">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
-            'ارسال درخواست عضویت' +
+            t('mem_submit_btn') +
           '</button>' +
         '</div>' +
         (rejectedRequest && rejectedRequest.admin_note
-          ? '<div style="margin-top:12px;padding:10px 12px;border-radius:11px;background:rgba(255,77,77,0.06);border:1px solid rgba(255,77,77,0.15);font-size:11px;color:#ff8080;text-align:right"><strong>دلیل رد قبلی:</strong> ' + esc(rejectedRequest.admin_note) + '</div>'
+          ? '<div style="margin-top:12px;padding:10px 12px;border-radius:11px;background:rgba(255,77,77,0.06);border:1px solid rgba(255,77,77,0.15);font-size:11px;color:#ff8080;text-align:right"><strong>' + t('mem_rejected_reason_label') + '</strong> ' + esc(rejectedRequest.admin_note) + '</div>'
           : ''
         ) +
       '</div>';
@@ -662,15 +662,15 @@
       return '<div class="mb-rules-section mb-rules-section--inactive">' +
         '<div class="mb-rules-header">' +
           '<div class="mb-rules-title-row">' +
-            '<span class="mb-rules-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/></svg> قوانین عضویت</span>' +
+            '<span class="mb-rules-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="10" y1="9" x2="12" y2="9"/></svg> ' + t('mem_rules_title') + '</span>' +
           '</div>' +
         '</div>' +
-        '<div class="mb-rules-body mb-rules-body--empty">قوانین فعال در حال حاضر در دسترس نیست. می‌توانید درخواست خود را ارسال کنید؛ در صورت نیاز، تیم پس از بررسی با شما تماس خواهد گرفت.</div>' +
+        '<div class="mb-rules-body mb-rules-body--empty">' + t('mem_rules_unavailable') + '</div>' +
       '</div>';
     }
 
     var versionBadge = ''; // Phase 8M: Version removed from UI (backend acceptance logic unchanged)
-    var titleText = rules.title || 'قوانین عضویت Premium';
+    var titleText = rules.title || t('mem_rules_title_full');
     // Phase 8L: Store rules data for the modal — don't display full text in the card
     _rulesDataForModal = rules;
 
@@ -682,10 +682,10 @@
         '</div>' +
       '</div>' +
       // Phase 8L: Short explanation + "مشاهده کامل قوانین" button (replaces full text)
-      '<div class="mb-rules-summary">برای ادامه، قوانین عضویت Premium را مطالعه و تأیید کنید.</div>' +
+      '<div class="mb-rules-summary">' + t('mem_rules_summary') + '</div>' +
       '<button class="mb-rules-view-btn" onclick="MembershipApp.openRulesModal()" type="button">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>' +
-        'مشاهده کامل قوانین' +
+        t('mem_rules_view_full') +
       '</button>' +
       // Custom checkbox — accessible, RTL-friendly, polished
       '<label class="mb-rules-accept" for="mb-rules-checkbox">' +
@@ -693,7 +693,7 @@
         '<span class="mb-rules-checkbox-custom" aria-hidden="true">' +
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>' +
         '</span>' +
-        '<span class="mb-rules-accept-label">قوانین عضویت Premium را مطالعه کرده‌ام و با آن موافقم.</span>' +
+        '<span class="mb-rules-accept-label">' + t('mem_rules_accept_label') + '</span>' +
       '</label>' +
     '</div>';
   }
@@ -710,8 +710,8 @@
     var rules = _rulesDataForModal;
     if (!rules) return;
 
-    var titleText = rules.title || 'قوانین عضویت Premium';
-    var bodyText = rules.body_markdown || rules.summary || 'متن قوانین در دسترس نیست.';
+    var titleText = rules.title || t('mem_rules_title_full');
+    var bodyText = rules.body_markdown || rules.summary || t('mem_rules_body_fallback');
     // Phase 8N: Build accordion sections from markdown headings
     var accordionHtml = buildRulesAccordion(bodyText);
 
@@ -720,14 +720,14 @@
     overlay.onclick = function (e) { if (e.target === overlay) closeRulesModal(); };
     overlay.innerHTML =
       '<div class="mb-rules-modal">' +
-        '<button class="mb-rules-modal-close" onclick="MembershipApp.closeRulesModal()" aria-label="بستن">' +
+        '<button class="mb-rules-modal-close" onclick="MembershipApp.closeRulesModal()" aria-label="' + t('close') + '">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
         '<div class="mb-rules-modal-header">' +
           '<h3 class="mb-rules-modal-title">' + esc(titleText) + '</h3>' +
         '</div>' +
         '<div class="mb-rules-modal-body">' + accordionHtml + '</div>' +
-        '<button class="mb-rules-modal-ok" onclick="MembershipApp.closeRulesModal()">متوجه شدم</button>' +
+        '<button class="mb-rules-modal-ok" onclick="MembershipApp.closeRulesModal()">' + t('mem_rules_ok') + '</button>' +
       '</div>';
     document.body.appendChild(overlay);
 
@@ -764,7 +764,7 @@
    * Content within each section (paragraphs, lists) is rendered as HTML.
    */
   function buildRulesAccordion(md) {
-    if (!md) return '<p>متن قوانین در دسترس نیست.</p>';
+    if (!md) return '<p>' + t('mem_rules_body_fallback') + '</p>';
     var lines = String(md).split('\n');
     var sections = [];
     var currentTitle = null;
@@ -879,12 +879,12 @@
       submitBtn.disabled = false;
       submitBtn.setAttribute('aria-disabled', 'false');
       submitBtn.classList.remove('mb-uid-submit--disabled');
-      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('mem_submit_btn');
     } else {
       submitBtn.disabled = true;
       submitBtn.setAttribute('aria-disabled', 'true');
       submitBtn.classList.add('mb-uid-submit--disabled');
-      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ابتدا قوانین را بپذیرید';
+      submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> ' + t('mem_submit_accept_first');
     }
   }
 
@@ -917,7 +917,7 @@
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
     overlay.innerHTML =
       '<div class="mb-popup">' +
-        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="بستن">' +
+        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="' + t('close') + '">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
         '<div class="mb-popup-header">' +
@@ -927,22 +927,22 @@
             '<div class="mb-popup-diamond-icon">' + DIAMOND_SVG + '</div>' +
             '<div class="mb-popup-diamond-shimmer"></div>' +
           '</div>' +
-          '<h2 class="mb-popup-title">درخواست شما در حال بررسی است</h2>' +
-          '<p class="mb-popup-subtitle">درخواست عضویت شما ثبت شده و در حال بررسی توسط تیم مدیریت است.</p>' +
+          '<h2 class="mb-popup-title">' + t('mem_pending_title') + '</h2>' +
+          '<p class="mb-popup-subtitle">' + t('mem_pending_subtitle') + '</p>' +
         '</div>' +
         // Timeline with current status
         '<ul class="mb-timeline">' +
-          timelineStep(1, (getRequirement().metadata && getRequirement().metadata.timeline_step_1) || ('ثبت‌نام از طریق لینک رسمی ' + (getRequirement().exchange_name || 'Bitunix')), steps[0]) +
-          timelineStep(2, 'ثبت UID صرافی', steps[1]) +
-          timelineStep(3, 'واریز اولیه به حساب صرافی', steps[2]) +
-          timelineStep(4, 'انجام اولین معامله (First Trade)', steps[3]) +
-          timelineStep(5, 'بررسی اطلاعات توسط تیم', steps[4]) +
-          timelineStep(6, 'فعال‌سازی پریمیوم', steps[5]) +
+          timelineStep(1, (getRequirement().metadata && getRequirement().metadata.timeline_step_1) || t('mem_timeline_step1', { exchange: (getRequirement().exchange_name || 'Bitunix') }), steps[0]) +
+          timelineStep(2, t('mem_timeline_step2'), steps[1]) +
+          timelineStep(3, t('mem_timeline_step3'), steps[2]) +
+          timelineStep(4, t('mem_timeline_step4'), steps[3]) +
+          timelineStep(5, t('mem_timeline_step5'), steps[4]) +
+          timelineStep(6, t('mem_timeline_step6'), steps[5]) +
         '</ul>' +
-        '<div class="mb-timeline-note">عضویت Premium پس از تکمیل تمام مراحل و تأیید اطلاعات توسط تیم فعال خواهد شد.</div>' +
+        '<div class="mb-timeline-note">' + t('mem_timeline_note') + '</div>' +
         '<div class="mb-pending">' +
           '<div class="mb-pending-progress"><div class="mb-pending-progress-bar"></div></div>' +
-          '<div style="margin-top:14px;font-size:11px;color:#6B7A8D">صرافی: ' + esc(request.exchange_name) + ' · UID: <span dir="ltr">' + esc(request.exchange_uid) + '</span></div>' +
+          '<div style="margin-top:14px;font-size:11px;color:#6B7A8D">' + t('mem_pending_exchange_uid', { exchange: esc(request.exchange_name), uid: esc(request.exchange_uid) }) + '</div>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -959,15 +959,15 @@
     overlay.onclick = function (e) { if (e.target === overlay) closePopup(); };
     overlay.innerHTML =
       '<div class="mb-popup">' +
-        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="بستن">' +
+        '<button class="mb-popup-close" onclick="MembershipApp.closePopup()" aria-label="' + t('close') + '">' +
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
         '</button>' +
         '<div class="mb-success">' +
           '<div class="mb-success-icon">' +
             '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
           '</div>' +
-          '<div class="mb-success-title">درخواست شما با موفقیت ثبت شد</div>' +
-          '<div class="mb-success-msg">پس از بررسی توسط تیم، وضعیت عضویت شما به Premium تغییر خواهد کرد.</div>' +
+          '<div class="mb-success-title">' + t('mem_success_title') + '</div>' +
+          '<div class="mb-success-msg">' + t('mem_success_msg') + '</div>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -1033,8 +1033,8 @@
     var uid = input.value.trim();
 
     if (!uid || uid.length < 4 || uid.length > 64 || !/^[A-Za-z0-9_-]+$/.test(uid)) {
-      if (window.admToast) admToast('شناسه نامعتبر است', 'error');
-      else alert('شناسه نامعتبر است');
+      if (window.admToast) admToast(t('mem_err_invalid_uid'), 'error');
+      else alert(t('mem_err_invalid_uid'));
       return;
     }
 
@@ -1044,8 +1044,8 @@
     if (rules && rules.active) {
       var checkbox = document.getElementById('mb-rules-checkbox');
       if (!checkbox || !checkbox.checked) {
-        if (window.admToast) admToast('برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.', 'error');
-        else alert('برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.');
+        if (window.admToast) admToast(t('mem_err_rules_required'), 'error');
+        else alert(t('mem_err_rules_required'));
         return;
       }
 
@@ -1057,7 +1057,7 @@
         var btn = document.getElementById('mb-uid-submit');
         if (btn) {
           btn.disabled = true;
-          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> در حال ثبت پذیرش قوانین...';
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> ' + t('mem_submit_loading_accept');
         }
 
         try {
@@ -1067,14 +1067,14 @@
           });
           if (!acceptRes || !acceptRes.ok) {
             // Acceptance failed — show structured error, re-enable button, abort.
-            var acceptMsg = (acceptRes && acceptRes.error) ? acceptRes.error : 'خطا در ثبت پذیرش قوانین. لطفاً دوباره تلاش کنید.';
+            var acceptMsg = (acceptRes && acceptRes.error) ? acceptRes.error : t('mem_err_accept_failed');
             if (acceptRes && acceptRes.code === 'RULES_NOT_FOUND') {
               // The version we have is stale — refresh rules and re-render.
               await refreshRulesAndRerenderSection();
-              acceptMsg = 'نسخه قوانین به‌روزرسانی شده است. لطفاً نسخه جدید را مطالعه و تأیید کنید.';
+              acceptMsg = t('mem_err_rules_updated');
             } else if (acceptRes && acceptRes.code === 'RULES_NOT_ACTIVE') {
               await refreshRulesAndRerenderSection();
-              acceptMsg = 'نسخه قوانین فعال تغییر کرده است. لطفاً نسخه جدید را تأیید کنید.';
+              acceptMsg = t('mem_err_rules_changed');
             }
             if (window.admToast) admToast(acceptMsg, 'error');
             else alert(acceptMsg);
@@ -1087,8 +1087,8 @@
           // Acceptance succeeded — record the version so we don't re-accept on retry.
           _rulesAcceptedVersion = rules.version;
         } catch (e) {
-          if (window.admToast) admToast('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.', 'error');
-          else alert('خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.');
+          if (window.admToast) admToast(t('mem_err_server'), 'error');
+          else alert(t('mem_err_server'));
           var checkboxErr = document.getElementById('mb-rules-checkbox');
           if (checkboxErr) { checkboxErr.checked = false; }
           updateSubmitButtonState(document.getElementById('mb-uid-submit'), false);
@@ -1101,7 +1101,7 @@
     var btn = document.getElementById('mb-uid-submit');
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> در حال ارسال...';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round" stroke-dasharray="40" stroke-dashoffset="20"/></svg> ' + t('mem_submit_loading');
     }
 
     try {
@@ -1125,22 +1125,22 @@
         var checkboxReset = document.getElementById('mb-rules-checkbox');
         if (checkboxReset) { checkboxReset.checked = false; }
         updateSubmitButtonState(document.getElementById('mb-uid-submit'), false);
-        var rulesMsg = 'قوانین عضویت به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه کرده و دوباره تأیید کنید.';
+        var rulesMsg = t('mem_err_rules_updated_request');
         if (window.admToast) admToast(rulesMsg, 'error');
         else alert(rulesMsg);
         return;
       }
 
       // Other errors — show structured message.
-      var msg = (res && res.error) ? res.error : 'خطا در ثبت درخواست';
+      var msg = (res && res.error) ? res.error : t('mem_err_submit_failed');
       if (window.admToast) admToast(msg, 'error');
       else alert(msg);
       // Restore button to appropriate state based on rules acceptance.
       restoreSubmitButtonState();
     } catch (e) {
       // Network error (fetch() rejected) — not an HTTP response.
-      if (window.admToast) admToast('خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.', 'error');
-      else alert('خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+      if (window.admToast) admToast(t('mem_err_server_internet'), 'error');
+      else alert(t('mem_err_server_internet'));
       restoreSubmitButtonState();
     }
   }
@@ -1174,7 +1174,7 @@
         submitBtn.disabled = false;
         submitBtn.setAttribute('aria-disabled', 'false');
         submitBtn.classList.remove('mb-uid-submit--disabled');
-        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+        submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('mem_submit_btn');
       }
     }
   }
@@ -1198,7 +1198,7 @@
       btn.disabled = false;
       btn.setAttribute('aria-disabled', 'false');
       btn.classList.remove('mb-uid-submit--disabled');
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ارسال درخواست عضویت';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('mem_submit_btn');
     }
   }
 

@@ -34,12 +34,12 @@
     try {
       var diff = Date.now() - new Date(iso).getTime();
       var min = Math.floor(diff / 60000);
-      if (min < 1) return 'همین الان';
-      if (min < 60) return min + ' دقیقه پیش';
+      if (min < 1) return t('mba_now');
+      if (min < 60) return t('mba_minutes_ago', { n: min });
       var hr = Math.floor(min / 60);
-      if (hr < 24) return hr + ' ساعت پیش';
+      if (hr < 24) return t('mba_hours_ago', { n: hr });
       var day = Math.floor(hr / 24);
-      if (day < 30) return day + ' روز پیش';
+      if (day < 30) return t('mba_days_ago', { n: day });
       return new Intl.DateTimeFormat('fa-IR', { month: 'short', day: 'numeric' }).format(new Date(iso));
     } catch (e) { return iso.slice(0, 10); }
   }
@@ -98,7 +98,7 @@
 
   function skeletonGrid(n) {
     if (typeof window.adminSkeletonGrid === 'function') return window.adminSkeletonGrid(n);
-    return '<div style="text-align:center;padding:40px;color:var(--text-sub)">در حال بارگذاری...</div>';
+    return '<div style="text-align:center;padding:40px;color:var(--text-sub)">' + t('adm_loading') + '</div>';
   }
 
   function errorState(msg, retryFn) {
@@ -108,7 +108,7 @@
 
   function statusBadge(status) {
     var colors = { PENDING: 'orange', APPROVED: 'green', REJECTED: 'red' };
-    var labels = { PENDING: 'در انتظار', APPROVED: 'تأیید شده', REJECTED: 'رد شده' };
+    var labels = { PENDING: t('adm_filter_pending'), APPROVED: t('adm_filter_approved'), REJECTED: t('adm_mb_rejected') };
     return badge(labels[status] || status, colors[status] || 'gray');
   }
 
@@ -125,12 +125,12 @@
       if (!data || !data.ok) { container.innerHTML = ''; return; }
       var s = data.data;
       container.innerHTML =
-        statCard(s.totalRequests, 'کل درخواست‌های عضویت', 'inbox', 'blue') +
-        statCard(s.pendingRequests, 'در انتظار', 'clock', 'blue') +
-        statCard(s.approvedUsers, 'تأیید شده', 'check', 'green') +
-        statCard(s.vipUsers, 'پرمیوم فعال', 'crown', 'orange') +
-        statCard(s.suspendedUsers, 'معلق', 'pause', 'gray') +
-        statCard(s.rejectedRequests, 'رد شده', 'x', 'red');
+        statCard(s.totalRequests, t('mba_total_requests'), 'inbox', 'blue') +
+        statCard(s.pendingRequests, t('adm_filter_pending'), 'clock', 'blue') +
+        statCard(s.approvedUsers, t('adm_filter_approved'), 'check', 'green') +
+        statCard(s.vipUsers, t('mba_active_premium'), 'crown', 'orange') +
+        statCard(s.suspendedUsers, t('mba_suspended'), 'pause', 'gray') +
+        statCard(s.rejectedRequests, t('adm_mb_rejected'), 'x', 'red');
     } catch (e) {
       container.innerHTML = '';
     }
@@ -153,32 +153,32 @@
     try {
       var data = await apiFetch('/api/admin/membership/requests?' + params);
       if (!data || !data.ok) {
-        container.innerHTML = errorState('خطا در بارگذاری', 'MembershipAdmin.load()');
+        container.innerHTML = errorState(t('mba_load_error'), 'MembershipAdmin.load()');
         return;
       }
       var result = data.data;
       if (!result.items || result.items.length === 0) {
-        container.innerHTML = empty('داده‌ای یافت نشد');
+        container.innerHTML = empty(t('mba_no_data'));
         return;
       }
 
       var html = '';
       result.items.forEach(function (r) {
         var name = [r.first_name, r.last_name].filter(Boolean).join(' ') || r.username || r.telegram_id;
-        var initial = esc(String(name).charAt(0) || '؟');
+        var initial = esc(String(name).charAt(0) || '?');
         var actions = '';
         if (r.status === 'PENDING') {
           actions =
             '<button class="admin-btn admin-btn-green admin-btn-sm" onclick="MembershipAdmin.act(\'' + r.id + '\',\'approve\')">' +
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
-              ' تأیید</button>' +
+              ' ' + t('mem_approve') + '</button>' +
             '<button class="admin-btn admin-btn-red admin-btn-sm" onclick="MembershipAdmin.act(\'' + r.id + '\',\'reject\')">' +
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
-              ' رد</button>';
+              ' ' + t('mem_reject') + '</button>';
         } else if (r.status === 'APPROVED') {
           actions = '<button class="admin-btn admin-btn-ghost admin-btn-sm" onclick="MembershipAdmin.act(\'' + r.id + '\',\'suspend\')">' +
             '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>' +
-            ' تعلیق</button>';
+            ' ' + t('mba_suspend_btn') + '</button>';
         }
         html +=
           '<div class="admin-list-item adm-user-card">' +
@@ -191,12 +191,12 @@
               '<div class="adm-card-badges">' + statusBadge(r.status) + levelBadge(r.membership_level) + '</div>' +
             '</div>' +
             '<div class="adm-card-meta">' +
-              '<div class="adm-meta-item"><span class="adm-meta-label">صرافی</span><span class="adm-meta-val">' + esc(r.exchange_name) + '</span></div>' +
+              '<div class="adm-meta-item"><span class="adm-meta-label">' + t('mem_exchange_label') + '</span><span class="adm-meta-val">' + esc(r.exchange_name) + '</span></div>' +
               '<div class="adm-meta-item"><span class="adm-meta-label">UID</span><span class="adm-meta-val" dir="ltr">' + esc(r.exchange_uid) + '</span></div>' +
-              '<div class="adm-meta-item"><span class="adm-meta-label">ثبت</span><span class="adm-meta-val">' + formatFaRelative(r.submitted_at) + '</span></div>' +
+              '<div class="adm-meta-item"><span class="adm-meta-label">' + t('mba_label_submitted') + '</span><span class="adm-meta-val">' + formatFaRelative(r.submitted_at) + '</span></div>' +
             '</div>' +
             (r.admin_note
-              ? '<div style="font-size:11px;color:var(--text-dim);background:rgba(255,138,0,0.06);border-radius:8px;padding:6px 10px;border:1px solid rgba(255,138,0,0.12)"><span style="color:var(--accent);font-weight:600">یادداشت: </span>' + esc(r.admin_note) + '</div>'
+              ? '<div style="font-size:11px;color:var(--text-dim);background:rgba(255,138,0,0.06);border-radius:8px;padding:6px 10px;border:1px solid rgba(255,138,0,0.12)"><span style="color:var(--accent);font-weight:600">' + t('mba_label_note') + '</span>' + esc(r.admin_note) + '</div>'
               : ''
             ) +
             (actions ? '<div style="display:flex;gap:6px;justify-content:flex-end">' + actions + '</div>' : '') +
@@ -208,18 +208,18 @@
       if (typeof window.adminPagination === 'function' && paginationEl) {
         window.adminPagination('admin-membership-pagination', _page, result.totalPages, 'MembershipAdmin.goPage');
       } else if (paginationEl) {
-        paginationEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:12px;padding:8px">' + result.total + ' رکورد</div>';
+        paginationEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:12px;padding:8px">' + t('mba_records_count', { n: result.total }) + '</div>';
       }
     } catch (e) {
-      container.innerHTML = errorState('خطا: ' + e.message, 'MembershipAdmin.load()');
+      container.innerHTML = errorState(t('adm_error_prefix') + e.message, 'MembershipAdmin.load()');
     }
   }
 
   async function act(requestId, action) {
     var confirmMsg = {
-      approve: 'آیا از تأیید این درخواست اطمینان دارید؟ کاربر به VIP ارتقا می‌یابد.',
-      reject: 'آیا از رد این درخواست اطمینان دارید؟',
-      suspend: 'آیا از تعلیق این کاربر اطمینان دارید؟'
+      approve: t('mba_confirm_approve'),
+      reject: t('mba_confirm_reject'),
+      suspend: t('mba_confirm_suspend')
     }[action];
     if (!confirm(confirmMsg)) return;
     try {
@@ -228,14 +228,14 @@
         body: JSON.stringify({ requestId: requestId }),
       });
       if (data && data.ok) {
-        if (window.admToast) admToast('عملیات با موفقیت انجام شد', 'success');
+        if (window.admToast) admToast(t('mba_op_success'), 'success');
         loadStats();
         loadRequests();
       } else {
-        if (window.admToast) admToast('خطا در عملیات', 'error');
+        if (window.admToast) admToast(t('adm_operation_error'), 'error');
       }
     } catch (e) {
-      if (window.admToast) admToast('خطا: ' + e.message, 'error');
+      if (window.admToast) admToast(t('adm_error_prefix') + e.message, 'error');
     }
   }
 
@@ -258,7 +258,7 @@
         a.click();
         URL.revokeObjectURL(url);
       })
-      .catch(function (e) { if (window.admToast) admToast('خطا در خروجی', 'error'); });
+      .catch(function (e) { if (window.admToast) admToast(t('mba_export_error'), 'error'); });
   }
 
   // Expose globally

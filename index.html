@@ -176,11 +176,11 @@
         <div class="hero-banner-slider" id="hero-banner-slider">
             <div class="hero-slide active" data-slide="0" onclick="if(window.MembershipApp)MembershipApp.open()">
                 <img src="assets/banner-premium.webp" alt="AMIRBTC Premium" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.background='#0B1220'">
-                <button class="hero-cta hero-cta--premium-v2" type="button" onclick="event.stopPropagation();if(window.MembershipApp)MembershipApp.open()">فعال‌سازی Premium</button>
+                <button class="hero-cta hero-cta--premium-v2" type="button" onclick="event.stopPropagation();if(window.MembershipApp)MembershipApp.open()" data-i18n="premium_activate">فعال‌سازی Premium</button>
             </div>
             <div class="hero-slide" data-slide="1" onclick="window.open('https://t.me/amir_btc_2024','_blank')">
                 <img src="assets/banner-channel.webp" alt="AMIRBTC کانال" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
-                <button class="hero-cta hero-cta--channel-v2" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')">عضویت در کانال</button>
+                <button class="hero-cta hero-cta--channel-v2" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')" data-i18n="join_channel">عضویت در کانال</button>
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>
@@ -395,11 +395,11 @@
                         <div class="mkt-status-premium-icon">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 14l4-8 4 5 5-9"/></svg>
                         </div>
-                        <span class="mkt-status-premium-title">وضعیت بازار</span>
+                        <span class="mkt-status-premium-title" data-i18n="mkt_status_title">وضعیت بازار</span>
                         <span class="mkt-status-premium-badge" id="mkt-fg-badge">--</span>
                     </div>
                     <div class="mkt-status-premium-trend">
-                        <span class="mkt-trend-label">روند بازار</span>
+                        <span class="mkt-trend-label" data-i18n="mkt_trend_title">روند بازار</span>
                         <span class="mkt-trend-value" id="mkt-trend-value">--</span>
                     </div>
                 </div>
@@ -430,16 +430,16 @@
                         <span class="mkt-status-up">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
                             <b id="sentiment-gainers">0</b>
-                            <small>صعودی</small>
+                            <small data-i18n="sentiment_bullish">صعودی</small>
                         </span>
                         <span class="mkt-status-neutral-label">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6B7A8D" stroke-width="3"><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             <b id="sentiment-neutral">0</b>
-                            <small>خنثی</small>
+                            <small data-i18n="sentiment_neutral">خنثی</small>
                         </span>
                         <span class="mkt-status-down">
                             <b id="sentiment-losers">0</b>
-                            <small>نزولی</small>
+                            <small data-i18n="sentiment_bearish">نزولی</small>
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
                         </span>
                     </div>
@@ -458,15 +458,15 @@
         <div class="mkt-tabs mkt-tabs-equal" id="market-main-tabs" role="tablist">
             <button type="button" class="mkt-tab active" data-main-tab="crypto" onclick="switchMainTab('crypto', this)" role="tab" aria-selected="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/></svg>
-                <span>کریپتو</span>
+                <span data-i18n="mkt_tab_crypto">کریپتو</span>
             </button>
             <button type="button" class="mkt-tab" data-main-tab="forex" onclick="switchMainTab('forex', this)" role="tab" aria-selected="false">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                <span>فارکس</span>
+                <span data-i18n="mkt_tab_forex">فارکس</span>
             </button>
             <button type="button" class="mkt-tab" data-main-tab="watchlist" onclick="switchMainTab('watchlist', this)" role="tab" aria-selected="false">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                <span>واچ‌لیست</span>
+                <span data-i18n="mkt_tab_watchlist">واچ‌لیست</span>
             </button>
         </div>
 
@@ -494,8 +494,8 @@
             <div class="mkt-list-header" id="mkt-list-header" role="row">
                 <span class="mkt-lh-rank" role="columnheader">#</span>
                 <span class="mkt-lh-logo" role="columnheader" aria-label="Coin"></span>
-                <span class="mkt-lh-coin" role="columnheader">ارز</span>
-                <span class="mkt-lh-price" role="columnheader">قیمت</span>
+                <span class="mkt-lh-coin" role="columnheader" data-i18n="mkt_header_coin">ارز</span>
+                <span class="mkt-lh-price" role="columnheader" data-i18n="mkt_header_price">قیمت</span>
                 <span class="mkt-lh-change" role="columnheader">24H</span>
                 <span class="mkt-lh-star" role="columnheader" aria-label="Watchlist"></span>
             </div>
@@ -517,14 +517,14 @@
         <div class="ptr-indicator" id="analysis-ptr">
             <svg class="ptr-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
             <svg class="ptr-spinner" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56" stroke-linecap="round"/></svg>
-            <span class="ptr-text" id="analysis-ptr-text">برای refresh پایین بکشید</span>
+            <span class="ptr-text" id="analysis-ptr-text" data-i18n="ptr_pull">برای refresh پایین بکشید</span>
         </div>
 
         <!-- 1. Page Header -->
         <div class="analysis-page-header">
             <h2 class="page-title-with-icon">
                 <svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 5 5-9"/></svg>
-                <span>تحلیل‌های بازار</span>
+                <span data-i18n="adp_analysis_title">تحلیل‌های بازار</span>
             </h2>
         </div>
 
@@ -578,8 +578,8 @@
                     </svg>
                 </div>
                 <div class="aes-brand">AMIR<span>BTC</span></div>
-                <p class="aes-title" id="aes-title">هنوز تحلیلی منتشر نشده است</p>
-                <p class="aes-desc" id="aes-desc">به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند</p>
+                <p class="aes-title" id="aes-title" data-i18n="analysis_empty_title">هنوز تحلیلی منتشر نشده است</p>
+                <p class="aes-desc" id="aes-desc" data-i18n="analysis_empty_desc_soon">به‌زودی تحلیل‌های جدید در این بخش نمایش داده می‌شوند</p>
                 <div class="aes-shimmer"></div>
             </div>
         </div>
@@ -587,7 +587,7 @@
 
 
     <!-- Admin Floating Button — outside .page so position:fixed is never hijacked by page transform animations -->
-    <button type="button" id="analysis-fab" class="analysis-fab" style="display:none;" onclick="openAddAnalysisModal()" aria-label="افزودن تحلیل">
+    <button type="button" id="analysis-fab" class="analysis-fab" style="display:none;" onclick="openAddAnalysisModal()" aria-label="افزودن تحلیل" data-i18n-aria-label="analysis_new">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
 
@@ -597,7 +597,7 @@
         <!-- Reading Progress Bar -->
         <div class="adp-progress-bar" id="adp-progress-bar"></div>
         <div class="adp-header">
-            <button class="adp-back-btn" onclick="closeAnalysisDetailPage()" aria-label="بازگشت">
+            <button class="adp-back-btn" onclick="closeAnalysisDetailPage()" aria-label="بازگشت" data-i18n-aria-label="adp_back">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <div class="adp-coin-avatar" id="adp-coin-avatar"></div>
@@ -638,21 +638,21 @@
         <div class="adp-related" id="adp-related" style="display:none;">
             <div class="adp-related-header">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-                <span>تحلیل‌های مرتبط</span>
+                <span data-i18n="adp_related">تحلیل‌های مرتبط</span>
             </div>
             <div class="adp-related-list" id="adp-related-list"></div>
         </div>
         <!-- Action Buttons: Bookmark, Copy, Share -->
         <div class="adp-footer">
-            <button class="adp-action-btn adp-bookmark-btn" id="adp-bookmark-btn" onclick="toggleAnalysisBookmark(currentAnalysisDetail?.id, event)" aria-label="ذخیره">
+            <button class="adp-action-btn adp-bookmark-btn" id="adp-bookmark-btn" onclick="toggleAnalysisBookmark(currentAnalysisDetail?.id, event)" aria-label="ذخیره" data-i18n-aria-label="adp_save">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
             </button>
-            <button class="adp-action-btn adp-copy-btn" onclick="copyAnalysisContent()" aria-label="کپی متن">
+            <button class="adp-action-btn adp-copy-btn" onclick="copyAnalysisContent()" aria-label="کپی متن" data-i18n-aria-label="adp_copy_text">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
             <button class="adp-share-btn" onclick="shareCurrentAnalysis()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                <span>اشتراک‌گذاری</span>
+                <span data-i18n="adp_share">اشتراک‌گذاری</span>
             </button>
         </div>
     </section>
@@ -662,7 +662,7 @@
     <!-- Image Viewer Overlay (fullscreen zoom) -->
     <div id="image-viewer-overlay" class="iv-overlay" style="display:none;" onclick="closeImageViewer(event)">
         <div class="iv-header">
-            <button class="iv-close-btn" onclick="closeImageViewer()" aria-label="بستن">
+            <button class="iv-close-btn" onclick="closeImageViewer()" aria-label="بستن" data-i18n-aria-label="close">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
@@ -702,13 +702,13 @@
             </div>
             <!-- Row 2: Tools (search + filter) — separated from tabs -->
             <div class="ni-tools-row">
-                <button class="ni-tool-btn" onclick="openNewsSearch()" aria-label="جستجو">
+                <button class="ni-tool-btn" onclick="openNewsSearch()" aria-label="جستجو" data-i18n-aria-label="news_search_label">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <span>جستجو</span>
+                    <span data-i18n="news_search_label">جستجو</span>
                 </button>
-                <button class="ni-tool-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر">
+                <button class="ni-tool-btn" onclick="openNewsFilterSheet()" aria-label="فیلتر" data-i18n-aria-label="news_filter_label">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                    <span>فیلتر</span>
+                    <span data-i18n="news_filter_label">فیلتر</span>
                     <span class="ni-filter-dot" id="ni-filter-dot" style="display:none;"></span>
                 </button>
             </div>
@@ -725,57 +725,57 @@
         <div class="ni-sheet" dir="rtl">
             <div class="ni-sheet-handle"></div>
             <div class="ni-sheet-header">
-                <h3 class="ni-sheet-title">فیلتر اخبار</h3>
-                <button class="ni-sheet-close" onclick="closeNewsFilterSheet()" aria-label="بستن">
+                <h3 class="ni-sheet-title" data-i18n="news_filter_title">فیلتر اخبار</h3>
+                <button class="ni-sheet-close" onclick="closeNewsFilterSheet()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
             <div class="ni-sheet-body">
                 <!-- Sentiment -->
                 <div class="ni-filter-section">
-                    <div class="ni-filter-label">احساس بازار</div>
+                    <div class="ni-filter-label" data-i18n="news_filter_sentiment">احساس بازار</div>
                     <div class="ni-chip-row">
-                        <button class="ni-chip" data-filter="sentiment" data-value="bullish">صعودی</button>
-                        <button class="ni-chip" data-filter="sentiment" data-value="bearish">نزولی</button>
-                        <button class="ni-chip" data-filter="sentiment" data-value="neutral">خنثی</button>
+                        <button class="ni-chip" data-filter="sentiment" data-value="bullish" data-i18n="sentiment_bullish">صعودی</button>
+                        <button class="ni-chip" data-filter="sentiment" data-value="bearish" data-i18n="sentiment_bearish">نزولی</button>
+                        <button class="ni-chip" data-filter="sentiment" data-value="neutral" data-i18n="sentiment_neutral">خنثی</button>
                     </div>
                 </div>
                 <!-- Priority -->
                 <div class="ni-filter-section">
-                    <div class="ni-filter-label">اولویت</div>
+                    <div class="ni-filter-label" data-i18n="news_filter_priority">اولویت</div>
                     <div class="ni-chip-row">
-                        <button class="ni-chip" data-filter="priority" data-value="breaking">خبر فوری</button>
-                        <button class="ni-chip" data-filter="priority" data-value="high">تأثیر بالا</button>
-                        <button class="ni-chip" data-filter="priority" data-value="trending">پرطرفدار</button>
+                        <button class="ni-chip" data-filter="priority" data-value="breaking" data-i18n="news_filter_breaking">خبر فوری</button>
+                        <button class="ni-chip" data-filter="priority" data-value="high" data-i18n="cal_impact_high">تأثیر بالا</button>
+                        <button class="ni-chip" data-filter="priority" data-value="trending" data-i18n="news_filter_trending">پرطرفدار</button>
                     </div>
                 </div>
                 <!-- Category -->
                 <div class="ni-filter-section">
-                    <div class="ni-filter-label">دسته‌بندی</div>
+                    <div class="ni-filter-label" data-i18n="news_filter_category">دسته‌بندی</div>
                     <div class="ni-chip-row">
-                        <button class="ni-chip" data-filter="category" data-value="bitcoin">بیت‌کوین</button>
-                        <button class="ni-chip" data-filter="category" data-value="ethereum">اتریوم</button>
-                        <button class="ni-chip" data-filter="category" data-value="solana">سولانا</button>
+                        <button class="ni-chip" data-filter="category" data-value="bitcoin" data-i18n="news_filter_bitcoin">بیت‌کوین</button>
+                        <button class="ni-chip" data-filter="category" data-value="ethereum" data-i18n="news_filter_ethereum">اتریوم</button>
+                        <button class="ni-chip" data-filter="category" data-value="solana" data-i18n="news_filter_solana">سولانا</button>
                         <button class="ni-chip" data-filter="category" data-value="xrp">XRP</button>
                         <button class="ni-chip" data-filter="category" data-value="etf">ETF</button>
-                        <button class="ni-chip" data-filter="category" data-value="regulation">قانون‌گذاری</button>
-                        <button class="ni-chip" data-filter="category" data-value="macro">کلان</button>
-                        <button class="ni-chip" data-filter="category" data-value="market">ساختار بازار</button>
+                        <button class="ni-chip" data-filter="category" data-value="regulation" data-i18n="news_filter_regulation">قانون‌گذاری</button>
+                        <button class="ni-chip" data-filter="category" data-value="macro" data-i18n="news_filter_macro">کلان</button>
+                        <button class="ni-chip" data-filter="category" data-value="market" data-i18n="news_filter_market_structure">ساختار بازار</button>
                     </div>
                 </div>
                 <!-- Time Range -->
                 <div class="ni-filter-section">
-                    <div class="ni-filter-label">بازه زمانی</div>
+                    <div class="ni-filter-label" data-i18n="news_filter_time">بازه زمانی</div>
                     <div class="ni-chip-row">
-                        <button class="ni-chip" data-filter="time" data-value="1h">ساعت گذشته</button>
-                        <button class="ni-chip" data-filter="time" data-value="24h">۲۴ ساعت گذشته</button>
-                        <button class="ni-chip" data-filter="time" data-value="7d">۷ روز گذشته</button>
+                        <button class="ni-chip" data-filter="time" data-value="1h" data-i18n="news_filter_1h">ساعت گذشته</button>
+                        <button class="ni-chip" data-filter="time" data-value="24h" data-i18n="news_filter_24h">۲۴ ساعت گذشته</button>
+                        <button class="ni-chip" data-filter="time" data-value="7d" data-i18n="news_filter_7d">۷ روز گذشته</button>
                     </div>
                 </div>
             </div>
             <div class="ni-sheet-actions">
-                <button class="ni-btn ni-btn-ghost" onclick="resetNewsFilters()">بازنشانی</button>
-                <button class="ni-btn ni-btn-primary" onclick="applyNewsFilters()">اعمال فیلتر</button>
+                <button class="ni-btn ni-btn-ghost" onclick="resetNewsFilters()" data-i18n="news_filter_reset">بازنشانی</button>
+                <button class="ni-btn ni-btn-primary" onclick="applyNewsFilters()" data-i18n="news_filter_apply">اعمال فیلتر</button>
             </div>
         </div>
     </div>
@@ -784,12 +784,12 @@
     <div id="ni-search-overlay" class="ni-sheet-overlay" style="display:none;" onclick="if(event.target===this) closeNewsSearch()">
         <div class="ni-search-panel" dir="rtl">
             <div class="ni-search-header">
-                <button class="ni-icon-btn" onclick="closeNewsSearch()" aria-label="بستن">
+                <button class="ni-icon-btn" onclick="closeNewsSearch()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                 </button>
                 <div class="ni-search-input-wrap">
                     <svg class="ni-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <input type="text" id="ni-search-input" class="ni-search-input" placeholder="جستجوی خبر، ارز، کشور..." oninput="onNewsSearchInput(this.value)">
+                    <input type="text" id="ni-search-input" class="ni-search-input" placeholder="جستجوی خبر، ارز، کشور..." data-i18n-placeholder="news_search_placeholder" oninput="onNewsSearchInput(this.value)">
                 </div>
             </div>
             <div class="ni-search-results" id="ni-search-results"></div>
@@ -801,8 +801,8 @@
         <div class="ni-sheet" dir="rtl">
             <div class="ni-sheet-handle"></div>
             <div class="ni-sheet-header">
-                <h3 class="ni-sheet-title">یادآوری رویداد</h3>
-                <button class="ni-sheet-close" onclick="closeReminderSheet()" aria-label="بستن">
+                <h3 class="ni-sheet-title" data-i18n="reminder_title">یادآوری رویداد</h3>
+                <button class="ni-sheet-close" onclick="closeReminderSheet()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -811,18 +811,18 @@
                 <div class="ni-reminder-options">
                     <button class="ni-reminder-option" onclick="setEventReminder('15m')">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>۱۵ دقیقه قبل</span>
+                        <span data-i18n="reminder_15m">۱۵ دقیقه قبل</span>
                     </button>
                     <button class="ni-reminder-option" onclick="setEventReminder('1h')">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>۱ ساعت قبل</span>
+                        <span data-i18n="reminder_1h">۱ ساعت قبل</span>
                     </button>
                     <button class="ni-reminder-option" onclick="setEventReminder('24h')">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>۲۴ ساعت قبل</span>
+                        <span data-i18n="reminder_24h">۲۴ ساعت قبل</span>
                     </button>
                 </div>
-                <button class="ni-btn ni-btn-ghost ni-btn-block" style="margin-top:12px;" onclick="removeEventReminder()">حذف یادآوری</button>
+                <button class="ni-btn ni-btn-ghost ni-btn-block" style="margin-top:12px;" onclick="removeEventReminder()" data-i18n="reminder_remove">حذف یادآوری</button>
             </div>
         </div>
     </div>
@@ -832,8 +832,8 @@
         <div class="ni-sheet" dir="rtl">
             <div class="ni-sheet-handle"></div>
             <div class="ni-sheet-header">
-                <h3 class="ni-sheet-title">اشتراک‌گذاری</h3>
-                <button class="ni-sheet-close" onclick="closeShareSheet()" aria-label="بستن">
+                <h3 class="ni-sheet-title" data-i18n="share_title">اشتراک‌گذاری</h3>
+                <button class="ni-sheet-close" onclick="closeShareSheet()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -843,13 +843,13 @@
                         <div class="ni-share-icon ni-share-telegram">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
                         </div>
-                        <span>تلگرام</span>
+                        <span data-i18n="share_telegram">تلگرام</span>
                     </button>
                     <button class="ni-share-option" onclick="shareNewsTo('whatsapp')">
                         <div class="ni-share-icon ni-share-whatsapp">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                         </div>
-                        <span>واتساپ</span>
+                        <span data-i18n="share_whatsapp">واتساپ</span>
                     </button>
                     <button class="ni-share-option" onclick="shareNewsTo('x')">
                         <div class="ni-share-icon ni-share-x">
@@ -861,7 +861,7 @@
                         <div class="ni-share-icon ni-share-copy">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                         </div>
-                        <span>کپی لینک</span>
+                        <span data-i18n="share_copy_link">کپی لینک</span>
                     </button>
                 </div>
             </div>
@@ -882,16 +882,16 @@
                 </svg>
             </div>
             <!-- Premium Membership Badge — top-left corner of profile card -->
-            <div id="membership-badge" class="membership-badge" onclick="if(window.MembershipApp)MembershipApp.open()" role="button" tabindex="0" aria-label="عضویت ویژه"></div>
+            <div id="membership-badge" class="membership-badge" onclick="if(window.MembershipApp)MembershipApp.open()" role="button" tabindex="0" aria-label="عضویت ویژه" data-i18n-aria-label="mem_premium_badge"></div>
             <div class="profile-avatar">
                 <img id="profile-avatar" src="https://ui-avatars.com/api/?name=Guest&background=f7931a&color=fff&bold=true" alt="">
             </div>
             <h3 class="profile-name profile-loading-target" id="profile-name" data-i18n="guest">کاربر میهمان</h3>
             <span class="profile-username profile-loading-target" id="profile-username">@guest</span>
             <span class="profile-id">ID: <span class="profile-loading-target" id="profile-id-num">000000</span></span>
-            <div id="admin-entry-btn" class="admin-entry-btn" style="display:none;" onclick="openAdminPanel()" role="button" tabindex="0" aria-label="پنل مدیریت">
+            <div id="admin-entry-btn" class="admin-entry-btn" style="display:none;" onclick="openAdminPanel()" role="button" tabindex="0" aria-label="پنل مدیریت" data-i18n-aria-label="admin_panel">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span>پنل مدیریت</span>
+                <span data-i18n="admin_panel">پنل مدیریت</span>
             </div>
         </div>
         <!-- Phase 8L: "ظاهر پروفایل" button temporarily removed from Profile page.
@@ -1002,10 +1002,10 @@
     <div id="add-coin-modal" class="modal" onclick="if(event.target===this) closeAddCoinModal()">
         <div class="modal-box">
             <div class="modal-header">
-                <h3>افزودن به واچ‌لیست</h3>
+                <h3 data-i18n="add_to_watchlist_title">افزودن به واچ‌لیست</h3>
                 <button class="modal-close-btn" onclick="closeAddCoinModal()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
-            <input type="text" id="coin-search-modal" placeholder="جستجو..." class="input-field" oninput="filterCoinList()">
+            <input type="text" id="coin-search-modal" placeholder="جستجو..." data-i18n-placeholder="coin_search_ph" class="input-field" oninput="filterCoinList()">
             <div id="coin-modal-list" class="modal-list"></div>
         </div>
     </div>
@@ -1036,29 +1036,29 @@
                     <div class="af-field af-field-half af-field-checkbox">
                         <label class="af-checkbox-label">
                             <input type="checkbox" id="analysis-featured">
-                            <span>⭐ تحلیل ویژه</span>
+                            <span data-i18n="af_featured_toggle">⭐ تحلیل ویژه</span>
                         </label>
                     </div>
                 </div>
                 <div class="af-row">
-                    <div class="af-field"><label>لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field"></div>
+                    <div class="af-field"><label data-i18n="af_chart_image">لینک تصویر چارت</label><input type="text" id="analysis-image" placeholder="https://..." class="input-field"></div>
                 </div>
                 <div class="af-row af-row-3col">
-                    <div class="af-field af-field-third"><label>حمایت (اختیاری)</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
-                    <div class="af-field af-field-third"><label>قیمت فعلی (اختیاری)</label><input type="text" id="analysis-current-price" placeholder="63200" class="input-field"></div>
-                    <div class="af-field af-field-third"><label>مقاومت (اختیاری)</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
+                    <div class="af-field af-field-third"><label data-i18n="af_support_opt">حمایت (اختیاری)</label><input type="text" id="analysis-support" placeholder="61700" class="input-field"></div>
+                    <div class="af-field af-field-third"><label data-i18n="af_current_price_opt">قیمت فعلی (اختیاری)</label><input type="text" id="analysis-current-price" placeholder="63200" class="input-field"></div>
+                    <div class="af-field af-field-third"><label data-i18n="af_resistance_opt">مقاومت (اختیاری)</label><input type="text" id="analysis-resistance" placeholder="65000" class="input-field"></div>
                 </div>
                 <div class="af-row">
                     <div class="af-field">
-                        <label>متن تحلیل</label>
-                        <textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." class="input-field" rows="6" maxlength="50000"></textarea>
+                        <label data-i18n="af_body">متن تحلیل</label>
+                        <textarea id="analysis-text" placeholder="سناریوی اصلی: ...&#10;سناریوی جایگزین: ..." data-i18n-placeholder="af_body_ph" class="input-field" rows="6" maxlength="50000"></textarea>
                         <div class="af-char-counter" id="analysis-text-counter">0 / 50000</div>
                     </div>
                 </div>
             </div>
             <div class="modal-actions">
-                <button id="analysis-submit-btn" class="submit-btn" onclick="submitAnalysis()">انتشار تحلیل</button>
-                <button class="cancel-btn" onclick="closeAddAnalysisModal()">انصراف</button>
+                <button id="analysis-submit-btn" class="submit-btn" onclick="submitAnalysis()" data-i18n="af_publish">انتشار تحلیل</button>
+                <button class="cancel-btn" onclick="closeAddAnalysisModal()" data-i18n="af_cancel">انصراف</button>
             </div>
         </div>
     </div>
@@ -1068,20 +1068,20 @@
         <div class="modal-box" style="max-width:320px;text-align:center;">
             <div id="delete-confirm-step1">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--red, #ef4444)" stroke-width="1.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <h3 style="margin:16px 0 8px;font-size:16px;font-weight:700;">آیا مطمئن هستید؟</h3>
-                <p style="color:var(--text-sub);font-size:13px;margin-bottom:20px;">این عمل قابل بازگشت نیست.</p>
+                <h3 style="margin:16px 0 8px;font-size:16px;font-weight:700;" data-i18n="af_confirm_title">آیا مطمئن هستید؟</h3>
+                <p style="color:var(--text-sub);font-size:13px;margin-bottom:20px;" data-i18n="af_confirm_desc">این عمل قابل بازگشت نیست.</p>
                 <div class="modal-actions" style="justify-content:center;">
-                    <button class="submit-btn" style="background:var(--red, #ef4444);" onclick="confirmDeleteStep2()">ادامه</button>
-                    <button class="cancel-btn" onclick="cancelDeleteAnalysis()">انصراف</button>
+                    <button class="submit-btn" style="background:var(--red, #ef4444);" onclick="confirmDeleteStep2()" data-i18n="af_confirm_continue">ادامه</button>
+                    <button class="cancel-btn" onclick="cancelDeleteAnalysis()" data-i18n="af_cancel">انصراف</button>
                 </div>
             </div>
             <div id="delete-confirm-step2" style="display:none;">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--red, #ef4444)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                <h3 style="margin:16px 0 8px;font-size:16px;font-weight:700;">حذف دائمی شود؟</h3>
-                <p style="color:var(--text-sub);font-size:13px;margin-bottom:20px;">تحلیل برای همیشه حذف خواهد شد.</p>
+                <h3 style="margin:16px 0 8px;font-size:16px;font-weight:700;" data-i18n="af_permanent_title">حذف دائمی شود؟</h3>
+                <p style="color:var(--text-sub);font-size:13px;margin-bottom:20px;" data-i18n="af_permanent_desc">تحلیل برای همیشه حذف خواهد شد.</p>
                 <div class="modal-actions" style="justify-content:center;">
-                    <button class="submit-btn" style="background:var(--red, #ef4444);" onclick="executeDeleteAnalysis()">حذف قطعی</button>
-                    <button class="cancel-btn" onclick="cancelDeleteAnalysis()">انصراف</button>
+                    <button class="submit-btn" style="background:var(--red, #ef4444);" onclick="executeDeleteAnalysis()" data-i18n="af_permanent_delete">حذف قطعی</button>
+                    <button class="cancel-btn" onclick="cancelDeleteAnalysis()" data-i18n="af_cancel">انصراف</button>
                 </div>
             </div>
         </div>
@@ -1091,8 +1091,8 @@
     <div id="news-modal" class="modal news-modal-pro" onclick="if(event.target===this) closeNewsModal()">
         <div class="news-modal-container">
             <div class="news-modal-header">
-                <h3 id="news-modal-title" class="news-modal-title">عنوان خبر</h3>
-                <button class="news-modal-close" onclick="closeNewsModal()" aria-label="بستن">
+                <h3 id="news-modal-title" class="news-modal-title" data-i18n="news_modal_default_title">عنوان خبر</h3>
+                <button class="news-modal-close" onclick="closeNewsModal()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -1105,7 +1105,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2z"/></svg>
                     <span id="news-modal-source">—</span>
                 </span>
-                <span class="news-meta-badge news-meta-category" id="news-modal-category">خبر</span>
+                <span class="news-meta-badge news-meta-category" id="news-modal-category" data-i18n="news_cat_crypto">خبر</span>
             </div>
             <div class="news-modal-hero-wrap">
                 <img loading="lazy" id="news-modal-image" class="news-modal-hero" src="" alt="">
@@ -1167,7 +1167,7 @@
 
             <!-- ═══ CD: Price Alert (PREMIUM REDESIGN) ═══ -->
             <div class="cd-section">
-                <h4 class="cd-section-title">هشدار قیمت</h4>
+                <h4 class="cd-section-title" data-i18n="cd_price_section">هشدار قیمت</h4>
                 <div class="cd-alert-card">
                     <!-- Status header row -->
                     <div class="cd-alert-header">
@@ -1176,19 +1176,19 @@
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                             </div>
                             <div class="cd-alert-status-text">
-                                <span class="cd-alert-status-label">وضعیت هشدار</span>
-                                <span class="cd-alert-status-value" id="cd-alert-status-value">غیرفعال</span>
+                                <span class="cd-alert-status-label" data-i18n="alert_status_label">وضعیت هشدار</span>
+                                <span class="cd-alert-status-value" id="cd-alert-status-value" data-i18n="alert_inactive">غیرفعال</span>
                             </div>
                         </div>
                         <div class="cd-alert-count-badge" id="cd-alert-count-badge">
                             <span class="cd-alert-count-num" id="cd-alert-count-num">0</span>
-                            <span class="cd-alert-count-label">هشدار فعال</span>
+                            <span class="cd-alert-count-label" data-i18n="alert_active_count_label">هشدار فعال</span>
                         </div>
                     </div>
 
                     <!-- Current price display -->
                     <div class="cd-alert-current">
-                        <span class="cd-alert-current-label">قیمت فعلی</span>
+                        <span class="cd-alert-current-label" data-i18n="alert_current_label">قیمت فعلی</span>
                         <span class="cd-alert-current-value" id="alert-current-price-value">--</span>
                     </div>
 
@@ -1196,11 +1196,11 @@
                     <div class="cd-alert-direction-group" role="group" aria-label="Alert direction">
                         <button type="button" class="cd-alert-dir-btn active" data-direction="above" onclick="selectCdAlertDirection('above', this)">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
-                            <span>وقتی بالاتر رفت</span>
+                            <span data-i18n="alert_when_above">وقتی بالاتر رفت</span>
                         </button>
                         <button type="button" class="cd-alert-dir-btn" data-direction="below" onclick="selectCdAlertDirection('below', this)">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
-                            <span>وقتی پایین‌تر رفت</span>
+                            <span data-i18n="alert_when_below">وقتی پایین‌تر رفت</span>
                         </button>
                     </div>
 
@@ -1212,7 +1212,7 @@
                         </div>
                         <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-                            <span>ثبت هشدار</span>
+                            <span data-i18n="alert_register_btn">ثبت هشدار</span>
                         </button>
                     </div>
 
@@ -1228,22 +1228,22 @@
 
             <!-- ═══ CD: Market Statistics ═══ -->
             <div class="cd-section">
-                <h4 class="cd-section-title">آمار بازار</h4>
+                <h4 class="cd-section-title" data-i18n="cd_market_stats">آمار بازار</h4>
                 <div class="cd-stats-grid" id="detail-stats">
                     <div class="cd-stat-item">
-                        <span class="cd-stat-label">مارکت کپ</span>
+                        <span class="cd-stat-label" data-i18n="cd_market_cap">مارکت کپ</span>
                         <span class="cd-stat-value" id="cd-stat-mcap">--</span>
                     </div>
                     <div class="cd-stat-item">
-                        <span class="cd-stat-label">حجم 24h</span>
+                        <span class="cd-stat-label" data-i18n="volume_24h">حجم 24h</span>
                         <span class="cd-stat-value" id="cd-stat-volume">--</span>
                     </div>
                     <div class="cd-stat-item">
-                        <span class="cd-stat-label">عرضه در گردش</span>
+                        <span class="cd-stat-label" data-i18n="supply">عرضه در گردش</span>
                         <span class="cd-stat-value" id="cd-stat-supply">--</span>
                     </div>
                     <div class="cd-stat-item">
-                        <span class="cd-stat-label">رتبه</span>
+                        <span class="cd-stat-label" data-i18n="rank">رتبه</span>
                         <span class="cd-stat-value" id="cd-stat-rank">--</span>
                     </div>
                 </div>
@@ -1251,7 +1251,7 @@
 
             <!-- ═══ CD: AI Analysis ═══ -->
             <div class="cd-section" id="cd-ai-section" style="display:none;">
-                <h4 class="cd-section-title">تحلیل هوش مصنوعی AMIRBTC</h4>
+                <h4 class="cd-section-title" data-i18n="cd_ai_analysis">تحلیل هوش مصنوعی AMIRBTC</h4>
                 <div class="cd-ai-card" id="cd-ai-content"></div>
             </div>
         </div>
@@ -1342,7 +1342,7 @@
             </div>
 
             <!-- Section Label -->
-            <div class="ns-group-label">انتخاب کانال دریافت</div>
+            <div class="ns-group-label" data-i18n="notif_select_channel">انتخاب کانال دریافت</div>
 
             <!-- Channel Segmented Controls -->
             <div class="ns-channel-list" id="ns-channel-list">
@@ -1386,9 +1386,9 @@
                 </div>
                 <div class="tk-header-text">
                     <h3 data-i18n="support">پشتیبانی</h3>
-                    <span>مرکز پشتیبانی AMIRBTC</span>
+                    <span data-i18n="support_center_desc">مرکز پشتیبانی AMIRBTC</span>
                 </div>
-                <button class="tk-close" onclick="closeTicketsModal()" aria-label="بستن">
+                <button class="tk-close" onclick="closeTicketsModal()" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -1399,19 +1399,19 @@
                 <div class="tk-form-card">
                     <div class="tk-form-card-header">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F5A623" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                        <span>تیکت جدید</span>
+                        <span data-i18n="ticket_new">تیکت جدید</span>
                     </div>
 
                     <!-- Title field -->
                     <div class="tk-field-group">
-                        <label class="tk-label">عنوان</label>
+                        <label class="tk-label" data-i18n="ticket_title_label">عنوان</label>
                         <input type="text" id="ticket-title" class="tk-input" data-i18n-placeholder="ticket_title" placeholder="عنوان تیکت" maxlength="120" oninput="validateTicketField('title')">
                         <span class="tk-error" id="ticket-title-error"></span>
                     </div>
 
                     <!-- Body field -->
                     <div class="tk-field-group">
-                        <label class="tk-label">متن پیام</label>
+                        <label class="tk-label" data-i18n="ticket_body_label">متن پیام</label>
                         <textarea id="ticket-body" class="tk-textarea" data-i18n-placeholder="ticket_body" placeholder="مشکل یا سوال خود را با جزئیات توضیح دهید..." maxlength="1500" rows="4" oninput="validateTicketField('body'); updateTicketCharCount()"></textarea>
                         <div class="tk-textarea-footer">
                             <span class="tk-error" id="ticket-body-error"></span>
@@ -1517,25 +1517,25 @@
     <div id="content-editor-modal" class="modal" onclick="if(event.target===this) closeContentEditor()">
         <div class="modal-box content-modal-box">
             <div class="modal-header">
-                <h3 id="content-editor-title">ویرایش محتوا</h3>
+                <h3 id="content-editor-title" data-i18n="content_edit_default">ویرایش محتوا</h3>
                 <button class="modal-close-btn" onclick="closeContentEditor()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="content-editor-body">
                 <div class="editor-field">
-                    <label>عنوان</label>
+                    <label data-i18n="content_title_label">عنوان</label>
                     <input type="text" id="editor-title" class="editor-input" />
                 </div>
                 <div class="editor-field">
-                    <label>نسخه برنامه (فقط برای About)</label>
+                    <label data-i18n="content_version_label">نسخه برنامه (فقط برای About)</label>
                     <input type="text" id="editor-version" class="editor-input" placeholder="1.0.0" />
                 </div>
                 <div class="editor-field">
-                    <label>بخش‌ها (JSON)</label>
-                    <textarea id="editor-sections" class="editor-textarea" rows="12" placeholder='[{"heading":"عنوان بخش","body":"متن بخش"}]'></textarea>
+                    <label data-i18n="content_sections_label">بخش‌ها (JSON)</label>
+                    <textarea id="editor-sections" class="editor-textarea" rows="12" placeholder='[{"heading":"عنوان بخش","body":"متن بخش"}]' data-i18n-placeholder="content_sections_ph"></textarea>
                 </div>
                 <div class="editor-actions">
-                    <button class="editor-save-btn" onclick="saveContentFromEditor()">ذخیره</button>
-                    <button class="editor-cancel-btn" onclick="closeContentEditor()">انصراف</button>
+                    <button class="editor-save-btn" onclick="saveContentFromEditor()" data-i18n="content_save_btn">ذخیره</button>
+                    <button class="editor-cancel-btn" onclick="closeContentEditor()" data-i18n="af_cancel">انصراف</button>
                 </div>
                 <div id="editor-status" class="editor-status"></div>
             </div>
@@ -1575,19 +1575,19 @@
             <!-- ── Premium Admin Header ── -->
             <header class="adm-header">
                 <div class="adm-header-left">
-                    <button class="adm-icon-btn" id="adm-hamburger" onclick="toggleAdminSidebar()" aria-label="منو">
+                    <button class="adm-icon-btn" id="adm-hamburger" onclick="toggleAdminSidebar()" aria-label="منو" data-i18n-aria-label="adm_menu">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                     </button>
                     <div class="adm-header-title">
                         <div class="adm-header-brand">
                             <span class="adm-header-crown">◆</span>
-                            <span>پنل مدیریت</span>
+                            <span data-i18n="admin_panel">پنل مدیریت</span>
                         </div>
-                        <div class="adm-header-sub" id="adm-section-label">داشبورد</div>
+                        <div class="adm-header-sub" id="adm-section-label" data-i18n="adm_section_label">داشبورد</div>
                     </div>
                 </div>
                 <div class="adm-header-right">
-                    <button class="adm-icon-btn adm-back-btn" onclick="closeAdminPanel()" aria-label="بازگشت به اپ">
+                    <button class="adm-icon-btn adm-back-btn" onclick="closeAdminPanel()" aria-label="بازگشت به اپ" data-i18n-aria-label="adm_back_to_app">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                     </button>
                 </div>
@@ -1600,83 +1600,83 @@
             <aside class="adm-sidebar" id="adm-sidebar">
                 <div class="adm-sidebar-inner">
                     <div class="adm-sidebar-section">
-                        <div class="adm-sidebar-label">نمای کلی</div>
+                        <div class="adm-sidebar-label" data-i18n="adm_sidebar_overview">نمای کلی</div>
                         <button class="adm-nav-item active" data-admin-section="dashboard" onclick="switchAdminSection('dashboard', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                            <span>داشبورد</span>
+                            <span data-i18n="adm_sidebar_dashboard">داشبورد</span>
                         </button>
                     </div>
 
                     <div class="adm-sidebar-section">
-                        <div class="adm-sidebar-label">مدیریت</div>
+                        <div class="adm-sidebar-label" data-i18n="adm_sidebar_management">مدیریت</div>
                         <button class="adm-nav-item" data-admin-section="users" onclick="switchAdminSection('users', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                            <span>کاربران</span>
+                            <span data-i18n="adm_sidebar_users">کاربران</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="admins" onclick="switchAdminSection('admins', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            <span>مدیران</span>
+                            <span data-i18n="adm_sidebar_admins">مدیران</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="tickets" onclick="switchAdminSection('tickets', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                            <span>تیکت‌ها</span>
+                            <span data-i18n="adm_sidebar_tickets">تیکت‌ها</span>
                             <span class="adm-nav-badge" id="adm-tickets-badge" style="display:none;">0</span>
                         </button>
                     </div>
 
                     <div class="adm-sidebar-section">
-                        <div class="adm-sidebar-label">محتوا</div>
+                        <div class="adm-sidebar-label" data-i18n="adm_sidebar_content">محتوا</div>
                         <button class="adm-nav-item" data-admin-section="rewards" onclick="switchAdminSection('rewards', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89 7 23l5-3 5 3-1.21-9.12"/></svg>
-                            <span>پاداش‌ها</span>
+                            <span data-i18n="adm_sidebar_rewards">پاداش‌ها</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="transactions" onclick="switchAdminSection('transactions', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-                            <span>تراکنش‌ها</span>
+                            <span data-i18n="adm_sidebar_transactions">تراکنش‌ها</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="referrals" onclick="switchAdminSection('referrals', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                            <span>رفرال</span>
+                            <span data-i18n="adm_sidebar_referral">رفرال</span>
                         </button>
                     </div>
 
                     <div class="adm-sidebar-section">
-                        <div class="adm-sidebar-label">سیستم</div>
+                        <div class="adm-sidebar-label" data-i18n="adm_sidebar_system">سیستم</div>
                         <button class="adm-nav-item" data-admin-section="reward-center" onclick="switchAdminSection('reward-center', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-                            <span>مرکز پاداش</span>
+                            <span data-i18n="adm_sidebar_reward_center">مرکز پاداش</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="notification-center" onclick="switchAdminSection('notification-center', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                            <span>مرکز اعلانات</span>
+                            <span data-i18n="adm_sidebar_notification_center">مرکز اعلانات</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="vpn-purchases" onclick="switchAdminSection('vpn-purchases', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-                            <span>خریدهای VPN</span>
+                            <span data-i18n="adm_sidebar_vpn">خریدهای VPN</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="alert-economy" onclick="switchAdminSection('alert-economy', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span>اقتصاد هشدارها</span>
+                            <span data-i18n="adm_sidebar_alert_economy">اقتصاد هشدارها</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="advertisements" onclick="switchAdminSection('advertisements', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                            <span>تبلیغات</span>
+                            <span data-i18n="adm_sidebar_ads">تبلیغات</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="membership" onclick="switchAdminSection('membership', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/><path d="M5 20h14"/></svg>
-                            <span>عضویت ویژه</span>
+                            <span data-i18n="adm_sidebar_membership">عضویت ویژه</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="system-controls" onclick="switchAdminSection('system-controls', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                            <span>کنترل سیستم</span>
+                            <span data-i18n="adm_sidebar_system_control">کنترل سیستم</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="system-health" onclick="switchAdminSection('system-health', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            <span>سلامت سیستم</span>
+                            <span data-i18n="adm_sidebar_health">سلامت سیستم</span>
                         </button>
                         <button class="adm-nav-item" data-admin-section="logs" onclick="switchAdminSection('logs', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                            <span>لاگ‌ها</span>
+                            <span data-i18n="adm_sidebar_logs">لاگ‌ها</span>
                         </button>
                     </div>
 
@@ -1684,7 +1684,7 @@
                         <div class="adm-sidebar-user" id="adm-sidebar-user">
                             <div class="adm-sidebar-avatar">A</div>
                             <div class="adm-sidebar-userinfo">
-                                <div class="adm-sidebar-username">مدیر</div>
+                                <div class="adm-sidebar-username" data-i18n="adm_username">مدیر</div>
                                 <div class="adm-sidebar-userrole">Super Admin</div>
                             </div>
                         </div>
@@ -1699,8 +1699,8 @@
                 <section class="adm-section active" id="admin-section-dashboard">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">داشبورد</h3>
-                            <p class="adm-section-desc">نمای کلی سیستم در یک نگاه</p>
+                            <h3 class="adm-section-title" data-i18n="adm_dashboard_title">داشبورد</h3>
+                            <p class="adm-section-desc" data-i18n="adm_dashboard_desc">نمای کلی سیستم در یک نگاه</p>
                         </div>
                     </div>
 
@@ -1710,8 +1710,8 @@
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                         </div>
                         <div class="adm-maint-banner-content">
-                            <div class="adm-maint-banner-title" id="adm-maint-banner-title">وضعیت نگهداری: بررسی...</div>
-                            <div class="adm-maint-banner-sub" id="adm-maint-banner-sub">در حال بارگذاری وضعیت سیستم</div>
+                            <div class="adm-maint-banner-title" id="adm-maint-banner-title" data-i18n="adm_maint_status_checking">وضعیت نگهداری: بررسی...</div>
+                            <div class="adm-maint-banner-sub" id="adm-maint-banner-sub" data-i18n="adm_maint_loading">در حال بارگذاری وضعیت سیستم</div>
                         </div>
                         <div class="adm-maint-banner-arrow">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1722,26 +1722,26 @@
                     <div class="adm-quick-actions">
                         <button class="adm-quick-btn" onclick="switchAdminSection('users', document.querySelector('.adm-nav-item[data-admin-section=&quot;users&quot;]'))">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                            <span>کاربران</span>
+                            <span data-i18n="adm_stat_users">کاربران</span>
                         </button>
                         <button class="adm-quick-btn" onclick="switchAdminSection('tickets', document.querySelector('.adm-nav-item[data-admin-section=&quot;tickets&quot;]'))">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                            <span>تیکت‌ها</span>
+                            <span data-i18n="adm_stat_tickets">تیکت‌ها</span>
                         </button>
                         <button class="adm-quick-btn" onclick="switchAdminSection('notification-center', document.querySelector('.adm-nav-item[data-admin-section=&quot;notification-center&quot;]'))">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
-                            <span>پیام همگانی</span>
+                            <span data-i18n="adm_stat_broadcast">پیام همگانی</span>
                         </button>
                         <button class="adm-quick-btn" onclick="switchAdminSection('system-controls', document.querySelector('.adm-nav-item[data-admin-section=&quot;system-controls&quot;]'))">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                            <span>نگهداری</span>
+                            <span data-i18n="adm_stat_maintenance">نگهداری</span>
                         </button>
                     </div>
 
                     <div class="adm-stats-grid" id="admin-stats-grid"></div>
                     <div class="adm-card">
                         <div class="adm-card-head">
-                            <h4 class="adm-card-title">فعالیت‌های اخیر</h4>
+                            <h4 class="adm-card-title" data-i18n="adm_recent_activity">فعالیت‌های اخیر</h4>
                         </div>
                         <div class="admin-activity-list" id="admin-activity-list"></div>
                     </div>
@@ -1751,22 +1751,22 @@
                 <section class="adm-section" id="admin-section-admins">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">مدیریت مدیران</h3>
-                            <p class="adm-section-desc">افزودن، ویرایش و حذف مدیران سیستم</p>
+                            <h3 class="adm-section-title" data-i18n="adm_admins_title">مدیریت مدیران</h3>
+                            <p class="adm-section-desc" data-i18n="adm_admins_desc">افزودن، ویرایش و حذف مدیران سیستم</p>
                         </div>
                         <button class="adm-btn adm-btn-primary" onclick="openAddAdminForm()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            افزودن مدیر
+                            <span data-i18n="adm_add_admin">افزودن مدیر</span>
                         </button>
                     </div>
                     <div id="admin-add-form" style="display:none;" class="adm-form-card">
                         <div class="adm-form-row">
                             <div class="adm-form-field">
-                                <label class="adm-form-label">شناسه تلگرام</label>
-                                <input type="text" id="admin-new-telegram-id" placeholder="مثال: 123456789" class="adm-input">
+                                <label class="adm-form-label" data-i18n="adm_telegram_id">شناسه تلگرام</label>
+                                <input type="text" id="admin-new-telegram-id" placeholder="مثال: 123456789" data-i18n-placeholder="adm_telegram_id_ph" class="adm-input">
                             </div>
                             <div class="adm-form-field">
-                                <label class="adm-form-label">نقش (Role)</label>
+                                <label class="adm-form-label" data-i18n="adm_role">نقش (Role)</label>
                                 <select id="admin-new-role" class="adm-input" onchange="_onAdminRoleChange()">
                                     <option value="support_agent">Support Agent</option>
                                     <option value="support_manager">Support Manager</option>
@@ -1781,14 +1781,14 @@
                             </div>
                         </div>
                         <div class="adm-form-field">
-                            <label class="adm-form-label">دسترسی‌ها (Permissions) — بر اساس نقش پر می‌شود، قابل ویرایش</label>
+                            <label class="adm-form-label" data-i18n="adm_permissions">دسترسی‌ها (Permissions) — بر اساس نقش پر می‌شود، قابل ویرایش</label>
                             <div class="adm-perm-checks" id="admin-new-permissions">
                                 <!-- Filled dynamically by _renderAdminPermChecks() -->
                             </div>
                         </div>
                         <div class="adm-form-actions">
-                            <button class="adm-btn adm-btn-primary" onclick="submitAddAdmin()">افزودن</button>
-                            <button class="adm-btn adm-btn-ghost" onclick="closeAddAdminForm()">انصراف</button>
+                            <button class="adm-btn adm-btn-primary" onclick="submitAddAdmin()" data-i18n="adm_add_btn">افزودن</button>
+                            <button class="adm-btn adm-btn-ghost" onclick="closeAddAdminForm()" data-i18n="af_cancel">انصراف</button>
                         </div>
                     </div>
                     <div class="adm-list" id="admin-list"></div>
@@ -1798,15 +1798,15 @@
                 <section class="adm-section" id="admin-section-users">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">کاربران</h3>
-                            <p class="adm-section-desc">جستجو و مدیریت کاربران مینی‌اپ</p>
+                            <h3 class="adm-section-title" data-i18n="adm_users_title">کاربران</h3>
+                            <p class="adm-section-desc" data-i18n="adm_users_desc">جستجو و مدیریت کاربران مینی‌اپ</p>
                         </div>
                     </div>
                     <!-- PHASE 2: User stats cards at top -->
                     <div id="admin-users-stats-grid" class="adm-stats-grid" style="margin-bottom:16px;"></div>
                     <div class="adm-search-bar">
                         <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        <input type="text" id="admin-user-search" placeholder="جستجو بر اساس ID، نام کاربری، نام..." class="adm-input adm-search-input" oninput="debounceAdminUserSearch()">
+                        <input type="text" id="admin-user-search" placeholder="جستجو بر اساس ID، نام کاربری، نام..." data-i18n-placeholder="adm_users_search_ph" class="adm-input adm-search-input" oninput="debounceAdminUserSearch()">
                     </div>
                     <div class="adm-list" id="admin-users-list"></div>
                     <div class="admin-pagination" id="admin-users-pagination"></div>
@@ -1816,15 +1816,15 @@
                 <section class="adm-section" id="admin-section-tickets">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">مرکز تیکت‌ها</h3>
-                            <p class="adm-section-desc">مدیریت و پاسخ به تیکت‌های کاربران</p>
+                            <h3 class="adm-section-title" data-i18n="adm_tickets_title">مرکز تیکت‌ها</h3>
+                            <p class="adm-section-desc" data-i18n="adm_tickets_desc">مدیریت و پاسخ به تیکت‌های کاربران</p>
                         </div>
                     </div>
                     <div class="adm-filters">
-                        <button class="adm-filter-btn active" onclick="filterAdminTickets('all', this)">همه</button>
-                        <button class="adm-filter-btn" onclick="filterAdminTickets('open', this)">باز</button>
-                        <button class="adm-filter-btn" onclick="filterAdminTickets('answered', this)">پاسخ داده شده</button>
-                        <button class="adm-filter-btn" onclick="filterAdminTickets('closed', this)">بسته شده</button>
+                        <button class="adm-filter-btn active" onclick="filterAdminTickets('all', this)" data-i18n="adm_filter_all">همه</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('open', this)" data-i18n="adm_filter_open">باز</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('answered', this)" data-i18n="adm_filter_answered">پاسخ داده شده</button>
+                        <button class="adm-filter-btn" onclick="filterAdminTickets('closed', this)" data-i18n="adm_filter_closed">بسته شده</button>
                     </div>
                     <div class="adm-list" id="admin-tickets-list"></div>
                     <div class="admin-pagination" id="admin-tickets-pagination"></div>
@@ -1836,15 +1836,15 @@
                 <section class="adm-section" id="admin-section-rewards">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">پاداش‌ها</h3>
-                            <p class="adm-section-desc">مدیریت درخواست‌های پاداش کاربران</p>
+                            <h3 class="adm-section-title" data-i18n="adm_rewards_title">پاداش‌ها</h3>
+                            <p class="adm-section-desc" data-i18n="adm_rewards_desc">مدیریت درخواست‌های پاداش کاربران</p>
                         </div>
                     </div>
                     <div class="adm-filters">
-                        <button class="adm-filter-btn active" onclick="filterAdminRewards('all', this)">همه</button>
-                        <button class="adm-filter-btn" onclick="filterAdminRewards('pending', this)">در انتظار</button>
-                        <button class="adm-filter-btn" onclick="filterAdminRewards('approved', this)">تأیید شده</button>
-                        <button class="adm-filter-btn" onclick="filterAdminRewards('delivered', this)">تحویل شده</button>
+                        <button class="adm-filter-btn active" onclick="filterAdminRewards('all', this)" data-i18n="adm_filter_all">همه</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('pending', this)" data-i18n="adm_filter_pending">در انتظار</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('approved', this)" data-i18n="adm_filter_approved">تأیید شده</button>
+                        <button class="adm-filter-btn" onclick="filterAdminRewards('delivered', this)" data-i18n="adm_filter_delivered">تحویل شده</button>
                     </div>
                     <div class="adm-list" id="admin-rewards-list"></div>
                 </section>
@@ -1853,21 +1853,21 @@
                 <section class="adm-section" id="admin-section-transactions">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">کیف پول و تراکنش‌ها</h3>
-                            <p class="adm-section-desc">مشاهده و فیلتر تراکنش‌های AB Token</p>
+                            <h3 class="adm-section-title" data-i18n="adm_wallet_title">کیف پول و تراکنش‌ها</h3>
+                            <p class="adm-section-desc" data-i18n="adm_wallet_desc">مشاهده و فیلتر تراکنش‌های AB Token</p>
                         </div>
                     </div>
                     <div class="adm-filters-row">
                         <div class="adm-form-field" style="flex:1;">
-                            <input type="text" id="admin-tx-user-id" placeholder="شناسه کاربر" class="adm-input">
+                            <input type="text" id="admin-tx-user-id" placeholder="شناسه کاربر" data-i18n-placeholder="adm_tx_user_id" class="adm-input">
                         </div>
                         <div class="adm-form-field" style="flex:1;">
                             <select id="admin-tx-type" class="adm-input">
-                                <option value="">همه انواع</option>
-                                <option value="daily_claim">چک‌این روزانه</option>
-                                <option value="referral">رفرال</option>
-                                <option value="admin_grant">هدیه مدیر</option>
-                                <option value="wheel">چرخ شانس</option>
+                                <option value="" data-i18n="adm_tx_all_types">همه انواع</option>
+                                <option value="daily_claim" data-i18n="adm_tx_daily_claim">چک‌این روزانه</option>
+                                <option value="referral" data-i18n="adm_tx_referral">رفرال</option>
+                                <option value="admin_grant" data-i18n="adm_tx_admin_grant">هدیه مدیر</option>
+                                <option value="wheel" data-i18n="adm_tx_wheel">چرخ شانس</option>
                             </select>
                         </div>
                     </div>
@@ -1879,13 +1879,13 @@
                 <section class="adm-section" id="admin-section-referrals">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">سیستم رفرال</h3>
-                            <p class="adm-section-desc">آمار دعوت‌ها و پاداش‌های معرف</p>
+                            <h3 class="adm-section-title" data-i18n="adm_referral_title">سیستم رفرال</h3>
+                            <p class="adm-section-desc" data-i18n="adm_referral_desc">آمار دعوت‌ها و پاداش‌های معرف</p>
                         </div>
                     </div>
                     <div class="adm-search-bar">
                         <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        <input type="text" id="admin-referral-search" placeholder="جستجو بر اساس شناسه کاربر..." class="adm-input adm-search-input" oninput="debounceAdminReferralSearch()">
+                        <input type="text" id="admin-referral-search" placeholder="جستجو بر اساس شناسه کاربر..." data-i18n-placeholder="adm_referral_search_ph" class="adm-input adm-search-input" oninput="debounceAdminReferralSearch()">
                     </div>
                     <div class="adm-list" id="admin-referrals-list"></div>
                 </section>
@@ -1894,8 +1894,8 @@
                 <section class="adm-section" id="admin-section-system-controls">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">کنترل سیستم</h3>
-                            <p class="adm-section-desc">مدیریت وضعیت مینی‌اپ و حالت نگهداری</p>
+                            <h3 class="adm-section-title" data-i18n="adm_system_title">کنترل سیستم</h3>
+                            <p class="adm-section-desc" data-i18n="adm_system_desc">مدیریت وضعیت مینی‌اپ و حالت نگهداری</p>
                         </div>
                     </div>
 
@@ -1906,8 +1906,8 @@
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             </div>
                             <div class="adm-maint-info">
-                                <h4 class="adm-maint-title">حالت نگهداری (Maintenance Mode)</h4>
-                                <p class="adm-maint-desc">با فعال‌سازی، مینی‌اپ برای کاربران عادی غیرفعال می‌شود.</p>
+                                <h4 class="adm-maint-title" data-i18n="adm_maint_mode_title">حالت نگهداری (Maintenance Mode)</h4>
+                                <p class="adm-maint-desc" data-i18n="adm_maint_mode_desc">با فعال‌سازی، مینی‌اپ برای کاربران عادی غیرفعال می‌شود.</p>
                             </div>
                             <label class="adm-switch" id="adm-maint-switch-wrap">
                                 <input type="checkbox" id="adm-maint-toggle" onchange="onMaintenanceToggleChange(this.checked)">
@@ -1917,16 +1917,16 @@
 
                         <div class="adm-maint-body" id="adm-maint-body" style="display:none;">
                             <div class="adm-form-field">
-                                <label class="adm-form-label">عنوان نمایشی</label>
-                                <input type="text" id="adm-maint-title-input" class="adm-input" placeholder="در حال ساخت آینده‌ای بهتر!" maxlength="60">
+                                <label class="adm-form-label" data-i18n="adm_maint_display_title">عنوان نمایشی</label>
+                                <input type="text" id="adm-maint-title-input" class="adm-input" placeholder="در حال ساخت آینده‌ای بهتر!" data-i18n-placeholder="adm_maint_title_ph" maxlength="60">
                             </div>
                             <div class="adm-form-field">
-                                <label class="adm-form-label">توضیحات</label>
-                                <textarea id="adm-maint-desc-input" class="adm-input adm-textarea" rows="3" placeholder="در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم..." maxlength="200"></textarea>
+                                <label class="adm-form-label" data-i18n="adm_maint_desc_label">توضیحات</label>
+                                <textarea id="adm-maint-desc-input" class="adm-input adm-textarea" rows="3" placeholder="در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم..." data-i18n-placeholder="adm_maint_desc_ph" maxlength="200"></textarea>
                             </div>
                             <div class="adm-form-field">
                                 <label class="adm-form-label">
-                                    پیشرفت کار
+                                    <span data-i18n="maint_progress">پیشرفت کار</span>
                                     <span class="adm-progress-val" id="adm-progress-val">0%</span>
                                 </label>
                                 <div class="adm-progress-slider-wrap">
@@ -1939,9 +1939,9 @@
                             <div class="adm-form-actions">
                                 <button class="adm-btn adm-btn-primary" onclick="saveMaintenanceSettings()">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                    ذخیره تنظیمات
+                                    <span data-i18n="adm_save_settings">ذخیره تنظیمات</span>
                                 </button>
-                                <button class="adm-btn adm-btn-ghost" onclick="loadMaintenanceSettings()">بارگذاری مجدد</button>
+                                <button class="adm-btn adm-btn-ghost" onclick="loadMaintenanceSettings()" data-i18n="adm_reload">بارگذاری مجدد</button>
                             </div>
                             <div class="adm-maint-status" id="adm-maint-status"></div>
                         </div>
@@ -1950,24 +1950,24 @@
                     <!-- Quick Stats -->
                     <div class="adm-stats-grid adm-stats-grid-3">
                         <div class="adm-stat-mini">
-                            <div class="adm-stat-mini-value" id="adm-stat-maint-status">غیرفعال</div>
-                            <div class="adm-stat-mini-label">وضعیت نگهداری</div>
+                            <div class="adm-stat-mini-value" id="adm-stat-maint-status" data-i18n="adm_maint_status_off">غیرفعال</div>
+                            <div class="adm-stat-mini-label" data-i18n="adm_maint_status_label">وضعیت نگهداری</div>
                         </div>
                         <div class="adm-stat-mini">
                             <div class="adm-stat-mini-value" id="adm-stat-maint-progress">0%</div>
-                            <div class="adm-stat-mini-label">پیشرفت</div>
+                            <div class="adm-stat-mini-label" data-i18n="adm_maint_progress_label">پیشرفت</div>
                         </div>
                         <div class="adm-stat-mini">
                             <div class="adm-stat-mini-value" id="adm-stat-maint-updated">—</div>
-                            <div class="adm-stat-mini-label">آخرین به‌روزرسانی</div>
+                            <div class="adm-stat-mini-label" data-i18n="adm_last_update">آخرین به‌روزرسانی</div>
                         </div>
                     </div>
 
                     <!-- Quick Presets -->
                     <div class="adm-card adm-presets-card">
                         <div class="adm-card-head">
-                            <h4 class="adm-card-title">سناریوهای آماده</h4>
-                            <span class="adm-presets-hint">با یک کلیک تنظیمات نگهداری را اعمال کنید</span>
+                            <h4 class="adm-card-title" data-i18n="adm_presets_title">سناریوهای آماده</h4>
+                            <span class="adm-presets-hint" data-i18n="adm_presets_hint">با یک کلیک تنظیمات نگهداری را اعمال کنید</span>
                         </div>
                         <div class="adm-presets-grid">
                             <button class="adm-preset-btn" onclick="applyMaintenancePreset('deploy')">
@@ -1975,8 +1975,8 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                                 </div>
                                 <div class="adm-preset-text">
-                                    <div class="adm-preset-name">استقرار نسخه جدید</div>
-                                    <div class="adm-preset-desc">پیشرفت ۲۵٪</div>
+                                    <div class="adm-preset-name" data-i18n="adm_preset_new_release">استقرار نسخه جدید</div>
+                                    <div class="adm-preset-desc" data-i18n="adm_preset_progress_25">پیشرفت ۲۵٪</div>
                                 </div>
                             </button>
                             <button class="adm-preset-btn" onclick="applyMaintenancePreset('upgrade')">
@@ -1984,8 +1984,8 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                                 </div>
                                 <div class="adm-preset-text">
-                                    <div class="adm-preset-name">ارتقای سیستم</div>
-                                    <div class="adm-preset-desc">پیشرفت ۵۰٪</div>
+                                    <div class="adm-preset-name" data-i18n="adm_preset_upgrade">ارتقای سیستم</div>
+                                    <div class="adm-preset-desc" data-i18n="adm_preset_progress_50">پیشرفت ۵۰٪</div>
                                 </div>
                             </button>
                             <button class="adm-preset-btn" onclick="applyMaintenancePreset('database')">
@@ -1993,8 +1993,8 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
                                 </div>
                                 <div class="adm-preset-text">
-                                    <div class="adm-preset-name">مهاجرت دیتابیس</div>
-                                    <div class="adm-preset-desc">پیشرفت ۷۵٪</div>
+                                    <div class="adm-preset-name" data-i18n="adm_preset_migration">مهاجرت دیتابیس</div>
+                                    <div class="adm-preset-desc" data-i18n="adm_preset_progress_75">پیشرفت ۷۵٪</div>
                                 </div>
                             </button>
                             <button class="adm-preset-btn" onclick="applyMaintenancePreset('emergency')">
@@ -2002,8 +2002,8 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                 </div>
                                 <div class="adm-preset-text">
-                                    <div class="adm-preset-name">اصلاح فوری</div>
-                                    <div class="adm-preset-desc">پیشرفت ۱۰٪</div>
+                                    <div class="adm-preset-name" data-i18n="adm_preset_hotfix">اصلاح فوری</div>
+                                    <div class="adm-preset-desc" data-i18n="adm_preset_progress_10">پیشرفت ۱۰٪</div>
                                 </div>
                             </button>
                             <button class="adm-preset-btn adm-preset-btn-end" onclick="applyMaintenancePreset('end')">
@@ -2011,8 +2011,8 @@
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                                 </div>
                                 <div class="adm-preset-text">
-                                    <div class="adm-preset-name">پایان نگهداری</div>
-                                    <div class="adm-preset-desc">غیرفعال‌سازی</div>
+                                    <div class="adm-preset-name" data-i18n="adm_preset_end">پایان نگهداری</div>
+                                    <div class="adm-preset-desc" data-i18n="adm_preset_disable">غیرفعال‌سازی</div>
                                 </div>
                             </button>
                         </div>
@@ -2023,8 +2023,8 @@
                 <section class="adm-section" id="admin-section-system-health">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">سلامت سیستم</h3>
-                            <p class="adm-section-desc">شاخص‌های عملکرد و وضعیت سرویس‌ها</p>
+                            <h3 class="adm-section-title" data-i18n="adm_health_title">سلامت سیستم</h3>
+                            <p class="adm-section-desc" data-i18n="adm_health_desc">شاخص‌های عملکرد و وضعیت سرویس‌ها</p>
                         </div>
                     </div>
                     <div class="adm-stats-grid" id="admin-health-grid"></div>
@@ -2034,8 +2034,8 @@
                 <section class="adm-section" id="admin-section-logs">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">لاگ‌های امنیتی</h3>
-                            <p class="adm-section-desc">رویدادهای امنیتی و فعالیت مدیران</p>
+                            <h3 class="adm-section-title" data-i18n="adm_logs_title">لاگ‌های امنیتی</h3>
+                            <p class="adm-section-desc" data-i18n="adm_logs_desc">رویدادهای امنیتی و فعالیت مدیران</p>
                         </div>
                     </div>
                     <div class="adm-list" id="admin-logs-list"></div>
@@ -2046,26 +2046,26 @@
                 <section class="adm-section" id="admin-section-reward-center">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">مرکز پاداش</h3>
-                            <p class="adm-section-desc">مدیریت کامل پاداش‌ها، گردونه، کمپین‌ها و تنظیمات</p>
+                            <h3 class="adm-section-title" data-i18n="adm_rc_title">مرکز پاداش</h3>
+                            <p class="adm-section-desc" data-i18n="adm_rc_desc">مدیریت کامل پاداش‌ها، گردونه، کمپین‌ها و تنظیمات</p>
                         </div>
                     </div>
 
                     <!-- Sub-navigation tabs -->
                     <div class="rc-tabs" id="rc-tabs">
-                        <button class="rc-tab active" data-rc-tab="overview" onclick="switchRewardCenterTab('overview', this)">نمای کلی</button>
-                        <button class="rc-tab" data-rc-tab="wheel" onclick="switchRewardCenterTab('wheel', this)">گردونه شانس</button>
-                        <button class="rc-tab" data-rc-tab="referral" onclick="switchRewardCenterTab('referral', this)">پاداش رفرال</button>
-                        <button class="rc-tab" data-rc-tab="mission" onclick="switchRewardCenterTab('mission', this)">پاداش ماموریت</button>
-                        <button class="rc-tab" data-rc-tab="campaigns" onclick="switchRewardCenterTab('campaigns', this)">کمپین‌ها</button>
-                        <button class="rc-tab" data-rc-tab="library" onclick="switchRewardCenterTab('library', this)">کتابخانه پاداش</button>
-                        <button class="rc-tab" data-rc-tab="analytics" onclick="switchRewardCenterTab('analytics', this)">تحلیل‌ها</button>
-                        <button class="rc-tab" data-rc-tab="settings" onclick="switchRewardCenterTab('settings', this)">تنظیمات</button>
+                        <button class="rc-tab active" data-rc-tab="overview" onclick="switchRewardCenterTab('overview', this)" data-i18n="adm_rc_tab_overview">نمای کلی</button>
+                        <button class="rc-tab" data-rc-tab="wheel" onclick="switchRewardCenterTab('wheel', this)" data-i18n="adm_rc_tab_wheel">گردونه شانس</button>
+                        <button class="rc-tab" data-rc-tab="referral" onclick="switchRewardCenterTab('referral', this)" data-i18n="adm_rc_tab_referral">پاداش رفرال</button>
+                        <button class="rc-tab" data-rc-tab="mission" onclick="switchRewardCenterTab('mission', this)" data-i18n="adm_rc_tab_mission">پاداش ماموریت</button>
+                        <button class="rc-tab" data-rc-tab="campaigns" onclick="switchRewardCenterTab('campaigns', this)" data-i18n="adm_rc_tab_campaigns">کمپین‌ها</button>
+                        <button class="rc-tab" data-rc-tab="library" onclick="switchRewardCenterTab('library', this)" data-i18n="adm_rc_tab_library">کتابخانه پاداش</button>
+                        <button class="rc-tab" data-rc-tab="analytics" onclick="switchRewardCenterTab('analytics', this)" data-i18n="adm_rc_tab_analytics">تحلیل‌ها</button>
+                        <button class="rc-tab" data-rc-tab="settings" onclick="switchRewardCenterTab('settings', this)" data-i18n="adm_rc_tab_settings">تنظیمات</button>
                     </div>
 
                     <!-- Tab content containers -->
                     <div class="rc-tab-content" id="rc-tab-overview">
-                        <div id="rc-overview-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
+                        <div id="rc-overview-grid" class="rc-overview-grid"><div class="admin-empty" data-i18n="adm_loading">در حال بارگذاری...</div></div>
                     </div>
                     <div class="rc-tab-content" id="rc-tab-wheel" style="display:none;">
                         <div id="rc-wheel-config-section"></div>
@@ -2094,30 +2094,30 @@
                 <!-- VPN Reward Purchases (Phase 8) -->
                 <section class="adm-section" id="admin-section-vpn-purchases">
                     <div class="adm-section-header">
-                        <h2>خریدهای VPN — صف انجام</h2>
-                        <p class="adm-section-desc">درخواست‌های خرید VPN کاربران Premium. پس از ارسال لینک VPN، وضعیت را به «انجام شد» تغییر دهید.</p>
+                        <h2 data-i18n="adm_vpn_title">خریدهای VPN — صف انجام</h2>
+                        <p class="adm-section-desc" data-i18n="adm_vpn_desc">درخواست‌های خرید VPN کاربران Premium. پس از ارسال لینک VPN، وضعیت را به «انجام شد» تغییر دهید.</p>
                     </div>
                     <div class="adm-filter-row" id="vpn-purchases-filter">
-                        <button class="adm-filter-btn active" data-vpn-status="pending" onclick="filterVpnPurchases('pending', this)">در انتظار</button>
-                        <button class="adm-filter-btn" data-vpn-status="fulfilled" onclick="filterVpnPurchases('fulfilled', this)">انجام شده</button>
-                        <button class="adm-filter-btn" data-vpn-status="all" onclick="filterVpnPurchases(null, this)">همه</button>
+                        <button class="adm-filter-btn active" data-vpn-status="pending" onclick="filterVpnPurchases('pending', this)" data-i18n="adm_filter_pending">در انتظار</button>
+                        <button class="adm-filter-btn" data-vpn-status="fulfilled" onclick="filterVpnPurchases('fulfilled', this)" data-i18n="adm_vpn_fulfilled">انجام شده</button>
+                        <button class="adm-filter-btn" data-vpn-status="all" onclick="filterVpnPurchases(null, this)" data-i18n="adm_filter_all">همه</button>
                     </div>
                     <div id="vpn-purchases-table" class="adm-table-wrap">
                         <table class="adm-table">
                             <thead>
                                 <tr>
-                                    <th>کاربر</th>
-                                    <th>پلن</th>
-                                    <th>هزینه</th>
-                                    <th>اعتبار</th>
-                                    <th>کد رهگیری</th>
-                                    <th>تاریخ</th>
-                                    <th>وضعیت</th>
-                                    <th>اقدام</th>
+                                    <th data-i18n="adm_vpn_th_user">کاربر</th>
+                                    <th data-i18n="adm_vpn_th_plan">پلن</th>
+                                    <th data-i18n="adm_vpn_th_cost">هزینه</th>
+                                    <th data-i18n="adm_vpn_th_credit">اعتبار</th>
+                                    <th data-i18n="adm_vpn_th_tracking">کد رهگیری</th>
+                                    <th data-i18n="adm_vpn_th_date">تاریخ</th>
+                                    <th data-i18n="adm_vpn_th_status">وضعیت</th>
+                                    <th data-i18n="adm_vpn_th_action">اقدام</th>
                                 </tr>
                             </thead>
                             <tbody id="vpn-purchases-body">
-                                <tr><td colspan="8" class="adm-loading">در حال بارگذاری...</td></tr>
+                                <tr><td colspan="8" class="adm-loading" data-i18n="adm_loading">در حال بارگذاری...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2127,22 +2127,22 @@
                 <section class="adm-section" id="admin-section-notification-center">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">مرکز اعلانات</h3>
-                            <p class="adm-section-desc">مدیریت یکپارچه اعلان‌ها، پیام‌ها و broadcast</p>
+                            <h3 class="adm-section-title" data-i18n="adm_notif_title">مرکز اعلانات</h3>
+                            <p class="adm-section-desc" data-i18n="adm_notif_desc">مدیریت یکپارچه اعلان‌ها، پیام‌ها و broadcast</p>
                         </div>
                     </div>
 
                     <!-- Sub-navigation tabs -->
                     <div class="rc-tabs" id="np-tabs">
-                        <button class="rc-tab active" data-np-tab="overview" onclick="switchNotificationTab('overview', this)">داشبورد</button>
-                        <button class="rc-tab" data-np-tab="broadcast" onclick="switchNotificationTab('broadcast', this)">ارسال همگانی</button>
-                        <button class="rc-tab" data-np-tab="templates" onclick="switchNotificationTab('templates', this)">قالب‌ها</button>
-                        <button class="rc-tab" data-np-tab="analytics" onclick="switchNotificationTab('analytics', this)">تحلیل‌ها</button>
+                        <button class="rc-tab active" data-np-tab="overview" onclick="switchNotificationTab('overview', this)" data-i18n="adm_np_tab_dashboard">داشبورد</button>
+                        <button class="rc-tab" data-np-tab="broadcast" onclick="switchNotificationTab('broadcast', this)" data-i18n="adm_np_tab_broadcast">ارسال همگانی</button>
+                        <button class="rc-tab" data-np-tab="templates" onclick="switchNotificationTab('templates', this)" data-i18n="adm_np_tab_templates">قالب‌ها</button>
+                        <button class="rc-tab" data-np-tab="analytics" onclick="switchNotificationTab('analytics', this)" data-i18n="adm_np_tab_analytics">تحلیل‌ها</button>
                     </div>
 
                     <!-- Tab content containers -->
                     <div class="rc-tab-content" id="np-tab-overview">
-                        <div id="np-overview-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
+                        <div id="np-overview-grid" class="rc-overview-grid"><div class="admin-empty" data-i18n="adm_loading">در حال بارگذاری...</div></div>
                     </div>
                     <div class="rc-tab-content" id="np-tab-broadcast" style="display:none;">
                         <div id="np-broadcast-section"></div>
@@ -2159,11 +2159,11 @@
                 <section class="adm-section" id="admin-section-alert-economy">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">اقتصاد هشدارها</h3>
-                            <p class="adm-section-desc">مدیریت سهمیه، هزینه و فعال‌سازی هشدارها</p>
+                            <h3 class="adm-section-title" data-i18n="adm_ae_title">اقتصاد هشدارها</h3>
+                            <p class="adm-section-desc" data-i18n="adm_ae_desc">مدیریت سهمیه، هزینه و فعال‌سازی هشدارها</p>
                         </div>
                     </div>
-                    <div id="ae-dashboard-grid" class="rc-overview-grid"><div class="admin-empty">در حال بارگذاری...</div></div>
+                    <div id="ae-dashboard-grid" class="rc-overview-grid"><div class="admin-empty" data-i18n="adm_loading">در حال بارگذاری...</div></div>
                     <div id="ae-configs-section" style="margin-top:16px;"></div>
                 </section>
 
@@ -2171,16 +2171,16 @@
                 <section class="adm-section" id="admin-section-advertisements">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">تبلیغات</h3>
-                            <p class="adm-section-desc">مدیریت کانال‌های عضویت، پاپ‌آپ مینی‌اپ و پیام‌های تبلیغاتی</p>
+                            <h3 class="adm-section-title" data-i18n="adm_ads_title">تبلیغات</h3>
+                            <p class="adm-section-desc" data-i18n="adm_ads_desc">مدیریت کانال‌های عضویت، پاپ‌آپ مینی‌اپ و پیام‌های تبلیغاتی</p>
                         </div>
                     </div>
 
                     <!-- Sub-navigation tabs -->
                     <div class="rc-tabs" id="ads-tabs">
-                        <button class="rc-tab active" data-ads-tab="channels" onclick="switchAdsTab('channels', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>کانال‌ها</span></button>
-                        <button class="rc-tab" data-ads-tab="popups" onclick="switchAdsTab('popups', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg><span>پاپ‌آپ</span></button>
-                        <button class="rc-tab" data-ads-tab="messages" onclick="switchAdsTab('messages', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg><span>پیام‌ها</span></button>
+                        <button class="rc-tab active" data-ads-tab="channels" onclick="switchAdsTab('channels', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span data-i18n="adm_ads_tab_channels">کانال‌ها</span></button>
+                        <button class="rc-tab" data-ads-tab="popups" onclick="switchAdsTab('popups', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg><span data-i18n="adm_ads_tab_popups">پاپ‌آپ</span></button>
+                        <button class="rc-tab" data-ads-tab="messages" onclick="switchAdsTab('messages', this)"><svg class="rc-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg><span data-i18n="adm_ads_tab_messages">پیام‌ها</span></button>
                     </div>
 
                     <!-- Tab content containers -->
@@ -2202,12 +2202,12 @@
                 <section class="adm-section" id="admin-section-membership">
                     <div class="adm-section-head">
                         <div>
-                            <h3 class="adm-section-title">عضویت ویژه</h3>
-                            <p class="adm-section-desc">مدیریت درخواست‌های عضویت صرافی و کاربران VIP</p>
+                            <h3 class="adm-section-title" data-i18n="adm_mb_title">عضویت ویژه</h3>
+                            <p class="adm-section-desc" data-i18n="adm_mb_desc">مدیریت درخواست‌های عضویت صرافی و کاربران VIP</p>
                         </div>
                         <button class="admin-btn admin-btn-ghost admin-btn-sm" onclick="loadAdminMembership()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
-                            به‌روزرسانی
+                            <span data-i18n="adm_update_btn">به‌روزرسانی</span>
                         </button>
                     </div>
                     <!-- Stats grid (uses existing adm-stat-card-v2 pattern) -->
@@ -2215,24 +2215,24 @@
                     <!-- Filter bar (uses existing adm-search-bar + admin-filters pattern) -->
                     <div class="adm-search-bar">
                         <svg class="adm-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                        <input type="text" id="mb-search" class="adm-input adm-search-input" placeholder="جستجو بر اساس ID، نام، صرافی، UID..." oninput="MembershipAdmin.onSearch(this.value)">
+                        <input type="text" id="mb-search" class="adm-input adm-search-input" placeholder="جستجو بر اساس ID، نام، صرافی، UID..." data-i18n-placeholder="adm_mb_search_ph" oninput="MembershipAdmin.onSearch(this.value)">
                     </div>
                     <div class="admin-filters-row">
                         <select id="mb-status-filter" class="admin-input" style="flex:1;min-width:120px" onchange="MembershipAdmin.onFilterChange()">
-                            <option value="">همه وضعیت‌ها</option>
-                            <option value="PENDING">در انتظار</option>
-                            <option value="APPROVED">تأیید شده</option>
-                            <option value="REJECTED">رد شده</option>
+                            <option value="" data-i18n="adm_mb_all_status">همه وضعیت‌ها</option>
+                            <option value="PENDING" data-i18n="adm_mb_pending">در انتظار</option>
+                            <option value="APPROVED" data-i18n="adm_mb_approved">تأیید شده</option>
+                            <option value="REJECTED" data-i18n="adm_mb_rejected">رد شده</option>
                         </select>
                         <select id="mb-exchange-filter" class="admin-input" style="flex:1;min-width:120px" onchange="MembershipAdmin.onFilterChange()">
-                            <option value="">همه صرافی‌ها</option>
+                            <option value="" data-i18n="adm_mb_all_exchanges">همه صرافی‌ها</option>
                             <option>Bitunix</option><option>Bybit</option><option>Binance</option>
                             <option>OKX</option><option>MEXC</option><option>Gate</option>
                             <option>KuCoin</option><option>Bitget</option><option>Coinex</option><option>Other</option>
                         </select>
                         <button class="admin-btn admin-btn-ghost admin-btn-sm" onclick="MembershipAdmin.exportCsv()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            خروجی CSV
+                            <span data-i18n="adm_csv_export">خروجی CSV</span>
                         </button>
                     </div>
                     <div id="admin-membership-list" class="adm-list"></div>
@@ -2441,17 +2441,17 @@
 
             <!-- Dynamic status text (rotates) -->
             <div class="maint-status-rotator" id="maint-status-rotator">
-                <span class="maint-status-text maint-status-active">در حال بهینه‌سازی سیستم...</span>
+                <span class="maint-status-text maint-status-active" data-i18n="maint_optimizing">در حال بهینه‌سازی سیستم...</span>
             </div>
 
             <!-- Text content -->
-            <h2 class="maint-title" id="maint-title">در حال ساخت آینده‌ای بهتر!</h2>
-            <p class="maint-desc" id="maint-desc">در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.</p>
+            <h2 class="maint-title" id="maint-title" data-i18n="maint_title_default">در حال ساخت آینده‌ای بهتر!</h2>
+            <p class="maint-desc" id="maint-desc" data-i18n="maint_desc_default_full">در حال ارتقاء سیستم‌ها و اضافه کردن قابلیت‌های جدید هستیم. به‌زودی با تجربه‌ای فوق‌العاده بازمی‌گردیم.</p>
 
             <!-- Progress bar -->
             <div class="maint-progress-wrap">
                 <div class="maint-progress-label">
-                    <span class="maint-progress-text">پیشرفت کار</span>
+                    <span class="maint-progress-text" data-i18n="maint_progress">پیشرفت کار</span>
                     <span class="maint-progress-percent" id="maint-progress-percent">0%</span>
                 </div>
                 <div class="maint-progress-track">
@@ -2462,7 +2462,7 @@
             <!-- Admin bypass button (only shown if user is admin) -->
             <button class="maint-admin-bypass" id="maint-admin-bypass" onclick="adminBypassMaintenance()">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-                <span>عبور از حالت نگهداری</span>
+                <span data-i18n="maint_bypass">عبور از حالت نگهداری</span>
             </button>
         </div>
     </div>

@@ -99,6 +99,55 @@ const WalletApp = (() => {
     error: 'خطا',
     loading_wallet: 'در حال بارگذاری...',
     staking_discounts: 'استیکینگ، تخفیف معاملات و بیشتر',
+    wheel_reward: 'پاداش چرخ شانس',
+    bonus_reward: 'پاداش تشویقی',
+    cosmetic_purchase: 'خرید کازمتیک',
+    alert_debit: 'هشدار اضافه',
+    vpn_purchase: 'خرید VPN',
+    marketplace_refund: 'بازگشت مبلغ',
+    campaign_reward: 'پاداش کمپین',
+    event_reward: 'پاداش رویداد',
+    tx_generic: 'تراکنش توکن',
+    status_unknown: 'نامشخص',
+    checkin_subtitle: 'هر روز وارد شو و پاداش بگیر',
+    premium_only_upgrade: 'ویژه اعضای Premium — برای خرید ارتقا دهید',
+    view_full_history: 'مشاهده تاریخچه کامل',
+    wallet_load_failed: 'بارگذاری کیف پول ناموفق بود',
+    retry_btn: 'تلاش مجدد',
+    claimed_label: 'دریافت شد',
+    come_back_tomorrow_hint: 'فردا برگرد و ادامه بده!',
+    come_back_tomorrow_full: 'فردا برگرد و ادامه بده!',
+    available_label: 'قابل دریافت',
+    locked_label: 'قفل',
+    day_label: 'روز',
+    day_label_full: 'روز {n}: +{reward} AB',
+    coming_soon_label: 'به‌زودی',
+    vpn_month_plan: 'اشتراک یک ماهه',
+    vpn_week_plan: 'اشتراک یک هفته‌ای',
+    purchased_label: 'خریداری شده',
+    days_left: '{n} روز دیگر',
+    premium_only_short: 'مخصوص Premium',
+    buy_btn: 'خرید',
+    confirm_purchase_title: 'تأیید خرید',
+    price_label: 'قیمت:',
+    duration_label: 'مدت:',
+    current_balance_label: 'موجودی فعلی:',
+    after_purchase_label: 'پس از خرید:',
+    insufficient_balance: 'موجودی کافی نیست',
+    cancel_btn: 'انصراف',
+    confirm_and_buy: 'تأیید و خرید',
+    vpn_pending_error: 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.',
+    vpn_insufficient_ab: 'موجودی AB کافی نیست. {n} AB لازم است.',
+    vpn_premium_required: 'این پلن ویژه اعضای Premium است. لطفاً ابتدا ارتقا دهید.',
+    vpn_invalid_plan: 'پلن نامعتبر است.',
+    vpn_purchase_error: 'خطا در خرید. لطفاً دوباره تلاش کنید.',
+    vpn_connection_error: 'خطا در برقراری ارتباط. لطفاً دوباره تلاش کنید.',
+    vpn_success_title: 'خرید با موفقیت انجام شد',
+    paid_label: 'پرداخت شد',
+    tracking_id_label: 'شماره پیگیری:',
+    vpn_success_note: 'درخواست شما ثبت شد. لینک اشتراک پس از آماده‌سازی ارسال می‌شود.',
+    got_it_btn: 'متوجه شدم',
+    streak_label: '{n} روز پشت سر هم',
   };
 
   const WT_EN = {
@@ -191,6 +240,55 @@ const WalletApp = (() => {
     error: 'Error',
     loading_wallet: 'Loading...',
     staking_discounts: 'Staking, trading discounts, and more',
+    wheel_reward: 'Wheel Reward',
+    bonus_reward: 'Bonus Reward',
+    cosmetic_purchase: 'Cosmetic Purchase',
+    alert_debit: 'Extra Alert',
+    vpn_purchase: 'VPN Purchase',
+    marketplace_refund: 'Refund',
+    campaign_reward: 'Campaign Reward',
+    event_reward: 'Event Reward',
+    tx_generic: 'Token Transaction',
+    status_unknown: 'Unknown',
+    checkin_subtitle: 'Come back daily for rewards',
+    premium_only_upgrade: 'Premium members only — upgrade to purchase',
+    view_full_history: 'View Full History',
+    wallet_load_failed: 'Couldn\'t load wallet',
+    retry_btn: 'Retry',
+    claimed_label: 'Claimed',
+    come_back_tomorrow_hint: 'Come back tomorrow!',
+    come_back_tomorrow_full: 'Come back tomorrow to continue!',
+    available_label: 'Available',
+    locked_label: 'Locked',
+    day_label: 'Day',
+    day_label_full: 'Day {n}: +{reward} AB',
+    coming_soon_label: 'Coming soon',
+    vpn_month_plan: 'Monthly subscription',
+    vpn_week_plan: 'Weekly subscription',
+    purchased_label: 'Purchased',
+    days_left: '{n} days left',
+    premium_only_short: 'Premium only',
+    buy_btn: 'Buy',
+    confirm_purchase_title: 'Confirm Purchase',
+    price_label: 'Price:',
+    duration_label: 'Duration:',
+    current_balance_label: 'Current:',
+    after_purchase_label: 'After:',
+    insufficient_balance: 'Insufficient balance',
+    cancel_btn: 'Cancel',
+    confirm_and_buy: 'Confirm',
+    vpn_pending_error: 'You already have a pending purchase for this plan.',
+    vpn_insufficient_ab: 'Insufficient AB balance. {n} AB needed.',
+    vpn_premium_required: 'This plan requires Premium membership.',
+    vpn_invalid_plan: 'Invalid plan.',
+    vpn_purchase_error: 'Purchase failed. Please try again.',
+    vpn_connection_error: 'Connection error. Please try again.',
+    vpn_success_title: 'Purchase Successful',
+    paid_label: 'paid',
+    tracking_id_label: 'Tracking ID:',
+    vpn_success_note: 'Your request has been submitted. The subscription link will be sent after preparation.',
+    got_it_btn: 'Got it',
+    streak_label: '{n} days in a row',
   };
 
   function detectLang() {
@@ -210,18 +308,23 @@ const WalletApp = (() => {
    * Returns FA string when currentLang === 'fa', EN otherwise.
    * Falls back to app's window.t(key) if key is not in our dictionary.
    */
-  function WT(key) {
+  function WT(key, params) {
     const lang = detectLang();
     const dict = (lang === 'fa') ? WT_FA : WT_EN;
-    if (dict[key] != null) return dict[key];
-    if (WT_EN[key] != null) return WT_EN[key];
-    try {
-      if (typeof window !== 'undefined' && typeof window.t === 'function') {
-        const v = window.t(key);
-        if (v && v !== key) return v;
-      }
-    } catch (e) {}
-    return key;
+    let s = dict[key] != null ? dict[key] : (WT_EN[key] != null ? WT_EN[key] : null);
+    if (s == null) {
+      try {
+        if (typeof window !== 'undefined' && typeof window.t === 'function') {
+          const v = window.t(key);
+          if (v && v !== key) s = v;
+        }
+      } catch (e) {}
+    }
+    if (s == null) return key;
+    if (params && typeof s === 'string') {
+      for (const pk in params) { s = s.split('{' + pk + '}').join(params[pk]); }
+    }
+    return s;
   }
 
   // =============================================
@@ -363,17 +466,17 @@ const WalletApp = (() => {
       redeem: WT('purchase'),
       airdrop: WT('airdrop'),
       admin_credit: WT('admin_credit'),
-      wheel_reward: detectLang() === 'fa' ? 'پاداش چرخ شانس' : 'Wheel Reward',
-      bonus_reward: detectLang() === 'fa' ? 'پاداش تشویقی' : 'Bonus Reward',
-      cosmetic_purchase: detectLang() === 'fa' ? 'خرید کازمتیک' : 'Cosmetic Purchase',
-      alert_debit: detectLang() === 'fa' ? 'هشدار اضافه' : 'Extra Alert',
-      vpn_purchase: detectLang() === 'fa' ? 'خرید VPN' : 'VPN Purchase',
-      marketplace_refund: detectLang() === 'fa' ? 'بازگشت مبلغ' : 'Refund',
-      campaign_reward: detectLang() === 'fa' ? 'پاداش کمپین' : 'Campaign Reward',
-      event_reward: detectLang() === 'fa' ? 'پاداش رویداد' : 'Event Reward',
+      wheel_reward: WT('wheel_reward'),
+      bonus_reward: WT('bonus_reward'),
+      cosmetic_purchase: WT('cosmetic_purchase'),
+      alert_debit: WT('alert_debit'),
+      vpn_purchase: WT('vpn_purchase'),
+      marketplace_refund: WT('marketplace_refund'),
+      campaign_reward: WT('campaign_reward'),
+      event_reward: WT('event_reward'),
     };
     // FIX 4: never show raw type/undefined/null — always a human label
-    return map[type] || (detectLang() === 'fa' ? 'تراکنش توکن' : 'Token Transaction');
+    return map[type] || WT('tx_generic');
   }
 
   function getTxStatusLabel(status) {
@@ -383,7 +486,7 @@ const WalletApp = (() => {
       failed: WT('failed'),
       reversed: WT('reversed'),
     };
-    return map[status] || (detectLang() === 'fa' ? 'نامشخص' : 'Unknown');
+    return map[status] || WT('status_unknown');
   }
 
   function applyDir(root) {
@@ -629,7 +732,7 @@ const WalletApp = (() => {
             <div class="checkin-icon">${ICONS.calendar}</div>
             <div class="checkin-info">
               <div class="checkin-title">${esc(WT('daily_checkin'))}</div>
-              <div class="checkin-subtitle">${detectLang() === 'fa' ? 'هر روز وارد شو و پاداش بگیر' : 'Come back daily for rewards'}</div>
+              <div class="checkin-subtitle">${WT('checkin_subtitle')}</div>
               <div class="checkin-reward" id="daily-reward-amount">—</div>
             </div>
             <div class="checkin-arrow">
@@ -648,7 +751,7 @@ const WalletApp = (() => {
         </div>
         <div id="reward-market-premium-banner" class="reward-market-premium-banner" style="display:none;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          <span>${detectLang() === 'fa' ? 'ویژه اعضای Premium — برای خرید ارتقا دهید' : 'Premium members only — upgrade to purchase'}</span>
+          <span>${WT('premium_only_upgrade')}</span>
         </div>
         <div class="vpn-market-grid" id="vpn-market-grid">
           <!-- VPN plan cards rendered dynamically by WalletApp.renderVpnMarket() -->
@@ -670,7 +773,7 @@ const WalletApp = (() => {
         ${history.length > 5 ? `
           <div class="wallet-load-more-wrap">
             <button class="wallet-load-more-btn" onclick="WalletApp.showFullHistory()">
-              ${detectLang() === 'fa' ? 'مشاهده تاریخچه کامل' : 'View Full History'}
+              ${WT('view_full_history')}
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-inline-start:4px;"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
@@ -860,8 +963,8 @@ const WalletApp = (() => {
     banner.className = 'wallet-retry-banner';
     banner.innerHTML = `
       <div class="wallet-retry-banner-content">
-        <span class="wallet-retry-banner-text">${fa ? 'بارگذاری کیف پول ناموفق بود' : 'Couldn\'t load wallet'}</span>
-        <button class="wallet-retry-banner-btn" onclick="WalletApp._refreshWalletData()">${fa ? 'تلاش مجدد' : 'Retry'}</button>
+        <span class="wallet-retry-banner-text">${WT('wallet_load_failed')}</span>
+        <button class="wallet-retry-banner-btn" onclick="WalletApp._refreshWalletData()">${WT('retry_btn')}</button>
       </div>
     `;
     // Insert at the top of the wallet page content
@@ -1333,13 +1436,13 @@ const WalletApp = (() => {
           // Update reward display + hint
           const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
           if (rewardDisplay) {
-            rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`;
+            rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${WT('claimed_label')}</span>`;
           }
           const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
           if (!hintEl) {
             const hint = document.createElement('div');
             hint.className = 'dcm-hint';
-            hint.textContent = detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow!';
+            hint.textContent = WT('come_back_tomorrow_hint');
             daysGrid.parentElement.appendChild(hint);
           }
           // Remove claim button from modal
@@ -1530,19 +1633,19 @@ const WalletApp = (() => {
           </button>
         </div>
         <div class="dcm-streak-summary">
-          ${streakDay > 0 ? `<span class="dcm-streak-flame"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg> ${streakDay} ${detectLang() === 'fa' ? 'روز پشت سر هم' : 'days in a row'}</span>` : ''}
+          ${streakDay > 0 ? `<span class="dcm-streak-flame"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg> ${WT('streak_label', {n: streakDay})}</span>` : ''}
         </div>
         <div class="dcm-days-grid" id="dcm-days-grid">
           ${_renderStreakDaysHTML(streakDay, streakRewards, claimedToday)}
         </div>
         <div class="dcm-reward-display">
           ${claimedToday
-            ? `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${detectLang() === 'fa' ? 'دریافت شد' : 'Claimed'}</span>`
+            ? `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${WT('claimed_label')}</span>`
             : `<span class="dcm-today-reward">+${streakRewards[Math.max(0, Math.min(6, (streakDay > 0 ? streakDay : 0)))]} AB</span>`
           }
         </div>
         ${claimedToday
-          ? `<div class="dcm-hint">${detectLang() === 'fa' ? 'فردا برگرد و ادامه بده!' : 'Come back tomorrow to continue!'}</div>`
+          ? `<div class="dcm-hint">${WT('come_back_tomorrow_full')}</div>`
           : `<button class="dcm-claim-btn" onclick="WalletApp.claimDaily()">
               ${esc(WT('claim'))}
             </button>`
@@ -1578,25 +1681,25 @@ const WalletApp = (() => {
       let stateSvg = '';
       if (isClaimed) {
         stateClass = 'dcm-day-claimed';
-        stateLabel = fa ? 'دریافت شد' : 'Claimed';
+        stateLabel = WT('claimed_label');
         stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
       } else if (isToday && !claimedToday) {
         stateClass = 'dcm-day-today';
-        stateLabel = fa ? 'قابل دریافت' : 'Available';
+        stateLabel = WT('available_label');
         stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>';
       } else if (isToday && claimedToday) {
         stateClass = 'dcm-day-claimed';
-        stateLabel = fa ? 'دریافت شد' : 'Claimed';
+        stateLabel = WT('claimed_label');
         stateSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
       } else {
         stateClass = 'dcm-day-locked';
-        stateLabel = fa ? 'قفل' : 'Locked';
+        stateLabel = WT('locked_label');
         stateSvg = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
       }
 
       html += `
-        <div class="dcm-day ${stateClass} ${isDay7 ? 'dcm-day-7' : ''}" title="${fa ? 'روز ' + day : 'Day ' + day}: +${reward} AB">
-          <div class="dcm-day-label">${fa ? 'روز' : 'Day'} ${day}</div>
+        <div class="dcm-day ${stateClass} ${isDay7 ? 'dcm-day-7' : ''}" title="${WT('day_label_full', {n: day, reward: reward})}">
+          <div class="dcm-day-label">${WT('day_label')} ${day}</div>
           <div class="dcm-day-reward">+${reward} AB</div>
           <div class="dcm-day-state">${stateSvg}<span>${stateLabel}</span></div>
         </div>`;
@@ -1715,7 +1818,7 @@ const WalletApp = (() => {
       }
     } catch (_) {}
     if (!plansData || plansData.plans.length === 0) {
-      grid.innerHTML = `<div class="vpn-market-empty">${detectLang() === 'fa' ? 'به‌زودی' : 'Coming soon'}</div>`;
+      grid.innerHTML = `<div class="vpn-market-empty">${WT('coming_soon_label')}</div>`;
       return;
     }
 
@@ -1730,9 +1833,7 @@ const WalletApp = (() => {
       const isPremiumLocked = !isPurchased && !isEligible && plan.premium_only;
 
       // FIX 8: Duration text from backend catalog
-      const durText = fa
-        ? (plan.duration_days >= 30 ? 'اشتراک یک ماهه' : 'اشتراک یک هفته‌ای')
-        : (plan.duration_days >= 30 ? '1-month subscription' : '1-week subscription');
+      const durText = plan.duration_days >= 30 ? WT('vpn_month_plan') : WT('vpn_week_plan');
 
       let cardClass = 'vpn-card';
       let badgeHtml = '';
@@ -1743,10 +1844,10 @@ const WalletApp = (() => {
         cardClass += ' vpn-card-purchased';
         badgeHtml = `<span class="vpn-purchased-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-          ${fa ? 'خریداری شده' : 'Purchased'}
+          ${WT('purchased_label')}
         </span>`;
         if (plan.days_remaining > 0) {
-          actionHtml = `<span class="vpn-purchased-days">${fa ? plan.days_remaining + ' روز دیگر' : plan.days_remaining + ' days left'}</span>`;
+          actionHtml = `<span class="vpn-purchased-days">${WT('days_left', {n: plan.days_remaining})}</span>`;
         }
       } else if (isPremiumLocked) {
         // State B — Premium Locked
@@ -1757,7 +1858,7 @@ const WalletApp = (() => {
         </span>`;
         actionHtml = `<span class="vpn-locked-badge">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          ${fa ? 'مخصوص Premium' : 'Premium only'}
+          ${WT('premium_only_short')}
         </span>`;
       } else {
         // State A — Available (also State D — eligible again after cooldown)
@@ -1767,7 +1868,7 @@ const WalletApp = (() => {
             PREMIUM
           </span>`;
         }
-        actionHtml = `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${fa ? 'خرید' : 'Buy'}</button>`;
+        actionHtml = `<button class="vpn-buy-btn" onclick="WalletApp.purchaseVpn('${plan.id}')">${WT('buy_btn')}</button>`;
       }
 
       return `
@@ -1806,7 +1907,7 @@ const WalletApp = (() => {
       <div class="dcm-overlay" onclick="WalletApp.closeVpnConfirmModal()"></div>
       <div class="dcm-sheet vpn-confirm-sheet">
         <div class="dcm-header">
-          <h3>${fa ? 'تأیید خرید' : 'Confirm Purchase'}</h3>
+          <h3>${WT('confirm_purchase_title')}</h3>
           <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="Close">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
@@ -1815,15 +1916,15 @@ const WalletApp = (() => {
           <div class="vpn-confirm-icon">${_vpnIconSvg(36)}</div>
           <div class="vpn-confirm-title">VPN ${plan.gb}GB</div>
           ${dur ? `<div class="vpn-confirm-desc">${dur}</div>` : ''}
-          <div class="vpn-confirm-row"><span>${fa ? 'قیمت:' : 'Price:'}</span><strong>${costAb} AB</strong></div>
-          ${dur ? `<div class="vpn-confirm-row"><span>${fa ? 'مدت:' : 'Duration:'}</span><strong>${dur}</strong></div>` : ''}
-          <div class="vpn-confirm-row"><span>${fa ? 'موجودی فعلی:' : 'Current:'}</span><strong>${formatNumber(currentBalance)} AB</strong></div>
-          <div class="vpn-confirm-row ${afterBalance < 0 ? 'vpn-insufficient' : ''}"><span>${fa ? 'پس از خرید:' : 'After:'}</span><strong>${formatNumber(Math.max(0, afterBalance))} AB</strong></div>
-          ${afterBalance < 0 ? `<div class="vpn-insufficient-warning">${fa ? 'موجودی کافی نیست' : 'Insufficient balance'}</div>` : ''}
+          <div class="vpn-confirm-row"><span>${WT('price_label')}</span><strong>${costAb} AB</strong></div>
+          ${dur ? `<div class="vpn-confirm-row"><span>${WT('duration_label')}</span><strong>${dur}</strong></div>` : ''}
+          <div class="vpn-confirm-row"><span>${WT('current_balance_label')}</span><strong>${formatNumber(currentBalance)} AB</strong></div>
+          <div class="vpn-confirm-row ${afterBalance < 0 ? 'vpn-insufficient' : ''}"><span>${WT('after_purchase_label')}</span><strong>${formatNumber(Math.max(0, afterBalance))} AB</strong></div>
+          ${afterBalance < 0 ? `<div class="vpn-insufficient-warning">${WT('insufficient_balance')}</div>` : ''}
         </div>
         <div class="vpn-confirm-actions">
-          <button class="vpn-cancel-btn" onclick="WalletApp.closeVpnConfirmModal()">${fa ? 'انصراف' : 'Cancel'}</button>
-          <button class="vpn-confirm-btn ${afterBalance < 0 ? 'disabled' : ''}" ${afterBalance < 0 ? 'disabled' : ''} onclick="WalletApp.executeVpnPurchase('${plan.id}')">${fa ? 'تأیید و خرید' : 'Confirm'}</button>
+          <button class="vpn-cancel-btn" onclick="WalletApp.closeVpnConfirmModal()">${WT('cancel_btn')}</button>
+          <button class="vpn-confirm-btn ${afterBalance < 0 ? 'disabled' : ''}" ${afterBalance < 0 ? 'disabled' : ''} onclick="WalletApp.executeVpnPurchase('${plan.id}')">${WT('confirm_and_buy')}</button>
         </div>
       </div>
     `;
@@ -1901,18 +2002,18 @@ const WalletApp = (() => {
           try { updateNotifBadge(); } catch (_) {}
         }
       } else if (resp?.code === 'DUPLICATE_PENDING') {
-        showToast(fa ? 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.' : 'You already have a pending purchase for this plan.');
+        showToast(WT('vpn_pending_error'));
       } else if (resp?.code === 'PAYMENT_FAILED') {
-        showToast(fa ? 'موجودی AB کافی نیست. ' + (resp.required_tokens || '') + ' AB لازم است.' : 'Insufficient AB balance.');
+        showToast(WT('vpn_insufficient_ab', {n: resp.required_tokens || ''}));
       } else if (resp?.code === 'PREMIUM_REQUIRED') {
-        showToast(fa ? 'این پلن ویژه اعضای Premium است. لطفاً ابتدا ارتقا دهید.' : 'This plan requires Premium membership.');
+        showToast(WT('vpn_premium_required'));
       } else if (resp?.code === 'INVALID_PLAN') {
-        showToast(fa ? 'پلن نامعتبر است.' : 'Invalid plan.');
+        showToast(WT('vpn_invalid_plan'));
       } else {
-        showToast(resp?.message || (fa ? 'خطا در خرید. لطفاً دوباره تلاش کنید.' : 'Purchase failed. Please try again.'));
+        showToast(resp?.message || WT('vpn_purchase_error'));
       }
     } catch (e) {
-      showToast(fa ? 'خطا در برقراری ارتباط. لطفاً دوباره تلاش کنید.' : 'Connection error. Please try again.');
+      showToast(WT('vpn_connection_error'));
     } finally {
       _purchaseInFlight = false;
     }
@@ -1936,20 +2037,20 @@ const WalletApp = (() => {
             <polyline points="8 12 11 15 16 9" stroke-width="3"/>
           </svg>
         </div>
-        <div class="vpn-success-title">${fa ? 'خرید با موفقیت انجام شد' : 'Purchase Successful'}</div>
+        <div class="vpn-success-title">${WT('vpn_success_title')}</div>
         <div class="vpn-success-product">
           <div class="vpn-success-product-icon">${_vpnIconSvg(24)}</div>
           <div>
             <div class="vpn-success-product-name">VPN ${purchase.vpn_gb}GB</div>
-            <div class="vpn-success-product-cost">${purchase.cost_ab} AB ${fa ? 'پرداخت شد' : 'paid'}</div>
+            <div class="vpn-success-product-cost">${purchase.cost_ab} AB ${WT('paid_label')}</div>
           </div>
         </div>
         <div class="vpn-success-tracking">
-          <span class="tracking-label">${fa ? 'شماره پیگیری:' : 'Tracking ID:'}</span>
+          <span class="tracking-label">${WT('tracking_id_label')}</span>
           <span class="tracking-value">${purchase.tracking_id || 'VPN-' + String(purchase.id).padStart(8, '0')}</span>
         </div>
-        <div class="vpn-success-note">${fa ? 'درخواست شما ثبت شد. لینک اشتراک پس از آماده‌سازی ارسال می‌شود.' : 'Your request has been submitted. The subscription link will be sent after preparation.'}</div>
-        <button class="vpn-success-close-btn" onclick="WalletApp.closeVpnSuccessModal()">${fa ? 'متوجه شدم' : 'Got it'}</button>
+        <div class="vpn-success-note">${WT('vpn_success_note')}</div>
+        <button class="vpn-success-close-btn" onclick="WalletApp.closeVpnSuccessModal()">${WT('got_it_btn')}</button>
       </div>
     `;
     document.body.appendChild(modal);
