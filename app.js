@@ -6540,6 +6540,14 @@ function selectLang(lang) {
             updateTicketCharCount();
         }
 
+        // Notification panel — re-render if open (empty state + notification text)
+        // Reset hash so empty state re-renders with new language
+        const notifModal = document.getElementById('notif-modal');
+        if (notifModal && notifModal.style.display === 'flex') {
+            if (typeof _lastNotifRenderHash !== 'undefined') _lastNotifRenderHash = '';
+            if (typeof renderNotifications === 'function') renderNotifications();
+        }
+
         // Join-lock overlay — 10 isFa? conditionals in showJoinStatusBar/setJoinLockState/_renderRequiredChannelsList
         // Only re-render if join-lock is currently visible
         const joinLock = document.getElementById('join-lock');
