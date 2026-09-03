@@ -4864,3 +4864,44 @@ Work Log:
 Stage Summary:
 - ALL validation criteria PASSED
 - Ready for commit/push (no deploy)
+
+---
+Task ID: I18N-AUDIT-COMMIT
+Agent: Z.ai Code (Orchestrator)
+Task: Commit and push i18n implementation
+
+Work Log:
+- All validation criteria PASSED (tests 1301/0 fail, runtime FA→EN→FA, layout invariant, dictionary safe)
+- Committed: 39cf2aa on main branch
+- 11 files changed, 3648 insertions(+), 1221 deletions(-)
+- Push to origin/main: FAILED — no GitHub credentials available in this environment (HTTPS remote requires auth, no token/SSH key configured)
+- Deploy: NOT performed (per user instruction — deploy is a separate phase)
+
+Stage Summary:
+- COMMIT: 39cf2aa (local) ✓
+- PUSH: blocked (no credentials) — user needs to push manually: git push origin main
+- DEPLOY: deferred (per user instruction)
+
+---
+Task ID: I18N-USER-SCOPE-FINAL
+Agent: Z.ai Code (Orchestrator)
+Task: Final validation — User-Facing scope only (Admin excluded per user instruction)
+
+Work Log:
+- Fixed ticket char counter: locale-aware digits (fa-IR in FA, en-US in EN), added updateTicketCharCount() to selectLang rerender hooks
+- Fixed assistant.js: added 36 new AI keys (quota labels, typing, file size states, error messages), converted all 49 Persian hardcodes to t() calls + data-i18n attributes
+- Fixed index.html: added data-i18n-aria-label for analysis search clear, edit/delete buttons; data-i18n-placeholder for alert price; data-i18n for view source span
+- Updated 7 test assertions in chat-ai-quota-image-retention-test.cjs for i18n key checks (replaced Persian string assertions with t() key assertions)
+- Runtime verification (Agent Browser):
+  - EN mode Persian leaks (user-facing, admin excluded): 0 ✓
+  - FA→EN→FA: PASS (Dashboard↔داشبورد, lang/dir update)
+  - AI Assistant open+switch: PASS (EN shows English, FA shows Persian)
+  - Ticket char counter: PASS (EN: "4 / 1,500", FA: "۴ / ۱٬۵۰۰")
+  - Nav layout invariant: PASS (Dashboard rightmost, Profile leftmost in both)
+  - Console errors: 0 i18n-related
+- Admin Panel: NOT validated (out of scope per user instruction)
+
+Stage Summary:
+- ALL User-Facing validation criteria PASSED
+- NO PUSH / NO DEPLOY (per user instruction)
+- Commit pending user approval

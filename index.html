@@ -548,7 +548,7 @@
             <div class="at-search-wrap">
                 <svg class="at-search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
                 <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجو..." data-i18n-placeholder="search" autocomplete="off" />
-                <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن">
+                <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن" data-i18n-aria-label="clear_input">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
                 </button>
             </div>
@@ -609,8 +609,8 @@
                 <span id="adp-views" class="adp-views-badge"></span>
             </div>
             <div id="adp-admin-actions" style="display:none;" class="adp-admin-btns">
-                <button onclick="editCurrentAnalysis()" title="ویرایش"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                <button onclick="deleteCurrentAnalysis()" title="حذف"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                <button onclick="editCurrentAnalysis()" title="ویرایش" data-i18n-aria-label="adp_edit" aria-label="ویرایش"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                <button onclick="deleteCurrentAnalysis()" title="حذف" data-i18n-aria-label="adp_delete" aria-label="حذف"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
             </div>
         </div>
         <div class="adp-body" id="adp-body">
@@ -1112,9 +1112,9 @@
             </div>
             <div id="news-modal-body" class="news-modal-body"></div>
             <div class="news-modal-footer">
-                <a id="news-modal-link" href="#" target="_blank" class="news-modal-source-btn" data-i18n="view_source">
+                <a id="news-modal-link" href="#" target="_blank" class="news-modal-source-btn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                    <span>مشاهده منبع</span>
+                    <span data-i18n="view_source">مشاهده منبع</span>
                 </a>
             </div>
         </div>
@@ -1208,7 +1208,7 @@
                     <div class="cd-alert-form">
                         <div class="cd-alert-input-wrap">
                             <span class="cd-alert-prefix">$</span>
-                            <input type="number" id="alert-price" placeholder="قیمت هدف را وارد کنید" class="cd-alert-input" step="any" min="0">
+                            <input type="number" id="alert-price" placeholder="قیمت هدف را وارد کنید" class="cd-alert-input" step="any" min="0" data-i18n-placeholder="alert_target_ph">
                         </div>
                         <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>

@@ -21,7 +21,7 @@ const AssistantUI = {
         root.className = 'ai-assistant-root';
         root.innerHTML = `
             <div id="ai-speech-bubble" class="ai-speech-bubble" role="status" aria-live="polite">
-                <button id="ai-bubble-close" class="ai-bubble-close" type="button" aria-label="بستن">
+                <button id="ai-bubble-close" class="ai-bubble-close" type="button" aria-label="بستن" data-i18n-aria-label="close">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
@@ -111,7 +111,7 @@ const AssistantUI = {
                         </svg>
                     </button>
                 </div>
-                <div id="ai-limits" class="ai-limits" role="region" aria-label="سهمیه دستیار هوشمند"></div>
+                <div id="ai-limits" class="ai-limits" role="region" aria-label="سهمیه دستیار هوشمند" data-i18n-aria-label="ai_quota_label"></div>
                 <div id="ai-messages" class="ai-messages">
                     <div class="ai-empty-state" id="ai-empty-state">
                         <div class="ai-empty-hero">
@@ -132,15 +132,15 @@ const AssistantUI = {
                         <p class="ai-empty-title" data-i18n="ai_title">دستیار هوشمند AMIRBTC</p>
                         <p class="ai-empty-subtitle" data-i18n="ai_placeholder">درباره بازار، ارزهای دیجیتال، اخبار و اطلاعات روز سؤال کن</p>
                         <div class="ai-suggestions">
-                            <button class="ai-suggestion-card" data-prompt="دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟">
+                            <button class="ai-suggestion-card" data-prompt="${t('ai_suggestion_1')}">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                                 <span data-i18n="ai_suggestion_1">دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟</span>
                             </button>
-                            <button class="ai-suggestion-card" data-prompt="با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟">
+                            <button class="ai-suggestion-card" data-prompt="${t('ai_suggestion_2')}">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
                                 <span data-i18n="ai_suggestion_2">با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟</span>
                             </button>
-                            <button class="ai-suggestion-card" data-prompt="چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های بازار استفاده کنم؟">
+                            <button class="ai-suggestion-card" data-prompt="${t('ai_suggestion_3')}">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/></svg>
                                 <span data-i18n="ai_suggestion_3">چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های بازار استفاده کنم؟</span>
                             </button>
@@ -390,13 +390,13 @@ const AssistantUI = {
 
             el.innerHTML = `
                 <div class="ai-quota-row">
-                    <button class="ai-quota-pill ai-quota-${msgStatus}" data-quota-type="chat" data-used="${used}" data-limit="${limit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="سهمیه پیام‌های هوش مصنوعی">
+                    <button class="ai-quota-pill ai-quota-${msgStatus}" data-quota-type="chat" data-used="${used}" data-limit="${limit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="${t('ai_quota_chat_label')}">
                         <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                         </svg>
                         <span class="ai-quota-text">${msgRemaining} / ${limit}</span>
                     </button>
-                    <button class="ai-quota-pill ai-quota-${imgStatus}" data-quota-type="image" data-used="${imgUsed}" data-limit="${imgLimit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="سهمیه تصاویر">
+                    <button class="ai-quota-pill ai-quota-${imgStatus}" data-quota-type="image" data-used="${imgUsed}" data-limit="${imgLimit}" data-premium="${isPremium}" role="button" tabindex="0" aria-expanded="false" aria-label="${t('ai_quota_image_label')}">
                         <svg class="ai-quota-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                             <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -432,17 +432,17 @@ const AssistantUI = {
 
         let title, body, remainingLabel;
         if (type === 'chat') {
-            title = isPremium ? 'سهمیه پیام‌های Premium' : 'سهمیه پیام‌های هوش مصنوعی';
+            title = isPremium ? t('ai_quota_chat_title_premium') : t('ai_quota_chat_title');
             body = isPremium
-                ? 'با عضویت Premium می‌توانید روزانه تا ۱۰۰ پیام با دستیار هوش مصنوعی گفتگو کنید.'
-                : 'این سهمیه تعداد پیام‌هایی را نشان می‌دهد که امروز می‌توانید با دستیار هوش مصنوعی ارسال کنید.';
-            remainingLabel = `${remaining} از ${limit} پیام باقی مانده`;
+                ? t('ai_quota_chat_desc_premium')
+                : t('ai_quota_chat_desc');
+            remainingLabel = t('ai_quota_remaining_msgs', { remaining: remaining, limit: limit });
         } else {
-            title = isPremium ? 'سهمیه تصاویر Premium' : 'سهمیه تصاویر';
+            title = isPremium ? t('ai_quota_image_title_premium') : t('ai_quota_image_title');
             body = isPremium
-                ? 'شما می‌توانید روزانه تا ۱۰ تصویر برای Chat AI ارسال کنید.'
-                : 'این سهمیه تعداد تصاویری را نشان می‌دهد که امروز می‌توانید برای Chat AI ارسال کنید.';
-            remainingLabel = `${remaining} از ${limit} تصویر باقی مانده`;
+                ? t('ai_quota_image_desc_premium')
+                : t('ai_quota_image_desc');
+            remainingLabel = t('ai_quota_remaining_imgs', { remaining: remaining, limit: limit });
         }
 
         const popover = document.createElement('div');
@@ -453,7 +453,7 @@ const AssistantUI = {
         popover.innerHTML = `
             <div class="ai-quota-popover-header">
                 <span class="ai-quota-popover-title">${title}</span>
-                <button class="ai-quota-popover-close" aria-label="بستن" type="button">
+                <button class="ai-quota-popover-close" aria-label="${t('close')}" type="button">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
@@ -461,8 +461,8 @@ const AssistantUI = {
             </div>
             <p class="ai-quota-popover-body">${body}</p>
             <div class="ai-quota-popover-remaining">${remainingLabel}</div>
-            ${type === 'image' ? '<div class="ai-quota-popover-note">حداکثر حجم هر تصویر: ۱ MB — تصاویر بزرگ‌تر به‌صورت خودکار فشرده می‌شوند.</div>' : ''}
-            <div class="ai-quota-popover-reset">سهمیه هر ۲۴ ساعت به‌صورت خودکار بازنشانی می‌شود.</div>
+            ${type === 'image' ? '<div class="ai-quota-popover-note">' + t('ai_quota_image_note') + '</div>' : ''}
+            <div class="ai-quota-popover-reset">${t('ai_quota_reset_note')}</div>
         `;
         // Position relative to pill
         const rect = pill.getBoundingClientRect();
@@ -629,7 +629,7 @@ const AssistantUI = {
         const bubble = document.createElement('div');
         bubble.className = 'ai-msg-bubble ai-msg-bubble-assistant ai-typing-bubble';
         bubble.innerHTML = `
-            <span class="ai-typing-label">در حال تحلیل</span>
+            <span class="ai-typing-label">${t('ai_typing_label')}</span>
             <span class="ai-typing-dots">
                 <span class="ai-typing-dot"></span>
                 <span class="ai-typing-dot"></span>
@@ -754,19 +754,19 @@ const AssistantUI = {
         let sizeStatus, sizeLabel, sizeColor;
         if (finalSize < 800 * 1024) {
             sizeStatus = 'healthy';
-            sizeLabel = 'حجم مناسب';
+            sizeLabel = t('ai_size_ok');
             sizeColor = '#22c55e';
         } else if (finalSize <= MAX_SIZE) {
             sizeStatus = 'warning';
-            sizeLabel = 'نزدیک سقف حجم';
+            sizeLabel = t('ai_size_near_limit');
             sizeColor = '#F5A623';
         } else {
             sizeStatus = 'critical';
-            sizeLabel = 'بیش از حد مجاز';
+            sizeLabel = t('ai_size_too_big');
             sizeColor = '#ef4444';
         }
         // PHASE 5: If status is 'ready', show ready label instead of size label
-        const readyLabel = status === 'ready' ? 'آماده ارسال' : (status === 'error' ? 'خطا در آماده‌سازی' : sizeLabel);
+        const readyLabel = status === 'ready' ? t('ai_file_ready') : (status === 'error' ? t('ai_file_error') : sizeLabel);
         const readyColor = status === 'ready' ? '#22c55e' : (status === 'error' ? '#ef4444' : sizeColor);
 
         const formatSize = (bytes) => {
@@ -799,11 +799,11 @@ const AssistantUI = {
                     ${readyLabel}
                 </span>
                 <div class="ai-file-preview-actions">
-                    <button class="ai-file-remove" type="button" aria-label="حذف فایل">
+                    <button class="ai-file-remove" type="button" aria-label="${t('ai_file_remove')}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                         </svg>
-                        حذف
+                        ${t('ai_delete')}
                     </button>
                 </div>
             </div>
@@ -926,7 +926,7 @@ const AssistantUI = {
                 if (compressionResult.finalSize > MAX_FILE_SIZE) {
                     this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
                     this.showFilePreview(this.pendingAttachment);
-                    this.appendBubble('assistant', 'حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است');
+                    this.appendBubble('assistant', t('ai_image_too_big_after_compress'));
                     e.target.value = '';
                     this.updateSendButtonState();
                     return;
@@ -936,14 +936,14 @@ const AssistantUI = {
                 this.removeCompressionProgress();
                 this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
                 this.showFilePreview(this.pendingAttachment);
-                this.appendBubble('assistant', 'خطا در پردازش تصویر');
+                this.appendBubble('assistant', t('ai_image_process_error'));
                 e.target.value = '';
                 this.updateSendButtonState();
                 return;
             }
         } else if (file.size > MAX_FILE_SIZE && !file.type.startsWith('image/')) {
             this.pendingAttachment = null;
-            this.appendBubble('assistant', 'حجم فایل نباید بیشتر از ۱ مگابایت باشد');
+            this.appendBubble('assistant', t('ai_file_too_big'));
             e.target.value = '';
             this.updateSendButtonState();
             return;
@@ -986,7 +986,7 @@ const AssistantUI = {
                 if (this._fileGeneration !== generation) return;
                 this.pendingAttachment = { status: 'error', file, name: file.name, type: file.type, size: file.size, data: null, generation };
                 this.showFilePreview(this.pendingAttachment);
-                this.appendBubble('assistant', 'آماده‌سازی تصویر انجام نشد. لطفاً دوباره تلاش کنید.');
+                this.appendBubble('assistant', t('ai_image_prep_failed'));
                 this.updateSendButtonState();
             }
         } else {
@@ -1025,7 +1025,7 @@ const AssistantUI = {
                 <div class="ai-file-preview-thumb ai-file-preview-thumb-loading"></div>
                 <div class="ai-file-preview-info">
                     <div class="ai-file-preview-name">${file.name}</div>
-                    <div class="ai-file-compressing-text">در حال بهینه‌سازی تصویر...</div>
+                    <div class="ai-file-compressing-text">${t('ai_compressing')}</div>
                 </div>
             </div>
         `;
@@ -1063,7 +1063,7 @@ const AssistantUI = {
             return;
         }
 
-        const userMsg = message || '[تصویر]';
+        const userMsg = message || t('ai_image_placeholder');
         // PHASE 5: Show image + text in user message bubble BEFORE sending
         if (imageData) {
             this.appendBubble('user', message || '', imageData);
@@ -1125,13 +1125,13 @@ const AssistantUI = {
                 // ITEM 5: Better error messages for rate limiting
                 let errMsg;
                 if (data.reason === 'cooldown') {
-                    errMsg = data.message || 'لطفاً چند ثانیه صبر کنید';
+                    errMsg = data.message || t('ai_err_wait');
                 } else if (data.reason === 'daily_message_limit') {
-                    errMsg = data.message || 'محدودیت پیام روزانه تمام شده است';
+                    errMsg = data.message || t('ai_err_daily_limit');
                 } else if (data.reason === 'image_too_large') {
-                    errMsg = data.message || 'حجم تصویر زیاد است';
+                    errMsg = data.message || t('ai_err_image_too_big');
                 } else if (data.reason === 'daily_image_limit') {
-                    errMsg = data.message || 'محدودیت ارسال تصویر تمام شده است';
+                    errMsg = data.message || t('ai_err_image_limit');
                 } else {
                     errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
                 }
@@ -1150,17 +1150,17 @@ const AssistantUI = {
                 try {
                     const parsed = JSON.parse(e.message);
                     if (parsed.reason === 'cooldown') {
-                        errMsg = parsed.message || 'لطفاً چند ثانیه صبر کنید';
+                        errMsg = parsed.message || t('ai_err_wait');
                     } else if (parsed.reason === 'daily_message_limit') {
-                        errMsg = parsed.message || 'محدودیت پیام روزانه تمام شده است';
+                        errMsg = parsed.message || t('ai_err_daily_limit');
                     } else if (parsed.reason === 'daily_image_limit') {
-                        errMsg = parsed.message || 'محدودیت ارسال تصویر تمام شده است';
+                        errMsg = parsed.message || t('ai_err_image_limit');
                     } else if (parsed.message) {
                         errMsg = parsed.message;
                     }
                 } catch (_) {
                     // e.message is not JSON — use generic error
-                    errMsg = 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید';
+                    errMsg = t('ai_err_wait_retry');
                 }
             } else if (e && e.status === 503) {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';

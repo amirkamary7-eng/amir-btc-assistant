@@ -1081,6 +1081,42 @@ const i18n = {
         ai_suggestion_1: 'دستیار هوشمند AMIRBTC چیه و چه کارهایی می‌تونه انجام بده؟',
         ai_suggestion_2: 'با AMIRBTC چه اطلاعاتی درباره بازار و ارزها می‌تونم بگیرم؟',
         ai_suggestion_3: 'چطور می‌تونم از بخش اخبار و تحلیل برای پیدا کردن فرصت‌های با سود استفاده کنم؟',
+        ai_quota_label: 'سهمیه دستیار هوشمند',
+        ai_quota_chat_label: 'سهمیه پیام‌های هوش مصنوعی',
+        ai_quota_image_label: 'سهمیه تصاویر',
+        ai_quota_chat_title_premium: 'سهمیه پیام‌های Premium',
+        ai_quota_chat_title: 'سهمیه پیام‌های هوش مصنوعی',
+        ai_quota_chat_desc_premium: 'با عضویت Premium می‌توانید روزانه تا ۱۰۰ پیام با دستیار هوش مصنوعی گفتگو کنید.',
+        ai_quota_chat_desc: 'این سهمیه تعداد پیام‌هایی را نشان می‌دهد که امروز می‌توانید با دستیار هوش مصنوعی ارسال کنید.',
+        ai_quota_remaining_msgs: '{remaining} از {limit} پیام باقی مانده',
+        ai_quota_image_title_premium: 'سهمیه تصاویر Premium',
+        ai_quota_image_title: 'سهمیه تصاویر',
+        ai_quota_image_desc_premium: 'شما می‌توانید روزانه تا ۱۰ تصویر برای Chat AI ارسال کنید.',
+        ai_quota_image_desc: 'این سهمیه تعداد تصاویری را نشان می‌دهد که امروز می‌توانید برای Chat AI ارسال کنید.',
+        ai_quota_remaining_imgs: '{remaining} از {limit} تصویر باقی مانده',
+        ai_quota_image_note: 'حداکثر حجم هر تصویر: ۱ MB — تصاویر بزرگ‌تر به‌صورت خودکار فشرده می‌شوند.',
+        ai_quota_reset_note: 'سهمیه هر ۲۴ ساعت به‌صورت خودکار بازنشانی می‌شود.',
+        ai_typing_label: 'در حال تحلیل',
+        ai_size_ok: 'حجم مناسب',
+        ai_size_near_limit: 'نزدیک سقف حجم',
+        ai_size_too_big: 'بیش از حد مجاز',
+        ai_file_ready: 'آماده ارسال',
+        ai_file_error: 'خطا در آماده‌سازی',
+        ai_file_remove: 'حذف فایل',
+        ai_delete: 'حذف',
+        ai_image_too_big_after_compress: 'حجم تصویر حتی پس از فشرده‌سازی بیشتر از ۱ مگابایت است',
+        ai_image_process_error: 'خطا در پردازش تصویر',
+        ai_file_too_big: 'حجم فایل نباید بیشتر از ۱ مگابایت باشد',
+        ai_image_prep_failed: 'آماده‌سازی تصویر انجام نشد. لطفاً دوباره تلاش کنید.',
+        ai_compressing: 'در حال بهینه‌سازی تصویر...',
+        ai_image_placeholder: '[تصویر]',
+        ai_err_wait: 'لطفاً چند ثانیه صبر کنید',
+        ai_err_daily_limit: 'محدودیت پیام روزانه تمام شده است',
+        ai_err_image_too_big: 'حجم تصویر زیاد است',
+        ai_err_image_limit: 'محدودیت ارسال تصویر تمام شده است',
+        ai_err_wait_retry: 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید',
+        clear_input: 'پاک کردن',
+        alert_target_ph: 'قیمت هدف را وارد کنید',
         adm_health_title: 'سلامت سیستم',
         adm_health_desc: 'شاخص‌های عملکرد و وضعیت سرویس‌ها',
         adm_logs_title: 'لاگ‌های امنیتی',
@@ -2356,6 +2392,42 @@ const i18n = {
         ai_suggestion_1: 'What is AMIRBTC AI Assistant and what can it do?',
         ai_suggestion_2: 'What market and crypto information can I get from AMIRBTC?',
         ai_suggestion_3: 'How can I use the news and analysis section to find profitable opportunities?',
+        ai_quota_label: 'AI Assistant Quota',
+        ai_quota_chat_label: 'AI Message Quota',
+        ai_quota_image_label: 'Image Quota',
+        ai_quota_chat_title_premium: 'Premium Message Quota',
+        ai_quota_chat_title: 'AI Message Quota',
+        ai_quota_chat_desc_premium: 'With Premium membership you can send up to 100 messages daily to the AI assistant.',
+        ai_quota_chat_desc: 'This quota shows how many messages you can send to the AI assistant today.',
+        ai_quota_remaining_msgs: '{remaining} of {limit} messages remaining',
+        ai_quota_image_title_premium: 'Premium Image Quota',
+        ai_quota_image_title: 'Image Quota',
+        ai_quota_image_desc_premium: 'You can send up to 10 images daily to Chat AI.',
+        ai_quota_image_desc: 'This quota shows how many images you can send to Chat AI today.',
+        ai_quota_remaining_imgs: '{remaining} of {limit} images remaining',
+        ai_quota_image_note: 'Max image size: 1 MB — larger images are automatically compressed.',
+        ai_quota_reset_note: 'Quota resets automatically every 24 hours.',
+        ai_typing_label: 'Analyzing',
+        ai_size_ok: 'Good size',
+        ai_size_near_limit: 'Near size limit',
+        ai_size_too_big: 'Too large',
+        ai_file_ready: 'Ready to send',
+        ai_file_error: 'Preparation error',
+        ai_file_remove: 'Remove file',
+        ai_delete: 'Remove',
+        ai_image_too_big_after_compress: 'Image size exceeds 1 MB even after compression',
+        ai_image_process_error: 'Error processing image',
+        ai_file_too_big: 'File size must not exceed 1 MB',
+        ai_image_prep_failed: 'Image preparation failed. Please try again.',
+        ai_compressing: 'Optimizing image...',
+        ai_image_placeholder: '[Image]',
+        ai_err_wait: 'Please wait a few seconds',
+        ai_err_daily_limit: 'Daily message limit reached',
+        ai_err_image_too_big: 'Image size is too large',
+        ai_err_image_limit: 'Image upload limit reached',
+        ai_err_wait_retry: 'Please wait a few seconds and try again',
+        clear_input: 'Clear',
+        alert_target_ph: 'Enter target price',
         adm_health_title: 'System Health',
         adm_health_desc: 'Performance metrics and service status',
         adm_logs_title: 'Security Logs',
@@ -6454,6 +6526,12 @@ function selectLang(lang) {
         const profilePage = document.getElementById('profile-page');
         if (profilePage && profilePage.classList.contains('active')) {
             renderTickets();
+        }
+
+        // Ticket char counter — update locale-aware digits if ticket modal is open
+        const ticketsModal = document.getElementById('tickets-modal');
+        if (ticketsModal && ticketsModal.style.display !== 'none' && typeof updateTicketCharCount === 'function') {
+            updateTicketCharCount();
         }
 
         // Join-lock overlay — 10 isFa? conditionals in showJoinStatusBar/setJoinLockState/_renderRequiredChannelsList
@@ -13555,13 +13633,14 @@ function updateTicketCharCount() {
     const counter = document.getElementById('ticket-char-counter');
     if (!body || !counter) return;
     const len = body.value.length;
-    // Display in Persian digits
-    const faLen = len.toLocaleString('fa-IR');
-    const faMax = TICKET_MAX_BODY.toLocaleString('fa-IR');
-    counter.textContent = `${faLen} / ${faMax}`;
+    // Locale-aware digit display: Persian digits in FA, Western digits in EN
+    const locale = (typeof currentLang !== 'undefined' && currentLang === 'fa') ? 'fa-IR' : 'en-US';
+    const locLen = len.toLocaleString(locale);
+    const locMax = TICKET_MAX_BODY.toLocaleString(locale);
+    counter.textContent = t('ticket_char_counter', { n: locLen, max: locMax });
     counter.classList.toggle('tk-limit', len >= TICKET_MAX_BODY);
     if (len >= TICKET_MAX_BODY) {
-        counter.textContent = t('ticket_max_chars', { n: faMax });
+        counter.textContent = t('ticket_max_chars', { n: locMax });
     }
 }
 

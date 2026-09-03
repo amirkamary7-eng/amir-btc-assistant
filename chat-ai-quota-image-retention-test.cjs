@@ -191,8 +191,8 @@ test('IMAGE-06: Frontend has client-side compression (compressImage)', () => {
 
 test('IMAGE-07: Frontend rejects if compression fails to reach <=1MB', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('حتی پس از فشرده‌سازی'),
-    'Must reject if image still >1MB after compression');
+  assert.ok(JS.includes("t('ai_image_too_big_after_compress')"),
+    'Must reject if image still >1MB after compression (i18n key)');
 });
 
 test('IMAGE-08: Backend image size limit is 1.4MB base64 (≈1MB binary)', () => {
@@ -641,14 +641,13 @@ test('QUOTA-UI-09: Quota status colors (healthy/warning/critical/empty)', () => 
   assert.ok(JS.includes('empty'), 'Must have empty status');
 });
 
-test('QUOTA-UI-10: Quota popover has Persian text (dynamic, not hardcoded numbers)', () => {
+test('QUOTA-UI-10: Quota popover has i18n keys (dynamic, not hardcoded numbers)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('سهمیه'), 'Must have Persian quota text');
-  assert.ok(JS.includes('باقی مانده'), 'Must have Persian "remaining" text');
-  assert.ok(JS.includes('بازنشانی'), 'Must mention auto-reset');
-  // Numbers must be dynamic (template literals)
-  assert.ok(JS.includes('${remaining}'), 'Remaining count must be dynamic');
-  assert.ok(JS.includes('${limit}'), 'Limit must be dynamic');
+  assert.ok(JS.includes("t('ai_quota"), 'Must use i18n quota keys');
+  assert.ok(JS.includes("t('ai_quota_remaining_msgs'"), 'Must use i18n remaining msgs key');
+  // Numbers must be dynamic (passed as interpolation params)
+  assert.ok(JS.includes('remaining: remaining'), 'Remaining count must be dynamic');
+  assert.ok(JS.includes('limit: limit'), 'Limit must be dynamic');
 });
 
 test('QUOTA-UI-11: Accessibility — aria-expanded, aria-label on quota pills', () => {
@@ -677,8 +676,8 @@ test('FILE-02: File preview shows thumbnail + filename + size', () => {
 
 test('FILE-03: File size visualization (3 states: healthy/warning/critical)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('حجم مناسب'), 'Must have healthy label');
-  assert.ok(JS.includes('نزدیک سقف حجم'), 'Must have warning label');
+  assert.ok(JS.includes("t('ai_size_ok')"), 'Must use i18n healthy label');
+  assert.ok(JS.includes("t('ai_size_near_limit')"), 'Must use i18n warning label');
   // Critical state must exist
   assert.ok(JS.includes('800 * 1024'), 'Must check 800KB threshold');
   assert.ok(JS.includes('MAX_FILE_SIZE'), 'Must check 1MB limit');
@@ -696,7 +695,7 @@ test('FILE-04: Compression shows original → final size', () => {
 test('FILE-05: Compression in progress state shown', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   assert.ok(JS.includes('showCompressionProgress'), 'Must have showCompressionProgress');
-  assert.ok(JS.includes('در حال بهینه‌سازی'), 'Must show Persian "optimizing" text');
+  assert.ok(JS.includes("t('ai_compressing')"), 'Must use i18n "optimizing" key');
   assert.ok(JS.includes('ai-file-compressing'), 'Must have compression CSS class');
 });
 
@@ -749,8 +748,8 @@ test('FILE-12: No UI emoji in file handling (📎❌ replaced with SVG/text)', (
   const codeOnly = JS.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   // Must NOT use emoji in UI chrome (file preview, error messages)
   assert.ok(!codeOnly.includes('❌'), 'Must NOT use ❌ emoji in UI');
-  // Error messages should be plain Persian text
-  assert.ok(codeOnly.includes('حجم تصویر حتی پس از فشرده‌سازی'), 'Must have Persian error text');
+  // Error messages should use i18n key
+  assert.ok(codeOnly.includes("t('ai_image_too_big_after_compress')"), 'Must use i18n error key');
 });
 
 console.log('✅ All Phase 4-14 professional UI tests loaded.');
@@ -898,13 +897,13 @@ test('FILE-25: Error handling — status=error on compression failure', () => {
   // Must set status=error on compression failure
   assert.ok(fnBlock.includes("status: 'error'"), 'Must set status=error on failure');
   // Must show error message
-  assert.ok(fnBlock.includes('آماده‌سازی تصویر انجام نشد'),
-    'Must show Persian error message');
+  assert.ok(fnBlock.includes("t('ai_image_prep_failed')"),
+    'Must use i18n error message key');
 });
 
 test('FILE-26: Ready label shown when status=ready', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('آماده ارسال'), 'Must show "آماده ارسال" when ready');
+  assert.ok(JS.includes("t('ai_file_ready')"), 'Must use i18n "ready" key');
   assert.ok(JS.includes("status === 'ready'"), 'Must check ready status for label');
 });
 
