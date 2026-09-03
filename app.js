@@ -1117,6 +1117,9 @@ const i18n = {
         ai_err_wait_retry: 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید',
         clear_input: 'پاک کردن',
         alert_target_ph: 'قیمت هدف را وارد کنید',
+        ai_attach_label: 'پیوست تصویر',
+        ai_send_label: 'ارسال',
+        ai_input_ph: 'پیام خود را بنویسید...',
         adm_health_title: 'سلامت سیستم',
         adm_health_desc: 'شاخص‌های عملکرد و وضعیت سرویس‌ها',
         adm_logs_title: 'لاگ‌های امنیتی',
@@ -2428,6 +2431,9 @@ const i18n = {
         ai_err_wait_retry: 'Please wait a few seconds and try again',
         clear_input: 'Clear',
         alert_target_ph: 'Enter target price',
+        ai_attach_label: 'Attach image',
+        ai_send_label: 'Send',
+        ai_input_ph: 'Type your message...',
         adm_health_title: 'System Health',
         adm_health_desc: 'Performance metrics and service status',
         adm_logs_title: 'Security Logs',
@@ -12808,6 +12814,9 @@ function closeLangModal() { document.getElementById('lang-modal').style.display 
 function openTicketsModal() {
     closeSettingsModal();
     document.getElementById('tickets-modal').style.display = 'flex';
+    // Render ticket char counter with correct locale digits immediately on open
+    // (before any input) so EN users see "0 / 1,500" not Persian "۰ / ۱۵۰۰".
+    if (typeof updateTicketCharCount === 'function') updateTicketCharCount();
     fetchTickets().then(renderTickets);
 }
 /**

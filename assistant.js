@@ -151,13 +151,13 @@ const AssistantUI = {
                     <div class="ai-composer-attachment" id="ai-composer-attachment" style="display:none;"></div>
                     <div class="ai-input-row">
                         <input type="file" id="ai-file" accept="image/*" hidden>
-                        <button id="ai-attach" class="ai-attach-btn" aria-label="پیوست تصویر">
+                        <button id="ai-attach" class="ai-attach-btn" aria-label="پیوست تصویر" data-i18n-aria-label="ai_attach_label">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                             </svg>
                         </button>
-                        <textarea id="ai-input" class="ai-input" rows="1" placeholder="پیام خود را بنویسید..."></textarea>
-                        <button id="ai-send" class="ai-send-btn" aria-label="ارسال">
+                        <textarea id="ai-input" class="ai-input" rows="1" placeholder="پیام خود را بنویسید..." data-i18n-placeholder="ai_input_ph"></textarea>
+                        <button id="ai-send" class="ai-send-btn" aria-label="ارسال" data-i18n-aria-label="ai_send_label">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
                             </svg>

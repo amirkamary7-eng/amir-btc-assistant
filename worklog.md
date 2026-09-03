@@ -4905,3 +4905,55 @@ Stage Summary:
 - ALL User-Facing validation criteria PASSED
 - NO PUSH / NO DEPLOY (per user instruction)
 - Commit pending user approval
+
+---
+Task ID: I18N-FINAL-GATE
+Agent: Z.ai Code (Orchestrator)
+Task: Final Gate validation before push (NO PUSH/NO DEPLOY)
+
+Work Log:
+- Gate 1 (test audit): All test changes are pure i18n implementation updates (Persian string → t() key). No security/functional/behavioral assertions weakened. IMAGE-08 backend limit, FILE-27 backend contract, QUOTA-UI-11 accessibility all intact.
+- Gate 2 (commit audit): 0 CSS files changed, 0 direction: property changes, 0 dir= attribute changes, 0 DOM reordering. All inline styles byte-identical — only text content changed to t(). Commits 39cf2aa, ed49988, 9a25c84 contain only User-Facing i18n + ticket counter + AI Assistant + essential test updates.
+- Gate 3 (data-i18n-html security): Only 1 usage (ai_welcome_msg) — trusted internal dictionary string with \n + emoji only. No API/user-generated content. About/Terms/Privacy API body untouched (src/repositories/app_content.js = 0 changes). Backend src/controllers/ = 0 changes.
+- Gate 4 (rescan): Main dict FA=1376 EN=1376 (0 missing, 0 self-ref). WT dict FA=138 EN=138. Remaining Persian in files = HTML comments, native language label (فارسی), and dynamic ticket counter (updates on input/language switch).
+- Gate 5 (runtime): All 15 user-facing areas verified FA→EN→FA:
+  - Dashboard, Market (tabs+headers), Analysis, News (tabs+filter sheet) — PASS
+  - Wallet, Referral (open+switch) — PASS
+  - AI Assistant (title/placeholder/suggestions/attach/send) — PASS
+  - Profile/Settings, About, Terms, Privacy, Tickets — PASS
+  - Coin Detail, Price Alert section, Premium badge — PASS
+  - Ticket char counter (locale-aware digits) — PASS
+  - Nav layout invariant (Dashboard rightmost, Profile leftmost in both) — PASS
+  - Console errors: 0 i18n-related
+  - Persian leaks in EN (user-facing, admin excluded): 0
+- Fixed 3 remaining AI assistant leaks (attach/send aria-labels, input placeholder)
+- Final test suite: 1303 / 1301 pass / 0 fail / 2 skipped
+
+Stage Summary:
+- ALL Final Gate criteria PASSED
+- 3 commits local: 39cf2aa, ed49988, 9a25c84
+- NO PUSH / NO DEPLOY (per user instruction)
+
+---
+Task ID: I18N-TICKET-COUNTER-FIX
+Agent: Z.ai Code (Orchestrator)
+Task: Fix ticket char counter to render correct locale on modal open (not just on input/switch)
+
+Work Log:
+- Connected updateTicketCharCount() to openTicketsModal() — counter now renders correct locale digits immediately when modal opens (before any input)
+- Updated initial HTML: ticket-char-counter span is now empty (was "۰ / ۱۵۰۰") — JS populates it on modal open with correct locale, so no Persian leak before JS execution
+- Runtime verification (all 6 test cases PASS):
+  1. Fresh FA load → open modal → "۰ / ۱٬۵۰۰" (Persian) ✓
+  2. EN switch while modal open → "0 / 1,500" (English) ✓
+  3. Type in EN → "12 / 1,500" (stays English) ✓
+  4. FA switch while modal open → "۱۲ / ۱٬۵۰۰" (Persian) ✓
+  5. Delete text → "۰ / ۱٬۵۰۰" (stays Persian) ✓
+  6. Fresh EN load → open modal → "0 / 1,500" (English) ✓
+- Amended commit 9a25c84 → 9fc9cbb (includes ticket counter fix)
+- Working tree: CLEAN
+
+Stage Summary:
+- ALL criteria PASS
+- 3 commits local: 39cf2aa, ed49988, 9fc9cbb
+- Working tree clean
+- NO PUSH / NO DEPLOY
