@@ -13026,26 +13026,31 @@ export default {
         return handleHealth(env);
       }
 
-      // ── App Content: About / Terms / Privacy (public read) ──
+      // ── App Content: About / Terms / Privacy (public read, bilingual) ──
       if (request.method === 'GET' && url.pathname.startsWith('/api/content/')) {
         const contentType = url.pathname.split('/api/content/')[1]?.split('/')[0];
         if (!['about', 'terms', 'privacy'].includes(contentType)) {
           return jsonResponse({ status: 'error', message: 'Invalid content type' }, { status: 400 }, env);
         }
+        // BILINGUAL: parse ?lang= (default 'fa'); cache + DB return language-specific content.
+        const lang = (url.searchParams.get('lang') === 'en') ? 'en' : 'fa';
         try {
-          const content = await appContentRepo.getContent(env, contentType);
+          const content = await appContentRepo.getContent(env, contentType, lang);
           return jsonResponse({ status: 'success', data: content }, {}, env);
         } catch (e) {
           return jsonResponse({ status: 'error', message: 'Failed to load content' }, { status: 500 }, env);
         }
       }
 
-      // ── App Content: Admin update (admin-only) ──
+      // ── App Content: Admin update (admin-only, bilingual) ──
+      // PUT /api/admin/content/{type}?lang=fa|en — saves ONLY the requested language's columns.
+      // Saving FA never touches EN; saving EN never touches FA.
       if (request.method === 'PUT' && url.pathname.startsWith('/api/admin/content/')) {
         const contentType = url.pathname.split('/api/admin/content/')[1]?.split('/')[0];
         if (!['about', 'terms', 'privacy'].includes(contentType)) {
           return jsonResponse({ status: 'error', message: 'Invalid content type' }, { status: 400 }, env);
         }
+        const lang = (url.searchParams.get('lang') === 'en') ? 'en' : 'fa';
         // Admin auth check
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) {
@@ -13056,13 +13061,13 @@ export default {
         }
         try {
           const body = await request.json();
-          console.log('[CONTENT SAVE] type:', contentType, 'title:', body.title, 'version:', body.version, 'sections_count:', Array.isArray(body.sections) ? body.sections.length : 'N/A');
+          console.log('[CONTENT SAVE] type:', contentType, 'lang:', lang, 'title:', body.title, 'version:', body.version, 'sections_count:', Array.isArray(body.sections) ? body.sections.length : 'N/A');
           const updated = await appContentRepo.updateContent(env, contentType, {
             title: body.title,
             sections: body.sections,
             version: body.version,
             updated_by: String(authState.user.id),
-          });
+          }, lang);
           console.log('[CONTENT SAVE] success:', JSON.stringify(updated).substring(0, 200));
           return jsonResponse({ status: 'success', data: updated }, {}, env);
         } catch (e) {

@@ -176,7 +176,13 @@ export function createUserRepository(deps) {
           username = COALESCE(EXCLUDED.username, users.username),
           first_name = COALESCE(EXCLUDED.first_name, users.first_name),
           last_name = COALESCE(EXCLUDED.last_name, users.last_name),
-          lang = COALESCE(EXCLUDED.lang, users.lang),
+          -- BILINGUAL PERSISTENCE FIX: preserve the EXISTING DB lang over the
+          -- request's lang. This prevents a fresh device (whose localStorage
+          -- defaults to 'fa') from overwriting a user's stored 'en' preference
+          -- in the DB on multi-device use. The explicit language switch path
+          -- (PUT /api/users/me/settings) unconditionally updates lang, which
+          -- is the correct channel for changing the user's language choice.
+          lang = COALESCE(users.lang, EXCLUDED.lang),
           is_premium = COALESCE(EXCLUDED.is_premium, users.is_premium),
           last_active_at = NOW(),
           mini_app_opened_at = COALESCE(users.mini_app_opened_at, NOW()),

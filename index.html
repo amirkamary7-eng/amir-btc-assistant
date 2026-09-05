@@ -87,6 +87,40 @@
     })();
     </script>
 
+    <!-- ==================== Pre-render Language Bootstrap ====================
+      BILINGUAL FIX: applies the user's stored language BEFORE first paint to
+      avoid a FA/RTL → EN/LTR flash for EN users on a fresh load. Reads
+      localStorage (legacy 'app_lang' key + any scoped 'app_lang_<uid>' key)
+      and sets document.documentElement.lang / dir synchronously in <head>.
+      If no stored preference exists, the HTML defaults (lang="fa" dir="rtl")
+      remain — no flash for FA users. This script is pure JS (no CSS change)
+      and runs after the version-check script (which may reload the page).
+    -->
+    <script>
+    (function() {
+      try {
+        var lang = null;
+        // Legacy key (always written by saveLangToStorage alongside the scoped key)
+        var legacy = localStorage.getItem('app_lang');
+        if (legacy === 'fa' || legacy === 'en') lang = legacy;
+        // Fallback: scan scoped keys (app_lang_<uid>) if legacy not set
+        if (!lang) {
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && k.indexOf('app_lang_') === 0) {
+              var v = localStorage.getItem(k);
+              if (v === 'fa' || v === 'en') { lang = v; break; }
+            }
+          }
+        }
+        if (lang === 'fa' || lang === 'en') {
+          document.documentElement.lang = lang;
+          document.documentElement.dir = (lang === 'fa') ? 'rtl' : 'ltr';
+        }
+      } catch(e) { /* localStorage unavailable — leave HTML defaults */ }
+    })();
+    </script>
+
     <link rel="stylesheet" href="base.css">
     <link rel="stylesheet" href="components.css">
     <link rel="stylesheet" href="dashboard.css">
@@ -1521,6 +1555,13 @@
                 <button class="modal-close-btn" onclick="closeContentEditor()" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="content-editor-body">
+                <div class="editor-field">
+                    <label data-i18n="content_lang_label">زبان محتوا</label>
+                    <div class="editor-lang-toggle" id="editor-lang-toggle">
+                        <button type="button" class="editor-lang-btn active" data-lang="fa" onclick="switchEditorLang('fa')">فارسی</button>
+                        <button type="button" class="editor-lang-btn" data-lang="en" onclick="switchEditorLang('en')">English</button>
+                    </div>
+                </div>
                 <div class="editor-field">
                     <label data-i18n="content_title_label">عنوان</label>
                     <input type="text" id="editor-title" class="editor-input" />

@@ -889,6 +889,14 @@ strong.down { color: var(--red); }
 .editor-status.success { color: var(--green); }
 .editor-status.error { color: var(--red); }
 
+/* BILINGUAL: minimal FA/EN toggle for the Admin Content Editor. Reuses
+   existing input radius + border + accent colors for visual consistency.
+   Not a redesign — purely functional language selector. */
+.editor-lang-toggle { display: flex; gap: 8px; }
+.editor-lang-btn { flex: 1; background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 9px 12px; font-size: 13px; font-weight: 600; cursor: pointer; transition: var(--transition); }
+.editor-lang-btn:hover { background: var(--bg-card-hover); }
+.editor-lang-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
 @media (max-width: 400px) {
   .content-modal-box { max-width: 100%; border-radius: 20px 20px 0 0; margin: 0; }
 }

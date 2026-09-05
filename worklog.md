@@ -4957,3 +4957,204 @@ Stage Summary:
 - 3 commits local: 39cf2aa, ed49988, 9fc9cbb
 - Working tree clean
 - NO PUSH / NO DEPLOY
+
+---
+Task ID: I18N-CONTENT-1-BASELINE
+Agent: Z.ai Code (Orchestrator)
+Task: Phase 1 — Baseline + Phase 2 — Reality Audit for bilingual content i18n
+
+Work Log:
+- Cloned repo (commit 9b25e2b) into /home/z/my-project/amir-btc-assistant via one-time git auth header (token NOT persisted in .git/config verified)
+- Installed npm deps (87 packages)
+- Ran baseline test suite (npm test): 1303 tests / 1301 pass / 0 fail / 2 skipped — matches prior worklog claim
+- Audited actual repository state for the 10 spec items:
+
+Reality Audit Findings (vs. spec):
+
+1. app_content table — NOT bilingual
+   - Schema: id, title, sections, version, updated_at, updated_by (NO _en columns)
+   - src/repositories/app_content.js: getContent(env, type), updateContent(env, type, data) — NO lang param
+   - Cache key: 'app_content:{type}' (no :lang suffix)
+   - SEED_DATA: Persian-only (about/terms/privacy)
+   - NEEDS: _en columns, idempotent migration, EN seed, lang-aware getContent/updateContent, isolated cache keys
+
+2. membership_rules table — NOT bilingual
+   - Schema (scripts/membership-rules-schema.sql): id, version, title, body_markdown, summary, status, effective_at, created_at, created_by, updated_at (NO _en columns)
+   - src/repositories/membership.js: getActiveRules(env) — NO lang param
+   - src/controllers/membership.js handleGetRules: cache 'mb:rules:active' (no :lang suffix)
+   - Seed: Persian-only
+   - NEEDS: _en columns, idempotent migration, EN seed, lang-aware getActiveRules, isolated cache keys
+
+3. EN content — Doesn't exist (both app_content SEED_DATA and membership_rules SQL seed are Persian-only)
+
+4. Language Persistence — HAS BUG (fresh-device overwrite)
+   - app.js:3421 _bootstrapUserImpl: currentLang = loadLangFromStorage() (defaults to 'fa' if no localStorage)
+   - app.js:3454 POST /api/users/bootstrap sends lang: currentLang
+   - src/repositories/users.js:179: ON CONFLICT DO UPDATE SET lang = COALESCE(EXCLUDED.lang, users.lang)
+   - BUG: Fresh device (no localStorage) → request lang='fa' → server OVERWRITES DB's stored 'en' with 'fa'
+   - NEEDS: Change to COALESCE(users.lang, EXCLUDED.lang) — preserve existing DB lang, fall back to request only if no existing row
+
+5. Pre-render Language Bootstrap — MISSING
+   - index.html:2: <html lang="fa" dir="rtl"> hardcoded
+   - No inline pre-render script reads localStorage before app.js (defer) executes
+   - EN user on fresh device: FA/RTL flash before _bootstrapUserImpl completes async
+   - NEEDS: Inline script in <head> (after version-check) that reads localStorage app_lang + sets document.documentElement.lang/dir before first paint
+
+6. Content API Language Support — MISSING
+   - worker-proxy.js:13030 GET /api/content/{type} — no ?lang= handling
+   - worker-proxy.js:13044 PUT /api/admin/content/{type} — no ?lang= handling
+   - src/controllers/membership.js:373 handleGetRules — no ?lang= handling
+   - NEEDS: Pass ?lang=fa|en through worker-proxy → appContentRepo.getContent/updateContent and membership controller → getActiveRules. Save FA only updates FA columns, save EN only updates EN columns.
+
+7. Cache Isolation — MISSING
+   - app_content:{type} (single cache, no :lang)
+   - mb:rules:active (single cache, no :lang)
+   - NEEDS: app_content:{type}:fa / app_content:{type}:en and mb:rules:active:fa / mb:rules:active:en. Invalidate the saved language's cache on admin save.
+
+8. Admin Content Editor — No language switcher
+   - app.js:12991 openContentEditor(type): fetches /api/content/{type} (no ?lang=)
+   - app.js:13029 saveContentFromEditor(): PUTs /api/admin/content/{type} (no ?lang=)
+   - index.html:1517 content-editor-modal — no FA/EN toggle
+   - NEEDS: Minimal FA/EN toggle in editor (without redesign). Editor tracks _editingContentLang. Fetch with ?lang=. Save with ?lang=. Switching reloads.
+
+9. Re-render on language change — PARTIAL
+   - app.js:6475 selectLang(): re-renders many UI parts but does NOT re-fetch open About/Terms/Privacy modals
+   - membership-user.js:135 loadRules(): no ?lang= param; _rules cached for session
+   - membership-user.js:1309 refresh(): clears _rules + re-renders (called by selectLang at app.js:6571)
+   - NEEDS: loadContent/loadRules pass ?lang=currentLang. selectLang re-fetches open content modals.
+
+10. Bottom Navigation invariant — ALREADY PRESERVED ✓
+    - components.css:71 .bottom-nav { direction: rtl } hardcoded — DOM order Dashboard, Market, Analysis, News, Profile → visual Profile(left)→News→Analysis→Market→Dashboard(right) in BOTH FA/EN
+    - NO ACTION — must NOT touch this CSS or DOM order
+
+11. Existing UI i18n (prior work) — COMPLETE per worklog
+    - app.js, index.html, wallet.js, referral.js, membership-user.js, membership-admin.js: all Persian hardcodes converted to t()/WT()/RT()
+    - Dictionary: 1376 FA = 1376 EN keys, no TDZ, no self-refs
+    - NO ACTION — my task is BACKEND content i18n, not UI strings
+
+Existing tests referencing this area:
+- membership-rules-test.cjs (370 lines) — tests getActiveRules, acceptance, fail-open
+- membership-requirements-test.cjs
+- phase7b-rules-acceptance-ui-test.cjs
+- premium-ui-test.cjs
+- profile-cosmetics-test.cjs
+- phase7a-entitlement-invalidation-test.cjs
+- phase7c-critical-fixes-test.cjs
+
+Stage Summary:
+- Baseline: 1303/1301 pass, 0 fail, 2 skipped
+- Real gaps identified: items 1-9 above need implementation; items 10-11 already done (must preserve)
+- No CSS redesign allowed; pure functional JS + SQL + 1 tiny HTML toggle
+- Next: Phase 3 (migration + EN content) → Phase 4 (persistence) → Phase 5 (API + cache) → Phase 6 (admin editor) → Phase 7 (tests) → runtime verification
+
+---
+Task ID: I18N-CONTENT-FINAL
+Agent: Z.ai Code (Orchestrator)
+Task: Phases 3-8 complete — bilingual content i18n implementation + runtime verification
+
+Work Log (per phase):
+
+Phase 3 — Migration + Data:
+- Created scripts/bilingual-content-schema.sql (idempotent):
+  - ALTER TABLE app_content ADD COLUMN IF NOT EXISTS title_en, sections_en
+  - ALTER TABLE membership_rules ADD COLUMN IF NOT EXISTS title_en, body_markdown_en, summary_en
+  - Backfill EN content for about/terms/privacy + membership_rules (UPDATE ... WHERE _en IS NULL — preserves admin edits on rerun)
+- Updated src/repositories/app_content.js:
+  - SEED_DATA now includes _en variants for all 3 content types
+  - ensureTable adds _en columns + idempotent ALTER TABLE for existing deployments
+  - seedIfEmpty inserts both FA + EN columns
+  - getContent(env, type, lang) — returns language-appropriate content; EN fallback uses SEED_DATA (English, never Persian)
+  - updateContent(env, type, data, lang) — updates ONLY the requested language's columns (FA save never touches EN, EN save never touches FA)
+  - Cache keys isolated: app_content:{type}:fa / app_content:{type}:en
+  - updateContent invalidates ONLY the saved language's cache key
+- Updated src/repositories/membership.js getActiveRules(env, lang):
+  - SELECT now includes _en columns
+  - For lang='en': returns EN columns with EN_FALLBACK_RULES (English constants) if NULL — never Persian
+  - For lang='fa' (default): existing behavior unchanged (backward compatible)
+
+Phase 4 — Persistence:
+- Fixed server-side fresh-device overwrite bug in src/repositories/users.js bootstrap():
+  - Changed `lang = COALESCE(EXCLUDED.lang, users.lang)` → `lang = COALESCE(users.lang, EXCLUDED.lang)`
+  - Now preserves existing DB lang; falls back to request lang only if no existing row
+  - Explicit language switch still works via PUT /api/users/me/settings (unconditional UPDATE)
+- Added _getExplicitLocalLang() helper in app.js (returns 'fa'/'en' or null)
+- Updated _bootstrapUserImpl() to adopt server lang ONLY when no explicit local pref:
+  `if (!explicitLocalLang && (data.user?.lang === 'fa' || data.user?.lang === 'en'))`
+- Added pre-render lang bootstrap script in index.html <head> (after version-check):
+  - Reads localStorage 'app_lang' (legacy) + scans scoped 'app_lang_<uid>' keys
+  - Sets document.documentElement.lang/dir BEFORE first paint (no FA/RTL flash for EN)
+- Fixed missing currentLang init in DOMContentLoaded: `currentLang = loadLangFromStorage()` added BEFORE the first applyLanguage() call (without this, currentLang stayed at 'fa' default when bootstrap skipped for guests, overwriting pre-render en|ltr)
+
+Phase 5 — API + Cache:
+- worker-proxy.js:
+  - GET /api/content/{type}: parses ?lang= (default 'fa'), passes to getContent
+  - PUT /api/admin/content/{type}: parses ?lang=, passes to updateContent (saves ONLY requested language)
+- src/controllers/membership.js handleGetRules: parses ?lang=, uses isolated cache key 'mb:rules:active:fa' / 'mb:rules:active:en'
+- app.js loadContent: passes ?lang=currentLang to /api/content/{type}
+- membership-user.js loadRules: detects currentLang (window.currentLang || global currentLang) and passes ?lang=
+
+Phase 6 — Admin Editor:
+- Added _editingContentLang variable + switchEditorLang() function in app.js
+- Added minimal FA/EN toggle in content-editor-modal (index.html): 2 buttons "فارسی" / "English" with data-lang attributes
+- Added 7 lines of CSS in style.css (.editor-lang-toggle / .editor-lang-btn) — reuses existing input radius + accent colors (no redesign)
+- _loadContentIntoEditor fetches /api/content/{type}?lang={lang} and appends (FA) or (EN) tag to editor title
+- switchEditorLang reloads the other language's content WITHOUT saving (no cross-contamination)
+- saveContentFromEditor PUTs with ?lang={_editingContentLang} — backend saves ONLY that language
+- Added 2 i18n keys: content_lang_label (FA: 'زبان محتوا' / EN: 'Content Language')
+- selectLang() now re-fetches open About/Terms/Privacy modals in the new language (no Persian leak)
+
+Phase 7 — Tests:
+- Created bilingual-content-regression-test.cjs (32 tests across 8 groups):
+  A. app_content bilingual (8 tests): getContent fa/en, EN fallback, cache isolation, updateContent fa/en column isolation, cache invalidation
+  B. membership_rules bilingual (5 tests): getActiveRules fa/en, EN fallback (no Persian), backward compat, SQL includes _en columns
+  C. handleGetRules controller (4 tests): ?lang= parsing, cache key isolation, backward compat, EN fallback
+  D. Persistence (4 tests): server COALESCE fix, frontend explicitLocalLang guard, _getExplicitLocalLang, pre-render script in <head>
+  E. Migration SQL (4 tests): IF NOT EXISTS, WHERE _en IS NULL backfill, no FA column modification, EN content for all 4 types
+  F. worker-proxy routing (2 tests): GET/PUT pass ?lang= to repo functions
+  G. Frontend (3 tests): loadContent/loadRules pass ?lang=, admin editor saves with ?lang=
+  H. Bottom Nav invariant (2 tests): CSS direction:rtl preserved, DOM order unchanged
+- Added bilingual-content-regression-test.cjs to package.json scripts.test
+
+Phase 8 — Runtime Verification (Agent Browser + pg-mem):
+- Migration idempotency on pg-mem: 3 runs, admin edits preserved, Persian columns untouched ✓
+- Pre-render script: app_lang=en → reload → en|ltr immediately (no FA/RTL flash) ✓
+- Fresh device (no localStorage) → fa|rtl (HTML default, no flash) ✓
+- selectLang('en') → en|ltr → reload → still en|ltr (persists) ✓
+- Admin editor modal: editor-lang-toggle present with 2 buttons (فارسی / English), switchEditorLang exposed ✓
+- loadContent.toString() includes '?lang=' ✓
+- Bottom nav DOM order: dashboard, market, analysis, news, profile (unchanged) ✓
+- Bottom nav visual positions IDENTICAL in FA and EN (dashboard x=1099 rightmost, profile x=109 leftmost) ✓
+- Page errors: none (only expected network fetch errors from no backend) ✓
+
+Final Test Results:
+- Baseline (before changes): 1303 tests / 1301 pass / 0 fail / 2 skipped
+- Final (after changes): 1335 tests / 1333 pass / 0 fail / 2 skipped
+- Net new: 32 bilingual regression tests, ALL PASSING
+- No regressions in existing tests
+
+Files Changed (13 total: 11 modified + 2 new):
+- app.js: +120/-7 (persistence guard, content editor lang toggle, selectLang re-fetch, loadContent ?lang=)
+- index.html: +41 (pre-render lang bootstrap script, editor lang toggle HTML)
+- membership-user.js: +16/-5 (loadRules ?lang= + lang detection)
+- package.json: +2/-2 (added bilingual-content-regression-test.cjs)
+- src/controllers/membership.js: +9/-3 (handleGetRules ?lang= + isolated cache key)
+- src/repositories/app_content.js: +249/-23 (bilingual schema, getContent/updateContent per lang, cache isolation, EN fallback)
+- src/repositories/membership.js: +51/-1 (getActiveRules per lang + EN_FALLBACK_RULES)
+- src/repositories/users.js: +8/-1 (bootstrap COALESCE fix for fresh-device overwrite)
+- style.css: +8 (minimal .editor-lang-toggle/.editor-lang-btn, reuses existing colors/radius — no redesign)
+- worker-proxy.js: +15/-7 (?lang= passthrough for GET/PUT content endpoints)
+- worklog.md: +89 (this audit + final report)
+- scripts/bilingual-content-schema.sql: NEW (idempotent migration + EN backfill)
+- bilingual-content-regression-test.cjs: NEW (32 tests)
+
+Stage Summary:
+- ALL 20 runtime verification items from the spec PASS (verified via tests + Agent Browser)
+- Bottom Navigation invariant PRESERVED (DOM order + CSS direction:rtl unchanged — Dashboard rightmost, Profile leftmost in both FA/EN)
+- No CSS redesign (only 8 new lines reusing existing colors/radius for the editor toggle)
+- No UI structural changes (no DOM reordering, no JS reorder, no direction: property changes)
+- Migration is 100% idempotent (verified on pg-mem with 3 runs)
+- Persian content NEVER overwritten by EN save or migration rerun (verified)
+- EN content NEVER falls back to Persian (always English SEED_DATA or EN_FALLBACK_RULES)
+- Persistence: fresh device no longer overwrites DB lang; explicit local pref protected from server response
+- Pre-render: EN users see en|ltr from first paint (no FA/RTL flash)
+- NO COMMIT / NO PUSH / NO DEPLOY — awaiting user approval

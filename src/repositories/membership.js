@@ -430,17 +430,60 @@ export function createMembershipRepository(deps) {
 
   // ─── Premium Rules (Phase 1) ──────────────────────────────────────────────
 
-  /** Get the currently ACTIVE rules version, or null if none. */
-  async function getActiveRules(env) {
+  // BILINGUAL EN FALLBACK (per spec): if EN columns are NULL/empty in the DB,
+  // return English constants below — never the Persian content. This guarantees
+  // EN users never see Persian rules.
+  const EN_FALLBACK_RULES = {
+    title_en: 'Premium Membership Rules — Version 1',
+    body_markdown_en: '# Premium Membership Rules\n\n## What is Premium?\n\nPremium membership is a special access tier that provides additional benefits in exchange for meeting membership conditions. Premium is not a paid subscription; it is a reward for users who are active in the AMIRBTC ecosystem and meet the membership conditions.\n\n## Premium Benefits\n\n- Higher quota for price alerts, AI chat, and other high-usage features\n- Access to the Premium Rewards Store (purchase with AB Token)\n- Access to the Profile Cosmetics Store (profile customization with AB Token)\n- Premium badge on profile\n- Priority access to new features and exclusive campaigns\n\n**Note:** Premium does not mean unlimited. For resource-intensive features, the Premium quota is higher than regular users but still limited.\n\n## Conditions for Maintaining Premium\n\n1. The user account must be active and accessible.\n2. Membership in the official AMIRBTC channel must be maintained.\n3. The current Exchange Requirement must be met.\n\n## Exchange Requirement\n\nAt any time, one exchange is defined as the "required exchange." The required exchange may change in the future. If it changes, a grace period is provided for you to comply.\n\n## Changes to Rules\n\nThese rules may be updated in the future. New users must accept the new version. Existing Premium users do not need to re-accept unless the changes are fundamental.\n\n## Acceptance of Rules\n\nBy accepting these rules, you confirm that you have read and accepted the rules and understand that Premium is a benefit conditional on meeting the requirements, not an absolute right.',
+    summary_en: 'Complete Premium Membership Rules — conditions, benefits, limitations, and acceptance',
+  };
+
+  function _normalizeRulesLang(lang) {
+    return lang === 'en' ? 'en' : 'fa';
+  }
+
+  /**
+   * Get the currently ACTIVE rules version, or null if none.
+   * lang: 'fa' | 'en' (default 'fa').
+   *
+   * BILINGUAL: returns language-appropriate title/body_markdown/summary fields.
+   * For EN: if EN columns are NULL/empty, falls back to EN_FALLBACK_RULES (English),
+   * never to Persian. The returned object always has canonical field names
+   * (title, body_markdown, summary) so callers don't need to branch on language.
+   */
+  async function getActiveRules(env, lang) {
+    const lng = _normalizeRulesLang(lang);
     try {
       const result = await queryDb(env,
-        `SELECT id, version, title, body_markdown, summary, status, effective_at, created_at
+        `SELECT id, version, title, body_markdown, summary,
+                title_en, body_markdown_en, summary_en,
+                status, effective_at, created_at
          FROM membership_rules
          WHERE status = 'ACTIVE'
          ORDER BY version DESC
          LIMIT 1`
       );
-      return result.rows[0] || null;
+      const row = result.rows[0] || null;
+      if (!row) return null;
+
+      if (lng === 'en') {
+        // Use EN columns; fall back to English constants if NULL/empty.
+        const titleEn = (row.title_en && String(row.title_en).trim()) ? row.title_en : EN_FALLBACK_RULES.title_en;
+        const bodyEn = (row.body_markdown_en && String(row.body_markdown_en).trim()) ? row.body_markdown_en : EN_FALLBACK_RULES.body_markdown_en;
+        const summaryEn = (row.summary_en && String(row.summary_en).trim()) ? row.summary_en : EN_FALLBACK_RULES.summary_en;
+        return {
+          id: row.id, version: row.version,
+          title: titleEn, body_markdown: bodyEn, summary: summaryEn,
+          status: row.status, effective_at: row.effective_at, created_at: row.created_at,
+        };
+      }
+      // FA: existing behavior (return Persian columns as-is)
+      return {
+        id: row.id, version: row.version,
+        title: row.title, body_markdown: row.body_markdown, summary: row.summary,
+        status: row.status, effective_at: row.effective_at, created_at: row.created_at,
+      };
     } catch (e) {
       console.warn('[membership] getActiveRules failed:', e.message || e);
       return null;

@@ -369,16 +369,19 @@ export function createMembershipHandlers(deps) {
 
   // ─── Handlers: Premium Rules (Phase 1) ────────────────────────────────────
 
-  /** GET /api/membership/rules — get current active rules (cached 5 min) */
+  /** GET /api/membership/rules?lang=fa|en — get current active rules (cached 5 min, per-language isolated) */
   async function handleGetRules(request, env) {
     const auth = await requireUser(request, env);
     if (auth.error) return auth.error;
     if (!isDatabaseConfigured(env)) return safeDbErrorResponse(new Error('DB not configured'), {}, env);
-    const cacheKey = 'mb:rules:active';
+    // BILINGUAL: parse ?lang= (default 'fa'); cache keys isolated per language.
+    const url = new URL(request.url);
+    const lang = (url.searchParams.get('lang') === 'en') ? 'en' : 'fa';
+    const cacheKey = 'mb:rules:active:' + lang;
     const cached = await readAppCache(env, cacheKey);
     if (cached) return jsonResponse({ ok: true, data: JSON.parse(cached) }, {}, env);
     try {
-      const rules = await membershipRepo.getActiveRules(env);
+      const rules = await membershipRepo.getActiveRules(env, lang);
       if (!rules) {
         return jsonResponse({ ok: true, data: { version: null, title: null, body_markdown: null, summary: null, active: false } }, {}, env);
       }

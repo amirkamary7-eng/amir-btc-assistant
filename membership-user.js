@@ -131,11 +131,25 @@
    * fetch is cheap. On any error or non-active response, falls back to
    * FALLBACK_RULES (active:false) which renders the rules section in a
    * soft non-blocking mode — matching the backend FAIL-OPEN behavior.
+   *
+   * BILINGUAL: passes ?lang=fa|en so the backend returns language-appropriate
+   * content. The cache key on the server is isolated per language
+   * (mb:rules:active:fa / mb:rules:active:en). Switching the app language
+   * calls refresh() which clears _rules, so the next loadRules() fetches
+   * the new language's content.
    */
   async function loadRules() {
     if (_rules) return _rules;
     try {
-      var res = await apiFetch('/api/membership/rules');
+      var langParam = 'fa';
+      try {
+        if (typeof window !== 'undefined' && typeof window.currentLang === 'string' && window.currentLang) {
+          langParam = window.currentLang === 'en' ? 'en' : 'fa';
+        } else if (typeof currentLang !== 'undefined' && currentLang === 'en') {
+          langParam = 'en';
+        }
+      } catch (e) { /* default 'fa' */ }
+      var res = await apiFetch('/api/membership/rules?lang=' + langParam);
       if (res && res.ok && res.data && res.data.active) {
         _rules = res.data;
       } else if (res && res.ok && res.data && res.data.active === false) {

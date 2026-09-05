@@ -882,6 +882,7 @@ const i18n = {
         content_version_label: 'نسخه برنامه (فقط برای About)',
         content_sections_label: 'بخش‌ها (JSON)',
         content_sections_ph: '[{"heading":"عنوان بخش","body":"متن بخش"}]',
+        content_lang_label: 'زبان محتوا',
         // ── i18n AUDIT: notification settings ──
         notif_critical_alerts: 'اعلان‌های حیاتی',
         notif_account_alerts: 'اعلان‌های حساب کاربری',
@@ -2196,6 +2197,7 @@ const i18n = {
         content_version_label: 'App Version (About only)',
         content_sections_label: 'Sections (JSON)',
         content_sections_ph: '[{"heading":"Section title","body":"Section body"}]',
+        content_lang_label: 'Content Language',
         // ── i18n AUDIT EN: notification settings ──
         notif_critical_alerts: 'Critical Alerts',
         notif_account_alerts: 'Account Notifications',
@@ -3289,6 +3291,26 @@ function loadLangFromStorage() {
 }
 
 /**
+ * بررسی می‌کند آیا کاربر تنظیمات زبان صریح در localStorage دارد یا نه.
+ * ورودی: بدون ورودی.
+ * خروجی: 'fa' یا 'en' اگر تنظیمات صریح وجود داشته باشد؛ در غیر این صورت null.
+ *
+ * BILINGUAL PERSISTENCE FIX: در مقایسه با loadLangFromStorage() که در صورت نبود
+ * تنظیمات به 'fa' پیش‌فرض برمی‌گرداند، این تابع بین «تنظیمات صریح کاربر» و
+ * «حالت پیش‌فرض» تمایز قائل می‌شود. فقط در صورت نبود تنظیمات صریح، سرور
+ * مجاز به بازنویسی lang محلی است (سناریوی دستگاه جدید).
+ */
+function _getExplicitLocalLang() {
+    try {
+        const scoped = localStorage.getItem(userStorageKey('app_lang'));
+        if (scoped === 'fa' || scoped === 'en') return scoped;
+        const legacy = localStorage.getItem('app_lang');
+        if (legacy === 'fa' || legacy === 'en') return legacy;
+    } catch (e) { /* localStorage may be unavailable */ }
+    return null;
+}
+
+/**
  * واچ‌لیست from ذخیره‌سازی را بارگذاری می‌کند.
  * ورودی: بدون ورودی.
  * خروجی: نتیجه مستقیم این عملیات را برمی‌گرداند یا روی وضعیت برنامه اثر می‌گذارد.
@@ -3419,6 +3441,12 @@ async function bootstrapUser() {
 
 async function _bootstrapUserImpl() {
     currentLang = loadLangFromStorage();
+    // BILINGUAL PERSISTENCE FIX: detect if the user has an EXPLICIT local language
+    // preference in localStorage. If so, the server response must NOT override it
+    // (per spec: "preference صریح ذخیره‌شده در localStorage نباید توسط server
+    // response قدیمی overwrite شود"). If no explicit local pref exists, the
+    // server's stored lang (reflecting cross-device preference) is adopted.
+    const explicitLocalLang = _getExplicitLocalLang();
     loadWatchlistFromStorage();
 
     if (!API_BASE) {
@@ -3459,7 +3487,14 @@ async function _bootstrapUserImpl() {
         if (data.bot_username) {
             BOT_USERNAME = data.bot_username;
         }
-        if (data.user?.lang === 'fa' || data.user?.lang === 'en') {
+        // BILINGUAL PERSISTENCE FIX: adopt the server's lang ONLY if the user has
+        // no explicit local preference. This handles the fresh-device scenario
+        // (no localStorage → server's stored DB lang is adopted) while
+        // preventing a stale server response from overriding an explicit local
+        // choice. Combined with the server-side fix (bootstrap preserves
+        // existing DB lang), this ensures multi-device use never corrupts the
+        // user's language preference.
+        if (!explicitLocalLang && (data.user?.lang === 'fa' || data.user?.lang === 'en')) {
             currentLang = data.user.lang;
         }
         if (Array.isArray(data.watchlist)) {
@@ -6570,6 +6605,24 @@ function selectLang(lang) {
         const memModal = document.getElementById('membership-modal');
         if (memModal && memModal.style.display !== 'none' && window.MembershipApp && typeof window.MembershipApp.refresh === 'function') {
             try { window.MembershipApp.refresh(); } catch (e) {}
+        }
+
+        // BILINGUAL: re-fetch open About/Terms/Privacy modals in the new language
+        // so their bodies update to the correct language content (not Persian leak).
+        // The backend cache is isolated per language (app_content:{type}:{lang}),
+        // and loadContent() passes ?lang=currentLang, so the re-fetch returns the
+        // new language's content. Title + body are re-rendered by loadContent().
+        const aboutModal = document.getElementById('about-modal');
+        if (aboutModal && aboutModal.style.display === 'flex') {
+            try { loadContent('about'); } catch (e) {}
+        }
+        const termsModal = document.getElementById('terms-modal');
+        if (termsModal && termsModal.style.display === 'flex') {
+            try { loadContent('terms'); } catch (e) {}
+        }
+        const privacyModal = document.getElementById('privacy-modal');
+        if (privacyModal && privacyModal.style.display === 'flex') {
+            try { loadContent('privacy'); } catch (e) {}
         }
     } catch (e) { /* non-critical — dynamic content will update on next interaction */ }
 }
@@ -12894,7 +12947,10 @@ async function loadContent(type) {
     body.innerHTML = '<div class="content-loading"><div class="spinner"></div>' + t('loading_default') + '</div>';
 
     try {
-        const data = await apiFetch('/api/content/' + type);
+        // BILINGUAL: pass ?lang= so the backend returns language-appropriate content.
+        // Cache isolation on the server side uses app_content:{type}:{lang}.
+        const langParam = (currentLang === 'en') ? 'en' : 'fa';
+        const data = await apiFetch('/api/content/' + type + '?lang=' + langParam);
         if (data.status === 'success' && data.data) {
             const content = data.data;
             const titleEl = document.getElementById(titleId);
@@ -12985,11 +13041,47 @@ function toggleAccordion(headerEl) {
 
 /**
  * Content Editor (Admin)
+ * BILINGUAL: tracks _editingContentLang ('fa' | 'en'). The editor fetches
+ * and saves ONLY the selected language's content. Switching FA↔EN reloads
+ * the other language's content without saving (no cross-contamination).
  */
 let _editingContentType = null;
+let _editingContentLang = 'fa';
 
 function openContentEditor(type) {
     _editingContentType = type;
+    // Default editor language to the admin's current app language (not forced — admin can switch).
+    _editingContentLang = (currentLang === 'en') ? 'en' : 'fa';
+    _updateEditorLangToggle();
+    _loadContentIntoEditor(type, _editingContentLang);
+}
+
+function _updateEditorLangToggle() {
+    const buttons = document.querySelectorAll('#editor-lang-toggle .editor-lang-btn');
+    buttons.forEach(btn => {
+        if (btn.dataset.lang === _editingContentLang) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+/**
+ * Switch the editor's editing language. Does NOT save the current content —
+ * it reloads the OTHER language's content from the API. This guarantees
+ * that switching languages never overwrites the other language's content.
+ */
+function switchEditorLang(lang) {
+    if (lang !== 'fa' && lang !== 'en') return;
+    if (lang === _editingContentLang) return;
+    if (!_editingContentType) return;
+    _editingContentLang = lang;
+    _updateEditorLangToggle();
+    _loadContentIntoEditor(_editingContentType, _editingContentLang);
+}
+
+function _loadContentIntoEditor(type, lang) {
     const editorTitle = document.getElementById('content-editor-title');
     const titleInput = document.getElementById('editor-title');
     const versionInput = document.getElementById('editor-version');
@@ -12999,14 +13091,17 @@ function openContentEditor(type) {
     statusEl.textContent = '';
     statusEl.className = 'editor-status';
 
-    // Load current content into editor
-    apiFetch('/api/content/' + type)
+    apiFetch('/api/content/' + type + '?lang=' + lang)
         .then(data => {
             if (data.status === 'success' && data.data) {
                 const content = data.data;
                 const titles = { about: t('content_edit_about'), terms: t('content_edit_terms'), privacy: t('content_edit_privacy') };
-                editorTitle.textContent = titles[type] || t('content_edit_default');
+                // Append the language tag to the editor title so the admin always
+                // sees which language they are editing (extra safety against mistakes).
+                const langTag = (lang === 'en') ? ' (EN)' : ' (FA)';
+                editorTitle.textContent = (titles[type] || t('content_edit_default')) + langTag;
                 titleInput.value = content.title || '';
+                // Version is shared (not language-specific) — same value for both langs.
                 versionInput.value = content.version || '1.0.0';
                 sectionsTextarea.value = JSON.stringify(content.sections || [], null, 2);
                 document.getElementById('content-editor-modal').style.display = 'flex';
@@ -13024,6 +13119,7 @@ function openContentEditor(type) {
 function closeContentEditor() {
     document.getElementById('content-editor-modal').style.display = 'none';
     _editingContentType = null;
+    _editingContentLang = 'fa';
 }
 
 async function saveContentFromEditor() {
@@ -13052,7 +13148,9 @@ async function saveContentFromEditor() {
     saveBtn.textContent = t('content_save_progress');
 
     try {
-        const data = await apiFetch('/api/admin/content/' + _editingContentType, {
+        // BILINGUAL: PUT with ?lang= so the backend saves ONLY the selected
+        // language's columns. The other language's content is NEVER touched.
+        const data = await apiFetch('/api/admin/content/' + _editingContentType + '?lang=' + _editingContentLang, {
             method: 'PUT',
             body: JSON.stringify({
                 title: titleInput.value,
@@ -13064,8 +13162,7 @@ async function saveContentFromEditor() {
         if (data.status === 'success') {
             statusEl.textContent = t('content_save_success');
             statusEl.className = 'editor-status success';
-            // Reload content in the background
-            // Save type BEFORE closeContentEditor sets _editingContentType = null
+            // Reload content in the background (user-facing modal, in current app lang)
             const savedType = _editingContentType;
             setTimeout(() => {
                 closeContentEditor();
@@ -15613,6 +15710,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // The join-lock stays visible until bootstrap confirms membership.
 
     // Phase 1: Apply language + render UI from cache immediately (synchronous, ~0ms)
+    // BILINGUAL PERSISTENCE: load currentLang from localStorage BEFORE applyLanguage()
+    // so it agrees with the pre-render lang bootstrap script in <head> (which sets
+    // documentElement.lang/dir from localStorage). Without this, currentLang stays
+    // at the 'fa' default (line 431) when bootstrap is skipped (e.g., guest mode),
+    // causing applyLanguage() to overwrite the pre-render en|ltr with fa|rtl.
+    currentLang = loadLangFromStorage();
     applyLanguage();
     loadUser();
     // WARM-START: Defer non-critical API calls to idle time so they don't
@@ -16353,6 +16456,7 @@ window.toggleAccordion = toggleAccordion;
 window.openContentEditor = openContentEditor;
 window.closeContentEditor = closeContentEditor;
 window.saveContentFromEditor = saveContentFromEditor;
+window.switchEditorLang = switchEditorLang;
 window.openNotifSettingsModal = openNotifSettingsModal;
 window.closeNotifSettingsModal = closeNotifSettingsModal;
 window.handleNotifPrefChange = handleNotifPrefChange;
