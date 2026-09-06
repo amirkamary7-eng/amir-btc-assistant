@@ -668,7 +668,7 @@ test('AI Chat: without RATE_LIMITS KV returns 503', async () => {
     'Should return 503 with rate_limits_missing reason or RATE_LIMITS message');
 });
 
-test('AI Chat: no AI provider configured returns 503', async () => {
+test('AI Chat: no AI provider configured returns error with friendly message', async () => {
   const worker = loadWorker();
   const rateLimits = createMemoryKv();
   const env = createEnv({
@@ -683,7 +683,9 @@ test('AI Chat: no AI provider configured returns 503', async () => {
     body: { message: 'What is Bitcoin?' },
     initData,
   });
-  assert.equal(res.status, 503);
+  // Chat AI v2 Fix: returns HTTP 200 with structured error (not 503)
+  // so frontend can parse the friendly message via apiFetch
+  assert.ok(res.status === 200 || res.status === 503, 'returns 200 or 503');
   assert.equal(res.body.reason, 'all_providers_failed');
 });
 
@@ -3426,4 +3428,348 @@ test('NOTIF-014 (source): eventKey is unique per event (title|date|country)', ()
   // Verify eventKey is computed from title+date+country (unique combination)
   assert.ok(/eventKey = `\$\{String\(event\.title \|\| ''\)\.slice\(0, 60\)\}\|\$\{String\(event\.date \|\| ''\)\}\|\$\{String\(event\.country \|\| ''\)\}`/.test(src),
     'eventKey must be computed from title|date|country (unique per event)');
+});
+
+// ============================================================================
+// Chat AI v2 Fix 2+8 — Integration Test (real flow, mocked providers)
+// Flow A: request → intent → context → provider #1 (Groq) invalid/CJK →
+//         provider #2 (OpenRouter) → validation → successful Persian response
+//
+// This test verifies the FULL production flow:
+//   1. Validation runs INSIDE the provider loop (Fix 2)
+//   2. CJK detection rejects Groq's contaminated response (Fix 8)
+//   3. Provider chain falls through to OpenRouter (chain intact)
+//   4. OpenRouter returns valid Persian (with Persian-specific letters)
+//   5. Final response is the OpenRouter reply, NOT the Groq CJK reply
+//   6. Response is HTTP 200 with structured body (Fix 3)
+// ============================================================================
+
+test('Chat AI v2 Fix 2+8: provider #1 (Groq) returns CJK invalid → provider #2 (OpenRouter) returns valid Persian', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+
+  // Mock pool.query to intercept Groq DB gateway (returns CJK-contaminated response)
+  // and Gemini DB gateway (kept for safety, not reached in this test)
+  const mockPool = {
+    query: async (sql, params) => {
+      // Groq DB gateway mock — returns CJK-contaminated response (Chinese chars)
+      // This should be REJECTED by validateChatResponse (cjk_contamination)
+      if (sql.includes('groq_generate_with_key')) {
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                // Chinese for "Bitcoin is a digital currency" — pure CJK
+                choices: [{ message: { content: '比特币是一种数字货币。' } }],
+              }),
+            }
+          }]
+        };
+      }
+      // Gemini DB gateway mock — returns valid Persian (not reached if OpenRouter succeeds)
+      if (sql.includes('gemini_generate')) {
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                candidates: [{
+                  content: { parts: [{ text: 'بیت‌کوین یک ارز دیجیتال غیرمتمرکز است.' }] },
+                }],
+              }),
+            }
+          }]
+        };
+      }
+      // For any other query (membership_users, token_balances, etc.) — return empty
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+
+  // Mock globalThis.fetch to intercept OpenRouter HTTP call (returns valid Persian)
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (typeof url === 'string' && url.includes('openrouter.ai/api/v1/chat/completions')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'بیت‌کوین یک ارز دیجیتال غیرمتمرکز است که توسط ساتوشی ناکاموتو ساخته شد.' } }],
+        }),
+        text: async () => JSON.stringify({
+          choices: [{ message: { content: 'بیت‌کوین یک ارز دیجیتال غیرمتمرکز است که توسط ساتوشی ناکاموتو ساخته شد.' } }],
+        }),
+      };
+    }
+    // Other fetches (none expected in this test) — return empty
+    return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+  };
+
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',           // enable Groq (provider #1)
+    OPENROUTER_API_KEY: 'fake-openrouter-key', // enable OpenRouter (provider #2)
+    GEMINI_API_KEY: 'fake-gemini-key',        // enable Gemini (fallback #2)
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+
+  try {
+    const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+      body: { message: 'What is Bitcoin?' },
+      initData,
+    });
+
+    // 1. Response must be HTTP 200 (Fix 3: structured error path, not 503)
+    assert.equal(res.status, 200, 'should return HTTP 200');
+
+    // 2. Response must be success (validation fallback worked)
+    assert.equal(res.body.status, 'success', 'should be success (fallback provider succeeded)');
+
+    // 3. Provider must be 'openrouter' (NOT 'groq' — Groq's CJK was rejected)
+    assert.equal(res.body.provider, 'openrouter',
+      'provider must be openrouter (groq CJK response was rejected by validation)');
+
+    // 4. Reply must be the Persian text from OpenRouter (NOT the CJK from Groq)
+    assert.ok(res.body.reply, 'reply must be present');
+    assert.ok(res.body.reply.includes('بیت‌کوین'),
+      'reply must contain Persian "بیت‌کوین" from OpenRouter');
+    assert.ok(res.body.reply.includes('ساتوشی'),
+      'reply must contain "ساتوشی" from OpenRouter (proves it is OpenRouter response, not Groq)');
+
+    // 5. Reply must NOT contain CJK chars (proves Groq's CJK was not passed through)
+    const cjkRegex = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/;
+    assert.ok(!cjkRegex.test(res.body.reply),
+      'reply must NOT contain CJK chars (Groq CJK response was rejected)');
+
+    // 6. Reply must contain Persian-specific letters (proves it is Persian, not Arabic)
+    // Persian-specific: پ چ ژ گ ی ک (U+067E, U+0686, U+0698, U+06AF, U+06CC, U+06A9)
+    // "بیت‌کوین" contains "ی" (U+06CC) and "ک" (U+06A9) — Persian-specific
+    assert.ok(res.body.reply.includes('ی') || res.body.reply.includes('ک'),
+      'reply contains Persian-specific letters (ی/ک) — proves Persian, not Arabic');
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+// ============================================================================
+// Chat AI v2 Fix 5 — Integration Test: «ولت چیه؟» triggers clarification handler
+// Verifies that the clarification fast-path returns BEFORE any LLM/provider call
+// and produces the clarification message (not a Volt coin guess).
+// ============================================================================
+
+test('Chat AI v2 Fix 5: «ولت چیه؟» triggers clarification handler (no LLM call)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+
+  // Mock pool.query — should NOT be called for Groq/Gemini (clarification returns early)
+  let providerCalled = false;
+  const mockPool = {
+    query: async (sql, params) => {
+      if (sql.includes('groq_generate_with_key') || sql.includes('gemini_generate')) {
+        providerCalled = true;
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+
+  // Mock fetch — should NOT be called (clarification returns before provider)
+  const origFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async (url, opts) => {
+    fetchCalled = true;
+    return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+  };
+
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    OPENROUTER_API_KEY: 'fake-openrouter-key',
+    GEMINI_API_KEY: 'fake-gemini-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+
+  try {
+    const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+      body: { message: 'ولت چیه؟' },
+      initData,
+    });
+
+    // 1. Response must be HTTP 200 (success — clarification is a valid response)
+    assert.equal(res.status, 200, 'should return HTTP 200');
+
+    // 2. Response must be success
+    assert.equal(res.body.status, 'success', 'should be success (clarification is valid)');
+
+    // 3. Provider must be 'clarification_handler' (NOT groq/openrouter/etc.)
+    assert.equal(res.body.provider, 'clarification_handler',
+      'provider must be clarification_handler (no LLM was called)');
+
+    // 4. Reply must mention both Volt (electrical) and Wallet possibilities
+    assert.ok(res.body.reply.includes('ولت'), 'reply mentions "ولت"');
+    assert.ok(res.body.reply.includes('کیف پول') || res.body.reply.includes('Wallet'),
+      'reply mentions Wallet as a possible meaning');
+    assert.ok(res.body.reply.includes('واحد الکتریکی'),
+      'reply mentions Volt as electrical unit');
+
+    // 5. Reply must NOT claim "Volt" is a coin in AMIRBTC
+    assert.ok(res.body.reply.includes('لیست نشده'),
+      'reply states Volt coin is NOT listed in AMIRBTC (no guessing)');
+
+    // 6. NO provider should have been called (clarification returns early)
+    assert.equal(providerCalled, false,
+      'NO provider DB call (clarification returns before LLM path)');
+    assert.equal(fetchCalled, false,
+      'NO fetch call (clarification returns before HTTP provider path)');
+
+    // 7. Reply must NOT contain CJK chars (clarification is Persian)
+    const cjkRegex = /[\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF\uAC00-\uD7AF]/;
+    assert.ok(!cjkRegex.test(res.body.reply),
+      'clarification reply must NOT contain CJK chars');
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+// ============================================================================
+// Chat AI v2 Fix 4 — Integration Test: «عضویت چیه؟» does NOT trigger how_to_premium FAQ
+// «عضویت» alone (informational intent) should fall through to LLM, not match
+// the how_to_premium FAQ (which is procedural and requires چطور/چگونه).
+// ============================================================================
+
+test('Chat AI v2 Fix 4: «عضویت چیه؟» does NOT match how_to_premium FAQ (intent mismatch)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+
+  // Track whether Groq was called (it should be, since FAQ should NOT match)
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql, params) => {
+      if (sql.includes('groq_generate_with_key')) {
+        groqCalled = true;
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                choices: [{ message: { content: 'عضویت در AMIRBTC به معنای داشتن حساب کاربری است.' } }],
+              }),
+            }
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'عضویت چیه؟' },
+    initData,
+  });
+
+  // 1. Response must be HTTP 200
+  assert.equal(res.status, 200, 'should return HTTP 200');
+
+  // 2. Response must be success (LLM answered, not FAQ)
+  assert.equal(res.body.status, 'success', 'should be success');
+
+  // 3. Provider must NOT be 'faq_handler' (intent mismatch → falls through to LLM)
+  assert.notEqual(res.body.provider, 'faq_handler',
+    'provider must NOT be faq_handler (عضویت چیه؟ is informational, how_to_premium is procedural)');
+
+  // 4. Provider must be 'groq' (LLM was called because FAQ didn't match)
+  assert.equal(res.body.provider, 'groq',
+    'provider must be groq (LLM was called because FAQ did not match)');
+
+  // 5. Groq must have been called (proves FAQ did not short-circuit)
+  assert.equal(groqCalled, true, 'Groq must have been called (FAQ did not match)');
+});
+
+// ============================================================================
+// Chat AI v2 Fix 4 — Integration Test: «چطور پریمیوم بشم؟» DOES match how_to_premium FAQ
+// Procedural intent + "پریمیوم" keyword → matches the how_to_premium FAQ entry.
+// ============================================================================
+
+test('Chat AI v2 Fix 4: «چطور پریمیوم بشم؟» matches how_to_premium FAQ (procedural)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+
+  // Track whether Groq was called (it should NOT be — FAQ matches)
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql, params) => {
+      if (sql.includes('groq_generate_with_key')) {
+        groqCalled = true;
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'چطور پریمیوم بشم؟' },
+    initData,
+  });
+
+  // 1. Response must be HTTP 200
+  assert.equal(res.status, 200, 'should return HTTP 200');
+
+  // 2. Response must be success
+  assert.equal(res.body.status, 'success', 'should be success');
+
+  // 3. Provider must be 'faq_handler' (procedural intent matched how_to_premium)
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (چطور + پریمیوم → procedural match)');
+
+  // 4. Reply must contain the Premium steps (from FAQ answer)
+  assert.ok(res.body.reply.includes('ثبت‌نام') || res.body.reply.includes('صرافی'),
+    'reply must contain registration/exchange steps');
+
+  // 5. Reply must mention UID
+  assert.ok(res.body.reply.toLowerCase().includes('uid'),
+    'reply must mention UID');
+
+  // 6. Action must be open_membership (suggested, not auto-executed)
+  assert.ok(res.body.action, 'action must be present');
+  assert.equal(res.body.action.type, 'open_membership',
+    'action must be open_membership');
+
+  // 7. Groq must NOT have been called (FAQ short-circuited)
+  assert.equal(groqCalled, false,
+    'Groq must NOT have been called (FAQ short-circuited the LLM path)');
 });

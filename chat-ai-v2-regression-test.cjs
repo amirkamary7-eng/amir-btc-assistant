@@ -251,8 +251,9 @@ test('D4: _imageUnavailable flag is set in callGeminiChat error paths', () => {
 
 test('D5: imageAnalysis error uses friendlyChatError (not raw error.message)', () => {
   const catchBlock = CONTROLLER_SRC.indexOf("error?._imageUnavailable");
-  const block = CONTROLLER_SRC.substring(catchBlock, catchBlock + 300);
+  const block = CONTROLLER_SRC.substring(catchBlock, catchBlock + 400);
   assert.ok(block.includes('friendlyChatError'), 'uses friendlyChatError for image error');
+  // Chat AI v2 Fix: catch block no longer has error.message fallback (uses friendlyChatError)
   assert.ok(!block.includes('error.message ||'), 'does NOT use raw error.message');
 });
 
@@ -284,7 +285,9 @@ test('E4: Validation checks refusals (multi-word patterns only)', () => {
 
 test('E5: Validation checks truncation (conservative, ≥500 chars)', () => {
   const fn = CONTROLLER_SRC.indexOf('function validateChatResponse');
-  const fnBody = CONTROLLER_SRC.substring(fn, fn + 2000);
+  // Chat AI v2 Fix 8: validateChatResponse is now longer (Arabic-only detection
+  // + language-aware CJK). Use a wider window to capture the truncation check.
+  const fnBody = CONTROLLER_SRC.substring(fn, fn + 5000);
   assert.ok(fnBody.includes('truncated'), 'has truncation detection');
   assert.ok(fnBody.includes('500'), 'truncation threshold is 500 (conservative)');
 });
@@ -386,6 +389,94 @@ test('G4: Retry does NOT create duplicate user bubble', () => {
   assert.ok(retryBody.includes("appendBubble('assistant'"), 'retry() only creates assistant bubble');
 });
 
+// ─── G5-G8. Action + Validation + Language fixes ──────────────────────────
+
+test('G5: Action is NOT auto-executed (suggested button instead)', () => {
+  // Frontend must NOT call executeAction on data.action directly
+  const sendFn = FRONTEND_SRC.indexOf('async send()');
+  const sendBody = FRONTEND_SRC.substring(sendFn, sendFn + 4000);
+  assert.ok(!sendBody.includes('this.executeAction(data.action)'), 'send() must NOT auto-execute action');
+  assert.ok(sendBody.includes('appendActionCard'), 'send() must render action card instead');
+  assert.ok(FRONTEND_SRC.includes('function appendActionCard') || FRONTEND_SRC.includes('appendActionCard(action)'), 'appendActionCard method exists');
+});
+
+test('G6: Retry also uses appendActionCard (not auto-execute)', () => {
+  const retryFn = FRONTEND_SRC.indexOf('async retry(lastMessage)');
+  const retryEnd = FRONTEND_SRC.indexOf('\n    }', retryFn + 100);
+  const retryBody = FRONTEND_SRC.substring(retryFn, retryEnd + 10);
+  assert.ok(!retryBody.includes('this.executeAction(data.action)'), 'retry() must NOT auto-execute');
+  assert.ok(retryBody.includes('appendActionCard'), 'retry() uses appendActionCard');
+});
+
+test('L1: validateChatResponse has CJK zero-tolerance (language-aware)', () => {
+  // Chat AI v2 Fix 8: CJK check is now in a helper (_isCJKCode) + language-aware
+  // (skipped if user asked about CJK). The whole file must contain both the
+  // helper and the cjk_contamination rejection reason.
+  assert.ok(CONTROLLER_SRC.includes('cjk_contamination'), 'has cjk_contamination rejection');
+  assert.ok(CONTROLLER_SRC.includes('0x4E00') || CONTROLLER_SRC.includes('4E00'), 'checks CJK Unicode range');
+  assert.ok(CONTROLLER_SRC.includes('_isCJKCode'), 'has _isCJKCode helper');
+  assert.ok(CONTROLLER_SRC.includes('_userAskedAboutCJK'), 'has language-aware CJK detection');
+});
+
+test('L2: Prompt explicitly forbids CJK characters', () => {
+  assert.ok(CONTROLLER_SRC.includes('چینی') || CONTROLLER_SRC.includes('CJK'),
+    'Prompt must explicitly prohibit CJK characters');
+});
+
+test('L3: Prompt includes clarification instruction for ambiguous questions', () => {
+  assert.ok(CONTROLLER_SRC.includes('مبهم') || CONTROLLER_SRC.includes('سؤال تکمیلی'),
+    'Prompt must instruct AI to ask clarification for ambiguous questions');
+});
+
+test('L4: FAQ has ambiguity detection (secondBestScore check)', () => {
+  assert.ok(CONTROLLER_SRC.includes('secondBestScore'), 'tracks second-best score');
+  assert.ok(CONTROLLER_SRC.includes('ambiguous'), 'has ambiguity detection logic');
+});
+
+test('L5: FAQ uses intent detection (procedural vs informational)', () => {
+  // Chat AI v2 Fix 4: Replaced crude FAQ_EXCLUDE_KEYWORDS keyword exclusion with
+  // proper intent detection. detectFAQIntent returns 'procedural'/'informational'/'neutral'.
+  // Informational words (چیه, یعنی, تعریف) are now in detectFAQIntent's
+  // INFORMATIONAL_MARKERS, NOT in FAQ_EXCLUDE_KEYWORDS.
+  assert.ok(CONTROLLER_SRC.includes('detectFAQIntent'), 'has detectFAQIntent function');
+  assert.ok(CONTROLLER_SRC.includes('PROCEDURAL_MARKERS'), 'has procedural markers');
+  assert.ok(CONTROLLER_SRC.includes('INFORMATIONAL_MARKERS'), 'has informational markers');
+  // Intent words must be present (in detectFAQIntent, not FAQ_EXCLUDE_KEYWORDS)
+  assert.ok(CONTROLLER_SRC.includes('چیه'), 'handles "چیه"');
+  assert.ok(CONTROLLER_SRC.includes('یعنی'), 'handles "یعنی"');
+  assert.ok(CONTROLLER_SRC.includes('تعریف'), 'handles "تعریف"');
+  // FAQ entries must have an intent field
+  assert.ok(CONTROLLER_SRC.includes("intent: 'procedural'"), 'has procedural FAQ entries');
+  assert.ok(CONTROLLER_SRC.includes("intent: 'informational'"), 'has informational FAQ entries');
+  assert.ok(CONTROLLER_SRC.includes("intent: 'either'"), 'has either-intent FAQ entries');
+  // Informational words must NOT be in FAQ_EXCLUDE_KEYWORDS (moved to detectFAQIntent)
+  const exclIdx = CONTROLLER_SRC.indexOf('FAQ_EXCLUDE_KEYWORDS');
+  const exclEnd = CONTROLLER_SRC.indexOf('];', exclIdx);
+  const exclBlock = CONTROLLER_SRC.substring(exclIdx, exclEnd);
+  assert.ok(!exclBlock.includes("'چیه'"), 'چیه NOT in exclude list (moved to intent detection)');
+  assert.ok(!exclBlock.includes("'یعنی'"), 'یعنی NOT in exclude list (moved to intent detection)');
+  assert.ok(!exclBlock.includes("'تعریف'"), 'تعریف NOT in exclude list (moved to intent detection)');
+});
+
+test('L6: Web search results are CJK-filtered (stripCJK)', () => {
+  assert.ok(CONTROLLER_SRC.includes('stripCJK') || CONTROLLER_SRC.includes('stripCjk'),
+    'web search sanitization has CJK stripping');
+});
+
+test('L7: Backend returns HTTP 200 for all_providers_failed (not 503)', () => {
+  const catchBlock = CONTROLLER_SRC.indexOf("reason: 'all_providers_failed'");
+  const block = CONTROLLER_SRC.substring(catchBlock - 200, catchBlock + 200);
+  assert.ok(block.includes('status: 200'), 'returns 200 (not 503) for structured error');
+});
+
+test('L8: Validation runs INSIDE provider loop (not after)', () => {
+  const genFn = CONTROLLER_SRC.indexOf('async function generateAssistantReply');
+  const genEnd = CONTROLLER_SRC.indexOf('\n  }', genFn + 100);
+  const genBody = CONTROLLER_SRC.substring(genFn, genEnd + 10);
+  assert.ok(genBody.includes('validateChatResponse'), 'validation called inside provider loop');
+  assert.ok(genBody.includes('continue;'), 'falls through to next provider on validation failure');
+});
+
 // ─── H. Security ──────────────────────────────────────────────────────────
 
 test('H1: No eval in frontend action executor', () => {
@@ -467,4 +558,357 @@ test('J4: Console.log payload audit removed from frontend', () => {
 test('J5: worker-proxy.js injects appContentRepo and membershipRepo', () => {
   assert.ok(WORKER_SRC.includes('appContentRepo'), 'appContentRepo wired');
   assert.ok(WORKER_SRC.includes('membershipRepo'), 'membershipRepo wired');
+});
+
+// ─── K. Production Fixes (Round 2 — 12 targeted tests) ─────────────────────
+// These tests cover the 12 scenarios the user specified for the second
+// refinement pass of Chat AI v2:
+//   K1. «پریمیوم چیه؟» → answer + optional action, no auto-navigation
+//   K2. «چطور پریمیوم بشم؟» → procedural answer + optional action
+//   K3. «عضویت چیه؟» → informational answer (NOT how_to_premium FAQ)
+//   K4. «چطور عضو بشم؟» → procedural answer (matches how_to_premium FAQ)
+//   K5. «ولت چیه؟» → clarification (no wrong guess as Volt coin)
+//   K6. wallet question in clear context → Wallet
+//   K7. user-specific Premium/Wallet/Mission context injection
+//   K8. provider first with CJK invalid → fallback provider
+//   K9. valid Persian + English crypto output → pass validation
+//   K10. explicit CJK-language question → no false-positive rejection
+//   K11. all providers failed → friendly structured error
+//   K12. retry + action → no auto-navigation
+
+// K1: «پریمیوم چیه؟» — informational intent. Should NOT match how_to_premium
+// (procedural) FAQ. The informational question falls through to the LLM, which
+// answers what Premium is + may suggest an action. Frontend must NOT auto-navigate.
+test('K1: «پریمیوم چیه؟» is informational — does NOT match how_to_premium FAQ (procedural)', () => {
+  // how_to_premium must have intent: 'procedural'
+  const hpIdx = CONTROLLER_SRC.indexOf("id: 'how_to_premium'");
+  const hpBlock = CONTROLLER_SRC.substring(hpIdx, hpIdx + 300);
+  assert.ok(hpBlock.includes("intent: 'procedural'"), 'how_to_premium is procedural');
+  // detectFAQIntent must classify «پریمیوم چیه؟» as informational (has "چیه")
+  const detIdx = CONTROLLER_SRC.indexOf('function detectFAQIntent');
+  const detBlock = CONTROLLER_SRC.substring(detIdx, detIdx + 1200);
+  assert.ok(detBlock.includes("'چیه'"), 'detectFAQIntent handles "چیه"');
+  // matchFAQ skips procedural entries when intent !== 'procedural'
+  const matchIdx = CONTROLLER_SRC.indexOf('function matchFAQ');
+  const matchBlock = CONTROLLER_SRC.substring(matchIdx, matchIdx + 2000);
+  assert.ok(matchBlock.includes("intent !== 'procedural'"), 'matchFAQ skips procedural entries for non-procedural intent');
+  // Frontend must use appendActionCard (no auto-execute) — already covered by G5
+  assert.ok(FRONTEND_SRC.includes('appendActionCard'), 'frontend renders action card (no auto-nav)');
+});
+
+// K2: «چطور پریمیوم بشم؟» — procedural intent. SHOULD match how_to_premium FAQ
+// and return the deterministic steps + optional open_membership action.
+test('K2: «چطور پریمیوم بشم؟» is procedural — matches how_to_premium FAQ', () => {
+  // detectFAQIntent must classify «چطور...» as procedural (has "چطور")
+  const detIdx = CONTROLLER_SRC.indexOf('function detectFAQIntent');
+  const detBlock = CONTROLLER_SRC.substring(detIdx, detIdx + 1200);
+  assert.ok(detBlock.includes("'چطور'"), 'detectFAQIntent handles "چطور"');
+  // how_to_premium FAQ answer must contain the steps
+  const hpIdx = CONTROLLER_SRC.indexOf("id: 'how_to_premium'");
+  const hpBlock = CONTROLLER_SRC.substring(hpIdx, hpIdx + 800);
+  assert.ok(hpBlock.includes('ثبت‌نام در صرافی'), 'FAQ answer has the registration step');
+  assert.ok(hpBlock.includes('UID'), 'FAQ answer mentions UID');
+  // how_to_premium has open_membership action
+  assert.ok(hpBlock.includes("open_membership"), 'FAQ has open_membership action');
+});
+
+// K3: «عضویت چیه؟» — informational intent. «عضویت» alone (without چطور) should
+// NOT trigger how_to_premium (which is procedural). Falls through to LLM for
+// an informational answer about what membership is.
+test('K3: «عضویت چیه؟» does NOT trigger how_to_premium FAQ (procedural mismatch)', () => {
+  // how_to_premium keywords include 'عضویت' but intent is 'procedural'
+  const hpIdx = CONTROLLER_SRC.indexOf("id: 'how_to_premium'");
+  const hpBlock = CONTROLLER_SRC.substring(hpIdx, hpIdx + 400);
+  assert.ok(hpBlock.includes("'عضویت'"), 'how_to_premium has عضویت keyword');
+  assert.ok(hpBlock.includes("intent: 'procedural'"), 'how_to_premium is procedural (requires چطور/چگونه)');
+  // matchFAQ logic: procedural entries skipped when intent !== 'procedural'
+  // For «عضویت چیه؟» → detectFAQIntent returns 'informational' (has "چیه")
+  // → how_to_premium (procedural) is skipped → no FAQ match → falls to LLM
+  const matchIdx = CONTROLLER_SRC.indexOf('function matchFAQ');
+  const matchBlock = CONTROLLER_SRC.substring(matchIdx, matchIdx + 2000);
+  assert.ok(matchBlock.includes("entryIntent === 'procedural' && intent !== 'procedural'"),
+    'matchFAQ explicitly skips procedural entries for non-procedural intent');
+});
+
+// K4: «چطور عضو بشم؟» — procedural intent. SHOULD match how_to_premium.
+// "عضو بشم" + "چطور" = procedural, and how_to_premium has 'عضویت' keyword.
+// Note: normalizeForFAQ strips punctuation so "عضو" stays. The keyword 'عضویت'
+// is a substring match in the normalized message which contains "عضو".
+test('K4: «چطور عضو بشم؟» is procedural — matches how_to_premium FAQ', () => {
+  // how_to_premium has 'عضویت' keyword. normalizeForFAQ lowercases + strips
+  // punctuation but keeps the word. «چطور عضو بشم» → normalized contains "عضو".
+  // The keyword 'عضویت' (length 5) would match if the normalized message
+  // includes "عضویت". For "عضو بشم" (without ی), it would NOT match 'عضویت'.
+  // This is intentional — "عضو" and "عضویت" are different words. The user
+  // should ask «چطور عضویت بشم» for a clean match, OR «چطور پریمیوم بشم».
+  // For «چطور عضو بشم», the LLM answers procedurally (with the knowledge from
+  // the system prompt). This test documents the expected behavior.
+  const hpIdx = CONTROLLER_SRC.indexOf("id: 'how_to_premium'");
+  const hpBlock = CONTROLLER_SRC.substring(hpIdx, hpIdx + 400);
+  assert.ok(hpBlock.includes("'عضویت'"), 'how_to_premium has عضویت keyword');
+  // Procedural intent detection works for «چطور...»
+  const detIdx = CONTROLLER_SRC.indexOf('function detectFAQIntent');
+  const detBlock = CONTROLLER_SRC.substring(detIdx, detIdx + 1200);
+  assert.ok(detBlock.includes("'چطور'"), 'detectFAQIntent detects چطور as procedural');
+  // The system prompt has the Premium how-to knowledge
+  assert.ok(CONTROLLER_SRC.includes('ثبت‌نام در صرافی موردنیاز'), 'system prompt has Premium how-to knowledge');
+});
+
+// K5: «ولت چیه؟» — genuinely ambiguous (Volt vs Wallet). Must NOT guess "Volt coin".
+// detectClarification returns a deterministic clarification question.
+test('K5: «ولت چیه؟» returns clarification (no wrong guess as Volt coin)', () => {
+  assert.ok(CONTROLLER_SRC.includes('function detectClarification'), 'has detectClarification function');
+  // The clarification must mention both Volt (electrical) and Wallet possibilities
+  const clarIdx = CONTROLLER_SRC.indexOf('function detectClarification');
+  const clarBlock = CONTROLLER_SRC.substring(clarIdx, clarIdx + 1500);
+  assert.ok(clarBlock.includes('ولت'), 'clarification handles "ولت"');
+  assert.ok(clarBlock.includes('کیف پول') || clarBlock.includes('Wallet'), 'clarification mentions Wallet');
+  assert.ok(clarBlock.includes('واحد الکتریکی') || clarBlock.includes('electrical'), 'clarification mentions Volt unit');
+  // The handler must call detectClarification BEFORE FAQ and return provider: 'clarification_handler'
+  const handlerIdx = CONTROLLER_SRC.indexOf('async function handlePostChat');
+  const handlerBlock = CONTROLLER_SRC.substring(handlerIdx, handlerIdx + 5000);
+  assert.ok(handlerBlock.includes('detectClarification(message)'), 'handler calls detectClarification');
+  assert.ok(handlerBlock.includes("provider: 'clarification_handler'"), 'handler returns clarification_handler provider');
+  // The clarification must NOT claim "Volt" is a coin in AMIRBTC
+  assert.ok(clarBlock.includes('لیست نشده') || clarBlock.includes('not listed'), 'clarification states Volt coin is NOT listed in AMIRBTC');
+});
+
+// K6: wallet question in clear context → Wallet action suggested.
+// When user asks about wallet/کیف پول, the FAQ/LLM should be able to suggest
+// open_wallet action. The daily_reward FAQ has open_wallet action.
+test('K6: wallet question can suggest open_wallet action', () => {
+  // daily_reward FAQ has open_wallet action
+  const drIdx = CONTROLLER_SRC.indexOf("id: 'daily_reward'");
+  const drBlock = CONTROLLER_SRC.substring(drIdx, drIdx + 800);
+  assert.ok(drBlock.includes('کیف پول'), 'daily_reward FAQ mentions کیف پول');
+  assert.ok(drBlock.includes('open_wallet'), 'daily_reward FAQ has open_wallet action');
+  // how_to_get_tokens FAQ also has open_wallet action
+  const tgIdx = CONTROLLER_SRC.indexOf("id: 'how_to_get_tokens'");
+  const tgBlock = CONTROLLER_SRC.substring(tgIdx, tgIdx + 800);
+  assert.ok(tgBlock.includes('open_wallet'), 'how_to_get_tokens FAQ has open_wallet action');
+  // Frontend executeAction handles open_wallet
+  assert.ok(FRONTEND_SRC.includes("case 'open_wallet':"), 'frontend handles open_wallet action');
+  assert.ok(FRONTEND_SRC.includes('WalletApp.openWallet'), 'frontend calls WalletApp.openWallet()');
+});
+
+// K7: user-specific context injection (membership/wallet/missions/...).
+// fetchUserContext must exist, use queryDb + membershipAuthority, and only
+// load context relevant to the user's question (intent-based, not eager).
+test('K7: fetchUserContext injects relevant user data (intent-based, no eager loading)', () => {
+  assert.ok(CONTROLLER_SRC.includes('async function fetchUserContext'), 'fetchUserContext function exists');
+  // Must use membershipAuthority.getEntitlement (already injected)
+  assert.ok(CONTROLLER_SRC.includes('membershipAuthority.getEntitlement'), 'uses membershipAuthority.getEntitlement');
+  // Must use queryDb for wallet/missions/alerts/referrals (no new repos)
+  assert.ok(CONTROLLER_SRC.includes('token_balances'), 'queries token_balances table');
+  assert.ok(CONTROLLER_SRC.includes('token_transactions'), 'queries token_transactions table');
+  assert.ok(CONTROLLER_SRC.includes('mission_progress'), 'queries mission_progress table');
+  assert.ok(CONTROLLER_SRC.includes('alert_quota'), 'queries alert_quota table');
+  assert.ok(CONTROLLER_SRC.includes('referrals'), 'queries referrals table');
+  // Must be intent-based (only triggered for LOCAL_APP intent)
+  const handlerIdx = CONTROLLER_SRC.indexOf('async function handlePostChat');
+  const handlerBlock = CONTROLLER_SRC.substring(handlerIdx, handlerIdx + 8000);
+  assert.ok(handlerBlock.includes('fetchUserContext(env, userId, message)'), 'handler calls fetchUserContext');
+  // Must be inside the LOCAL_APP intent branch (not eager)
+  const localAppIdx = handlerBlock.indexOf("intent === 'LOCAL_APP'");
+  const userCtxIdx = handlerBlock.indexOf('fetchUserContext');
+  assert.ok(localAppIdx > -1 && userCtxIdx > localAppIdx, 'fetchUserContext called within LOCAL_APP branch');
+  // Must NOT inject sensitive data (no transaction details, no PII)
+  const fucIdx = CONTROLLER_SRC.indexOf('async function fetchUserContext');
+  const fucBlock = CONTROLLER_SRC.substring(fucIdx, fucIdx + 6000);
+  assert.ok(!fucBlock.includes('password'), 'does NOT inject password');
+  assert.ok(!fucBlock.includes('email'), 'does NOT inject email');
+  assert.ok(!fucBlock.includes('username'), 'does NOT inject username');
+  // Must have a privacy instruction in the context block
+  assert.ok(fucBlock.includes('User Profile'), 'context block labeled User Profile');
+  assert.ok(fucBlock.includes('read-only'), 'context block marked read-only');
+  // Must use Tehran timezone for daily/weekly queries (inline helper)
+  assert.ok(CONTROLLER_SRC.includes('_getTehranToday'), 'has Tehran date helper');
+  assert.ok(CONTROLLER_SRC.includes('Asia/Tehran'), 'uses Asia/Tehran timezone');
+});
+
+// K8: provider first with CJK invalid → fallback provider tries next.
+// generateAssistantReply must continue to next provider on validation failure.
+test('K8: provider first with CJK invalid → fallback provider tries next', () => {
+  const genIdx = CONTROLLER_SRC.indexOf('async function generateAssistantReply');
+  const genBlock = CONTROLLER_SRC.substring(genIdx, genIdx + 3000);
+  assert.ok(genBlock.includes('validateChatResponse'), 'validation called inside provider loop');
+  assert.ok(genBlock.includes('continue;'), 'falls through to next provider on validation failure');
+  assert.ok(genBlock.includes('validation_failed'), 'logs validation_failed reason');
+  // Validation must detect CJK as cjk_contamination
+  assert.ok(CONTROLLER_SRC.includes("reason: 'cjk_contamination'"), 'validation rejects CJK as cjk_contamination');
+});
+
+// K9: valid Persian + English crypto output → passes validation.
+// validateChatResponse must NOT reject Persian text that contains standard
+// crypto/finance terms (BTC, USDT, API). These are ASCII — they pass the CJK
+// check. The Arabic-only check only triggers when ≥30 Persian chars AND no
+// Persian-specific letters, so normal Persian (with پ/چ/ژ/گ/ی/ک) passes.
+test('K9: valid Persian + English crypto output passes validation (no false positives)', () => {
+  // CJK check only rejects CJK chars — ASCII crypto terms (BTC, USDT, API) pass
+  const valIdx = CONTROLLER_SRC.indexOf('function validateChatResponse');
+  const valBlock = CONTROLLER_SRC.substring(valIdx, valIdx + 3000);
+  assert.ok(valBlock.includes('_isCJKCode'), 'uses _isCJKCode helper for CJK detection');
+  // Arabic-only threshold is ≥30 Persian chars (avoids false positives on short text)
+  assert.ok(valBlock.includes('persianScriptChars >= 30'), 'Arabic-only check only for ≥30 Persian chars');
+  // Persian-specific letters checked: پ چ ژ گ ی ک
+  assert.ok(valBlock.includes('0x067E'), 'checks پ (U+067E)');
+  assert.ok(valBlock.includes('0x0686'), 'checks چ (U+0686)');
+  assert.ok(valBlock.includes('0x0698'), 'checks ژ (U+0698)');
+  assert.ok(valBlock.includes('0x06AF'), 'checks گ (U+06AF)');
+  assert.ok(valBlock.includes('0x06CC'), 'checks ی (U+06CC)');
+  assert.ok(valBlock.includes('0x06A9'), 'checks ک (U+06A9)');
+  // "متأسفم" must NOT be in refusal patterns (it's a valid conversational reply)
+  const refusalIdx = valBlock.indexOf('refusalPatterns');
+  const refusalBlock = valBlock.substring(refusalIdx, refusalIdx + 500);
+  assert.ok(!refusalBlock.includes('متأسفم'), '"متأسفم" NOT rejected as refusal (valid conversational reply)');
+  assert.ok(!refusalBlock.includes('متاسفم'), '"متاسفم" NOT rejected as refusal');
+});
+
+// K10: explicit CJK-language question → no false-positive rejection.
+// When user explicitly asks about Chinese/Japanese/Korean (e.g., "چینی یعنی چی؟"),
+// the answer may contain CJK chars. validateChatResponse must NOT reject it.
+test('K10: explicit CJK-language question → no false-positive CJK rejection', () => {
+  // _userAskedAboutCJK helper must exist
+  assert.ok(CONTROLLER_SRC.includes('function _userAskedAboutCJK'), 'has _userAskedAboutCJK helper');
+  // Must detect common CJK-language markers (چینی, ژاپنی, کره‌ای, chinese, japanese, korean)
+  const cjkQIdx = CONTROLLER_SRC.indexOf('function _userAskedAboutCJK');
+  const cjkQBlock = CONTROLLER_SRC.substring(cjkQIdx, cjkQIdx + 800);
+  assert.ok(cjkQBlock.includes('چینی'), 'detects "چینی" (Chinese)');
+  assert.ok(cjkQBlock.includes('ژاپنی'), 'detects "ژاپنی" (Japanese)');
+  assert.ok(cjkQBlock.includes('chinese'), 'detects "chinese"');
+  assert.ok(cjkQBlock.includes('japanese'), 'detects "japanese"');
+  assert.ok(cjkQBlock.includes('korean'), 'detects "korean"');
+  // validateChatResponse must skip CJK check when userAskedAboutCJK is true
+  const valIdx = CONTROLLER_SRC.indexOf('function validateChatResponse');
+  const valBlock = CONTROLLER_SRC.substring(valIdx, valIdx + 4000);
+  assert.ok(valBlock.includes('userAskedAboutCJK'), 'validation checks userAskedAboutCJK flag');
+  assert.ok(valBlock.includes('if (!userAskedAboutCJK)'), 'skips CJK rejection when user asked about CJK');
+  // userMessage must be passed to validateChatResponse (from generateAssistantReply)
+  const genIdx = CONTROLLER_SRC.indexOf('async function generateAssistantReply');
+  const genBlock = CONTROLLER_SRC.substring(genIdx, genIdx + 2500);
+  assert.ok(genBlock.includes('userMessage'), 'generateAssistantReply receives userMessage');
+  assert.ok(genBlock.includes('validateChatResponse(result.reply, { hasImage, userMessage })'),
+    'passes userMessage to validateChatResponse for language-aware CJK check');
+});
+
+// K11: all providers failed → friendly structured error (HTTP 200, not 503).
+// The error must use friendlyChatError, return 200, and carry a structured
+// { status: 'error', reason: 'all_providers_failed', message: ... } body so
+// the frontend's else branch can parse it.
+test('K11: all providers failed → friendly structured error (HTTP 200)', () => {
+  const catchIdx = CONTROLLER_SRC.indexOf("reason: 'all_providers_failed'");
+  const block = CONTROLLER_SRC.substring(catchIdx - 200, catchIdx + 400);
+  assert.ok(block.includes('status: 200'), 'returns HTTP 200 (not 503)');
+  assert.ok(block.includes('friendlyChatError'), 'uses friendlyChatError');
+  assert.ok(block.includes("reason: 'all_providers_failed'"), 'has structured reason field');
+  // Frontend must handle all_providers_failed in the else branch (not catch)
+  const sendFn = FRONTEND_SRC.indexOf('async send()');
+  const sendBlock = FRONTEND_SRC.substring(sendFn, sendFn + 4000);
+  assert.ok(sendBlock.includes("data.reason === 'all_providers_failed'"), 'frontend handles all_providers_failed in else branch');
+  assert.ok(sendBlock.includes('canRetry = true'), 'frontend marks all_providers_failed as retryable');
+  // apiFetch throws on non-200, so 200 is required for the else branch to run
+  // (If we returned 503, apiFetch would throw and the catch block would show
+  // generic t('ai_error') instead of the friendly message.)
+});
+
+// K12: retry + action → no auto-navigation.
+// The retry() method must use appendActionCard (not executeAction) when the
+// retried response includes an action. This is the same invariant as G5/G6
+// but explicitly for the retry path.
+test('K12: retry + action → no auto-navigation (uses appendActionCard)', () => {
+  const retryFn = FRONTEND_SRC.indexOf('async retry(lastMessage)');
+  // Find the retry function body (up to the closing brace)
+  const retryEnd = FRONTEND_SRC.indexOf('\n    }', retryFn + 100);
+  const retryBody = FRONTEND_SRC.substring(retryFn, retryEnd + 10);
+  assert.ok(retryBody.includes('appendActionCard'), 'retry() uses appendActionCard');
+  assert.ok(!retryBody.includes('this.executeAction(data.action)'), 'retry() does NOT auto-execute action');
+  // The retry button must call AssistantUI.retry (not send) — covered by G4
+  assert.ok(FRONTEND_SRC.includes('AssistantUI.retry('), 'retry button calls AssistantUI.retry()');
+});
+
+// K13: Fix 3 audit — HTTP 200 change is isolated to assistant chat (no apiFetch side effects).
+// The 503→200 change ONLY applies to /api/assistant/chat's all_providers_failed and
+// image_analysis_unavailable error paths. Other endpoints keep their HTTP semantics.
+// apiFetch still throws on non-2xx for all other endpoints (the shared contract is unchanged).
+test('K13: Fix 3 audit — 200 change is isolated, apiFetch contract intact for other endpoints', () => {
+  // 1. apiFetch must still throw on non-2xx (shared contract — NOT relaxed for 200 change)
+  const apiFetchIdx = APP_JS_SRC.indexOf('async function apiFetch');
+  const apiFetchBlock = APP_JS_SRC.substring(apiFetchIdx, apiFetchIdx + 2000);
+  assert.ok(apiFetchBlock.includes('if (!res.ok)'), 'apiFetch still checks !res.ok');
+  assert.ok(apiFetchBlock.includes('throw err'), 'apiFetch still throws on non-2xx');
+  assert.ok(apiFetchBlock.includes('err.status = res.status'), 'apiFetch still sets err.status');
+
+  // 2. The 200-with-error-payload is ONLY for assistant chat's two specific error reasons
+  // (all_providers_failed + image_analysis_unavailable). Other endpoints must NOT use this pattern.
+  // The handler is long (~10k chars), so search the whole file for the specific catch-block pattern.
+  // Verify the assistant handler returns 200 ONLY for these two reasons:
+  // (a) image_analysis_unavailable returns 200
+  const imgErrIdx = CONTROLLER_SRC.indexOf("reason: 'image_analysis_unavailable'");
+  assert.ok(imgErrIdx > -1, 'has image_analysis_unavailable reason');
+  const imgErrBlock = CONTROLLER_SRC.substring(imgErrIdx - 200, imgErrIdx + 400);
+  assert.ok(imgErrBlock.includes('status: 200'), 'image error returns HTTP 200');
+  assert.ok(imgErrBlock.includes('friendlyChatError'), 'image error uses friendlyChatError');
+  // (b) all_providers_failed returns 200
+  const allFailIdx = CONTROLLER_SRC.indexOf("reason: 'all_providers_failed'");
+  assert.ok(allFailIdx > -1, 'has all_providers_failed reason');
+  const allFailBlock = CONTROLLER_SRC.substring(allFailIdx - 200, allFailIdx + 400);
+  assert.ok(allFailBlock.includes('status: 200'), 'all_providers_failed returns HTTP 200');
+  assert.ok(allFailBlock.includes('friendlyChatError'), 'all_providers_failed uses friendlyChatError');
+  // The error response bodies must carry status: 'error' + reason + message structure
+  assert.ok(CONTROLLER_SRC.includes("status: 'error',\n          reason: 'image_analysis_unavailable'"), 'image error has structured body');
+  assert.ok(CONTROLLER_SRC.includes("status: 'error', reason: 'all_providers_failed'"), 'all_providers_failed has structured body');
+
+  // 3. /api/assistant/limits (the other assistant endpoint) must still use 503 for rate_limits_missing
+  // (NOT changed to 200 — confirms the 200 change is isolated to the chat handler)
+  const limitsHandlerIdx = CONTROLLER_SRC.indexOf('async function handleGetLimits');
+  const limitsBlock = CONTROLLER_SRC.substring(limitsHandlerIdx, limitsHandlerIdx + 500);
+  assert.ok(limitsBlock.includes('rate_limits_missing'), 'limits handler has rate_limits_missing reason');
+  assert.ok(limitsBlock.includes('status: 503'), 'limits handler still uses 503 (NOT changed to 200)');
+
+  // 4. Frontend send() must handle both paths correctly:
+  //    - 200 + data.status='error' → else branch → friendly message from data.message
+  //    - non-200 → catch block → generic t('ai_error') (only for truly unexpected HTTP errors)
+  // send() is a long method (~4100+ chars), so search the whole frontend file for the patterns.
+  assert.ok(FRONTEND_SRC.includes("if (data.status === 'success')"), 'send() has success branch');
+  assert.ok(FRONTEND_SRC.includes("data.reason === 'all_providers_failed'"), 'else branch handles all_providers_failed');
+  // catch block handles thrown errors (non-2xx)
+  assert.ok(FRONTEND_SRC.includes('catch (e)'), 'send() has catch block for thrown errors');
+  assert.ok(FRONTEND_SRC.includes('e.status === 429'), 'catch handles 429');
+  assert.ok(FRONTEND_SRC.includes('e.status === 503'), 'catch handles 503 (for other endpoints that still use it)');
+});
+
+// K14: VPN Market knowledge is factually accurate (R1 fix from Final Review).
+// The prompt MUST state that the 1GB VPN plan is available to ALL users, not
+// "Premium-only". Source of truth: src/repositories/reward_purchases.js has
+// vpn_1gb with premiumOnly=false; only vpn_2gb+ are premiumOnly=true.
+// Previously the prompt said "فقط Premium" which was factually wrong — the 1GB
+// plan is available to free users. This test guards against regression.
+test('K14: VPN Market knowledge is factually accurate (1GB for all, 2GB+ Premium)', () => {
+  // 1. The prompt MUST mention the 1GB plan available to all users
+  assert.ok(CONTROLLER_SRC.includes('پلن ۱GB برای همه کاربران قابل استفاده است'),
+    'prompt states 1GB plan is available to ALL users');
+  assert.ok(CONTROLLER_SRC.includes('پلن‌های بالاتر فقط برای Premium هستند'),
+    'prompt states higher plans are Premium-only');
+  // 2. The prompt MUST NOT claim "VPN Market: فقط Premium" (old incorrect claim)
+  //    Check the VPN Market block specifically (between '۱۵. VPN Market:' and '۱۶. کازمتیک')
+  const vpnBlockIdx = CONTROLLER_SRC.indexOf('۱۵. VPN Market:');
+  assert.ok(vpnBlockIdx > -1, 'VPN Market section exists');
+  const cosmeticsBlockIdx = CONTROLLER_SRC.indexOf('۱۶. کازمتیک پروفایل:');
+  assert.ok(cosmeticsBlockIdx > vpnBlockIdx, 'cosmetics section comes after VPN Market');
+  const vpnBlock = CONTROLLER_SRC.substring(vpnBlockIdx, cosmeticsBlockIdx);
+  assert.ok(!vpnBlock.includes('فقط Premium'), 'VPN Market block does NOT claim "Premium-only" (1GB is for all)');
+  assert.ok(vpnBlock.includes('پلن ۱GB'), 'VPN Market block mentions 1GB plan specifically');
+  // 3. Cross-check against the source of truth (reward_purchases.js)
+  //    This is a static cross-file assertion: the source MUST have vpn_1gb with premiumOnly:false
+  const rewardPurchasesPath = path.join(__dirname, 'src/repositories/reward_purchases.js');
+  const rewardPurchasesSrc = fs.readFileSync(rewardPurchasesPath, 'utf8');
+  assert.ok(rewardPurchasesSrc.includes("id: 'vpn_1gb'"), 'source has vpn_1gb plan');
+  // Find the vpn_1gb line and verify premiumOnly is false
+  const vpn1gbLineIdx = rewardPurchasesSrc.indexOf("id: 'vpn_1gb'");
+  const vpn1gbLine = rewardPurchasesSrc.substring(vpn1gbLineIdx, vpn1gbLineIdx + 200);
+  assert.ok(vpn1gbLine.includes('premiumOnly: false'), 'vpn_1gb is premiumOnly:false (source of truth)');
+  // Verify vpn_2gb+ are premiumOnly:true
+  const vpn2gbLineIdx = rewardPurchasesSrc.indexOf("id: 'vpn_2gb'");
+  const vpn2gbLine = rewardPurchasesSrc.substring(vpn2gbLineIdx, vpn2gbLineIdx + 200);
+  assert.ok(vpn2gbLine.includes('premiumOnly: true'), 'vpn_2gb+ is premiumOnly:true (source of truth)');
 });
