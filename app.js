@@ -5352,8 +5352,8 @@ function checkAnalysisDeepLink() {
     if (sp.startsWith('announcement_')) {
         const annId = sp.replace('announcement_', '');
         if (annId && /^[a-zA-Z0-9_-]+$/.test(annId)) {
-            // Switch to home/announcements tab + scroll to announcement
-            switchTab('home-page');
+            // Switch to dashboard page (announcements are on dashboard) + scroll to announcement
+            switchTab('dashboard-page');
             setTimeout(() => {
                 const el = document.getElementById('announcement-' + annId) || document.querySelector('[data-announcement-id="' + annId + '"]');
                 if (el) {
@@ -5401,7 +5401,9 @@ async function openNewsByHash(hash) {
 // Open a calendar event by ID (used by deep links from Telegram channel posts)
 async function openCalendarEventById(eventId) {
     try {
-        switchTab('calendar-page');
+        // Calendar is a sub-tab of News page, not a standalone page.
+        switchTab('news-page');
+        if (typeof switchNewsTab === 'function') switchNewsTab('calendar');
         // Wait a moment for calendar page to render, then find the event card
         setTimeout(() => {
             const card = document.querySelector('[data-calendar-event-id="' + eventId + '"]')
@@ -16553,6 +16555,7 @@ window.copyAnalysisContent = copyAnalysisContent;
 window.openDashboardNewsModal = openDashboardNewsModal;
 window.openNewsModalWith = openNewsModalWith;
 window.openCoinDetail = openCoinDetail;
+window.openForexDetail = openForexDetail; // Chat AI v2: expose for action executor
 window.closeCoinDetail = closeCoinDetail;
 window.setPriceAlert = setPriceAlert;
 window.selectAlertDirection = selectAlertDirection;

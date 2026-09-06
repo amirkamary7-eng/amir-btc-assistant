@@ -647,3 +647,25 @@
     color: #C5D0E0;
     font-size: 13px; line-height: 1.6;
 }
+
+
+/* Chat AI v2: Error bubble + retry button (minimal, scoped to Chat AI only) */
+.ai-msg-bubble-error {
+    border-left: 2px solid rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.06);
+}
+.ai-msg-retry-btn {
+    margin-top: 8px;
+    padding: 4px 12px;
+    background: rgba(245, 166, 35, 0.15);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+    border-radius: 8px;
+    color: #F5A623;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.ai-msg-retry-btn:hover {
+    background: rgba(245, 166, 35, 0.25);
+}

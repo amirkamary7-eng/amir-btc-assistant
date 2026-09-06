@@ -1971,12 +1971,13 @@ test('CA-08: ASSISTANT_APP_CONTEXT exists with AMIRBTC features', () => {
     'ASSISTANT_APP_CONTEXT must exist');
   assert.ok(ASSISTANT_SRC.includes('AMIRBTC'),
     'Context must mention AMIRBTC');
-  assert.ok(ASSISTANT_SRC.includes('Market'),
-    'Context must mention Market feature');
-  assert.ok(ASSISTANT_SRC.includes('News'),
-    'Context must mention News feature');
-  assert.ok(ASSISTANT_SRC.includes('Wallet'),
-    'Context must mention Wallet feature');
+  // Chat AI v2: prompt uses Persian feature names. Check for Persian equivalents.
+  assert.ok(ASSISTANT_SRC.includes('بازار'),
+    'Context must mention Market feature (بازار)');
+  assert.ok(ASSISTANT_SRC.includes('اخبار'),
+    'Context must mention News feature (اخبار)');
+  assert.ok(ASSISTANT_SRC.includes('کیف پول'),
+    'Context must mention Wallet feature (کیف پول)');
 });
 
 // CA-09: Dynamic context support
@@ -2062,12 +2063,13 @@ test('CA-16: Output leak patterns filter AMIRBTC context leakage', () => {
 // CA-17: System prompt includes honesty + data usage instructions
 test('CA-17: System prompt includes data honesty + Persian instructions', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes('Do NOT make up data'),
-    'System prompt must instruct: Do NOT make up data');
-  assert.ok(ASSISTANT_SRC.includes('Distinguish between facts and analysis'),
-    'System prompt must instruct: Distinguish facts from analysis');
-  assert.ok(ASSISTANT_SRC.includes('اطلاعات لحظه‌ای در دسترس نیست'),
-    'System prompt must include Persian "no live data" fallback text');
+  // Chat AI v2: prompt is in Persian. Check for Persian equivalents.
+  assert.ok(ASSISTANT_SRC.includes('اطلاعات ساختگی'),
+    'System prompt must instruct: do not make up data (اطلاعات ساختگی)');
+  assert.ok(ASSISTANT_SRC.includes('بین واقعیت و تحلیل'),
+    'System prompt must instruct: distinguish facts from analysis');
+  assert.ok(ASSISTANT_SRC.includes('داده لحظه‌ای'),
+    'System prompt must mention live data handling');
 });
 
 // CA-18: Frontend sends context
@@ -2201,26 +2203,28 @@ test('RT-28: External search layer exists (Wikipedia API)', () => {
     'fetchExternalContext function must exist');
   assert.ok(ASSISTANT_SRC.includes('wikipedia.org'),
     'Must use Wikipedia API for external search');
-  assert.ok(ASSISTANT_SRC.includes('اطلاعات لحظه‌ای در دسترس نیست'),
+  // Chat AI v2: freshness rule is in Persian now
+  assert.ok(ASSISTANT_SRC.includes('داده لحظه‌ای') || ASSISTANT_SRC.includes('اطلاعات لحظه‌ای'),
     'Must have freshness rule message');
 });
 
 // RT-29: Expanded AMIRBTC Knowledge Base
 test('RT-29: Expanded AMIRBTC Knowledge Base (v2)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes('AMIRBTC Knowledge Base (v2)'),
-    'Must have v2 knowledge base');
+  // Chat AI v2: knowledge base is now in Persian modular sections
+  assert.ok(ASSISTANT_SRC.includes('ASSISTANT_APP_KNOWLEDGE'),
+    'Must have app knowledge section');
   // Must include detailed feature guides
-  assert.ok(ASSISTANT_SRC.includes('Price Alerts') || ASSISTANT_SRC.includes('هشدار قیمت'),
-    'Must mention Price Alerts');
-  assert.ok(ASSISTANT_SRC.includes('Wallet') || ASSISTANT_SRC.includes('کیف پول'),
-    'Must mention Wallet');
-  assert.ok(ASSISTANT_SRC.includes('Referral') || ASSISTANT_SRC.includes('رفرال'),
-    'Must mention Referral');
+  assert.ok(ASSISTANT_SRC.includes('هشدار قیمت'),
+    'Must mention Price Alerts (هشدار قیمت)');
+  assert.ok(ASSISTANT_SRC.includes('کیف پول'),
+    'Must mention Wallet (کیف پول)');
+  assert.ok(ASSISTANT_SRC.includes('رفرال'),
+    'Must mention Referral (رفرال)');
   assert.ok(ASSISTANT_SRC.includes('Membership') || ASSISTANT_SRC.includes('عضویت'),
     'Must mention Membership');
-  // Must include how-to-guide instructions
-  assert.ok(ASSISTANT_SRC.includes('How to Guide Users'),
+  // Chat AI v2: how-to-guide replaced with natural action rules
+  assert.ok(ASSISTANT_SRC.includes('اقدامات ناوبری') || ASSISTANT_SRC.includes('How to Guide Users'),
     'Must have how-to guide instructions');
 });
 
@@ -2228,7 +2232,7 @@ test('RT-29: Expanded AMIRBTC Knowledge Base (v2)', () => {
 test('RT-30: Intent classification wired in handlePostChat', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
   const chatFn = ASSISTANT_SRC.indexOf('async function handlePostChat');
-  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 5000);
+  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 8000);
   assert.ok(fnBlock.includes('classifyIntent(message)'),
     'handlePostChat must call classifyIntent');
   assert.ok(fnBlock.includes('intent === \'MARKET_DATA\''),
@@ -2289,13 +2293,13 @@ test('RT-33: Output leak patterns cover new context blocks', () => {
 // RT-34: Freshness rules — no guessing for current data
 test('RT-34: Freshness rules in system prompt', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  // System prompt must have freshness rules
-  assert.ok(ASSISTANT_SRC.includes('Do NOT make up data'),
+  // Chat AI v2: prompt is in Persian. Check for Persian equivalents.
+  assert.ok(ASSISTANT_SRC.includes('اطلاعات ساختگی') || ASSISTANT_SRC.includes('داده جعل'),
     'Must instruct AI not to make up data');
-  assert.ok(ASSISTANT_SRC.includes('Never say "I think" for factual'),
-    'Must instruct AI not to say "I think" for factual data');
-  assert.ok(ASSISTANT_SRC.includes('mention the source'),
-    'Must instruct AI to mention source for external data');
+  assert.ok(ASSISTANT_SRC.includes('بین واقعیت و تحلیل'),
+    'Must instruct AI to distinguish facts from analysis');
+  assert.ok(ASSISTANT_SRC.includes('نتایج جستجو') || ASSISTANT_SRC.includes('mention the source'),
+    'Must instruct AI about search results usage');
 });
 
 // RT-35: Performance — no external search for simple/greeting questions
@@ -2303,7 +2307,7 @@ test('RT-35: No external search for non-external intents', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
   // Only REAL_TIME_EXTERNAL should trigger external search
   const chatFn = ASSISTANT_SRC.indexOf('async function handlePostChat');
-  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 5000);
+  const fnBlock = ASSISTANT_SRC.slice(chatFn, chatFn + 8000);
   // External context should only be fetched for REAL_TIME_EXTERNAL intent
   assert.ok(fnBlock.includes("intent === 'REAL_TIME_EXTERNAL'"),
     'External search only for REAL_TIME_EXTERNAL');

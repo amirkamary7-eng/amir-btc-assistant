@@ -10587,6 +10587,11 @@ const notificationHandlers = createNotificationHandlers({
   isDatabaseConfigured,
   notificationRepo,
 });
+// ── App Content Module — CMS for About / Terms / Privacy ───────────────────
+// Chat AI v2: moved before assistantHandlers so the repo is available for
+// dependency injection (avoids TDZ ReferenceError with const declarations).
+const appContentRepo = createAppContentRepository({ queryDb, readAppCache, writeAppCache });
+
 const assistantHandlers = createAssistantHandlers({
   jsonResponse,
   optionalTelegramAuth,
@@ -10611,6 +10616,10 @@ const assistantHandlers = createAssistantHandlers({
   // Router (replaces old checkGroqCapacity/recordGroqRequest/estimateGroqTokens
   // + groqPrimaryGenerate — the router handles key selection + budget + cooldown).
   groqRouterExecute,
+  // Chat AI v2: inject app content + membership rules repos for dynamic
+  // fetchAppContentContext (About/Terms/Privacy/Rules context injection).
+  appContentRepo,
+  membershipRepo,
 });
 const analysisRepo = createAnalysisRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 const analysisHandlers = createAnalysisHandlers({
@@ -10757,8 +10766,7 @@ const marketOverviewSvc = createMarketOverviewService({ readAppCache, writeAppCa
 // ── News Articles Module — permanent storage for AI summaries ───────────────
 const newsArticleRepo = createNewsArticleRepository({ queryDb });
 
-// ── App Content Module — CMS for About / Terms / Privacy ───────────────────
-const appContentRepo = createAppContentRepository({ queryDb, readAppCache, writeAppCache });
+// appContentRepo moved before assistantHandlers (line ~10593) for TDZ-safe injection.
 const membershipHandlers = createMembershipHandlers({
   jsonResponse,
   authenticateTelegramRequest,

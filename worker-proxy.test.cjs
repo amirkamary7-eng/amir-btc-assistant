@@ -663,7 +663,9 @@ test('AI Chat: without RATE_LIMITS KV returns 503', async () => {
     initData,
   });
   assert.equal(res.status, 503);
-  assert.ok(res.body.message.includes('RATE_LIMITS'));
+  // Chat AI v2: error message is now Persian via friendlyChatError
+  assert.ok(res.body.reason === 'rate_limits_missing' || (res.body.message && res.body.message.includes('RATE_LIMITS')),
+    'Should return 503 with rate_limits_missing reason or RATE_LIMITS message');
 });
 
 test('AI Chat: no AI provider configured returns 503', async () => {

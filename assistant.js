@@ -334,25 +334,131 @@ const AssistantUI = {
 
     getContext() {
         const ctx = {};
-        // Detect current page from active nav/section
-        const activeNav = document.querySelector('.nav-tab.active, .bottom-nav-item.active');
+        // Detect current page from active bottom-nav item
+        // Actual DOM: <button class="nav-item active" data-page="dashboard-page">
+        const activeNav = document.querySelector('.bottom-nav .nav-item.active');
         if (activeNav) {
-            const section = activeNav.getAttribute('data-section') || activeNav.getAttribute('data-tab');
-            if (section) ctx.page = section;
+            const pageId = activeNav.getAttribute('data-page');
+            if (pageId) ctx.page = pageId.replace('-page', ''); // e.g. 'dashboard-page' → 'dashboard'
         }
         // Detect selected coin from coin detail modal
+        // Actual DOM: <div id="coin-detail-modal"> + symbol on #detail-coin-icon data-symbol
         const coinDetail = document.getElementById('coin-detail-modal');
-        if (coinDetail && coinDetail.style.display !== 'none') {
-            const coinSymbol = coinDetail.getAttribute('data-coin') || coinDetail.querySelector('[data-coin-symbol]')?.getAttribute('data-coin-symbol');
+        if (coinDetail && coinDetail.style.display !== 'none' && coinDetail.classList.contains('open')) {
+            const coinIcon = coinDetail.querySelector('#detail-coin-icon');
+            const coinSymbol = (coinIcon && coinIcon.getAttribute('data-symbol')) ||
+                               (typeof _currentDetailSymbol !== 'undefined' ? _currentDetailSymbol : null);
             if (coinSymbol) ctx.coin = coinSymbol;
         }
-        // Detect current news article if on news detail
-        const newsDetail = document.getElementById('news-detail-page');
-        if (newsDetail && newsDetail.style.display !== 'none') {
-            const articleId = newsDetail.getAttribute('data-article-id');
-            if (articleId) ctx.article_id = articleId;
+        // Detect current news article if news modal is open
+        // Actual DOM: <div id="news-modal"> with display:flex when open
+        const newsModal = document.getElementById('news-modal');
+        if (newsModal && newsModal.style.display === 'flex') {
+            // Try to get article URL from the modal's source link
+            const newsLink = document.getElementById('news-modal-link');
+            if (newsLink && newsLink.href) {
+                ctx.article_url = newsLink.href;
+            }
+        }
+        // Detect current news category from active news tab
+        // Actual DOM: <button class="ni-tab active" data-news="all">
+        const activeNewsTab = document.querySelector('.ni-tab.active');
+        if (activeNewsTab) {
+            const newsCat = activeNewsTab.getAttribute('data-news');
+            if (newsCat) ctx.news_category = newsCat;
+        }
+        // Detect current language
+        if (typeof currentLang !== 'undefined' && currentLang) {
+            ctx.lang = currentLang;
         }
         return Object.keys(ctx).length > 0 ? ctx : null;
+    },
+
+    // Chat AI v2: Hardcoded action executor — NO eval, NO window[actionName].
+    // Only actions from the allowlist below can be executed.
+    // Invalid actions are silently ignored.
+    executeAction(action) {
+        if (!action || !action.type) return;
+        const type = action.type;
+
+        // Hardcoded allowlist with explicit function calls.
+        // NO dynamic function lookup. NO eval. NO new Function.
+        switch (type) {
+            case 'open_dashboard':
+                if (typeof switchTab === 'function') switchTab('dashboard-page');
+                break;
+            case 'open_market':
+                if (typeof switchTab === 'function') switchTab('market-page');
+                break;
+            case 'open_news':
+                if (typeof switchTab === 'function') switchTab('news-page');
+                break;
+            case 'open_analysis':
+                if (typeof switchTab === 'function') switchTab('analysis-page');
+                break;
+            case 'open_profile':
+                if (typeof switchTab === 'function') switchTab('profile-page');
+                break;
+            case 'open_wallet':
+                if (window.WalletApp && typeof window.WalletApp.openWallet === 'function') window.WalletApp.openWallet();
+                break;
+            case 'open_referral':
+                if (window.ReferralApp && typeof window.ReferralApp.openReferral === 'function') window.ReferralApp.openReferral();
+                break;
+            case 'open_membership':
+                if (window.MembershipApp && typeof window.MembershipApp.open === 'function') window.MembershipApp.open();
+                break;
+            case 'open_membership_rules':
+                if (window.MembershipApp && typeof window.MembershipApp.openRulesModal === 'function') window.MembershipApp.openRulesModal();
+                break;
+            case 'open_about':
+                if (typeof openAboutModal === 'function') openAboutModal();
+                break;
+            case 'open_terms':
+                if (typeof openTermsModal === 'function') openTermsModal();
+                break;
+            case 'open_privacy':
+                if (typeof openPrivacyModal === 'function') openPrivacyModal();
+                break;
+            case 'open_settings':
+                if (typeof openSettingsModal === 'function') openSettingsModal();
+                break;
+            case 'open_language':
+                if (typeof openLangModal === 'function') openLangModal();
+                break;
+            case 'open_tickets':
+                if (typeof openTicketsModal === 'function') openTicketsModal();
+                break;
+            case 'open_coin_detail':
+                // Validate symbol: only uppercase alphanumeric, 2-10 chars
+                if (action.args && typeof action.args === 'string' && /^[A-Z0-9]{2,10}$/.test(action.args)) {
+                    if (typeof openCoinDetail === 'function') openCoinDetail(action.args);
+                }
+                break;
+            case 'open_forex_detail':
+                // Validate symbol: only uppercase alphanumeric, 2-10 chars
+                if (action.args && typeof action.args === 'string' && /^[A-Z0-9]{2,10}$/.test(action.args)) {
+                    if (typeof openForexDetail === 'function') openForexDetail(action.args);
+                }
+                break;
+            case 'open_news_category':
+                // Validate category: only known values
+                {
+                    const validCats = ['all', 'crypto', 'forex', 'calendar', 'saved'];
+                    if (action.args && typeof action.args === 'string' && validCats.includes(action.args.toLowerCase())) {
+                        if (typeof switchNewsTab === 'function') switchNewsTab(action.args.toLowerCase());
+                    }
+                }
+                break;
+            case 'open_calendar':
+                // Calendar is a sub-tab of news
+                if (typeof switchTab === 'function') switchTab('news-page');
+                if (typeof switchNewsTab === 'function') switchNewsTab('calendar');
+                break;
+            default:
+                // Unknown action — silently ignore (no error, no console.warn)
+                break;
+        }
     },
 
     async refreshLimits() {
@@ -502,7 +608,7 @@ const AssistantUI = {
     },
 
     // ITEM 1: Premium chat bubbles — user right, AI left with avatar
-    appendBubble(role, content, imageUrl) {
+    appendBubble(role, content, imageUrl, options = {}) {
         const box = document.getElementById('ai-messages');
         if (!box) return;
         // PHASE 7: Hide empty state when first message appears
@@ -546,6 +652,24 @@ const AssistantUI = {
             // Now: safe inline conversion of **bold**, *italic*, bullet points, paragraphs.
             text.innerHTML = AssistantUI.renderMarkdown(content);
             bubble.appendChild(text);
+        }
+        // Chat AI v2: Error styling + retry button
+        if (options.error) {
+            bubble.classList.add('ai-msg-bubble-error');
+            if (options.canRetry && options.lastMessage) {
+                const retryBtn = document.createElement('button');
+                retryBtn.className = 'ai-msg-retry-btn';
+                retryBtn.textContent = '↻ تلاش مجدد';
+                retryBtn.onclick = () => {
+                    // Remove the error bubble wrapper (the assistant error bubble)
+                    wrapper.remove();
+                    // Retry by calling send() with skipUserBubble=true so it
+                    // does NOT create a duplicate user message bubble.
+                    // The original user bubble is still in the DOM.
+                    AssistantUI.retry(options.lastMessage);
+                };
+                bubble.appendChild(retryBtn);
+            }
         }
         wrapper.appendChild(bubble);
         box.appendChild(wrapper);
@@ -1083,29 +1207,12 @@ const AssistantUI = {
         }
 
         try {
-            // PHASE 7: Payload audit — verify attachment is actually in payload
             const payload = {
                 message: fullMessage,
-                // PHASE FIX: Reduced from 6 → 4 messages (last 2 exchanges).
-                // With 4 × 2000 chars = 8000 chars max — well within all provider context windows.
                 history: this.history.slice(-8),
                 image: imageData || null,
                 context: this.getContext ? this.getContext() : null
             };
-            // PHASE 7: Payload audit logging (no base64 content, just metadata)
-            console.log('[ChatAI] Payload audit:', {
-                hasMessage: !!payload.message,
-                messageLength: payload.message?.length || 0,
-                hasImage: !!payload.image,
-                imageType: attachment?.type || 'unknown',
-                imageName: attachment?.name || 'unknown',
-                imageSize: attachment?.size || 0,
-                imageDataLength: payload.image?.length || 0,
-                imageCompressed: attachment?.compressed || false,
-                attachmentStatus: attachment?.status || 'none',
-            });
-            // PHASE 6: Do NOT clear pendingImage here — only after success
-            // Old code cleared pendingImage before API call, breaking retry on failure
 
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
@@ -1119,11 +1226,16 @@ const AssistantUI = {
                 this.history.push({ role: 'user', content: userMsg });
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
+                // Chat AI v2: Execute navigation action if present (hardcoded allowlist, NO eval)
+                if (data.action) {
+                    this.executeAction(data.action);
+                }
                 // PHASE 6: Quota consumed on success — clear attachment + composer
                 this.clearAttachment();
             } else {
                 // ITEM 5: Better error messages for rate limiting
                 let errMsg;
+                let canRetry = false;
                 if (data.reason === 'cooldown') {
                     errMsg = data.message || t('ai_err_wait');
                 } else if (data.reason === 'daily_message_limit') {
@@ -1132,10 +1244,14 @@ const AssistantUI = {
                     errMsg = data.message || t('ai_err_image_too_big');
                 } else if (data.reason === 'daily_image_limit') {
                     errMsg = data.message || t('ai_err_image_limit');
+                } else if (data.reason === 'all_providers_failed') {
+                    errMsg = data.message || (typeof t === 'function' ? t('ai_error') : 'Error');
+                    canRetry = true; // all_providers_failed is retryable
                 } else {
                     errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
+                    canRetry = true;
                 }
-                this.appendBubble('assistant', errMsg);
+                this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage: userMsg });
             }
             this.refreshLimits();
         } catch (e) {
@@ -1165,8 +1281,101 @@ const AssistantUI = {
             } else if (e && e.status === 503) {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
             }
-            this.appendBubble('assistant', errMsg);
+            // Chat AI v2: error styling + retry for 503 and non-quota errors
+            const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
+            this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage: userMsg });
             console.warn('AI send error:', e.status || 'no-status', e.message?.slice(0, 100));
+        } finally {
+            this.sending = false;
+        }
+    },
+
+    // Chat AI v2: Retry — re-sends lastMessage WITHOUT creating a duplicate
+    // user bubble. The original user bubble from the failed attempt remains
+    // in the DOM. Only the error bubble was removed by the retry button onclick.
+    // This prevents the "duplicate user message" visual bug.
+    async retry(lastMessage) {
+        if (this.sending) return;
+        const input = document.getElementById('ai-input');
+        if (input) input.value = '';
+
+        this.sending = true;
+        this.showTyping();
+
+        let fullMessage = lastMessage || '';
+        if (this.pendingFileText) {
+            fullMessage += `\n\nAttached file content:\n${this.pendingFileText}`;
+            this.pendingFileText = null;
+        }
+
+        try {
+            const payload = {
+                message: fullMessage,
+                history: this.history.slice(-8),
+                image: null, // retry does not re-attach image (per existing behavior)
+                context: this.getContext ? this.getContext() : null
+            };
+
+            const data = await apiFetch('/api/assistant/chat', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            this.hideTyping();
+
+            if (data.status === 'success') {
+                this.history.push({ role: 'user', content: lastMessage });
+                this.history.push({ role: 'assistant', content: data.reply });
+                this.appendBubble('assistant', data.reply);
+                if (data.action) {
+                    this.executeAction(data.action);
+                }
+                this.clearAttachment();
+            } else {
+                let errMsg;
+                let canRetry = false;
+                if (data.reason === 'cooldown') {
+                    errMsg = data.message || t('ai_err_wait');
+                } else if (data.reason === 'daily_message_limit') {
+                    errMsg = data.message || t('ai_err_daily_limit');
+                } else if (data.reason === 'image_too_large') {
+                    errMsg = data.message || t('ai_err_image_too_big');
+                } else if (data.reason === 'daily_image_limit') {
+                    errMsg = data.message || t('ai_err_image_limit');
+                } else if (data.reason === 'all_providers_failed') {
+                    errMsg = data.message || (typeof t === 'function' ? t('ai_error') : 'Error');
+                    canRetry = true;
+                } else {
+                    errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
+                    canRetry = true;
+                }
+                this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage });
+            }
+            this.refreshLimits();
+        } catch (e) {
+            this.hideTyping();
+            let errMsg = typeof t === 'function' ? t('ai_error') : 'Assistant unavailable';
+            if (e && e.status === 429) {
+                try {
+                    const parsed = JSON.parse(e.message);
+                    if (parsed.reason === 'cooldown') {
+                        errMsg = parsed.message || t('ai_err_wait');
+                    } else if (parsed.reason === 'daily_message_limit') {
+                        errMsg = parsed.message || t('ai_err_daily_limit');
+                    } else if (parsed.reason === 'daily_image_limit') {
+                        errMsg = parsed.message || t('ai_err_image_limit');
+                    } else if (parsed.message) {
+                        errMsg = parsed.message;
+                    }
+                } catch (_) {
+                    errMsg = t('ai_err_wait_retry');
+                }
+            } else if (e && e.status === 503) {
+                errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
+            }
+            const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
+            this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage });
+            console.warn('AI retry error:', e.status || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
         }

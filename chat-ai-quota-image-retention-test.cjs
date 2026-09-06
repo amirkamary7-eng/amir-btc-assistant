@@ -879,15 +879,12 @@ test('FILE-23: clearAttachment NOT called on failure (quota preserved)', () => {
     'clearAttachment must NOT be called on failure (quota preserved)');
 });
 
-test('FILE-24: Payload audit logging exists (no base64 content)', () => {
+test('FILE-24: Payload audit logging removed (was debug code in production)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  assert.ok(JS.includes('[ChatAI] Payload audit:'), 'Must have payload audit log');
-  assert.ok(JS.includes('hasImage'), 'Must log hasImage');
-  assert.ok(JS.includes('imageType'), 'Must log imageType');
-  assert.ok(JS.includes('imageSize'), 'Must log imageSize');
-  assert.ok(JS.includes('imageDataLength'), 'Must log imageDataLength');
-  // Must NOT log actual base64 content
-  assert.ok(!JS.includes('console.log(payload.image)'), 'Must NOT log base64 content');
+  // Chat AI v2: the payload audit console.log was removed as debug code.
+  // Verify it's gone — no payload audit logging in production.
+  assert.ok(!JS.includes('[ChatAI] Payload audit:'), 'Payload audit console.log must be removed');
+  assert.ok(!JS.includes('imageDataLength'), 'imageDataLength debug field must be removed');
 });
 
 test('FILE-25: Error handling — status=error on compression failure', () => {
@@ -1024,7 +1021,7 @@ test('UI-REDESIGN-11: prefers-reduced-motion support', () => {
 test('UI-REDESIGN-12: AI avatar in assistant messages uses Digital Core icon', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   // appendBubble for assistant must use the Digital Core SVG (not old robot)
-  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl, options');
   const fnBlock = JS.slice(appendFn, appendFn + 2000);
   assert.ok(fnBlock.includes('viewBox="0 0 56 56"'),
     'Assistant avatar must use 56x56 viewBox (Digital Core)');
@@ -1050,7 +1047,7 @@ test('UI-REDESIGN-14: Empty state management (hideEmptyState + showEmptyState)',
   assert.ok(JS.includes('hideEmptyState'), 'Must have hideEmptyState function');
   assert.ok(JS.includes('showEmptyState'), 'Must have showEmptyState function');
   // appendBubble must call hideEmptyState
-  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl, options');
   const fnBlock = JS.slice(appendFn, appendFn + 500);
   assert.ok(fnBlock.includes('this.hideEmptyState()'),
     'appendBubble must hide empty state');
@@ -1339,7 +1336,7 @@ test('COMPOSER-ATTACHMENT-02: Input row wraps attach + textarea + send', () => {
 test('IMAGE-MESSAGE-01: Image shown in user message after send', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   // appendBubble must handle imageUrl parameter
-  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl, options');
   assert.ok(appendFn > -1, 'appendBubble must accept imageUrl');
   const fnBlock = JS.slice(appendFn, appendFn + 2000);
   assert.ok(fnBlock.includes('ai-msg-image'), 'Must render image in message');
@@ -1483,7 +1480,7 @@ test('ATTACH-CLEAR-01: clearAttachment resets composer + state', () => {
 
 test('IMAGE-MESSAGE-01: appendBubble handles imageUrl parameter', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl)');
+  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl, options');
   const fnBlock = JS.slice(appendFn, appendFn + 2000);
   assert.ok(fnBlock.includes('if (imageUrl)'), 'Must check imageUrl');
   assert.ok(fnBlock.includes('ai-msg-image'), 'Must create image element');
@@ -1623,8 +1620,13 @@ test('VISION-PROD-05: Correct MIME type (image/jpeg) sent for vision', () => {
 
 test('VISION-PROD-06: Vision failure returns Persian error (not text-only fallback)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
-    'Must return Persian vision service error when vision providers fail');
+  // Chat AI v2: error message is now via friendlyChatError('image_analysis_unavailable')
+  assert.ok(SRC.includes('friendlyChatError'),
+    'Must have friendlyChatError function');
+  assert.ok(SRC.includes('image_analysis_unavailable'),
+    'Must have image_analysis_unavailable error type');
+  assert.ok(SRC.includes('فعلاً نتونستم تصویر'),
+    'Must return Persian vision error via friendlyChatError');
 });
 
 test('VISION-PROD-07: Text-only providers forbidden as fallback for image requests', () => {
@@ -1989,8 +1991,10 @@ test('GEMINI-429-02: Image request with Gemini 429 does NOT fall back to text-on
 
 test('GEMINI-429-03: Vision failure returns clean Persian error (not 503)', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
-  // When hasImage and all providers fail, must return Persian vision error
-  assert.ok(SRC.includes('سرویس تحلیل تصویر در حال حاضر در دسترس نیست'),
+  // Chat AI v2: error message via friendlyChatError
+  assert.ok(SRC.includes('image_analysis_unavailable'),
+    'Must have image_analysis_unavailable error type');
+  assert.ok(SRC.includes('فعلاً نتونستم تصویر'),
     'Must return Persian vision error');
   // The catch block in handlePostChat must NOT throw ReferenceError
   const postChatFn = SRC.indexOf('async function handlePostChat');
