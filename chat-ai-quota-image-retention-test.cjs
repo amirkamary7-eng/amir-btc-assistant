@@ -1103,11 +1103,15 @@ test('CHAT-AVAIL-01: Chat API success response renders correctly', () => {
 });
 
 test('CHAT-AVAIL-02: Chat provider failure falls through chain (sequential)', () => {
+  // Chat AI v2 Fix: validation is now inside the provider loop.
+  // The loop structure has changed — check for the new pattern.
   const fnStart = ASSISTANT_SRC.indexOf('for (const [providerName, providerCall, enabled] of providers)');
   assert.ok(fnStart !== -1, 'Chat must iterate providers sequentially');
-  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
-  assert.ok(fnBody.includes('if (result.success)'), 'Must check success before returning');
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 1200);
+  assert.ok(fnBody.includes('result.success') || fnBody.includes('if (result.success)'), 'Must check success');
   assert.ok(fnBody.includes('lastError'), 'Must track lastError for fallback');
+  // Chat AI v2 Fix: validation now runs inside the loop (not after it)
+  assert.ok(fnBody.includes('validateChatResponse'), 'Must validate inside provider loop');
 });
 
 test('CHAT-AVAIL-03: Frontend does NOT convert valid response to unavailable', () => {

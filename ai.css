@@ -669,3 +669,28 @@
 .ai-msg-retry-btn:hover {
     background: rgba(245, 166, 35, 0.25);
 }
+
+
+/* Chat AI v2 Fix: Suggested action card (clickable, NOT auto-executed) */
+.ai-action-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: rgba(245, 166, 35, 0.12);
+    border: 1px solid rgba(245, 166, 35, 0.25);
+    border-radius: 12px;
+    color: #F5A623;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    margin-top: 4px;
+}
+.ai-action-card:hover {
+    background: rgba(245, 166, 35, 0.2);
+    border-color: rgba(245, 166, 35, 0.4);
+}
+.ai-action-card:active {
+    transform: scale(0.98);
+}
