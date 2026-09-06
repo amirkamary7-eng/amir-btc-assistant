@@ -76,8 +76,10 @@ test('B1: FAQ_ENTRIES exist with at least 20 entries', () => {
   assert.ok(CONTROLLER_SRC.includes('FAQ_ENTRIES'), 'FAQ_ENTRIES array exists');
   const entries = CONTROLLER_SRC.match(/id: '/g) || [];
   // Count FAQ entry ids (not other ids like article_id)
-  const faqIdMatches = CONTROLLER_SRC.match(/\bid: '(how_to_premium|exchange_requirement|daily_reward|how_to_get_tokens|missions|wheel_spins|vpn_market|alert_quota|membership_rules|terms|privacy|about|referral|watchlist_limit|ai_chat_limit|ai_image_limit|news_categories|calendar_location|language_change|tickets)'/g) || [];
-  assert.ok(faqIdMatches.length >= 18, `at least 18 FAQ entries (got ${faqIdMatches.length})`);
+  // Chat AI v2 Premium Fix: added premium_info entry (informational)
+  // Chat AI v2 Premium Navigation Fix: added premium_navigation entry (procedural)
+  const faqIdMatches = CONTROLLER_SRC.match(/\bid: '(how_to_premium|premium_navigation|premium_info|exchange_requirement|daily_reward|how_to_get_tokens|missions|wheel_spins|vpn_market|alert_quota|membership_rules|terms|privacy|about|referral|watchlist_limit|ai_chat_limit|ai_image_limit|news_categories|calendar_location|language_change|tickets)'/g) || [];
+  assert.ok(faqIdMatches.length >= 20, `at least 20 FAQ entries (got ${faqIdMatches.length}, including premium_info + premium_navigation)`);
 });
 
 test('B2: FAQ has normalizeForFAQ function', () => {
@@ -576,14 +578,25 @@ test('J5: worker-proxy.js injects appContentRepo and membershipRepo', () => {
 //   K11. all providers failed → friendly structured error
 //   K12. retry + action → no auto-navigation
 
-// K1: «پریمیوم چیه؟» — informational intent. Should NOT match how_to_premium
-// (procedural) FAQ. The informational question falls through to the LLM, which
-// answers what Premium is + may suggest an action. Frontend must NOT auto-navigate.
-test('K1: «پریمیوم چیه؟» is informational — does NOT match how_to_premium FAQ (procedural)', () => {
+// K1: «پریمیوم چیه؟» — informational intent. Should match premium_info FAQ
+// (informational), NOT how_to_premium (procedural). The new premium_info entry
+// gives a deterministic Premium benefits answer + open_membership action card.
+// Frontend must NOT auto-navigate (Action Card only on explicit click).
+test('K1: «پریمیوم چیه؟» is informational — matches premium_info FAQ (not how_to_premium)', () => {
   // how_to_premium must have intent: 'procedural'
   const hpIdx = CONTROLLER_SRC.indexOf("id: 'how_to_premium'");
   const hpBlock = CONTROLLER_SRC.substring(hpIdx, hpIdx + 300);
   assert.ok(hpBlock.includes("intent: 'procedural'"), 'how_to_premium is procedural');
+  // premium_info FAQ entry must exist with intent: 'informational'
+  const piIdx = CONTROLLER_SRC.indexOf("id: 'premium_info'");
+  assert.ok(piIdx > -1, 'premium_info FAQ entry exists');
+  const piBlock = CONTROLLER_SRC.substring(piIdx, piIdx + 1200);
+  assert.ok(piBlock.includes("intent: 'informational'"), 'premium_info is informational');
+  // premium_info must have both spellings: «پریمیوم» and «پرمیوم»
+  assert.ok(piBlock.includes("'پریمیوم'"), 'premium_info keywords include «پریمیوم» (with ا)');
+  assert.ok(piBlock.includes("'پرمیوم'"), 'premium_info keywords include «پرمیوم» (alternative)');
+  // premium_info must have open_membership action
+  assert.ok(piBlock.includes("open_membership"), 'premium_info has open_membership action');
   // detectFAQIntent must classify «پریمیوم چیه؟» as informational (has "چیه")
   const detIdx = CONTROLLER_SRC.indexOf('function detectFAQIntent');
   const detBlock = CONTROLLER_SRC.substring(detIdx, detIdx + 1200);
@@ -592,6 +605,11 @@ test('K1: «پریمیوم چیه؟» is informational — does NOT match how_to
   const matchIdx = CONTROLLER_SRC.indexOf('function matchFAQ');
   const matchBlock = CONTROLLER_SRC.substring(matchIdx, matchIdx + 2000);
   assert.ok(matchBlock.includes("intent !== 'procedural'"), 'matchFAQ skips procedural entries for non-procedural intent');
+  // LOCAL_APP intent keywords must include «پریمیوم» (with ا) — was the root cause of production issue
+  const localAppIdx = CONTROLLER_SRC.indexOf('LOCAL_APP: [');
+  const localAppBlock = CONTROLLER_SRC.substring(localAppIdx, localAppIdx + 500);
+  assert.ok(localAppBlock.includes("'پریمیوم'"), 'LOCAL_APP keywords include «پریمیوم» (with ا) — root cause fix');
+  assert.ok(localAppBlock.includes("'پرمیوم'"), 'LOCAL_APP keywords still include «پرمیوم» (backward compat)');
   // Frontend must use appendActionCard (no auto-execute) — already covered by G5
   assert.ok(FRONTEND_SRC.includes('appendActionCard'), 'frontend renders action card (no auto-nav)');
 });

@@ -358,11 +358,12 @@ export function createAssistantHandlers(deps) {
       'امروز', 'الان', 'اخیراً', 'به تازگی', 'right now', 'today', 'currently',
     ],
     LOCAL_APP: [
-      'پرمیوم', 'premium', 'کیف پول', 'wallet', 'توکن', 'اب', 'ab token',
+      // Chat AI v2 Premium Fix: support both Persian spellings «پرمیوم» and «پریمیوم».
+      'پرمیوم', 'پریمیوم', 'premium', 'کیف پول', 'wallet', 'توکن', 'اب', 'ab token',
       'رفرال', 'referral', 'هشدار', 'alert', 'اعلان', ' notification',
       'عضویت', 'membership', 'پاداش', 'reward', 'روزانه', 'daily',
       'چطور', 'how to', 'چگونه', 'راهنمایی', 'کمک', 'استفاده',
-      'ویژگی', 'feature', 'امکانات', 'نحوه', 'خرید پرمیوم',
+      'ویژگی', 'feature', 'امکانات', 'نحوه', 'خرید پرمیوم', 'خرید پریمیوم',
     ],
   };
 
@@ -1397,6 +1398,13 @@ export function createAssistantHandlers(deps) {
       'چطور', 'چگونه', 'نحوه', 'how to', 'how do', 'how can',
       'مراحل', 'قدم', 'راهنمایی', 'دسترسی چ', 'کجا', 'کدوم بخش',
       'how can i', 'where can i',
+      // Chat AI v2 Premium Fix: navigation verbs. These are safe to add because
+      // matchFAQ still requires FAQ keyword match (score >= 2). A navigation
+      // message like «برو بخش اخبار» becomes procedural, but news_categories
+      // FAQ has intent='informational' so it's skipped (no false positive).
+      // Only how_to_premium (procedural) can match navigation requests to
+      // Premium, producing the open_membership action.
+      'ببر', 'ببرم', 'برو', 'باز کن', 'نمایش بده',
     ];
     const INFORMATIONAL_MARKERS = [
       'چیه', 'چی هست', 'چی هستند', 'یعنی چی', 'یعنی چه', 'تعریف',
@@ -1440,6 +1448,40 @@ export function createAssistantHandlers(deps) {
   //   'either'        — matches any intent (quota/limit questions)
   //   undefined      — treated as 'either' (backward compatible)
   const FAQ_ENTRIES = [
+    // Chat AI v2 Premium Navigation Fix: dedicated FAQ entry for navigation
+    // requests like «منو ببر بخش پریمیوم» / «بخش پریمیوم رو باز کن».
+    // These should produce ONLY the open_membership action card (short
+    // confirmation reply), NOT the 4-step activation procedure.
+    // The 4-step activation procedure stays in how_to_premium (below) for
+    // «چطور پریمیوم بشم»-style queries.
+    //
+    // Strategy: Use multi-word navigation phrases («بخش پریمیوم», «ببر بخش
+    // پریمیوم», «برو بخش پریمیوم», «بخش پریمیوم رو باز کن» and the پرمیوم
+    // alternatives). Each multi-word keyword gets score +2 (length > 3), so
+    // navigation messages match TWO of them (score = 4) while how_to_premium
+    // only matches «پریمیوم» (score = 2). Result: premium_navigation wins
+    // cleanly for navigation requests (no ambiguity), and how_to_premium
+    // still wins for «چطور پریمیوم بشم» (no premium_navigation keyword match).
+    // Generic navigation («برو بخش اخبار», «بخش رو باز کن») has NO Premium
+    // keyword → no false positive.
+    {
+      id: 'premium_navigation',
+      intent: 'procedural',
+      keywords: [
+        'بخش پریمیوم', 'بخش پرمیوم',
+        'ببر بخش پریمیوم', 'ببر بخش پرمیوم',
+        'برو بخش پریمیوم', 'برو بخش پرمیوم',
+        'بخش پریمیوم رو باز کن', 'بخش پرمیوم رو باز کن',
+      ],
+      answers: {
+        fa: [
+          'بفرما، می‌برمت به بخش عضویت. ✨',
+          'حاضرش، الان می‌برمت به صفحه Premium. ⭐',
+        ],
+        en: ['Sure, taking you to the Membership section.'],
+      },
+      action: { type: 'open_membership' },
+    },
     {
       id: 'how_to_premium',
       intent: 'procedural',
@@ -1450,6 +1492,34 @@ export function createAssistantHandlers(deps) {
           'مسیر دریافت Premium:\nثبت‌نام در صرافی موردنیاز ← ارسال UID ← تأیید ادمین ← فعال‌سازی.\n\nاگه بخوای، می‌تونم الان ببرمت به بخش عضویت.',
         ],
         en: ['To get Premium: 1. Go to Membership 2. Register at the required exchange 3. Submit your exchange UID 4. Wait for admin approval.'],
+      },
+      action: { type: 'open_membership' },
+    },
+    // Chat AI v2 Premium Fix: dedicated informational FAQ entry for «پریمیوم چیه؟»,
+    // «مزایای پریمیوم چیه؟», etc. Procedural queries (with چطور/چگونه) still
+    // match how_to_premium above because of intent filtering in matchFAQ.
+    // All numbers verified against src/services/entitlement_config.js (source of truth):
+    //   - ai_chat: 10 (free) / 100 (premium)  [entitlement_config.js ai_chat]
+    //   - ai_image: 3 (free) / 10 (premium)   [entitlement_config.js ai_image]
+    //   - watchlist: 7 (free) / 20 (premium)   [entitlement_config.js watchlist]
+    //   - alerts: 3 (free) / 10 (premium)     [entitlement_config.js alerts]
+    //   - wheel: 3 (free) / 5 (premium)       [entitlement_config.js wheel]
+    //   - daily_claim: 10 (free) / 20 (premium) [entitlement_config.js daily_claim]
+    //   - missions: 1× (free) / 1.5× (premium)  [entitlement_config.js missions]
+    //   - referral: 3 (free) / 6 (premium)     [entitlement_config.js referral]
+    //   - Activation path: exchange registration + UID + admin approval
+    //     (verified from scripts/membership-schema.sql: membership_requests table
+    //      with exchange_name + exchange_uid columns)
+    //   - No direct purchase (no buy path in source)
+    {
+      id: 'premium_info',
+      intent: 'informational',
+      keywords: ['پرمیوم', 'پریمیوم', 'premium', 'عضویت ویژه', 'مزایای premium', 'مزایای پریمیوم', 'مزایای پرمیوم'],
+      answers: {
+        fa: [
+          'Premium عضویت ویژه AMIRBTC است با این مزایا:\n\n📊 سهمیه بالاتر:\n• چت دستیار: ۱۰۰/روز (رایگان ۱۰)\n• تصویر دستیار: ۱۰/روز (رایگان ۳)\n• واچ‌لیست: ۲۰ ارز (رایگان ۷)\n• هشدار قیمت: ۱۰/روز (رایگان ۳)\n• Wheel: ۵ اسپین/روز (رایگان ۳)\n\n🎁 پاداش بالاتر:\n• پاداش روزانه: ۲۰ AB (رایگان ۱۰)\n• ماموریت‌ها: ۱.۵ برابر (رایگان ۱×)\n• رفرال: ۶ AB (رایگان ۳)\n\n✨ سایر مزایا:\n• بدون تبلیغ\n• هشدار پیشرفته\n• VPN Market و کازمتیک پروفایل\n\n⚠️ خرید مستقیم نیست — فقط با ثبت‌نام در صرافی موردنیاز و تأیید ادمین فعال می‌شه.',
+        ],
+        en: ['Premium is AMIRBTC\'s VIP membership: higher quotas (chat 100/day vs 10, image 10 vs 3, watchlist 20 vs 7, alerts 10 vs 3, wheel 5 vs 3), 2× daily reward, 1.5× missions, 2× referral, ad-free, advanced alerts, VPN Market, cosmetics. Not purchasable — activated via exchange registration + admin approval.'],
       },
       action: { type: 'open_membership' },
     },

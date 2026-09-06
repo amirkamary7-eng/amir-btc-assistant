@@ -3773,3 +3773,395 @@ test('Chat AI v2 Fix 4: «چطور پریمیوم بشم؟» matches how_to_prem
   assert.equal(groqCalled, false,
     'Groq must NOT have been called (FAQ short-circuited the LLM path)');
 });
+
+// ============================================================================
+// Chat AI v2 Premium Fix — Integration Tests (K15-K22)
+// Premium-specific regression tests for the production issue:
+//   «پریمیوم چیه؟» was returning generic app info or "دستیار در دسترس نیست"
+//   because «پریمیوم» (with ا) was missing from LOCAL_APP intent keywords
+//   and no informational FAQ entry existed for Premium.
+//
+// Fix: (1) Added «پریمیوم» to LOCAL_APP keywords
+//      (2) Added premium_info FAQ entry (informational intent)
+//      (3) Added navigation verbs (ببر/برو/باز کن) to PROCEDURAL_MARKERS
+//          — safe because matchFAQ still requires FAQ keyword match (score >= 2)
+// ============================================================================
+
+// K15: «پریمیوم چیه؟» (informational) → matches premium_info FAQ + open_membership action
+test('Chat AI v2 Premium Fix K15: «پریمیوم چیه؟» matches premium_info FAQ (informational)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'پریمیوم چیه؟' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'success');
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (premium_info informational match)');
+  // Reply must contain Premium benefits info (not generic)
+  assert.ok(res.body.reply.includes('عضویت ویژه') || res.body.reply.includes('Premium'),
+    'reply mentions Premium membership');
+  assert.ok(res.body.reply.includes('۱۰۰/روز') || res.body.reply.includes('100'),
+    'reply includes chat quota 100/day');
+  assert.ok(res.body.reply.includes('۲۰ AB') || res.body.reply.includes('20'),
+    'reply includes daily reward 20 AB');
+  // Action must be open_membership (suggested, not auto-executed)
+  assert.ok(res.body.action, 'action must be present');
+  assert.equal(res.body.action.type, 'open_membership',
+    'action must be open_membership');
+  // Groq must NOT have been called (FAQ short-circuited)
+  assert.equal(groqCalled, false, 'Groq must NOT have been called (FAQ matched)');
+});
+
+// K16: «پرمیوم چیه؟» (alternative spelling without ا) → matches premium_info FAQ
+test('Chat AI v2 Premium Fix K16: «پرمیوم چیه؟» (alternative spelling) matches premium_info FAQ', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'پرمیوم چیه؟' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (premium_info match for alternative spelling)');
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership');
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K17: «پریمیوم چه مزایایی داره؟» (informational, no چیه marker) → matches premium_info
+test('Chat AI v2 Premium Fix K17: «پریمیوم چه مزایایی داره؟» matches premium_info FAQ', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'پریمیوم چه مزایایی داره؟' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (premium_info match via مزایای پریمیوم keyword)');
+  assert.ok(res.body.reply.includes('عضویت ویژه') || res.body.reply.includes('Premium'),
+    'reply mentions Premium');
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership');
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K18: «چطور پریمیوم بشم؟» (procedural) → matches how_to_premium (NOT premium_info)
+test('Chat AI v2 Premium Fix K18: «چطور پریمیوم بشم؟» matches how_to_premium (procedural, not premium_info)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'چطور پریمیوم بشم؟' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler');
+  // Reply must contain procedural steps (NOT benefits list)
+  assert.ok(res.body.reply.includes('ثبت‌نام') || res.body.reply.includes('UID'),
+    'reply contains registration steps (procedural, not informational)');
+  // Reply must NOT contain the benefits list (which is premium_info content)
+  // — the benefits list has "عضویت ویژه AMIRBTC است با این مزایا"
+  assert.ok(!res.body.reply.includes('با این مزایا'),
+    'reply is procedural (NOT the benefits list from premium_info)');
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership');
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K19: «منو ببر بخش پریمیوم» (navigation) → matches premium_navigation (NOT how_to_premium)
+// Navigation requests must produce a SHORT confirmation reply + open_membership
+// action card. They must NOT produce the 4-step activation procedure.
+test('Chat AI v2 Premium Fix K19: «منو ببر بخش پریمیوم» matches premium_navigation (NOT how_to_premium)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'منو ببر بخش پریمیوم' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (navigation → premium_navigation match)');
+  // Reply must be a SHORT navigation confirmation (NOT the 4-step activation procedure)
+  assert.ok(res.body.reply.length < 100,
+    `reply must be short navigation confirmation (got ${res.body.reply.length} chars)`);
+  // Reply must NOT contain the activation procedure steps
+  assert.ok(!res.body.reply.includes('برای دریافت Premium باید این مراحل'),
+    'reply must NOT contain 4-step activation procedure (that is how_to_premium content)');
+  assert.ok(!res.body.reply.includes('UID'),
+    'reply must NOT mention UID (that is how_to_premium content)');
+  assert.ok(!res.body.reply.includes('صرافی'),
+    'reply must NOT mention exchange (that is how_to_premium content)');
+  // Reply must contain a navigation confirmation phrase
+  assert.ok(res.body.reply.includes('بفرما') || res.body.reply.includes('می‌برمت') || res.body.reply.includes('حاضرش'),
+    'reply contains navigation confirmation phrase');
+  // Action must be open_membership
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership (navigation action)');
+  // Groq must NOT have been called
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K20: «بخش پریمیوم رو باز کن» (navigation) → matches premium_navigation (NOT how_to_premium)
+test('Chat AI v2 Premium Fix K20: «بخش پریمیوم رو باز کن» matches premium_navigation (NOT how_to_premium)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'بخش پریمیوم رو باز کن' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (navigation → premium_navigation)');
+  // Reply must be SHORT navigation confirmation
+  assert.ok(res.body.reply.length < 100,
+    `reply must be short (got ${res.body.reply.length} chars)`);
+  // Reply must NOT contain the activation procedure
+  assert.ok(!res.body.reply.includes('برای دریافت Premium باید این مراحل'),
+    'reply must NOT contain 4-step activation procedure');
+  assert.ok(!res.body.reply.includes('UID'),
+    'reply must NOT mention UID');
+  assert.ok(!res.body.reply.includes('صرافی'),
+    'reply must NOT mention exchange');
+  // Action must be open_membership
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership');
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K19b: «برو بخش پریمیوم» (navigation, alternative) → matches premium_navigation
+test('Chat AI v2 Premium Fix K19b: «برو بخش پریمیوم» matches premium_navigation', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) groqCalled = true;
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'برو بخش پریمیوم' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.provider, 'faq_handler',
+    'provider must be faq_handler (navigation → premium_navigation)');
+  assert.ok(res.body.reply.length < 100,
+    'reply must be short navigation confirmation');
+  assert.ok(!res.body.reply.includes('UID'),
+    'reply must NOT mention UID (NOT how_to_premium)');
+  assert.ok(res.body.action && res.body.action.type === 'open_membership',
+    'action must be open_membership');
+  assert.equal(groqCalled, false, 'Groq must NOT have been called');
+});
+
+// K21: NEGATIVE — «برو بخش اخبار» must NOT match how_to_premium (no Premium keyword)
+test('Chat AI v2 Premium Fix K21: «برو بخش اخبار» does NOT trigger Premium FAQ (negative)', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) {
+        groqCalled = true;
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                choices: [{ message: { content: 'برای رفتن به بخش اخبار، روی تب اخبار کلیک کن.' } }],
+              }),
+            }
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'برو بخش اخبار' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  // Must NOT be faq_handler (no Premium FAQ match)
+  assert.notEqual(res.body.provider, 'faq_handler',
+    'provider must NOT be faq_handler (no Premium keyword in message)');
+  // Must NOT have open_membership action (no Premium navigation)
+  assert.ok(!res.body.action || res.body.action.type !== 'open_membership',
+    'action must NOT be open_membership (no Premium context)');
+  // Groq WAS called (FAQ did not short-circuit)
+  assert.equal(groqCalled, true,
+    'Groq was called (FAQ did not match — no false positive)');
+});
+
+// K22: NEGATIVE — «بخش رو باز کن» (generic navigation, no Premium keyword) must NOT match Premium
+test('Chat AI v2 Premium Fix K22: «بخش رو باز کن» (generic, no Premium keyword) does NOT trigger Premium FAQ', async () => {
+  const worker = loadWorker();
+  const rateLimits = createMemoryKv();
+  let groqCalled = false;
+  const mockPool = {
+    query: async (sql) => {
+      if (sql.includes('groq_generate_with_key')) {
+        groqCalled = true;
+        return {
+          rows: [{
+            result: {
+              status_code: 200,
+              response_body: JSON.stringify({
+                choices: [{ message: { content: 'کدام بخش رو می‌خوای باز کنی؟' } }],
+              }),
+            }
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    end: async () => {},
+    on: () => {},
+  };
+  const env = createEnv({
+    RATE_LIMITS: rateLimits,
+    GROQ_API_KEY: 'fake-groq-key',
+    DATABASE_URL: '',
+    _reqPool: mockPool,
+  });
+  const user = { id: 999888, first_name: 'Test' };
+  const initData = buildInitData('test-bot-token', user);
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'بخش رو باز کن' },
+    initData,
+  });
+  assert.equal(res.status, 200);
+  // Must NOT match Premium FAQ
+  assert.notEqual(res.body.provider, 'faq_handler',
+    'provider must NOT be faq_handler (no Premium keyword)');
+  assert.ok(!res.body.action || res.body.action.type !== 'open_membership',
+    'action must NOT be open_membership (no Premium context)');
+  assert.equal(groqCalled, true,
+    'Groq was called (no false positive — generic navigation did not trigger Premium)');
+});
