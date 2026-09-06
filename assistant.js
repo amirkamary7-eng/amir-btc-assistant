@@ -461,6 +461,57 @@ const AssistantUI = {
         }
     },
 
+    // Chat AI v2 Fix: Render a clickable action card (NOT auto-execute).
+    // User must click to navigate. No forced navigation.
+    appendActionCard(action) {
+        if (!action || !action.type) return;
+        const box = document.getElementById('ai-messages');
+        if (!box) return;
+
+        // Action labels (Persian) — matches the action type
+        const ACTION_LABELS = {
+            open_dashboard: '📊 مشاهده داشبورد',
+            open_market: '📈 مشاهده بازار',
+            open_news: '📰 مشاهده اخبار',
+            open_analysis: '🔍 مشاهده تحلیل‌ها',
+            open_profile: '👤 مشاهده پروفایل',
+            open_wallet: '💰 مشاهده کیف پول',
+            open_referral: '👥 مشاهده رفرال',
+            open_membership: '⭐ مشاهده بخش عضویت',
+            open_membership_rules: '📋 مشاهده قوانین Premium',
+            open_about: 'ℹ️ مشاهده درباره ما',
+            open_terms: '📜 مشاهده قوانین و شرایط',
+            open_privacy: '🔒 مشاهده حریم خصوصی',
+            open_settings: '⚙️ مشاهده تنظیمات',
+            open_language: '🌐 تغییر زبان',
+            open_tickets: '🎫 مشاهده پشتیبانی',
+            open_coin_detail: '🪙 مشاهده جزئیات ارز',
+            open_news_category: '📰 مشاهده اخبار',
+            open_calendar: '📅 مشاهده تقویم اقتصادی',
+            open_forex_detail: '📈 مشاهده جزئیات فارکس',
+        };
+
+        const label = ACTION_LABELS[action.type] || '🔗 مشاهده';
+        const wrapper = document.createElement('div');
+        wrapper.className = 'ai-msg-row ai-msg-assistant';
+
+        const card = document.createElement('button');
+        card.className = 'ai-action-card';
+        card.innerHTML = label;
+        card.onclick = () => {
+            // Execute the action only on explicit user click
+            AssistantUI.executeAction(action);
+        };
+
+        wrapper.appendChild(card);
+        box.appendChild(wrapper);
+
+        // Smooth scroll to bottom
+        requestAnimationFrame(() => {
+            box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+        });
+    },
+
     async refreshLimits() {
         const el = document.getElementById('ai-limits');
         if (!el || !window.API_BASE || (typeof isGuestUserId === 'function' ? isGuestUserId(getUserId()) : String(getUserId()).startsWith('guest_'))) {
@@ -1226,9 +1277,10 @@ const AssistantUI = {
                 this.history.push({ role: 'user', content: userMsg });
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
-                // Chat AI v2: Execute navigation action if present (hardcoded allowlist, NO eval)
+                // Chat AI v2 Fix: Action is a SUGGESTED button, NOT auto-executed.
+                // User must explicitly click to navigate. No forced navigation.
                 if (data.action) {
-                    this.executeAction(data.action);
+                    this.appendActionCard(data.action);
                 }
                 // PHASE 6: Quota consumed on success — clear attachment + composer
                 this.clearAttachment();
@@ -1328,7 +1380,7 @@ const AssistantUI = {
                 this.history.push({ role: 'assistant', content: data.reply });
                 this.appendBubble('assistant', data.reply);
                 if (data.action) {
-                    this.executeAction(data.action);
+                    this.appendActionCard(data.action);
                 }
                 this.clearAttachment();
             } else {
