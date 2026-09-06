@@ -1874,13 +1874,17 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
   // output, removed Chinese '跌破' leftover from sentiment array). These changes
   // are verified by news-ai-rootcause-audit-test.cjs and the 11-case translation
   // validation test suite.
+  //
+  // NOTE: publishArticleToFarsiNews REMOVED — intentionally modified (News Phase 3:
+  // published_at now uses real RSS pub_date instead of Date.now(), so old
+  // articles don't re-appear as "newest" on re-analysis/cache-refresh).
   const PROTECTED = new Set([
     // News AI — provider chain (NOT processOneArticleSummary, NOT translateToFarsi,
     // NOT generateSummaryWithFallback — all intentionally modified with P0-1/P0-2/P1-B fixes)
     // NOTE: processNewsAIBatch REMOVED — intentionally modified (Phase 3: batch translation)
     // NOTE: buildFarsiNewsArticles NOT protected — intentionally modified (Phase 3: batch translation)
+    // NOTE: publishArticleToFarsiNews REMOVED — intentionally modified (News Phase 3)
     'fetchAllNewsRss',
-    'publishArticleToFarsiNews',
     'fetchNewsRss', 'processNewsQueue', 'runNewsAICron',
     // Chat AI (assistant.js controller mirrors; names that would indicate chat changes)
     'handleChatMessage', 'processChatMessage', 'callAIProvider', 'streamChatCompletion',

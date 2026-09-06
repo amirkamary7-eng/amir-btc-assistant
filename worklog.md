@@ -5158,3 +5158,25 @@ Stage Summary:
 - Persistence: fresh device no longer overwrites DB lang; explicit local pref protected from server response
 - Pre-render: EN users see en|ltr from first paint (no FA/RTL flash)
 - NO COMMIT / NO PUSH / NO DEPLOY — awaiting user approval
+
+---
+Task ID: NEWS-FINAL-VERIFICATION
+Agent: Z.ai Code (Orchestrator)
+Task: Final Read-Only Verification of News Pipeline Fix (7 items)
+
+Work Log:
+- 1. Truncation: tested with 6 fixtures. Cut at sentence boundary works for cases with boundary in [6500, 8500]. Hard-cut at 8000 only when no boundary in range (rare). Persian ۔ (U+06D4) detected. ✅ PASS
+- 2. Language Validation: tested with 8 fixtures. Persian + tickers + proper nouns accepted. Persian/English refusals rejected. CJK rejected. Russian rejected (insufficient_persian). FOUND ISSUE: Arabic text (U+0600-U+06FF) passes Persian ratio check — same Unicode range. NEEDS ATTENTION.
+- 3. Hero / Featured: tested with 8 scenarios. FOUND ISSUE: freshness check is at END of function — breaking sentiment and high impact return true BEFORE freshness check runs. Old + important news stays hero. NEEDS ATTENTION.
+- 4. Publication Timestamp: traced full path RSS → queue → AI → saveAnalysis → DB → KV → API → frontend. pub_date preserved end-to-end. created_at/updated_at NOT used as published_at (except in DB fallback when pub_date is NULL — documented). Timezone: Tehran (Asia/Tehran) in frontend. ✅ PASS
+- 5. Changed Tests: chat-ai-quota-image-retention-test.cjs — removed publishArticleToFarsiNews from PROTECTED list (justified — function intentionally modified). persian-validation-batch-translation-test.cjs — updated SRC-07 assertion phrase to match new prompt text (justified). ✅ PASS
+- 6. End-to-End: 5 scenarios traced. Healthy news ✅, Truncated ✅ (rejected), AI refusal ✅ (rejected), Russian ✅ (rejected), Old+important (Hero issue — see #3). NEEDS ATTENTION on Hero.
+- 7. Provider Architecture: confirmed Groq → OpenRouter → Workers AI → OpenAI (no Gemini in news summary chain). Anti-hallucination instruction preserved in prompt. ✅ PASS
+
+Stage Summary:
+- 2 issues found that NEED ATTENTION before commit:
+  (a) Arabic text passes Persian ratio check (U+0600-U+06FF overlap) — low risk for production but a real gap
+  (b) Hero freshness check bypassed by breaking/high-impact returns at top of function — old important news stays hero
+- 5 of 7 items PASS cleanly
+- No code changes made (read-only verification as instructed)
+- Commit recommendation: DO NOT APPROVE until Hero freshness issue is acknowledged

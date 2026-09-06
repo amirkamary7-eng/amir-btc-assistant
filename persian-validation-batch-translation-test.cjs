@@ -272,7 +272,7 @@ test('SRC-03: Whitelist has BTC', () => assert.match(WORKER_SRC, /'BTC'/));
 test('SRC-04: Whitelist has ETH', () => assert.match(WORKER_SRC, /'ETH'/));
 test('SRC-05: Whitelist has USDT', () => assert.match(WORKER_SRC, /'USDT'/));
 test('SRC-06: JOURNALIST_SYSTEM prohibits CJK', () => assert.match(WORKER_SRC, /هیچ کاراکتر چینی/));
-test('SRC-07: JOURNALIST_SYSTEM prohibits English', () => assert.match(WORKER_SRC, /هیچ کلمه یا عبارت انگلیسی مجاز نیست/));
+test('SRC-07: JOURNALIST_SYSTEM prohibits English', () => assert.match(WORKER_SRC, /هیچ کلمه یا عبارت انگلیسی معمولی مجاز نیست/));
 test('SRC-08: JOURNALIST_SYSTEM has transliteration', () => {
   assert.match(WORKER_SRC, /بایننس/);
   assert.match(WORKER_SRC, /گوگل/);

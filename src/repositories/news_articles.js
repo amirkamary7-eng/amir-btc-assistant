@@ -56,11 +56,15 @@ export function createNewsArticleRepository(deps) {
         provider VARCHAR(32),
         analyzed_at TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW(),
+        pub_date TIMESTAMPTZ,
         UNIQUE(url)
       )
     `, []);
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_news_articles_url ON news_articles (url)`, []).catch(() => {});
     await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_news_articles_created ON news_articles (created_at DESC)`, []).catch(() => {});
+    // PHASE 3 FIX: Add pub_date column + index for idempotent migration on existing deployments.
+    await queryDb(env, `ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS pub_date TIMESTAMPTZ`, []).catch(() => {});
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_news_articles_pub_date ON news_articles (pub_date DESC NULLS LAST)`, []).catch(() => {});
     _tableEnsured = true;
   }
 
@@ -142,13 +146,17 @@ export function createNewsArticleRepository(deps) {
   async function saveAnalysis(env, data, pool = null) {
     const {
       id, url, title, title_en, source, category,
-      summary, sentiment, impact, impact_reason, coins, provider
+      summary, sentiment, impact, impact_reason, coins, provider, pub_date
     } = data;
 
     try {
+      // PHASE 3 FIX: persist pub_date (real RSS publication date) so the DB
+      // fallback feed can sort by real publication time, not AI processing
+      // time. Also update sentiment/impact/impact_reason/coins on conflict
+      // (previously discarded by the caller hardcoding defaults).
       await queryDb(env, `
-        INSERT INTO news_articles (id, url, title, title_en, source, category, summary, sentiment, impact, impact_reason, coins, provider, analyzed_at, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+        INSERT INTO news_articles (id, url, title, title_en, source, category, summary, sentiment, impact, impact_reason, coins, provider, analyzed_at, created_at, pub_date)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), $13)
         ON CONFLICT (id) DO UPDATE SET
           summary = EXCLUDED.summary,
           sentiment = EXCLUDED.sentiment,
@@ -156,6 +164,7 @@ export function createNewsArticleRepository(deps) {
           impact_reason = EXCLUDED.impact_reason,
           coins = EXCLUDED.coins,
           provider = EXCLUDED.provider,
+          pub_date = COALESCE(EXCLUDED.pub_date, news_articles.pub_date),
           analyzed_at = NOW()
       `, [
         String(id),
@@ -170,6 +179,7 @@ export function createNewsArticleRepository(deps) {
         String(impact_reason || ''),
         Array.isArray(coins) ? JSON.stringify(coins) : String(coins || '[]'),
         String(provider || 'unknown'),
+        pub_date ? new Date(pub_date).toISOString() : null,
       ], 1, pool);
       return true;
     } catch (e) {
@@ -203,11 +213,15 @@ export function createNewsArticleRepository(deps) {
     const safeLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 30));
     try {
       const params = [safeLimit];
+      // PHASE 3 FIX: sort by pub_date DESC (real RSS publication date) first,
+      // then analyzed_at DESC as a secondary sort. This makes the DB fallback
+      // feed match the chronological order the user expects (newest first by
+      // publication date), not the AI processing time.
       let sql = `
         SELECT
           id, url, title, title_en, source, category,
           summary, sentiment, impact, impact_reason, coins, provider,
-          analyzed_at, created_at
+          analyzed_at, created_at, pub_date
         FROM news_articles
         WHERE created_at > NOW() - INTERVAL '4 days'
       `;
@@ -215,18 +229,19 @@ export function createNewsArticleRepository(deps) {
         sql += ` AND category = $2`;
         params.push(category);
       }
-      sql += ` ORDER BY analyzed_at DESC NULLS LAST, created_at DESC LIMIT $1`;
+      sql += ` ORDER BY pub_date DESC NULLS LAST, analyzed_at DESC NULLS LAST, created_at DESC LIMIT $1`;
       const result = await queryDb(env, sql, params, 1, pool);
       // Transform DB rows to feed-article shape (match KV news:farsi format)
       return (result.rows || []).map(row => {
         let coinsArr = [];
         try { coinsArr = typeof row.coins === 'string' ? JSON.parse(row.coins) : (Array.isArray(row.coins) ? row.coins : []); } catch {}
+        const realPubDate = row.pub_date ? new Date(row.pub_date).getTime() : null;
         return {
           title: row.title || '',
           title_en: row.title_en || '',
           description: '',
           time_ago: null,
-          pub_date: null,
+          pub_date: realPubDate ? new Date(row.pub_date).toISOString() : null,
           source: row.source || '',
           category: row.category || 'crypto',
           image: null,
@@ -237,7 +252,7 @@ export function createNewsArticleRepository(deps) {
           coins: Array.isArray(coinsArr) ? coinsArr : [],
           importance_tags: [],
           importance_score: 0,
-          published_at: row.analyzed_at ? new Date(row.analyzed_at).getTime() : (row.created_at ? new Date(row.created_at).getTime() : Date.now()),
+          published_at: realPubDate || (row.analyzed_at ? new Date(row.analyzed_at).getTime() : (row.created_at ? new Date(row.created_at).getTime() : Date.now())),
           // DB-specific: ai_summary is the stored summary (enrichNewsWithAISummaries adds this)
           _db_summary: row.summary || '',
           _db_provider: row.provider || '',

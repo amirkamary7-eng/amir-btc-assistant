@@ -6761,20 +6761,51 @@ function sanitizeNewsTitle(rawTitle) {
  * Item 2: News time displayed in Tehran timezone, not UTC.
  */
 function formatNewsTimeTehran(pubDate, relativeTime) {
-    // If we have a valid pubDate, format as Tehran time (HH:MM only, no label)
+    // PHASE 4 FIX: Show date + time (not just time), in the UI's active language.
+    // Examples:
+    //   FA, today:      "امروز، ۱۵:۳۰"
+    //   FA, other day:  "۵ سپتامبر، ۲۲:۱۰"
+    //   EN, today:      "Today, 15:30"
+    //   EN, other day:  "5 Sep, 22:10"
+    // The timezone is always Asia/Tehran (UTC+3:30, no DST) — matches the source
+    // RSS pubDate which is converted to Tehran local time for display.
     if (pubDate) {
         try {
             const date = new Date(pubDate);
             if (!isNaN(date.getTime())) {
-                // Format in Asia/Tehran timezone (UTC+3:30, no DST)
-                // Show ONLY the time (e.g. "۱۴:۳۵") — no "به وقت تهران" label
-                // to keep the UI clean and uncluttered.
-                return new Intl.DateTimeFormat('fa-IR', {
+                // Determine UI language: use window.currentLang if available (set by
+                // the language bootstrap), else default to 'fa' for backward compat.
+                const lang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'fa';
+                const locale = lang === 'en' ? 'en-US' : 'fa-IR';
+
+                // Determine if the pubDate is "today" in Tehran timezone.
+                // We format the date part in Tehran tz and compare to "now" in Tehran tz.
+                const tehranNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tehran' }));
+                const tehranDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Tehran' }));
+                const isToday = tehranNow.toDateString() === tehranDate.toDateString();
+
+                // Time part: HH:MM (24h) in Tehran timezone
+                const timeStr = new Intl.DateTimeFormat(locale, {
                     timeZone: 'Asia/Tehran',
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false,
                 }).format(date);
+
+                if (isToday) {
+                    // "Today" label in the active language
+                    const todayLabel = lang === 'en' ? 'Today' : 'امروز';
+                    return `${todayLabel}، ${timeStr}`;
+                }
+
+                // Date part: "day month" (e.g., "5 Sep" or "۵ سپتامبر")
+                const dateStr = new Intl.DateTimeFormat(locale, {
+                    timeZone: 'Asia/Tehran',
+                    day: 'numeric',
+                    month: lang === 'en' ? 'short' : 'long',
+                }).format(date);
+
+                return `${dateStr}، ${timeStr}`;
             }
         } catch (_) { /* fall through to relative time */ }
     }
@@ -8965,13 +8996,31 @@ function niBadgeHtml(sentiment) {
  * Returns 'high', 'medium', or 'low'.
  */
 function niImpactLevel(news) {
+    // PHASE 5 FIX: prefer the backend AI-classified impact field when available.
+    // Previously this function ignored the backend `impact` field and recomputed
+    // from sentiment + title keywords — which could disagree with the AI
+    // classification. Now we trust the backend field first, falling back to
+    // the rule-based computation only when the backend field is missing/low
+    // but sentiment suggests higher impact.
+    const backendImpact = (news.impact || '').toLowerCase();
+    if (backendImpact === 'high') return 'high';
+    if (backendImpact === 'medium') return 'medium';
+
     const s = (news.sentiment || '').toLowerCase();
     const title = (news.title || '').toLowerCase();
     if (s === 'breaking') return 'high';
     if (s === 'bullish' || s === 'bearish') return 'medium';
-    // Check for high-impact keywords
-    const highImpactKeywords = ['bitcoin', 'ethereum', 'sec', 'etf', 'fed', 'cpi', 'rate', 'ban', 'hack', 'crash', 'rally', 'surge'];
+    // PHASE 5 FIX: add Persian keyword equivalents so Persian-titled articles
+    // can be classified as high-impact (previously only English keywords matched).
+    const highImpactKeywords = [
+        // English
+        'bitcoin', 'ethereum', 'sec', 'etf', 'fed', 'cpi', 'rate', 'ban', 'hack', 'crash', 'rally', 'surge',
+        // Persian equivalents
+        'بیت‌کوین', 'بیت کوین', 'اتریوم', 'قانون', 'هک', 'سقوط', 'رشد', 'افزایش', 'کاهش',
+    ];
     if (highImpactKeywords.some(k => title.includes(k))) return 'high';
+    // If backend said 'low' but we can't confirm higher, respect the backend.
+    if (backendImpact === 'low') return 'low';
     return 'low';
 }
 
@@ -8987,15 +9036,53 @@ function niImpactHtml(news) {
 /**
  * Determine if a news item qualifies for the hero slider.
  * Only breaking, high-impact, or trending news goes in the hero.
+ *
+ * PHASE 5 FIX (corrected): the freshness check MUST run BEFORE the
+ * breaking / high-impact / keyword paths. If an article has a valid
+ * pub_date and is older than 24 hours, it is NOT hero-eligible — even
+ * if it is breaking, high-impact, or matches a major keyword. This
+ * prevents old articles from being re-featured as hero just because
+ * they are still in the KV cache. If pub_date is missing or invalid,
+ * the freshness gate is skipped (existing behavior preserved for
+ * articles without a known publication time).
  */
 function niIsHeroEligible(news) {
+    // GATE 1 — freshness (runs FIRST, before any other eligibility path).
+    // If pub_date is present and valid AND the article is older than 24
+    // hours, immediately return false. Age alone never causes Hero
+    // eligibility — it can only restrict it.
+    if (news.pub_date) {
+        try {
+            const pubMs = new Date(news.pub_date).getTime();
+            if (!isNaN(pubMs)) {
+                const ageHours = (Date.now() - pubMs) / (1000 * 60 * 60);
+                if (ageHours > 24) return false;
+            }
+        } catch (_) { /* invalid pub_date — skip freshness gate */ }
+    }
+
+    // GATE 2 — breaking sentiment.
     const s = (news.sentiment || '').toLowerCase();
     if (s === 'breaking') return true;
+
+    // GATE 3 — high impact (backend AI-classified or rule-based).
     if (niImpactLevel(news) === 'high') return true;
-    // Check title for major events
+
+    // GATE 4 — major keyword match (English + Persian).
+    // PHASE 5 FIX: add Persian keyword equivalents so Persian-titled articles
+    // can qualify for the hero slider. Previously only English keywords matched,
+    // which meant most translated Persian titles never became hero-eligible.
     const title = (news.title || '').toUpperCase();
-    const majorKeywords = ['BITCOIN', 'BTC', 'ETHEREUM', 'ETH', 'ETF', 'FED', 'SEC', 'RALLY', 'CRASH', 'SURGE', 'REGULATION'];
-    return majorKeywords.some(k => title.includes(k));
+    const majorKeywords = [
+        // English
+        'BITCOIN', 'BTC', 'ETHEREUM', 'ETH', 'ETF', 'FED', 'SEC', 'RALLY', 'CRASH', 'SURGE', 'REGULATION',
+        // Persian equivalents (uppercased for case-insensitive match)
+        'بیت‌کوین', 'بیت کوین', 'BTC'.toLowerCase().toUpperCase(), 'اتریوم', 'ETH'.toLowerCase().toUpperCase(),
+        'صندوق', 'فدرال', 'قانون', 'سقوط', 'رشد', 'افزایش',
+    ];
+    if (majorKeywords.some(k => title.includes(k))) return true;
+
+    return false;
 }
 
 /**
@@ -9008,9 +9095,21 @@ function niAiSummaryHtml(news) {
     // Use ai_summary (the actual Persian analysis from the API)
     const preview = news.ai_summary || '';
     if (!preview || preview.trim().length < 50) return '';
-    // Truncate to 120 chars for card preview (avoid overflow)
-    const truncated = preview.length > 120 ? preview.substring(0, 120) + '...' : preview;
-    return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(truncated)}</span></div>`;
+    // PHASE 6 FIX: truncate at the last WORD boundary before 120 chars, not
+    // mid-word. This prevents the card preview from showing a half-cut word
+    // with "..." appended (which looked like a complete-but-truncated text).
+    // We walk backward from char 120 to find the last space; if no space is
+    // found within 30 chars, we fall back to the hard cut (rare for Persian
+    // which has natural word breaks).
+    if (preview.length > 120) {
+        let cut = 120;
+        for (let i = 120; i >= 90 && i > 0; i--) {
+            if (preview[i] === ' ') { cut = i; break; }
+        }
+        const truncated = preview.substring(0, cut).trimEnd() + '...';
+        return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(truncated)}</span></div>`;
+    }
+    return `<div class="ni-card-ai-summary">${NI_ICONS.sparkles}<span>${escapeHtml(preview)}</span></div>`;
 }
 
 // Legacy badge functions — kept for dashboard important news compatibility
@@ -9108,6 +9207,18 @@ async function loadNews(force = false, append = false) {
                     ai_summary: a.ai_summary || null,
                     ai_status: a.ai_status || 'pending',
                     source_name: a.source_name || a.source || '',
+                    // PHASE 6 FIX: preserve backend AI-enriched fields so the
+                    // modal tags (impact, coins) render and the hero slider
+                    // can use the real AI-classified impact. Previously these
+                    // were dropped in mapping, so the modal never showed the
+                    // impact/coins tags and niImpactLevel had to recompute
+                    // from sentiment + title keywords.
+                    impact: a.impact || 'low',
+                    impact_reason: a.impact_reason || '',
+                    coins: Array.isArray(a.coins) ? a.coins : [],
+                    importance_score: a.importance_score || 0,
+                    importance_tags: Array.isArray(a.importance_tags) ? a.importance_tags : [],
+                    published_at: a.published_at || null,
                 }));
                 fetchSucceeded = true;
             }
@@ -9439,7 +9550,11 @@ function niRenderHeroSlider(items) {
     const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22240%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22/%3E%3C/svg%3E';
     const slidesHtml = validItems.map((n, i) => {
         const img = n.image && !n.image.includes('data:image/svg') ? n.image : placeholderImg;
-        const idx = newsCache.indexOf(n); // index in displayedNews for modal
+        // PHASE 6 FIX: use displayedNews.indexOf (not newsCache.indexOf) so the
+        // hero slider click opens the CORRECT article when category filters are
+        // active. openNewsModal(idx) reads from displayedNews[idx], so the index
+        // must be relative to displayedNews, not the unfiltered newsCache.
+        const idx = displayedNews.indexOf(n);
         const isSaved = _niSavedNews.some(s => s.url === n.url);
         return `
         <div class="ni-hero-slide" onclick="openNewsModal(${idx})">
@@ -9687,7 +9802,19 @@ function toggleSaveNews(idx) {
     if (savedIdx >= 0) {
         _niSavedNews.splice(savedIdx, 1);
     } else {
-        _niSavedNews.unshift({ url: n.url, title: n.title, image: n.image, source: n.source, time: n.time, pub_date: n.pub_date, sentiment: n.sentiment, summary: n.summary, body: n.body, category: n.category, savedAt: Date.now() });
+        // PHASE 6 FIX: persist ai_summary + ai_status so saved news cards show
+        // the AI summary preview and the saved modal shows the full summary
+        // (previously the saved modal showed "در حال آماده‌سازی..." forever
+        // because ai_summary was not saved).
+        _niSavedNews.unshift({
+            url: n.url, title: n.title, image: n.image, source: n.source,
+            time: n.time, pub_date: n.pub_date, sentiment: n.sentiment,
+            summary: n.summary, body: n.body, category: n.category,
+            ai_summary: n.ai_summary || null, ai_status: n.ai_status || 'pending',
+            impact: n.impact || 'low', coins: Array.isArray(n.coins) ? n.coins : [],
+            impact_reason: n.impact_reason || '',
+            savedAt: Date.now(),
+        });
     }
     // NEWSFE-011 FIX: Use safeLocalStorageSetItem to prevent QuotaExceededError
     // from propagating up and leaving the save button in a stuck state. The
@@ -9879,7 +10006,9 @@ function onNewsSearchInput(query) {
     if (newsResults.length) {
         html += '<div class="ni-cal-time-group">' + t('news_time_group_news') + '</div>';
         newsResults.forEach(n => {
-            const idx = newsCache.indexOf(n);
+            // PHASE 6 FIX: use displayedNews.indexOf (not newsCache.indexOf) for
+            // correct modal index when filters are active.
+            const idx = displayedNews.indexOf(n);
             html += `
             <div class="ni-card" style="animation-delay:0s" onclick="closeNewsSearch(); switchTab('news-page'); setTimeout(() => openNewsModal(${idx}), 300)">
                 <div class="ni-card-top">

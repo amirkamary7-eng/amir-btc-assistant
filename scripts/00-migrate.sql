@@ -583,11 +583,14 @@ CREATE TABLE IF NOT EXISTS news_articles (
   provider       VARCHAR(32),
   analyzed_at    TIMESTAMPTZ DEFAULT NOW(),
   created_at     TIMESTAMPTZ DEFAULT NOW(),
+  pub_date       TIMESTAMPTZ,
   UNIQUE(url)
 );
 
 CREATE INDEX IF NOT EXISTS idx_news_articles_url     ON news_articles (url);
 CREATE INDEX IF NOT EXISTS idx_news_articles_created ON news_articles (created_at DESC);
+ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS pub_date TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_news_articles_pub_date ON news_articles (pub_date DESC NULLS LAST);
 
 
 -- ── notification_broadcasts ────────────────────────────────────────────────
