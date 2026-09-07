@@ -33,6 +33,11 @@ export function createWalletHandlers(deps) {
     // to not match the retry cron's reconstruction. Now uses Tehran date consistently.
     getTehranDateString: _getTehranDateString = () => new Date().toISOString().slice(0, 10),
     getTehranWeekStart: _getTehranWeekStart = () => new Date().toISOString().slice(0, 10),
+    // PERF FIX: helper to schedule fire-and-forget background tasks on
+    // Cloudflare ctx.waitUntil() so notifications stay alive past the
+    // response. Falls back to plain fire-and-forget when not available
+    // (test environment without env.ctx).
+    backgroundTask: _backgroundTask = null,
   } = deps;
 
   /**
@@ -46,6 +51,26 @@ export function createWalletHandlers(deps) {
     } catch (e) {
       return false;
     }
+  }
+
+  /**
+   * PERF FIX: schedule a background task on Cloudflare ctx.waitUntil() if
+   * available (production Worker), otherwise fall back to plain fire-and-
+   * forget (test environment without env.ctx). The promise is wrapped with
+   * .catch() so an already-rejected promise never surfaces as an unhandled
+   * rejection.
+   */
+  function _scheduleBackground(env, promise) {
+    if (typeof _backgroundTask === 'function') {
+      return _backgroundTask(env, promise);
+    }
+    // Fallback: plain fire-and-forget with .catch (for tests where
+    // backgroundTask is not injected — same behavior as the prior
+    // implementation, which is acceptable in test environments).
+    if (promise && typeof promise.catch === 'function') {
+      return promise.catch(e => console.warn('[wallet-bg] non-blocking task failed:', e?.message || String(e)));
+    }
+    return promise;
   }
 
   /**
@@ -260,8 +285,15 @@ export function createWalletHandlers(deps) {
       }
 
       // Dispatch notification via NotificationService (single entry point)
+      // PERF FIX (Daily Check-in Latency): notification is fire-and-forget —
+      // it MUST NOT block the response. Previously `await notificationService.create(...)`
+      // was on the main path and could add 1-5s latency (template fetch, settings
+      // fetch, INSERT notifications, enqueue, processQueue → Telegram API fetch).
+      // Now: response returns immediately after the atomic DB commit with
+      // newBalance. Notification runs in background; failures are logged.
+      // Reward atomicity is unaffected (DB committed before this point).
       if (notificationService && result && result.credited !== false) {
-        await notificationService.create(env, {
+        _scheduleBackground(env, notificationService.create(env, {
           userId: authState.user.id,
           templateKey: 'wallet_received',
           category: 'wallet',
@@ -269,7 +301,7 @@ export function createWalletHandlers(deps) {
           channel: 'both',
           metadata: { amount: String(result.amount), name: 'Daily Reward', streak_day: result.streak_day },
           dedupKey: `wallet_daily_${authState.user.id}_${_getTehranDateString()}`,
-        }).catch(() => {});
+        }));
       }
 
       return jsonResponse({
@@ -518,9 +550,17 @@ export function createWalletHandlers(deps) {
           newBalance = result.newBalance;
 
           // Dispatch notification via NotificationService
-          // Await — ensures notification completes BEFORE withSharedPool closes the DB pool.
+          // PERF FIX (Mission Completion Latency): notification is fire-and-forget —
+          // it MUST NOT block the response. Previously `await notificationService.create(...)`
+          // was on the main path and could add 1-5s latency (template fetch, settings
+          // fetch, INSERT notifications, enqueue, processQueue → Telegram API fetch).
+          // Note: handleMissionComplete does not use withSharedPool (queries use
+          // queryDb/queryDbTransaction which create+end their own pools), so the
+          // earlier "ensure notification completes BEFORE withSharedPool closes"
+          // comment was a non-applicable safety belt — removed for correctness.
+          // Reward atomicity is unaffected (DB committed before this point).
           if (rewardGranted && notificationService) {
-            await notificationService.create(env, {
+            _scheduleBackground(env, notificationService.create(env, {
               userId,
               category: 'wallet',
               priority: 'low',
@@ -533,7 +573,7 @@ export function createWalletHandlers(deps) {
               // day 2's notification would ON CONFLICT DO NOTHING with day 1's,
               // silently dropping the notification. Now day-scoped.
               dedupKey: `wallet_mission_${missionId}_${userId}_${today}`,
-            }).catch(() => {});
+            }));
           }
         }
       }
@@ -628,7 +668,8 @@ export function createWalletHandlers(deps) {
           newBalance = result.newBalance;
 
           if (rewardGranted && notificationService) {
-            await notificationService.create(env, {
+            // PERF FIX: fire-and-forget — same as handleClaimDaily/handleMissionComplete.
+            _scheduleBackground(env, notificationService.create(env, {
               userId,
               category: 'wallet',
               priority: 'low',
@@ -638,7 +679,7 @@ export function createWalletHandlers(deps) {
               metadata: { mission_id: missionId, amount },
               // PHASE 1 FIX: include daily_date for unique-per-day notification idempotency
               dedupKey: `wallet_mission_${missionId}_${userId}_${today}`,
-            }).catch(() => {});
+            }));
           }
         }
       }

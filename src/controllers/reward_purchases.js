@@ -46,7 +46,29 @@ export function createRewardPurchaseHandlers(deps) {
     // the second debit idempotently (debitTokens handles 23505 unique
     // violation by returning { idempotent: true }).
     getTehranDateString,
+    // PERF FIX: helper to schedule fire-and-forget background tasks on
+    // Cloudflare ctx.waitUntil() so notifications stay alive past the
+    // response. Falls back to plain fire-and-forget when not available
+    // (test environment without env.ctx).
+    backgroundTask: _backgroundTask = null,
   } = deps;
+
+  /**
+   * PERF FIX: schedule a background task on Cloudflare ctx.waitUntil() if
+   * available (production Worker), otherwise fall back to plain fire-and-
+   * forget (test environment without env.ctx). The promise is wrapped with
+   * .catch() so an already-rejected promise never surfaces as an unhandled
+   * rejection.
+   */
+  function _scheduleBackground(env, promise) {
+    if (typeof _backgroundTask === 'function') {
+      return _backgroundTask(env, promise);
+    }
+    if (promise && typeof promise.catch === 'function') {
+      return promise.catch(e => console.warn('[vpn-purchase-bg] non-blocking task failed:', e?.message || String(e)));
+    }
+    return promise;
+  }
 
   function _getTehranDateSafe() {
     try { return (typeof getTehranDateString === 'function') ? getTehranDateString() : new Date().toISOString().slice(0, 10); }
@@ -91,15 +113,26 @@ export function createRewardPurchaseHandlers(deps) {
 
     const now = Date.now();
     const plansWithState = plans.map(plan => {
-      // Check if user has a recent fulfilled purchase for this plan (30-day cooldown)
+      // Check if user has a recent fulfilled purchase for this plan (rolling 30-day window)
+      // E Time correctness: backend is the single source of truth. The 30-day
+      // window is computed from the actual fulfilled purchase's created_at
+      // (DB TIMESTAMPTZ), NOT a client-side calendar calculation.
+      // Premium-only enforcement is unchanged (premiumOnly + isPremium check).
       const recentPurchase = userPurchases.find(p =>
         p.plan_id === plan.id && p.status === 'fulfilled' &&
         p.created_at && (now - new Date(p.created_at).getTime()) < 30 * 86400000
       );
 
       const purchased = Boolean(recentPurchase);
+      const purchasedAtMs = purchased ? new Date(recentPurchase.created_at).getTime() : 0;
+      const elapsedDays = purchased ? (now - purchasedAtMs) / 86400000 : 0;
       const daysRemaining = purchased
-        ? Math.max(0, Math.ceil(30 - (now - new Date(recentPurchase.created_at).getTime()) / 86400000))
+        ? Math.max(0, Math.ceil(30 - elapsedDays))
+        : null;
+      // E: precise next-eligible timestamp = purchased_at + 30 days (ISO).
+      // Frontend uses this for accurate countdown independent of client clock.
+      const nextEligibleAt = purchased
+        ? new Date(purchasedAtMs + 30 * 86400000).toISOString()
         : null;
       const eligible = !purchased && (!plan.premiumOnly || isPremium);
 
@@ -119,6 +152,8 @@ export function createRewardPurchaseHandlers(deps) {
           purchased_at: recentPurchase.created_at,
           purchased_expires_at: recentPurchase.expires_at,
           days_remaining: daysRemaining,
+          // E: precise timestamp (display hint; backend still re-checks on purchase)
+          next_eligible_at: nextEligibleAt,
         } : {}),
       };
     });
@@ -174,6 +209,9 @@ export function createRewardPurchaseHandlers(deps) {
         message: `You already purchased this plan. ${limitCheck.daysRemaining} days until next purchase.`,
         code: 'PLAN_LIMIT_REACHED',
         days_remaining: limitCheck.daysRemaining,
+        // E: precise timestamp = purchased_at + 30 days. Frontend uses this
+        // for accurate countdown display (independent of client clock skew).
+        next_eligible_at: limitCheck.next_eligible_at || null,
         last_tracking_id: limitCheck.lastPurchase?.tracking_id || null,
       }, { status: 429 }, env);
     }
@@ -291,49 +329,49 @@ export function createRewardPurchaseHandlers(deps) {
       }
 
       // 3. Notify admin via internal notification system
+      // PERF FIX (VPN Purchase Latency): admin notification is fire-and-forget —
+      // it MUST NOT block the response. The DB purchase record is already
+      // committed at this point; the admin will see the pending purchase in
+      // the admin panel regardless. Previously `await notificationService.create(...)`
+      // could add 1-5s latency (template fetch, settings fetch, INSERT, enqueue,
+      // processQueue → Telegram API fetch for admin).
       if (notificationService) {
-        try {
-          const username = authState.user?.username || null;
-          const displayName = [authState.user?.first_name, authState.user?.last_name].filter(Boolean).join(' ') || username || userId;
-          await notificationService.create(env, {
-            userId: userId,
-            templateKey: 'vpn_purchase_pending',
-            category: 'system',
-            priority: 'high',
-            channel: 'both',
-            title: 'VPN Reward Purchase — Action Needed',
-            message: `NEW VPN PURCHASE\n\nUser: ${displayName} (${username ? '@' + username : 'ID: ' + userId})\nProduct: VPN ${plan.gb}GB (${plan.durationFa})\nCost: ${plan.costAb} AB\nTracking: ${purchase.tracking_id}\nStatus: Pending — send subscription link to user`,
-            metadata: {
-              purchase_id: purchase.id,
-              tracking_id: purchase.tracking_id,
-              user_id: userId,
-              username: username,
-              display_name: displayName,
-              reward: 'VPN',
-              vpn_gb: plan.gb,
-              cost_ab: plan.costAb,
-              duration_days: plan.durationDays,
-              status: 'pending',
-              admin_action: 'Send VPN subscription link to user',
-            },
-            dedupKey: `vpn_purchase_${purchase.id}`,
-          }).catch(() => {});
-        } catch (notifErr) {
-          console.warn('[vpn-purchase] admin notification failed:', notifErr?.message);
-        }
+        const username = authState.user?.username || null;
+        const displayName = [authState.user?.first_name, authState.user?.last_name].filter(Boolean).join(' ') || username || userId;
+        _scheduleBackground(env, notificationService.create(env, {
+          userId: userId,
+          templateKey: 'vpn_purchase_pending',
+          category: 'system',
+          priority: 'high',
+          channel: 'both',
+          title: 'VPN Reward Purchase — Action Needed',
+          message: `NEW VPN PURCHASE\n\nUser: ${displayName} (${username ? '@' + username : 'ID: ' + userId})\nProduct: VPN ${plan.gb}GB (${plan.durationFa})\nCost: ${plan.costAb} AB\nTracking: ${purchase.tracking_id}\nStatus: Pending — send subscription link to user`,
+          metadata: {
+            purchase_id: purchase.id,
+            tracking_id: purchase.tracking_id,
+            user_id: userId,
+            username: username,
+            display_name: displayName,
+            reward: 'VPN',
+            vpn_gb: plan.gb,
+            cost_ab: plan.costAb,
+            duration_days: plan.durationDays,
+            status: 'pending',
+            admin_action: 'Send VPN subscription link to user',
+          },
+          dedupKey: `vpn_purchase_${purchase.id}`,
+        }));
       }
 
-      // FIX 5: Send Telegram message to USER about successful purchase
+      // PERF FIX: user Telegram notification is also fire-and-forget.
+      // The Telegram message to the user about "purchase received" can
+      // arrive 1-3s after the user already sees the success UI — that
+      // is acceptable and preferred over making the user wait for it.
       if (sendTelegramMessage) {
-        try {
-          const trackingId = purchase.tracking_id;
-          // Dynamic duration label: 7 → «۷ روز», 30 → «۱ ماه»
-          const durationLabel = plan.durationDays >= 30 ? '۱ ماه' : '۷ روز';
-          const msg = `🎉 درخواست شما با موفقیت ثبت شد!\n\n📦 بسته: ${purchase.plan_name || `VPN ${plan.gb}GB`}\n💎 هزینه: ${plan.costAb} AB\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n⏳ لینک سرویس پس از آماده‌سازی برای شما ارسال خواهد شد.\n\n💙 ممنون که همراه Amir BTC هستید.`;
-          await sendTelegramMessage(env, { chat_id: String(userId), text: msg });
-        } catch (tgErr) {
-          console.warn('[vpn-purchase] Telegram purchase notification failed (non-blocking):', tgErr?.message);
-        }
+        const trackingId = purchase.tracking_id;
+        const durationLabel = plan.durationDays >= 30 ? '۱ ماه' : '۷ روز';
+        const msg = `🎉 درخواست شما با موفقیت ثبت شد!\n\n📦 بسته: ${purchase.plan_name || `VPN ${plan.gb}GB`}\n💎 هزینه: ${plan.costAb} AB\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n⏳ لینک سرویس پس از آماده‌سازی برای شما ارسال خواهد شد.\n\n💙 ممنون که همراه Amir BTC هستید.`;
+        _scheduleBackground(env, sendTelegramMessage(env, { chat_id: String(userId), text: msg }));
       }
 
       // AUDIT LOG

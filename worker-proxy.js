@@ -108,6 +108,45 @@ function safeError(scope, error) {
   return JSON.stringify({ scope, error: sanitized, type: error?.constructor?.name });
 }
 
+/**
+ * Fire-and-forget background task in Cloudflare Worker context.
+ *
+ * PERF FIX: Cloudflare Workers terminate I/O after the Response is returned.
+ * A bare `promise.catch(...)` without `ctx.waitUntil()` can be cut off before
+ * completion — losing the work (and leaking a "pool closed" error if it
+ * touches the shared pool that withSharedPool's finally has already ended).
+ *
+ * This helper wraps the promise with `env.ctx.waitUntil()` when available
+ * (production Worker), keeping it alive past the response. In test/Node
+ * environments where env.ctx is absent, it falls back to plain fire-and-
+ * forget (acceptable because Node won't kill the process mid-microtask).
+ *
+ * Usage:  backgroundTask(env, notificationService.create(env, {...}))
+ *         backgroundTask(env, sendTelegramMessage(env, {...}))
+ *
+ * @param {object} env - Worker env (with env.ctx set in fetch handler)
+ * @param {Promise} promise - The background work to schedule
+ */
+function backgroundTask(env, promise) {
+  if (!promise || typeof promise.catch !== 'function') return;
+  // Wrap with .catch FIRST so an already-rejected promise never surfaces
+  // as an unhandled rejection (which logs in Worker runtime).
+  const safe = promise.catch(e => {
+    // Log to console.warn — non-blocking, just for observability.
+    console.warn('[backgroundTask] non-blocking task failed:', e?.message || String(e));
+  });
+  // Schedule on Cloudflare ctx.waitUntil() if available — keeps the task
+  // alive past the response. Without it, the runtime may cancel the
+  // pending I/O (DB queries, Telegram API fetches) as soon as the
+  // Response is returned, causing silent notification loss.
+  if (env && env.ctx && typeof env.ctx.waitUntil === 'function') {
+    env.ctx.waitUntil(safe);
+  }
+  // Return safe promise (in case caller wants to also await it later —
+  // unusual, but harmless). Most callers ignore the return value.
+  return safe;
+}
+
 function withCors(headers = {}, env = null) {
   const merged = new Headers(headers);
   // Echo localhost origins (any port) so the app can be previewed locally
@@ -10451,6 +10490,10 @@ const walletHandlers = createWalletHandlers({
   // PHASE 1 (WALLET-REWARDS): shared Tehran date helpers for idempotency keys
   getTehranDateString: sharedGetTehranDateString,
   getTehranWeekStart: getTehranWeekStart,
+  // PERF FIX: backgroundTask helper — schedules fire-and-forget work on
+  // Cloudflare ctx.waitUntil() so notifications stay alive past the response.
+  // See worker-proxy.js backgroundTask() definition above.
+  backgroundTask,
 });
 
 // ── Reward Purchases (VPN Reward Market — Phase 5-8) ──
@@ -10476,6 +10519,9 @@ const rewardPurchaseHandlers = createRewardPurchaseHandlers({
   // W-STAB-4 FIX: pass Tehran date helper so controller can build deterministic
   // refId per (user, plan, tehran-today) for concurrent-request idempotency.
   getTehranDateString: sharedGetTehranDateString,
+  // PERF FIX: backgroundTask helper — schedules fire-and-forget work on
+  // Cloudflare ctx.waitUntil() so notifications stay alive past the response.
+  backgroundTask,
 });
 
 // ── Cosmetics Module — Phase 5 ──────────────────────────────────────────────
@@ -13212,6 +13258,12 @@ export default {
     // request only. withCors() reads it back when building response headers,
     // guaranteeing each response echoes its own request's Origin.
     env._reqOrigin = request.headers.get('Origin');
+    // PERF FIX: store ctx on env for fire-and-forget background tasks.
+    // Cloudflare Workers terminate I/O after the response is returned —
+    // to keep background work (notifications) alive, controllers use
+    // env.ctx.waitUntil(promise). This mirrors env._reqOrigin pattern
+    // (per-invocation, scoped to THIS request).
+    env.ctx = ctx;
     // TEMP: set trace context for instrumentation
     const _url = new URL(request.url);
     _setTraceContext(_url.pathname, request.method);

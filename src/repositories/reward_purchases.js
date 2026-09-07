@@ -136,7 +136,12 @@ export function createRewardPurchaseRepository(deps) {
     const plan = getVpnPlan(planId);
     if (!plan) return { restricted: false };
 
-    // Find the most recent fulfilled purchase for this user+plan
+    // PERF/E Time correctness: rolling 30-day window from the most recent
+    // FULFILLED purchase. The purchase is restricted if there exists a
+    // fulfilled purchase whose created_at is within the last 30 days.
+    // Exactly at 30 days elapsed, the WHERE clause (> NOW() - 30 days)
+    // no longer matches, so the user becomes eligible automatically.
+    // 30 days is NOT a calendar month — it is a strict rolling window.
     const result = await queryDb(env,
       `SELECT id, tracking_id, created_at, expires_at
        FROM reward_purchases
@@ -152,12 +157,17 @@ export function createRewardPurchaseRepository(deps) {
     }
 
     const row = result.rows[0];
-    const purchasedAt = new Date(row.created_at);
-    const elapsedDays = (Date.now() - purchasedAt.getTime()) / 86400000;
+    const purchasedAtMs = new Date(row.created_at).getTime();
+    const elapsedDays = (Date.now() - purchasedAtMs) / 86400000;
     const daysRemaining = Math.max(0, Math.ceil(30 - elapsedDays));
+    // E: precise next-eligible timestamp = purchased_at + 30 days.
+    // Frontend can use this for an accurate countdown independent of
+    // client clock skew. days_remaining remains a display hint only.
+    const nextEligibleAt = new Date(purchasedAtMs + 30 * 86400000).toISOString();
     return {
       restricted: true,
       daysRemaining,
+      next_eligible_at: nextEligibleAt,
       lastPurchase: {
         id: Number(row.id),
         tracking_id: row.tracking_id,

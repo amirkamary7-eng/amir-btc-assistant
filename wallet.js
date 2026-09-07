@@ -1954,6 +1954,18 @@ const WalletApp = (() => {
     const fa = detectLang() === 'fa';
     // P0-1 FIX: increment mutation sequence before the API call
     _walletMutationSeq++;
+
+    // D UX: disable the buy button on the VPN card IMMEDIATELY so the user
+    // gets visual feedback that the purchase is in flight (no infinite
+    // loading — the button shows "..." while waiting, re-enabled on error).
+    // The card is updated to "purchased" state on success without re-fetch.
+    const _buyBtn = document.querySelector(`.vpn-card[data-plan="${planId}"] .vpn-buy-btn`);
+    if (_buyBtn) {
+      _buyBtn.disabled = true;
+      _buyBtn.dataset.originalText = _buyBtn.textContent;
+      _buyBtn.textContent = fa ? 'در حال...' : 'Processing...';
+    }
+
     try {
       // FIX 5: Frontend sends ONLY plan_id — price/eligibility are
       // server-side authoritative (backend uses its own catalog price).
@@ -1962,6 +1974,12 @@ const WalletApp = (() => {
         body: JSON.stringify({ plan_id: planId }),
       });
       if (resp?.status === 'success' && resp.purchase) {
+        // D UX: immediately mark this card as "purchased ✓" in the DOM
+        // without re-fetching from the server. This gives instant feedback.
+        // The next renderVpnMarket() call will show the authoritative
+        // state (with days_remaining + next_eligible_at from backend).
+        _markVpnCardPurchased(planId);
+
         showVpnSuccessModal(resp.purchase);
         // PART 10: use the AUTHORITATIVE balance from the server response
         // (not a frontend guess). Falls back to refreshWalletBalance() if
@@ -2016,6 +2034,42 @@ const WalletApp = (() => {
       showToast(WT('vpn_connection_error'));
     } finally {
       _purchaseInFlight = false;
+      // D UX: re-enable the buy button on error (only if it was not
+      // already marked as purchased by the success path).
+      // On success, the button is replaced by a "purchased" badge —
+      // _buyBtn no longer exists in the DOM, so this is a no-op.
+      const _btn = document.querySelector(`.vpn-card[data-plan="${planId}"] .vpn-buy-btn`);
+      if (_btn && _btn.dataset.originalText) {
+        _btn.disabled = false;
+        _btn.textContent = _btn.dataset.originalText;
+        delete _btn.dataset.originalText;
+      }
+    }
+  }
+
+  // D UX: immediately mark a VPN card as "purchased ✓" in the DOM without
+  // re-fetching from the server. This replaces the buy button with a
+  // purchased badge and updates the in-memory _vpnPlansCache for consistency.
+  // The next renderVpnMarket() call will show the authoritative state with
+  // accurate days_remaining + next_eligible_at from the backend.
+  function _markVpnCardPurchased(planId) {
+    const card = document.querySelector(`.vpn-card[data-plan="${planId}"]`);
+    if (!card) return;
+    card.classList.add('vpn-card-purchased');
+    const buyBtn = card.querySelector('.vpn-buy-btn');
+    if (buyBtn) {
+      const badge = document.createElement('span');
+      badge.className = 'vpn-purchased-badge';
+      badge.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${WT('purchased_label')}`;
+      buyBtn.replaceWith(badge);
+    }
+    // Update in-memory cache for consistency (so reloadMissions / re-renders match)
+    if (_vpnPlansCache) {
+      const idx = _vpnPlansCache.findIndex(p => p.id === planId);
+      if (idx >= 0) {
+        _vpnPlansCache[idx].purchased = true;
+        _vpnPlansCache[idx].eligible = false;
+      }
     }
   }
 
