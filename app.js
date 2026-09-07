@@ -3954,50 +3954,20 @@ function estimateReadTime(text) {
 /**
  * Determine sentiment (bullish/bearish/neutral/decision) based on price levels.
  * Compares current_price to support and resistance.
+ *
+ * REMOVED (analysis price-level cleanup): getSentiment(a), SENTIMENT_CONFIG, and
+ * getSentimentBadgeHTML(sentiment, badgeClass) were removed because they depended
+ * solely on analysis support_level/current_price/resistance_level — which were
+ * removed from the Add/Edit form and from the API response shape. There is no
+ * alternate sentiment source for analyses, so the analysis sentiment badge
+ * (featured slide, analysis card, detail page) is intentionally gone.
+ *
+ * NOTE: News sentiment (in renderSentimentBar / news modal tags) is INDEPENDENT —
+ * it uses a ratio-based calculation (gainers vs losers), not price levels. The
+ * sentiment_bullish / sentiment_bearish / sentiment_neutral translation keys
+ * and the news sentiment chips in index.html are unrelated to this removal and
+ * remain in place.
  */
-function getSentiment(a) {
-    const support = parseFloat(a.support_level);
-    const resistance = parseFloat(a.resistance_level);
-    const current = parseFloat(a.current_price);
-    if (!isFinite(support) || !isFinite(resistance) || !isFinite(current)) return null;
-    const range = resistance - support;
-    if (range <= 0) return null;
-    const position = (current - support) / range; // 0 = at support, 1 = at resistance
-    if (position <= 0.25) return 'bearish';
-    if (position >= 0.75) return 'bullish';
-    if (position <= 0.45 || position >= 0.55) return 'neutral';
-    return 'decision';
-}
-
-// ── Sentiment Badge HTML Generator ──
-const SENTIMENT_CONFIG = {
-    bullish: {
-        labelKey: 'sentiment_bullish',
-        cls: 'bullish',
-        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20L12 4L21 20" fill="rgba(34,197,94,0.15)"/><path d="M12 4"/><path d="M7 15l5-7 5 7"/><path d="M9.5 13h5" stroke-width="2.5"/></svg>',
-    },
-    bearish: {
-        labelKey: 'sentiment_bearish',
-        cls: 'bearish',
-        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4L12 20L21 4" fill="rgba(239,68,68,0.15)"/><path d="M7 9l5 7 5-7"/><path d="M9.5 11h5" stroke-width="2.5"/></svg>',
-    },
-    neutral: {
-        labelKey: 'sentiment_neutral',
-        cls: 'neutral',
-        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4" fill="rgba(148,163,184,0.1)"/><path d="M8 12h8" stroke-width="2.5"/><path d="M12 8v8" stroke-width="2.5"/></svg>',
-    },
-    decision: {
-        labelKey: 'decision_range',
-        cls: 'decision',
-        icon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" fill="rgba(168,85,247,0.12)"/><path d="M12 7v5" stroke-width="2.5"/><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 3.5" stroke-dasharray="2 2" opacity="0.4"/></svg>',
-    },
-};
-
-function getSentimentBadgeHTML(sentiment, badgeClass = 'acv-sentiment') {
-    if (!sentiment || !SENTIMENT_CONFIG[sentiment]) return '';
-    const cfg = SENTIMENT_CONFIG[sentiment];
-    return `<span class="${badgeClass} ${badgeClass}-${cfg.cls}">${cfg.icon} ${t(cfg.labelKey)}</span>`;
-}
 
 /**
  * Toggle bookmark for an analysis ID. Persists to localStorage.
@@ -4070,32 +4040,13 @@ let currentFeaturedSlide = 0;
 let featuredSlideInterval = null;
 let featuredSlides = [];
 
-function buildFeaturedPriceBoxes(a) {
-    const sNum = parseFloat(a.support_level);
-    const rNum = parseFloat(a.resistance_level);
-    const cNum = parseFloat(a.current_price);
-    if (!isFinite(sNum) && !isFinite(rNum) && !isFinite(cNum)) return '';
-    return `
-        <div class="fs-price-boxes">
-            <div class="price-box price-box-resistance">
-                <span class="price-box-label">${t('resistance')}</span>
-                <span class="price-box-value">${escapeHtml(a.resistance_level || '—')}</span>
-            </div>
-            <div class="price-box price-box-current">
-                <span class="price-box-label">${t('current_price')}</span>
-                <span class="price-box-value">${escapeHtml(a.current_price || '—')}</span>
-            </div>
-            <div class="price-box price-box-support">
-                <span class="price-box-label">${t('support_level')}</span>
-                <span class="price-box-value">${escapeHtml(a.support_level || '—')}</span>
-            </div>
-        </div>
-    `;
-}
+// NOTE: `buildFeaturedPriceBoxes(a)` was REMOVED as part of the analysis price-level
+// cleanup (support_level/current_price/resistance_level removed from UI). The function
+// had zero call sites — it was defined but never invoked by renderFeaturedSlideHTML
+// (which only renders sentiment + image + title + snippet + meta). Kept this comment
+// as a marker so a future reader knows the price boxes feature is intentionally gone.
 
 function renderFeaturedSlideHTML(a) {
-    const sentiment = getSentiment(a);
-    const sentimentHTML = sentiment ? `<span class="fs-sentiment-badge ${sentiment}">${SENTIMENT_CONFIG[sentiment].icon} ${t(SENTIMENT_CONFIG[sentiment].labelKey)}</span>` : '';
     const featuredHTML = a.featured ? `<span class="fs-featured-badge">${t('featured_badge')}</span>` : '';
 
     // ANPOST-002 FIX: Validate URL scheme via sanitizeNewsUrl before escapeHtml.
@@ -4108,7 +4059,6 @@ function renderFeaturedSlideHTML(a) {
         ? `<div class="fs-card-image-wrap">
                 <img src="${escapeHtml(safeSlideImg)}" loading="eager" alt="${escapeHtml(a.coin)}" onerror="this.parentElement.parentElement.innerHTML='<div class=\'fs-card-no-image\'><div class=\'fs-card-no-image-text\'>${escapeHtml(a.coin)}</div></div>'">
                 <div class="fs-card-image-overlay"></div>
-                ${sentimentHTML}
                 ${featuredHTML}
                 <div class="fs-card-image-content">
                     <div class="fs-coin-row">
@@ -4120,7 +4070,6 @@ function renderFeaturedSlideHTML(a) {
                 </div>
            </div>`
         : `<div class="fs-card-no-image">
-                ${sentimentHTML}
                 ${featuredHTML}
                 <div class="fs-card-no-image-text">${escapeHtml(a.coin)}</div>
            </div>`;
@@ -4129,7 +4078,7 @@ function renderFeaturedSlideHTML(a) {
         <div class="fs-card" onclick="openAnalysisDetailPage('${escapeHtml(a.id)}')">
             ${imageSection}
             <div class="fs-card-content">
-                <div class="fs-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 80))}</div>
+                <div class="fs-card-snippet">${escapeHtml(truncateText(a.content || '', 80))}</div>
                 <div class="fs-card-meta">
                     <span class="fs-meta-item">${SVG_EYE} ${a.views_count || 0}</span>
                     <span class="fs-meta-item">${SVG_CLOCK} ${timeAgo(a.created_at)}</span>
@@ -4328,7 +4277,7 @@ function getFilteredAnalyses() {
             list = list.filter(a => {
                 const coin = (a.coin || '').toLowerCase();
                 const title = (a.title || '').toLowerCase();
-                const text = (a.content || a.text || '').toLowerCase();
+                const text = (a.content || '').toLowerCase();
                 return coin.includes(q) || title.includes(q) || text.includes(q);
             });
         }
@@ -4434,10 +4383,8 @@ function renderAnalysisList() {
     const hasMore = filtered.length > visibleCount;
 
     container.innerHTML = visibleAnalyses.map((a, i) => {
-        const sentiment = getSentiment(a);
-        const readTime = estimateReadTime(a.content || a.text);
+        const readTime = estimateReadTime(a.content);
         const bookmarked = isAnalysisBookmarked(a.id);
-        const sentimentBadge = getSentimentBadgeHTML(sentiment, 'acv-sentiment');
 
         // Price boxes — REMOVED from cards (available in detail page + hero slider)
         let priceBoxes = '';
@@ -4479,10 +4426,9 @@ function renderAnalysisList() {
                     <span class="acv-coin-name">${escapeHtml(a.coin)}</span>
                     ${marketBadge}
                     <span class="acv-timeframe">${escapeHtml(a.timeframe || '1D')}</span>
-                    ${sentimentBadge}
                 </div>
                 ${a.title ? `<h3 class="acv-card-title">${escapeHtml(truncateText(a.title, 60))}</h3>` : ''}
-                <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || a.text || '', 250))}</p>
+                <p class="acv-card-snippet">${escapeHtml(truncateText(a.content || '', 250))}</p>
             </div>
             <div class="acv-footer-row">
                 <div class="acv-meta-icons">
@@ -4906,7 +4852,7 @@ function renderAnalysisDetailPage() {
 
     const coinEl = $('adp-coin'); if (coinEl) coinEl.innerText = a.coin;
     const tfEl = $('adp-tf'); if (tfEl) tfEl.innerText = a.timeframe || '1D';
-    const readTime = estimateReadTime(a.content || a.text);
+    const readTime = estimateReadTime(a.content);
     // Animated view count (count-up effect)
     animateViewCount($('adp-views'), a.views_count || 0, readTime);
 
@@ -4937,9 +4883,7 @@ function renderAnalysisDetailPage() {
     // Title (with sentiment badge if available)
     const titleEl = $('adp-title');
     if (titleEl) {
-        const sentiment = getSentiment(a);
-        const sentimentHtml = getSentimentBadgeHTML(sentiment, 'adp-sentiment');
-        titleEl.innerHTML = `${escapeHtml(a.title || `${a.coin} — ${a.timeframe || '1D'}`)} ${sentimentHtml}`;
+        titleEl.innerText = a.title || `${a.coin} — ${a.timeframe || '1D'}`;
     }
 
     // Content (escaped for XSS safety) — wrapped in a reading card.
@@ -4953,7 +4897,7 @@ function renderAnalysisDetailPage() {
     //     resolves with identical content.
     const contentEl = $('adp-content');
     if (contentEl) {
-        const text = a.content || a.text || '';
+        const text = a.content || '';
         if (contentEl.dataset.renderedText === text) {
             // Identical content already rendered — skip to avoid any flicker/shift.
         } else {
@@ -4962,20 +4906,10 @@ function renderAnalysisDetailPage() {
         }
     }
 
-    // Price levels — smaller, shown BELOW content
+    // Price levels — REMOVED (support_level/current_price/resistance_level removed from UI).
+    // The #adp-levels element stays in the DOM (CSS regression test verifies it) but is hidden.
     const levelsEl = $('adp-levels');
-    if (levelsEl) {
-        if (a.support_level || a.current_price || a.resistance_level) {
-            levelsEl.style.display = '';
-            levelsEl.innerHTML = `
-                ${a.resistance_level ? `<div class="adp-level adp-resistance"><span class="adp-level-label">${t('resistance')}</span><span class="adp-level-value">${escapeHtml(a.resistance_level)}</span></div>` : ''}
-                ${a.current_price ? `<div class="adp-level adp-current"><span class="adp-level-label">${t('current_price')}</span><span class="adp-level-value">${escapeHtml(a.current_price)}</span></div>` : ''}
-                ${a.support_level ? `<div class="adp-level adp-support"><span class="adp-level-label">${t('support_level')}</span><span class="adp-level-value">${escapeHtml(a.support_level)}</span></div>` : ''}
-            `;
-        } else {
-            levelsEl.style.display = 'none';
-        }
-    }
+    if (levelsEl) { levelsEl.style.display = 'none'; levelsEl.innerHTML = ''; }
 
     // Price range visualizer — REMOVED (user requested removal)
     const rangeEl = $('adp-price-range');
@@ -4995,63 +4929,14 @@ function renderAnalysisDetailPage() {
     setupReadingProgress();
 }
 
-/**
- * Render the price range visualizer bar.
- * Shows a horizontal track from support to resistance with a marker at current price.
- * Only renders if all 3 values are present and numeric.
- */
-function renderPriceRangeVisualizer(a) {
-    const rangeEl = $('adp-price-range');
-    if (!rangeEl) return;
-
-    const support = parseFloat(a.support_level);
-    const resistance = parseFloat(a.resistance_level);
-    const current = parseFloat(a.current_price);
-
-    // Hide if any value is missing or non-numeric, or if range is invalid
-    if (!isFinite(support) || !isFinite(resistance) || !isFinite(current) || resistance <= support) {
-        rangeEl.style.display = 'none';
-        return;
-    }
-
-    // Clamp current to [support, resistance]
-    const clampedCurrent = Math.max(support, Math.min(resistance, current));
-    const position = ((clampedCurrent - support) / (resistance - support)) * 100; // 0-100
-
-    rangeEl.style.display = '';
-
-    // Update labels with actual values
-    const supportLabel = $('adp-pr-support');
-    const resistanceLabel = $('adp-pr-resistance');
-    if (supportLabel) supportLabel.textContent = t('support_level') + ' ' + formatPrice(support);
-    if (resistanceLabel) resistanceLabel.textContent = t('resistance') + ' ' + formatPrice(resistance);
-
-    // Set fill width and marker position (start at 0, then animate)
-    const fill = $('adp-pr-fill');
-    const marker = $('adp-pr-marker');
-    const markerLabel = $('adp-pr-marker-label');
-
-    if (fill) {
-        fill.style.width = '0%';
-        // Trigger animation on next frame
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                fill.style.width = position + '%';
-            });
-        });
-    }
-    if (marker) {
-        marker.style.left = '0%';
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                marker.style.left = position + '%';
-            });
-        });
-    }
-    if (markerLabel) {
-        markerLabel.textContent = formatPrice(current);
-    }
-}
+// NOTE: `renderPriceRangeVisualizer(a)` was REMOVED as part of the analysis price-level
+// cleanup (support_level/current_price/resistance_level removed from UI). The function
+// had zero call sites — `adp-price-range` does not exist in index.html (it was previously
+// removed from the DOM by renderAnalysisDetailPage via rangeEl.remove()), so the function
+// was already a no-op. Kept this comment as a marker so a future reader knows the price
+// range visualizer feature is intentionally gone. CSS for .adp-price-range / .adp-pr-*
+// remains in analysis-detail.css to avoid breaking the CSS regression test that asserts
+// those selectors exist.
 
 /**
  * Format a price number with appropriate decimals.
@@ -5158,13 +5043,7 @@ function copyAnalysisContent() {
     let text = `${a.coin} (${a.timeframe || '1D'})`;
     if (a.title) text += ` — ${a.title}`;
     text += '\n\n';
-    text += a.content || a.text || '';
-    if (a.support_level || a.current_price || a.resistance_level) {
-        text += '\n\n';
-        if (a.resistance_level) text += t('resistance') + ': ' + a.resistance_level + ' | ';
-        if (a.current_price) text += t('current_price') + ': ' + a.current_price + ' | ';
-        if (a.support_level) text += t('support_level') + ': ' + a.support_level;
-    }
+    text += a.content || '';
     text += '\n\n📎 AMIRBTC';
 
     try {
@@ -5191,7 +5070,7 @@ function shareAnalysisById(id) {
     const a = analyses.find(x => x.id === id) || currentAnalysisDetail;
     if (!a) return;
     const deepLink = getAnalysisDeepLink(id);
-    const text = `${a.coin} (${a.timeframe || '1D'})\n\n${truncateText(a.content || a.text || '', 200)}`;
+    const text = `${a.coin} (${a.timeframe || '1D'})\n\n${truncateText(a.content || '', 200)}`;
 
     const tg = window.Telegram?.WebApp;
     if (tg?.openTelegramLink) {
@@ -5452,7 +5331,7 @@ function openAddAnalysisModal() {
     editingAnalysisId = null;
     document.getElementById('analysis-modal-title').innerText = t('analysis_new');
     document.getElementById('analysis-submit-btn').innerText = t('analysis_publish');
-    ['analysis-title', 'analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text', 'analysis-support', 'analysis-current-price', 'analysis-resistance'].forEach(id => {
+    ['analysis-title', 'analysis-coin', 'analysis-timeframe', 'analysis-image', 'analysis-text'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
@@ -5479,12 +5358,7 @@ function openEditAnalysisModal(id) {
     document.getElementById('analysis-coin').value = a.coin || '';
     document.getElementById('analysis-timeframe').value = a.timeframe || '';
     document.getElementById('analysis-image').value = a.image || '';
-    document.getElementById('analysis-text').value = a.content || a.text || '';
-    document.getElementById('analysis-support').value = a.support_level || '';
-    // FIX 3: current_price field removed from form — null-safe in case element is gone
-    const cpEl = document.getElementById('analysis-current-price');
-    if (cpEl) cpEl.value = a.current_price || '';
-    document.getElementById('analysis-resistance').value = a.resistance_level || '';
+    document.getElementById('analysis-text').value = a.content || '';
     const featuredEl = document.getElementById('analysis-featured');
     if (featuredEl) featuredEl.checked = Boolean(a.featured);
     const catEl = document.getElementById('analysis-category');
@@ -5529,9 +5403,6 @@ function submitAnalysis() {
         const tfEl    = document.getElementById('analysis-timeframe');
         const imgEl   = document.getElementById('analysis-image');
         const textEl  = document.getElementById('analysis-text');
-        const supEl   = document.getElementById('analysis-support');
-        const priceEl = document.getElementById('analysis-current-price');
-        const resEl   = document.getElementById('analysis-resistance');
         const featEl  = document.getElementById('analysis-featured');
         const catEl   = document.getElementById('analysis-category');
 
@@ -5541,9 +5412,6 @@ function submitAnalysis() {
         const timeframe      = (tfEl && tfEl.value.trim()) ? tfEl.value.trim() : '1D';
         const image          = imgEl ? imgEl.value.trim() : '';
         const text           = textEl ? textEl.value.trim() : '';
-        const support_level  = supEl   ? supEl.value.trim() : '';
-        const current_price  = priceEl ? priceEl.value.trim() : '';
-        const resistance_level = resEl  ? resEl.value.trim() : '';
         const featured       = featEl  ? featEl.checked : false;
         const category       = catEl   ? catEl.value : 'crypto';
 
@@ -5555,7 +5423,7 @@ function submitAnalysis() {
 
         // ── Step 4: Build payload ──
         const author = getTelegramUser()?.first_name || t('admin_author');
-        const payload = { coin, timeframe, image, text, author, title, support_level, current_price, resistance_level, featured, category };
+        const payload = { coin, timeframe, image, text, author, title, featured, category };
 
         // ── Step 5: Disable button ──
         const btn = document.getElementById('analysis-submit-btn');
@@ -5822,7 +5690,7 @@ function renderAnalysisSlider() {
                 <img src="${escapeHtml(a.image || '')}" class="slide-img" loading="lazy" onerror="newsImageFallback(this)">
                 <div class="slide-overlay">
                     <h4>${escapeHtml(a.coin)} (${escapeHtml(a.timeframe || '1D')})</h4>
-                    <p>${escapeHtml(truncateText(a.content || a.text || '', 80))}</p>
+                    <p>${escapeHtml(truncateText(a.content || '', 80))}</p>
                     <span class="slide-author">${escapeHtml(a.author || '')} • ${escapeHtml(a.date || '')}</span>
                 </div>
             </div>

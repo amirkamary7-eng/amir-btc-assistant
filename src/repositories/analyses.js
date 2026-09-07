@@ -31,9 +31,12 @@ export function createAnalysisRepository(deps) {
       timeframe: normalizeOptionalString(row?.timeframe) || '1d',
       content: String(row?.text || ''),
       image: normalizeOptionalString(row?.image) || '',
-      support_level: normalizeOptionalString(row?.support_level) || '',
-      current_price: normalizeOptionalString(row?.current_price) || '',
-      resistance_level: normalizeOptionalString(row?.resistance_level) || '',
+      // NOTE: support_level / current_price / resistance_level are intentionally
+      // OMITTED from the API response as part of the analysis price-level UI cleanup.
+      // The DB columns still exist (no migration) and SELECT/INSERT/UPDATE queries
+      // still reference them for backward compatibility with existing rows — but the
+      // API no longer surfaces them to the frontend. If a future need arises to
+      // re-expose them, simply add the three lines back here.
       views_count: Number(row?.views_count || 0),
       featured: Boolean(row?.featured),
       category: normalizeOptionalString(row?.category) || 'crypto',
@@ -613,7 +616,6 @@ export function createAnalysisRepository(deps) {
     getFeatured,
     getStats,
     listWithStatsAndFeatured,
-    list,
     getById,
     incrementViews,
     create,
@@ -621,6 +623,13 @@ export function createAnalysisRepository(deps) {
     update,
     updateWithFeaturedLimit,
     remove,
-    serializeAnalysisRow,
+    // NOTE: `list` and `serializeAnalysisRow` were REMOVED from the public exports
+    // as part of dead-code cleanup. `list` had zero external callers (the controller
+    // exclusively uses listWithStatsAndFeatured which returns featured + stats + the
+    // paginated list in one CTE query). `serializeAnalysisRow` had zero external
+    // callers (it's used only internally by this repository's own getFeatured/list/
+    // getById/create/update functions). The function definitions remain in this
+    // module scope — only their public export was removed. If a future caller
+    // needs either, re-add the export here.
   });
 }

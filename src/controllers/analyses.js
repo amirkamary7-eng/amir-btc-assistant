@@ -181,15 +181,19 @@ export function createAnalysisHandlers(deps) {
     }
 
     const validated = {};
+    // NOTE: support_level / current_price / resistance_level field specs were REMOVED
+    // from validation as part of the analysis price-level UI cleanup. The DB columns
+    // remain (no migration) for backward compatibility with existing analyses, but the
+    // frontend no longer submits these fields, and the API response no longer includes
+    // them (see serializeAnalysisRow in repositories/analyses.js). If a legacy client
+    // still sends these fields in a POST/PUT body, they will simply be ignored (not
+    // validated, not stored on new rows). Existing rows keep their values untouched.
     const fieldSpecs = [
       { name: 'coin', required: true, minLength: 1, maxLength: 16 },
       { name: 'timeframe', required: false, defaultValue: '1d', maxLength: 16 },
       { name: 'image', required: false, defaultValue: '', maxLength: 512 },
       { name: 'text', required: true, minLength: 1, maxLength: 50000 },
       { name: 'title', required: false, defaultValue: '', maxLength: 256 },
-      { name: 'support_level', required: false, defaultValue: '', maxLength: 64 },
-      { name: 'current_price', required: false, defaultValue: '', maxLength: 64 },
-      { name: 'resistance_level', required: false, defaultValue: '', maxLength: 64 },
       { name: 'category', required: false, defaultValue: 'crypto', maxLength: 16 },
       ...(requireAuthor ? [{ name: 'author', required: true, minLength: 1, maxLength: 128 }] : []),
     ];
