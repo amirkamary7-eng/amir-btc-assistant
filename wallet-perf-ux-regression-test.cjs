@@ -477,3 +477,218 @@ test('H13: WithSharedPool does NOT close pool before background tasks complete',
   // Background tasks (notification dispatch) use queryDb which creates a new
   // pool when env._reqPool is null (the per-call fallback). This is safe.
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// I) lock_key JS-PostgreSQL equivalence verification
+// ═══════════════════════════════════════════════════════════════════════
+
+const crypto = require('crypto');
+
+// Replicate the JS computation from src/repositories/wallet.js
+function computeLockKeyJS(uid, tehranToday) {
+  const md5hex = crypto.createHash('md5').update(uid + tehranToday).digest('hex');
+  const hex16 = md5hex.substring(0, 16);
+  const TWO_POW_63 = BigInt('9223372036854775808');
+  const TWO_POW_64 = BigInt('18446744073709551616');
+  let bigIntVal = BigInt('0x' + hex16);
+  if (bigIntVal >= TWO_POW_63) {
+    bigIntVal = bigIntVal - TWO_POW_64;
+  }
+  return bigIntVal.toString();
+}
+
+test('I1: JS lock_key matches PostgreSQL signed bigint (positive values)', () => {
+  // userIds that produce hex16 starting with 0-7 (high bit NOT set → positive bigint)
+  const cases = [
+    { uid: 'guest_1788704567901', date: '2026-09-07', expected: '3501896654345175563' },
+    { uid: 'a-very-long-user-id-string-here-12345', date: '2026-06-15', expected: '2019478881245197978' },
+  ];
+  for (const { uid, date, expected } of cases) {
+    const jsResult = computeLockKeyJS(uid, date);
+    assert.equal(jsResult, expected,
+      `JS lock_key for uid=${uid} date=${date} matches expected PostgreSQL bigint`);
+  }
+});
+
+test('I2: JS lock_key matches PostgreSQL signed bigint (negative values)', () => {
+  // userIds that produce hex16 starting with 8-f (high bit SET → negative bigint)
+  const cases = [
+    { uid: '123456', date: '2026-09-07', expected: '-5448676804448115950' },
+    { uid: '999888', date: '2026-09-06', expected: '-6592954970313649992' },
+    { uid: '1', date: '2026-01-01', expected: '-5744618552353138019' },
+    { uid: '999999999', date: '2026-12-31', expected: '-4571581102075413722' },
+  ];
+  for (const { uid, date, expected } of cases) {
+    const jsResult = computeLockKeyJS(uid, date);
+    assert.equal(jsResult, expected,
+      `JS lock_key for uid=${uid} date=${date} matches expected PostgreSQL signed bigint (negative)`);
+  }
+});
+
+test('I3: Same uid+date always produces same lock_key (deterministic)', () => {
+  const k1 = computeLockKeyJS('123456', '2026-09-07');
+  const k2 = computeLockKeyJS('123456', '2026-09-07');
+  assert.equal(k1, k2, 'Same input → same lock_key (deterministic)');
+});
+
+test('I4: Different uid or date produces different lock_key (no collision)', () => {
+  const k1 = computeLockKeyJS('123456', '2026-09-07');
+  const k2 = computeLockKeyJS('123456', '2026-09-08');
+  const k3 = computeLockKeyJS('789012', '2026-09-07');
+  assert.notEqual(k1, k2, 'Different date → different lock_key');
+  assert.notEqual(k1, k3, 'Different uid → different lock_key');
+});
+
+test('I5: lock_key computed via crypto (no DB round-trip in claimDailyRewardWithStreak)', () => {
+  // Verify the new claimDailyRewardWithStreak uses crypto module
+  const WALLET_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/wallet.js'), 'utf8');
+  const fnStart = WALLET_REPO_SRC.indexOf('async function claimDailyRewardWithStreak');
+  const fnEnd = WALLET_REPO_SRC.indexOf('\n  }', fnStart + 100);
+  const fnBody = WALLET_REPO_SRC.substring(fnStart, fnEnd + 10);
+  assert.ok(fnBody.includes("import('crypto')"),
+    'claimDailyRewardWithStreak uses import(crypto)');
+  assert.ok(fnBody.includes("createHash('md5')"),
+    'claimDailyRewardWithStreak uses createHash(md5)');
+  // Must NOT have the old separate queryDb call for lock_key
+  assert.ok(!fnBody.includes("SELECT (('x' || SUBSTRING(MD5"),
+    'old queryDb lock_key computation removed from claimDailyRewardWithStreak');
+  // Legacy claimDailyReward (without streak) may still have old pattern — that's OK
+  // since it's a separate function and not used in production (claimDailyRewardWithStreak takes priority)
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// J) MissionBus race condition fix verification
+// ═══════════════════════════════════════════════════════════════════════
+
+test('J1: MissionBus.fire is async (can await shared promise)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes('async fire(eventType, targetId)'),
+    'MissionBus.fire is async');
+});
+
+test('J2: MissionBus.fire awaits loadMissionStatus when missions not loaded', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes('await loadMissionStatus()'),
+    'MissionBus.fire awaits loadMissionStatus()');
+  // The await is inside the fire() function, not in a .then() callback
+  const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 500);
+  assert.ok(fireBody.includes('await loadMissionStatus()'),
+    'await is inside fire() body (not a .then() fire-and-forget)');
+});
+
+test('J3: Shared promise prevents duplicate concurrent loads', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes('_missionLoadPromise'),
+    'shared _missionLoadPromise exists');
+  assert.ok(APP_SRC.includes('if (_missionLoadPromise) return _missionLoadPromise'),
+    'loadMissionStatus returns existing promise if in-flight');
+  assert.ok(APP_SRC.includes('_missionLoadPromise = null'),
+    '_missionLoadPromise is cleaned up in finally');
+});
+
+test('J4: MissionBus.fire returns on load failure (allows retry)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 600);
+  assert.ok(fireBody.includes('return;'),
+    'fire() returns early on load failure (no _fireInternal)');
+  // On failure, _missionsLoaded stays false → next fire() retries
+  assert.ok(fireBody.includes('_missionsLoaded stays false'),
+    'comment confirms _missionsLoaded stays false for retry');
+});
+
+test('J5: _fireInternal only called after successful load', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 800);
+  const awaitIdx = fireBody.indexOf('await loadMissionStatus()');
+  const fireInternalIdx = fireBody.indexOf('_fireInternal');
+  assert.ok(awaitIdx > -1, 'await loadMissionStatus() exists in fire()');
+  assert.ok(fireInternalIdx > -1, '_fireInternal exists in fire()');
+  assert.ok(fireInternalIdx > awaitIdx,
+    '_fireInternal called AFTER await loadMissionStatus()');
+});
+
+test('J6: All 4 mission triggers have matching MissionBus.fire calls', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  // news_article_open → read_news
+  assert.ok(APP_SRC.includes("MissionBus.fire('news_article_open'"),
+    "MissionBus.fire('news_article_open') exists");
+  // analysis_detail_open → read_analysis
+  assert.ok(APP_SRC.includes("MissionBus.fire('analysis_detail_open'"),
+    "MissionBus.fire('analysis_detail_open') exists");
+  // asset_detail_open → visit_market
+  assert.ok(APP_SRC.includes("MissionBus.fire('asset_detail_open'"),
+    "MissionBus.fire('asset_detail_open') exists");
+  // calendar_open → check_calendar
+  assert.ok(APP_SRC.includes("MISSION_EVENTS.CALENDAR_OPEN") || APP_SRC.includes("'calendar_open'"),
+    "calendar_open trigger exists (via MISSION_EVENTS or direct)");
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// K) Daily Day 1/Day 2 rendering verification
+// ═══════════════════════════════════════════════════════════════════════
+
+test('K1: _renderStreakDaysHTML uses todayDay for unclaimed streak', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  assert.ok(WALLET_SRC.includes('const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1)'),
+    '_renderStreakDaysHTML computes todayDay for unclaimed streak');
+});
+
+test('K2: State A — Day 1 claimed, Day 2 available (claimedToday=false, streak_day=1)', () => {
+  // Simulate: streak_day=1, claimedToday=false → todayDay=2
+  const claimedToday = false;
+  const currentStreakDay = 1;
+  const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
+  assert.equal(todayDay, 2, 'todayDay=2 when streak_day=1, claimedToday=false');
+
+  // Day 1: isClaimed = (1 < 2) = true → ticked ✅
+  // Day 2: isToday = (2 === 2) = true, !claimedToday → available ✅
+  const day1_isClaimed = 1 < todayDay || (claimedToday && 1 === currentStreakDay);
+  const day2_isToday = 2 === todayDay;
+  assert.equal(day1_isClaimed, true, 'Day 1 is claimed (ticked)');
+  assert.equal(day2_isToday, true, 'Day 2 is today (available)');
+});
+
+test('K3: State B — Day 2 claimed (claimedToday=true, streak_day=2)', () => {
+  const claimedToday = true;
+  const currentStreakDay = 2;
+  const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
+  assert.equal(todayDay, 2, 'todayDay=2 when streak_day=2, claimedToday=true');
+
+  // Day 1: isClaimed = (1 < 2) = true → ticked ✅
+  // Day 2: isToday = (2 === 2) = true, claimedToday=true → ticked ✅
+  const day1_isClaimed = 1 < todayDay || (claimedToday && 1 === currentStreakDay);
+  const day2_isClaimed = 2 < todayDay || (claimedToday && 2 === currentStreakDay);
+  assert.equal(day1_isClaimed, true, 'Day 1 is claimed');
+  assert.equal(day2_isClaimed, true, 'Day 2 is claimed');
+});
+
+test('K4: State C — First ever claim (claimedToday=false, streak_day=0)', () => {
+  const claimedToday = false;
+  const currentStreakDay = 0;
+  const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
+  assert.equal(todayDay, 1, 'todayDay=1 when streak_day=0, claimedToday=false');
+
+  // Day 1: isToday = (1 === 1) = true, !claimedToday → available ✅
+  const day1_isToday = 1 === todayDay;
+  const day1_isClaimed = 1 < todayDay || (claimedToday && 1 === currentStreakDay);
+  assert.equal(day1_isToday, true, 'Day 1 is today');
+  assert.equal(day1_isClaimed, false, 'Day 1 is NOT claimed (available)');
+});
+
+test('K5: State D — streak_day=3, claimedToday=false (Day 4 available)', () => {
+  const claimedToday = false;
+  const currentStreakDay = 3;
+  const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
+  assert.equal(todayDay, 4, 'todayDay=4 when streak_day=3, claimedToday=false');
+
+  // Days 1-3: ticked, Day 4: available
+  for (let day = 1; day <= 3; day++) {
+    const isClaimed = day < todayDay || (claimedToday && day === currentStreakDay);
+    assert.equal(isClaimed, true, `Day ${day} is claimed`);
+  }
+  const day4_isToday = 4 === todayDay;
+  assert.equal(day4_isToday, true, 'Day 4 is today (available)');
+});

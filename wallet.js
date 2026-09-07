@@ -1668,12 +1668,21 @@ const WalletApp = (() => {
   function _renderStreakDaysHTML(currentStreakDay, streakRewards, claimedToday) {
     const days = (streakRewards && streakRewards.length >= 7) ? streakRewards.slice(0, 7) : [1, 3, 6, 10, 18, 30, 50];
     const fa = detectLang() === 'fa';
+    // FIX: when claimedToday=false and streak_day > 0, the user has a
+    // streak from previous day(s) but hasn't claimed today yet. The "today"
+    // day should be streak_day + 1 (the next day to claim), NOT streak_day
+    // (which was already claimed on a previous day).
+    // Example: streak_day=1, claimed_today=false → Day 1 is ticked
+    // (claimed yesterday), Day 2 is available (today's claim).
+    const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
     let html = '';
     for (let i = 0; i < 7; i++) {
       const day = i + 1;
       const reward = days[i] || 0;
-      const isClaimed = day < currentStreakDay || (claimedToday && day === currentStreakDay);
-      const isToday = day === currentStreakDay;
+      // Day is claimed if it's before today's day, OR if it's today and
+      // the user has already claimed today.
+      const isClaimed = day < todayDay || (claimedToday && day === currentStreakDay);
+      const isToday = day === todayDay;
       const isDay7 = day === 7;
 
       let stateClass = '';

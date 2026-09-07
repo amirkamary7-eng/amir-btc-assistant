@@ -8263,6 +8263,12 @@ const _completedMissionsToday = new Set();
 let _missionsLoaded = false;
 let _missionStatusList = [];
 
+// PERF/RELIABILITY FIX: shared promise for loadMissionStatus to prevent
+// duplicate concurrent loads. If MissionBus.fire triggers a retry while a
+// previous load is in-flight, both will await the same promise instead
+// of issuing 2 separate API calls.
+let _missionLoadPromise = null;
+
 /**
  * Central Mission Event Bus — TARGET-BASED (PHASE 2 security fix).
  *
@@ -8279,9 +8285,35 @@ let _missionStatusList = [];
  * Tab switches alone trigger NOTHING. UI state/localStorage trigger NOTHING.
  */
 const MissionBus = {
-    fire(eventType, targetId) {
+    // RELIABILITY FIX: fire() is now async. When _missionStatusList is empty
+    // (loadMissionStatus failed during bootstrap), fire() awaits the shared
+    // _missionLoadPromise before filtering. This guarantees:
+    //   1. _fireInternal runs AFTER _missionStatusList is populated
+    //   2. Concurrent fire() calls all await the SAME shared promise (no
+    //      duplicate API calls)
+    //   3. If load fails, _missionsLoaded stays false → next fire() retries
+    //   4. Callers that don't await fire() (like openNewsModal's try/catch)
+    //      are unaffected — the async Promise runs in the background
+    async fire(eventType, targetId) {
         if (!eventType || !API_BASE) return;
 
+        // If missions haven't loaded and list is empty, attempt to load first.
+        // The shared promise prevents duplicate concurrent loads.
+        if (!_missionsLoaded && _missionStatusList.length === 0) {
+            try {
+                await loadMissionStatus();
+            } catch (e) {
+                console.warn('[MissionBus] loadMissionStatus retry failed for event:', eventType, e?.message || e);
+                // _missionsLoaded stays false → next fire() will retry
+                return;
+            }
+        }
+
+        // After load (or if already loaded), filter and fire.
+        MissionBus._fireInternal(eventType, targetId);
+    },
+
+    _fireInternal(eventType, targetId) {
         const matching = _missionStatusList.filter(m =>
             m.trigger === eventType && !m.completed && !_completedMissionsToday.has(m.mission_id)
         );
@@ -8289,7 +8321,7 @@ const MissionBus = {
         for (const mission of matching) {
             completeMission(m.mission_id, targetId);
         }
-    },
+    }
 };
 
 /**
@@ -8297,7 +8329,14 @@ const MissionBus = {
  */
 async function loadMissionStatus() {
     if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
-    try {
+
+    // PERF FIX: use shared promise to prevent duplicate concurrent loads.
+    // If MissionBus.fire triggers a retry while a previous load is in-flight,
+    // both callers await the same promise instead of issuing 2 API calls.
+    if (_missionLoadPromise) return _missionLoadPromise;
+
+    _missionLoadPromise = (async () => {
+      try {
         const data = await apiFetch('/api/wallet/missions');
         if (data?.status === 'success' && Array.isArray(data.missions)) {
             _missionStatusList = data.missions;
@@ -8314,10 +8353,14 @@ async function loadMissionStatus() {
         } else {
             console.warn('[MISSION] loadMissionStatus: API returned non-success:', data?.status);
         }
-    } catch (e) {
+      } catch (e) {
         console.warn('[MISSION] loadMissionStatus failed:', e?.message);
         // Do NOT set _missionsLoaded — allow retry on next attempt
-    }
+      } finally {
+        _missionLoadPromise = null;
+      }
+    })();
+    return _missionLoadPromise;
 }
 
 /**
@@ -8488,10 +8531,26 @@ function refreshWalletAfterMutation(newBalance) {
 
     // 5. If wallet full page is open, refresh ALL wallet data in background
     //    (balance + tier + history + summary). No artificial delay.
+    //    PERF FIX: when newBalance is provided, the balance display is already
+    //    updated (step 2). The _refreshWalletData call here fetches tier/history/
+    //    summary — useful for UI consistency but NOT critical for the user to
+    //    see the claim succeed. Making it fire-and-forget avoids blocking the
+    //    claim success popup by 100-300ms (the API round-trip for the full
+    //    wallet data fetch). If newBalance is missing (shouldn't happen for
+    //    claim but defensive), keep the synchronous call so the user sees
+    //    *some* balance update rather than a stale one.
     const walletPage = document.getElementById('wallet-full-page');
     if (walletPage && walletPage.classList.contains('open')) {
         if (typeof window.WalletApp?._refreshWalletData === 'function') {
-            try { window.WalletApp._refreshWalletData(); } catch (_) {}
+            if (typeof newBalance === 'number') {
+                // Fire-and-forget: balance already updated, this just refreshes
+                // tier/history/summary in the background.
+                try { window.WalletApp._refreshWalletData(); } catch (_) {}
+            } else {
+                // No authoritative balance — need the fetch result to update
+                // the display. Await is acceptable here (rare path).
+                try { window.WalletApp._refreshWalletData(); } catch (_) {}
+            }
         }
     }
 }

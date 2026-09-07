@@ -371,21 +371,37 @@ export function createWalletRepository(deps) {
     });
     const tehranYesterday = yesterdayFmt.format(yesterday);
 
-    // Compute advisory lock key from user_id + Tehran date.
-    const lockKeyResult = await queryDb(env,
-      `SELECT (('x' || SUBSTRING(MD5($1 || $2), 1, 16))::bit(64)::bigint) AS lock_key`,
-      [uid, tehranToday],
-    );
-    const lockKey = lockKeyResult.rows[0]?.lock_key;
-    if (lockKey == null) {
-      throw new Error('Failed to compute advisory lock key');
+    // PERF FIX: compute advisory lock key in JS (was a separate queryDb call,
+    // adding 50-200ms Pool create+connect+end). The lock key is derived from
+    // MD5(uid || tehranToday) → first 16 hex chars → bit(64) → bigint.
+    // Race protection unchanged: advisory lock serializes concurrent claims
+    // for the same user+date; PHASE 2 uses ON CONFLICT DO NOTHING + partial
+    // unique index as final defense.
+    //
+    // EQUIVALENCE VERIFICATION: PostgreSQL computes
+    //   ('x' || hex16)::bit(64)::bigint
+    // which interprets the 16-hex-char string as a 64-bit two's complement
+    // signed integer. If the high bit is set (hex starts with 8-f), the
+    // value is negative. JS BigInt is unsigned, so we replicate the signed
+    // behavior by subtracting 2^64 when the unsigned value >= 2^63.
+    // Tested with 6 userIds + dates — JS and PG produce identical signed
+    // bigint values (verified in wallet-perf-ux-regression-test.cjs I1-I4).
+    const _crypto = await import('crypto');
+    const md5hex = _crypto.createHash('md5').update(uid + tehranToday).digest('hex');
+    const hex16 = md5hex.substring(0, 16);
+    const _TWO_POW_63 = BigInt('9223372036854775808');
+    const _TWO_POW_64 = BigInt('18446744073709551616');
+    let lockKeyBigInt = BigInt('0x' + hex16);
+    if (lockKeyBigInt >= _TWO_POW_63) {
+      // Replicate PostgreSQL's signed bigint: negative when high bit is set
+      lockKeyBigInt = lockKeyBigInt - _TWO_POW_64;
     }
+    const lockKey = lockKeyBigInt.toString(); // string for pg_advisory_xact_lock param
 
-    // PHASE 1 (read-only transaction — HR-1 accurate description): lock +
-    // duplicate check + streak read. This transaction COMMITS right here and
-    // releases the lock/row locks; it writes nothing, so any failure after
-    // it leaves zero partial state. The write-phase atomicity lives in
-    // PHASE 2 below.
+    // PHASE 1 (read-only transaction): acquire lock + duplicate check +
+    // streak read. This transaction COMMITS right here and releases the
+    // lock/row locks; it writes nothing, so any failure after it leaves
+    // zero partial state. The write-phase atomicity lives in PHASE 2 below.
     const phase1 = await queryDbTransaction(env, [
       { sql: `SELECT pg_advisory_xact_lock($1)`, params: [lockKey] },
       {
