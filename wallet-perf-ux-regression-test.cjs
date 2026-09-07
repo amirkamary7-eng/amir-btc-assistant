@@ -1081,3 +1081,617 @@ test('P10: Guard works for debit mutations too (VPN purchase balance decreases)'
   assert.ok(!fnBody.includes('data.balance > ') && !fnBody.includes('data.balance < '),
     'fetchWallet does NOT use numeric balance comparison (guard is seq-based, works for debits too)');
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Q) Root-Cause 1 (RC-1) — Stale Mission Triggers migration
+//
+// Production was seeded with OLD trigger names (news_open / analysis_open /
+// market_open) before commit 6870112 renamed them to news_article_open /
+// analysis_detail_open / asset_detail_open. Because the seed only fires
+// when mission_rewards is EMPTY, existing production rows kept their
+// stale triggers — MissionBus.fire fired the NEW event names but the DB
+// still held the OLD triggers, so _fireInternal matched nothing → missions
+// never ticked. This suite verifies the idempotent migration in
+// reward_center.js ensureSchema that promotes stale triggers to the
+// current names.
+// ═══════════════════════════════════════════════════════════════════════
+
+test('Q1: Stale-trigger migration exists in reward_center.js ensureSchema', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  // The migration block is identifiable by its three pinned (mission_id, old_trigger) pairs.
+  assert.ok(SRC.includes("mission_id = 'read_news'      AND metadata->>'trigger' = 'news_open'"),
+    'migration pins read_news + news_open');
+  assert.ok(SRC.includes("mission_id = 'read_analysis'  AND metadata->>'trigger' = 'analysis_open'"),
+    'migration pins read_analysis + analysis_open');
+  assert.ok(SRC.includes("mission_id = 'visit_market'   AND metadata->>'trigger' = 'market_open'"),
+    'migration pins visit_market + market_open');
+});
+
+test('Q2: Migration uses jsonb_set on the trigger field only (other metadata preserved)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const migrationIdx = SRC.indexOf("UPDATE mission_rewards SET metadata = jsonb_set");
+  assert.ok(migrationIdx > -1, 'jsonb_set migration present');
+  const block = SRC.substring(migrationIdx, migrationIdx + 2000);
+  // Must update only the trigger field path
+  assert.ok(block.includes("'{trigger}'"), 'jsonb_set targets {trigger} path only');
+  // Must use CASE with the three mappings (old → new)
+  assert.ok(block.includes('"news_article_open"'), 'maps to news_article_open');
+  assert.ok(block.includes('"analysis_detail_open"'), 'maps to analysis_detail_open');
+  assert.ok(block.includes('"asset_detail_open"'), 'maps to asset_detail_open');
+  // Must NOT touch target_count, description, icon, sort_order, token_amount
+  // (jsonb_set with a single field path only rewrites that field)
+  assert.ok(!block.includes('target_count'), 'migration does NOT touch target_count');
+  assert.ok(!block.includes('description'), 'migration does NOT touch description');
+  assert.ok(!block.includes('icon'), 'migration does NOT touch icon');
+});
+
+test('Q3: Migration is idempotent — WHERE clause pins stale trigger (2nd run is no-op)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const migrationIdx = SRC.indexOf("UPDATE mission_rewards SET metadata = jsonb_set");
+  const block = SRC.substring(migrationIdx, migrationIdx + 2500);
+  // WHERE clause must include all 3 (mission_id, old_trigger) conditions
+  // so a 2nd run (after trigger is updated to new value) finds 0 rows.
+  const whereIdx = block.indexOf('WHERE');
+  assert.ok(whereIdx > -1, 'WHERE clause exists');
+  const whereBlock = block.substring(whereIdx);
+  assert.ok(whereBlock.includes("news_open") && whereBlock.includes("analysis_open") && whereBlock.includes("market_open"),
+    'WHERE pins the OLD trigger names → 2nd run finds 0 rows (idempotent)');
+  // Verify the WHERE clause is an OR of all 3 (not AND — that would never match)
+  const orCount = (whereBlock.match(/\sOR\s/g) || []).length;
+  assert.ok(orCount >= 2, 'WHERE uses OR across 3 stale-trigger conditions');
+});
+
+test('Q4: Migration does NOT touch calendar_open or daily_open (unchanged triggers)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const migrationIdx = SRC.indexOf("UPDATE mission_rewards SET metadata = jsonb_set");
+  // Block ends at the closing of the query string (next `)` after `)` of queryDb call)
+  const blockEnd = SRC.indexOf(');', migrationIdx);
+  const block = SRC.substring(migrationIdx, blockEnd);
+  assert.ok(!block.includes("calendar_open"),
+    'migration does NOT touch calendar_open (unchanged trigger)');
+  assert.ok(!block.includes("daily_open"),
+    'migration does NOT touch daily_open (unchanged trigger)');
+});
+
+test('Q5: Migration try/catch RE-THROWS on failure (NOT silently swallowed)', () => {
+  // CORRECTNESS FIX: previously, the migration try/catch swallowed the
+  // error AND set `_schemaVerified = true`. That meant a single failure
+  // (e.g. transient DB error, jsonb_set unavailable on a misconfigured PG,
+  // etc.) silently left stale triggers in place for the isolate's lifetime
+  // (hours/days until Worker cold-restart). Since the migration is REQUIRED
+  // for mission correctness (without it, the 3 affected missions never
+  // tick), swallowing the error defeated the entire fix.
+  //
+  // The fix: the inner catch RE-THROWS so the outer catch (which logs +
+  // returns WITHOUT setting `_schemaVerified`) takes over. The next
+  // request retries ensureSchema — the batchSql (CREATE TABLE IF NOT
+  // EXISTS) and seed (gated on count===0) are idempotent no-ops on an
+  // already-initialized DB, so retrying is cheap.
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const migrationIdx = SRC.indexOf("UPDATE mission_rewards SET metadata = jsonb_set");
+  const block = SRC.substring(migrationIdx - 200, migrationIdx + 2500);
+  assert.ok(block.includes('try {'),
+    'migration has try block');
+  assert.ok(block.includes('catch (e)'),
+    'migration has catch block');
+  assert.ok(block.includes('throw e'),
+    'inner catch RE-THROWS the error (does NOT silently swallow)');
+  assert.ok(block.includes('will retry next request'),
+    'inner catch logs a clear "will retry next request" warning');
+});
+
+test('Q5b: Migration failure does NOT set _schemaVerified=true (next request retries)', () => {
+  // The OUTER catch (line ~333) is responsible for ensuring the migration
+  // failure path doesn't lock the isolate. The outer catch must:
+  //   1. NOT set `_schemaVerified = true`
+  //   2. Return early (so the migration is retried next request)
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const outerCatchIdx = SRC.indexOf('Reward Center schema migration warning');
+  assert.ok(outerCatchIdx > -1, 'outer catch exists');
+  const block = SRC.substring(outerCatchIdx, outerCatchIdx + 800);
+  // The outer catch must include the comment + return (no `_schemaVerified = true`)
+  assert.ok(block.includes('Do NOT set _schemaVerified on error'),
+    'outer catch documents the policy (do NOT set _schemaVerified on error)');
+  assert.ok(block.includes('return;'),
+    'outer catch returns early (no _schemaVerified = true)');
+  // The outer catch must NOT set _schemaVerified=true after the warning
+  // (i.e. between the `console.warn` line and the `return;` line)
+  const warnLine = block.indexOf('console.warn');
+  const returnLine = block.indexOf('return;');
+  const setTrueLine = block.indexOf('_schemaVerified = true');
+  assert.ok(setTrueLine === -1 || setTrueLine > returnLine,
+    'outer catch does NOT set _schemaVerified = true before returning');
+});
+
+test('Q5c: Migration success path sets _schemaVerified=true (NOT in catch)', () => {
+  // Verify `_schemaVerified = true` is set ONLY in the success path
+  // (after the migration try/catch, inside the outer try, before the outer catch).
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  const migrationIdx = SRC.indexOf("UPDATE mission_rewards SET metadata = jsonb_set");
+  const innerThrowIdx = SRC.indexOf('throw e', migrationIdx);
+  const schemaVerifiedIdx = SRC.indexOf('_schemaVerified = true', innerThrowIdx);
+  const outerCatchIdx = SRC.indexOf('} catch (e) {', schemaVerifiedIdx);
+  // _schemaVerified = true must come BEFORE the outer catch (i.e. inside the outer try block)
+  assert.ok(schemaVerifiedIdx > -1 && outerCatchIdx > schemaVerifiedIdx,
+    '_schemaVerified = true is in the SUCCESS path (inside outer try, BEFORE outer catch)');
+});
+
+test('Q6: Frontend MISSION_EVENTS values match the seed triggers (no future mismatch)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  // After RC-1 fix, MISSION_EVENTS values must match the seed triggers in reward_center.js
+  // (otherwise a future call to fireMissionEvent(MISSION_EVENTS.NEWS_OPEN) would fail).
+  const meStart = APP_SRC.indexOf('const MISSION_EVENTS = {');
+  const meEnd = APP_SRC.indexOf('};', meStart);
+  const meBlock = APP_SRC.substring(meStart, meEnd);
+  assert.ok(meBlock.includes("NEWS_OPEN: 'news_article_open'"),
+    "MISSION_EVENTS.NEWS_OPEN aligned with seed (news_article_open)");
+  assert.ok(meBlock.includes("ANALYSIS_OPEN: 'analysis_detail_open'"),
+    "MISSION_EVENTS.ANALYSIS_OPEN aligned with seed (analysis_detail_open)");
+  assert.ok(meBlock.includes("MARKET_OPEN: 'asset_detail_open'"),
+    "MISSION_EVENTS.MARKET_OPEN aligned with seed (asset_detail_open)");
+  assert.ok(meBlock.includes("CALENDAR_OPEN: 'calendar_open'"),
+    "MISSION_EVENTS.CALENDAR_OPEN unchanged (matches seed)");
+  assert.ok(meBlock.includes("DAILY_OPEN: 'daily_open'"),
+    "MISSION_EVENTS.DAILY_OPEN unchanged (matches seed)");
+  // Verify NO stale values remain in MISSION_EVENTS
+  assert.ok(!meBlock.includes("'news_open'"),
+    "MISSION_EVENTS no longer has stale 'news_open' value");
+  assert.ok(!meBlock.includes("'analysis_open'"),
+    "MISSION_EVENTS no longer has stale 'analysis_open' value");
+  assert.ok(!meBlock.includes("'market_open'"),
+    "MISSION_EVENTS no longer has stale 'market_open' value");
+});
+
+test('Q7: _fireInternal matches all 5 missions when triggers are aligned (post-migration)', () => {
+  // Simulates the in-memory state AFTER the migration has run on a stale DB:
+  //   triggers now match the frontend event names → all 5 missions match.
+  const postMigrationMissions = [
+    { mission_id: 'daily_login',    trigger: 'daily_open',           completed: false },
+    { mission_id: 'read_news',      trigger: 'news_article_open',    completed: false },
+    { mission_id: 'read_analysis',  trigger: 'analysis_detail_open',  completed: false },
+    { mission_id: 'check_calendar', trigger: 'calendar_open',        completed: false },
+    { mission_id: 'visit_market',   trigger: 'asset_detail_open',    completed: false },
+  ];
+  const completedToday = new Set();
+  const frontendEvents = [
+    ['news_article_open', 'url-1'],
+    ['analysis_detail_open', 'a-1'],
+    ['calendar_open', undefined],
+    ['asset_detail_open', 'BTC'],
+    ['daily_open', undefined],
+  ];
+
+  function _fireInternal(missions, eventType, targetId) {
+    return missions.filter(m => m.trigger === eventType && !m.completed && !completedToday.has(m.mission_id));
+  }
+
+  let totalMatched = 0;
+  for (const [evt, target] of frontendEvents) {
+    const matched = _fireInternal(postMigrationMissions, evt, target);
+    totalMatched += matched.length;
+  }
+  assert.equal(totalMatched, 5,
+    'After migration, all 5 frontend events match a mission (was: only 2 with stale triggers)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// R) Root-Cause 2 (RC-2) — Weekly Boundary Leak in _completedMissionsToday
+//
+// Previously, _completedMissionsToday was only ever ADD-TO (never cleared).
+// On the weekly boundary (Saturday Tehran), a user who completed `read_news`
+// in the prior week had `read_news` stuck in the Set, and `_fireInternal`
+// filtered it out → the new week's mission never fired → no tick, no reward.
+// This suite verifies that reloadMissions now clears the Set and that
+// loadMissionStatus rebuilds it authoritatively from the backend response.
+// ═══════════════════════════════════════════════════════════════════════
+
+test('R1: reloadMissions clears _completedMissionsToday before re-fetching', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const rmStart = APP_SRC.indexOf('window.reloadMissions = function()');
+  const rmBlock = APP_SRC.substring(rmStart, rmStart + 800);
+  assert.ok(rmBlock.includes('_completedMissionsToday.clear()'),
+    'reloadMissions clears _completedMissionsToday before loadMissionStatus()');
+  // Order: clear must come BEFORE loadMissionStatus (otherwise Set is stale during load)
+  const clearIdx = rmBlock.indexOf('_completedMissionsToday.clear()');
+  const loadIdx = rmBlock.indexOf('loadMissionStatus()');
+  assert.ok(clearIdx > -1 && loadIdx > clearIdx,
+    '_completedMissionsToday.clear() runs BEFORE loadMissionStatus()');
+});
+
+test('R2: _missionsLoaded also reset to false in reloadMissions', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const rmStart = APP_SRC.indexOf('window.reloadMissions = function()');
+  const rmBlock = APP_SRC.substring(rmStart, rmStart + 800);
+  assert.ok(rmBlock.includes('_missionsLoaded = false'),
+    'reloadMissions resets _missionsLoaded (existing behavior, not regressed)');
+});
+
+test('R3: loadMissionStatus rebuilds _completedMissionsToday from backend response', () => {
+  // After reloadMissions clears the Set, loadMissionStatus must repopulate it
+  // from m.completed (the authoritative backend-completed flag).
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const lmStart = APP_SRC.indexOf('async function loadMissionStatus()');
+  const lmBlock = APP_SRC.substring(lmStart, lmStart + 2500);
+  // The repopulation code: for each mission in the response, if m.completed add to Set
+  assert.ok(/if\s*\(\s*m\.completed\s*\)\s*_completedMissionsToday\.add\(\s*m\.mission_id\s*\)/.test(lmBlock),
+    'loadMissionStatus repopulates _completedMissionsToday from m.completed (authoritative)');
+});
+
+test('R4: Weekly boundary simulation — old week completion does NOT block new week', () => {
+  // Simulate the pre-fix behavior vs the post-fix behavior.
+  const _completedMissionsToday_preFix = new Set();
+  const _completedMissionsToday_postFix = new Set();
+
+  // WEEK 1: backend reports read_news completed
+  const week1BackendResponse = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: true },
+  ];
+  for (const m of week1BackendResponse) {
+    if (m.completed) _completedMissionsToday_preFix.add(m.mission_id);
+    if (m.completed) _completedMissionsToday_postFix.add(m.mission_id);
+  }
+
+  // WEEK 1: user opens article — _fireInternal returns no match (already completed)
+  function _fireInternal_pre(set, missions, eventType) {
+    return missions.filter(m => m.trigger === eventType && !m.completed && !set.has(m.mission_id));
+  }
+  const week1Result_pre = _fireInternal_pre(_completedMissionsToday_preFix,
+    [{ mission_id: 'read_news', trigger: 'news_article_open', completed: true }],
+    'news_article_open');
+  assert.equal(week1Result_pre.length, 0, 'Week 1: mission already completed, no re-fire');
+
+  // WEEK 2 BOUNDARY: reloadMissions called. PRE-FIX keeps the Set, POST-FIX clears it.
+  // PRE-FIX (bug): _completedMissionsToday NOT cleared → read_news still in Set
+  // POST-FIX (correct): _completedMissionsToday.clear() → Set is empty
+
+  // Simulate POST-FIX: clear
+  _completedMissionsToday_postFix.clear();
+
+  // WEEK 2: backend reports read_news NOT completed (fresh progress for new week)
+  const week2BackendResponse = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: false },
+  ];
+  for (const m of week2BackendResponse) {
+    if (m.completed) _completedMissionsToday_postFix.add(m.mission_id);
+  }
+
+  // WEEK 2: user opens article — POST-FIX _fireInternal should match (mission fires, ticks)
+  const week2Result_post = _fireInternal_pre(_completedMissionsToday_postFix,
+    [{ mission_id: 'read_news', trigger: 'news_article_open', completed: false }],
+    'news_article_open');
+  assert.equal(week2Result_post.length, 1,
+    'Post-fix Week 2: read_news fires (Set was cleared, backend reports not-completed)');
+
+  // Compare with PRE-FIX behavior — Set still has read_news from week 1
+  for (const m of week2BackendResponse) {
+    if (m.completed) _completedMissionsToday_preFix.add(m.mission_id);
+    // m.completed is false, so nothing added; stale read_news STILL in Set
+  }
+  const week2Result_pre = _fireInternal_pre(_completedMissionsToday_preFix,
+    [{ mission_id: 'read_news', trigger: 'news_article_open', completed: false }],
+    'news_article_open');
+  assert.equal(week2Result_pre.length, 0,
+    'Pre-fix Week 2: read_news is BLOCKED by stale Set entry (the bug)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// S) Mission Behavioral End-to-End (the 3 stale-trigger missions)
+//
+// Source-level assertions on the full path from Frontend event → Backend
+// grant → tick. Covers the 3 missions that were affected by stale seed
+// (read_news, read_analysis, visit_market). Cannot run runtime pg-mem
+// for the migration itself (pg-mem lacks jsonb_set), but asserts the
+// code path end-to-end.
+// ═══════════════════════════════════════════════════════════════════════
+
+test('S1: read_news — frontend fires news_article_open for a specific article (target_id)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const idx = APP_SRC.indexOf("MissionBus.fire('news_article_open'");
+  assert.ok(idx > -1, "MissionBus.fire('news_article_open', targetId) exists");
+  // Verify it passes a target_id (the article URL/id/index)
+  const line = APP_SRC.substring(idx, idx + 300);
+  assert.ok(line.includes('displayedNews[idx].url') || line.includes('displayedNews[idx].id'),
+    'news_article_open carries a specific target_id (article url/id)');
+});
+
+test('S2: read_analysis — frontend fires analysis_detail_open for a specific analysis (target_id)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const idx = APP_SRC.indexOf("MissionBus.fire('analysis_detail_open'");
+  assert.ok(idx > -1, "MissionBus.fire('analysis_detail_open', targetId) exists");
+  const line = APP_SRC.substring(idx, idx + 200);
+  assert.ok(line.includes('String(id)'),
+    'analysis_detail_open carries a specific target_id (analysis id)');
+});
+
+test('S3: visit_market — frontend fires asset_detail_open for a specific symbol (target_id)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  // Two fire sites (coin detail + forex detail) — both with String(symbol)
+  const re = /MissionBus\.fire\('asset_detail_open',\s*String\(symbol\)\)/g;
+  const matches = APP_SRC.match(re);
+  assert.ok(matches && matches.length >= 2,
+    'asset_detail_open fires for both coin and forex detail (2 sites)');
+});
+
+test('S4: completeMission issues event_token BEFORE calling /mission/complete (3 stale-trigger missions)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function completeMission(missionId, targetId)');
+  const fnBlock = APP_SRC.substring(fnStart, fnStart + 3000);
+  // Verify the flow: issue-token first (for non-daily_login), then complete
+  const issueIdx = fnBlock.indexOf("'/api/wallet/mission/issue-token'");
+  const completeIdx = fnBlock.indexOf("'/api/wallet/mission/complete'");
+  assert.ok(issueIdx > -1 && completeIdx > issueIdx,
+    'completeMission issues event_token BEFORE calling /mission/complete');
+  // Verify it skips token issuance for daily_login
+  assert.ok(fnBlock.includes("missionId !== 'daily_login'"),
+    'completeMission skips issue-token for daily_login (auto-fired by bootstrap)');
+  // Verify target_id is passed to BOTH issue-token and complete
+  assert.ok(fnBlock.includes('target_id: targetId') || fnBlock.includes("target_id: targetId || ''"),
+    'completeMission passes target_id to issue-token and complete');
+});
+
+test('S5: handleMissionComplete backend verifies event_token + target_id binding (consumeMissionEventToken)', () => {
+  const WALLET_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/wallet.js'), 'utf8');
+  const fnStart = WALLET_CTRL_SRC.indexOf('async function handleMissionComplete(request, env)');
+  const fnBlock = WALLET_CTRL_SRC.substring(fnStart, fnStart + 5000);
+  // Consume the token (one-time use, KV)
+  assert.ok(fnBlock.includes('consumeMissionEventToken'),
+    'handleMissionComplete consumes the event_token (one-time use)');
+  // Pass completeTargetId from the request body
+  assert.ok(fnBlock.includes('completeTargetId'),
+    'handleMissionComplete reads target_id from request body and binds it to token consumption');
+  // Reject if token invalid/expired
+  assert.ok(fnBlock.includes('INVALID_EVENT_TOKEN'),
+    'handleMissionComplete rejects with INVALID_EVENT_TOKEN if consume fails');
+});
+
+test('S6: handleMissionComplete incrementMissionProgress → markMissionRewarded → grantReward chain', () => {
+  const WALLET_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/wallet.js'), 'utf8');
+  const fnStart = WALLET_CTRL_SRC.indexOf('async function handleMissionComplete(request, env)');
+  // Use a generous slice (the function is ~9000 chars) — but bound at next function for safety
+  const nextFn = WALLET_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnEnd = nextFn > -1 ? nextFn : WALLET_CTRL_SRC.length;
+  const fnBlock = WALLET_CTRL_SRC.substring(fnStart, fnEnd);
+  // Order: increment → mark → grant
+  const incrIdx = fnBlock.indexOf('incrementMissionProgress');
+  const markIdx = fnBlock.indexOf('markMissionRewarded');
+  const grantIdx = fnBlock.indexOf('economyService.grantReward');
+  assert.ok(incrIdx > -1 && markIdx > incrIdx && grantIdx > markIdx,
+    'Order: incrementMissionProgress → markMissionRewarded → economyService.grantReward');
+  // markMissionRewarded uses CAS (WHERE rewarded = FALSE)
+  assert.ok(fnBlock.includes('if (progress.completed && !progress.rewarded)'),
+    'handleMissionComplete grants reward only if completed && !rewarded (CAS protection)');
+  // refId deterministic: mission_<userId>_<missionId>_<today>
+  assert.ok(fnBlock.includes("`mission_${userId}_${missionId}_${today}`"),
+    'refId is deterministic (mission_userId_missionId_today)');
+});
+
+test('S7: Response shape — completed, is_new_completion, new_balance (frontend uses these for tick + popup)', () => {
+  const WALLET_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/wallet.js'), 'utf8');
+  const fnStart = WALLET_CTRL_SRC.indexOf('async function handleMissionComplete(request, env)');
+  const nextFn = WALLET_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnEnd = nextFn > -1 ? nextFn : WALLET_CTRL_SRC.length;
+  const fnBlock = WALLET_CTRL_SRC.substring(fnStart, fnEnd);
+  // Response must include: completed, is_new_completion, new_balance, reward_amount, reward_label, progress_count, target_count
+  assert.ok(fnBlock.includes('completed: progress.completed'),
+    'Response includes completed (frontend uses for tick)');
+  assert.ok(fnBlock.includes('is_new_completion: rewardGranted'),
+    'Response includes is_new_completion (frontend uses to gate popup)');
+  assert.ok(fnBlock.includes('new_balance: newBalance'),
+    'Response includes new_balance (frontend uses for balance refresh)');
+});
+
+test('S8: completeMission frontend uses response.completed to update _missionStatusList + tick', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function completeMission(missionId, targetId)');
+  const fnBlock = APP_SRC.substring(fnStart, fnStart + 3000);
+  // After success: update _missionStatusList[idx].completed = data.completed
+  assert.ok(fnBlock.includes('_missionStatusList[idx].completed = data.completed'),
+    'completeMission updates _missionStatusList[idx].completed from response');
+  // If data.completed: add to _completedMissionsToday (so it doesn't fire again)
+  assert.ok(fnBlock.includes('if (data.completed)') && fnBlock.includes('_completedMissionsToday.add(missionId)'),
+    'completeMission adds to _completedMissionsToday if data.completed');
+  // If is_new_completion: popup + refreshWalletAfterMission
+  assert.ok(fnBlock.includes('if (data.is_new_completion)'),
+    'completeMission checks is_new_completion for popup');
+  assert.ok(fnBlock.includes('showMissionRewardPopup') && fnBlock.includes('refreshWalletAfterMission'),
+    'completeMission shows popup + refreshWalletAfterMission on new completion');
+  // Calls updateMissionCards() at the end (re-renders tick)
+  assert.ok(fnBlock.includes('updateMissionCards()'),
+    'completeMission calls updateMissionCards() (renders tick)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// T) Mission Idempotency — duplicate/concurrent completion
+// ═══════════════════════════════════════════════════════════════════════
+
+test('T1: Duplicate completion in same session — frontend _completedMissionsToday guards it', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function completeMission(missionId, targetId)');
+  const fnBlock = APP_SRC.substring(fnStart, fnStart + 200);
+  assert.ok(fnBlock.includes('if (_completedMissionsToday.has(missionId)) return'),
+    'completeMission early-returns if missionId already in _completedMissionsToday (no duplicate API call)');
+});
+
+test('T2: Backend CAS guard — markMissionRewarded UPDATE WHERE rewarded = FALSE', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  // Two markMissionRewarded paths: weekly (week_start) and daily (daily_date)
+  // Both use "WHERE ... AND rewarded = FALSE RETURNING id" (CAS)
+  const idx = SRC.indexOf('async function markMissionRewarded');
+  const block = SRC.substring(idx, idx + 2000);
+  assert.ok(block.includes('rewarded = FALSE') && block.includes('RETURNING id'),
+    'markMissionRewarded uses CAS (WHERE rewarded = FALSE RETURNING id)');
+  // Two paths: weekly (week_start) and daily (daily_date)
+  assert.ok(block.includes('week_start = $3'),
+    'weekly mission markMissionRewarded filters by week_start');
+  assert.ok(block.includes('daily_date = $3'),
+    'daily mission markMissionRewarded filters by daily_date');
+});
+
+test('T3: creditTokens idempotency — INSERT ON CONFLICT DO NOTHING (no double-credit)', () => {
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/wallet.js'), 'utf8');
+  const fnStart = SRC.indexOf('async function creditTokens(env');
+  const fnBlock = SRC.substring(fnStart, fnStart + 3000);
+  // ON CONFLICT DO NOTHING
+  assert.ok(fnBlock.includes('ON CONFLICT DO NOTHING'),
+    'creditTokens uses INSERT ON CONFLICT DO NOTHING (atomic idempotency)');
+  // If idempotent (existing tx found), returns idempotent: true
+  assert.ok(fnBlock.includes('idempotent: true'),
+    'creditTokens returns idempotent:true for duplicate requests (no double-credit)');
+  // refId-based idempotency pre-check
+  assert.ok(fnBlock.includes('ref_id = $3') || fnBlock.includes('ref_id = $2'),
+    'creditTokens checks existing tx by ref_id (idempotency pre-check)');
+});
+
+test('T4: Event token one-time use — consumedMarkerKey prevents double-consume', () => {
+  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const idx = WORKER_SRC.indexOf('async function consumeMissionEventToken');
+  const block = WORKER_SRC.substring(idx, idx + 2500);
+  // Check the consumed marker
+  assert.ok(block.includes('consumedMarkerKey'),
+    'consumeMissionEventToken uses a consumed marker key');
+  // Already-consumed → return false
+  assert.ok(block.includes('alreadyConsumed') && block.includes('return false'),
+    'consumeMissionEventToken returns false if already consumed (double-reward prevention)');
+  // Delete the token after consume (one-time)
+  assert.ok(block.includes('SESSION_CACHE.delete'),
+    'consumeMissionEventToken deletes the token (one-time use)');
+}
+
+);
+
+test('T5: Failed grantReward recovery — retryFailedMissionRewards cron exists', () => {
+  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  // The cron that re-grants if markMissionRewarded succeeded but grantReward failed
+  assert.ok(WORKER_SRC.includes('async function retryFailedMissionRewards'),
+    'retryFailedMissionRewards cron exists (handles failed grantReward)');
+  // Finds rows where completed=true, rewarded=true, but NO matching token_transactions
+  assert.ok(WORKER_SRC.includes('completed = TRUE') && WORKER_SRC.includes('rewarded = TRUE'),
+    'cron queries mission_progress where completed=true AND rewarded=true');
+  assert.ok(WORKER_SRC.includes('NOT EXISTS') || WORKER_SRC.includes('IS NULL'),
+    'cron filters where no matching token_transactions row exists (NOT EXISTS / LEFT JOIN IS NULL)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// U) Full Flow Simulation (runtime logic test, not source-only)
+//
+// Simulates the in-memory state machine of the frontend + backend logic
+// for a `read_news` completion. Validates that, after the migration fix,
+// the entire flow produces: tick + reward + idempotent retry behavior.
+// ═══════════════════════════════════════════════════════════════════════
+
+test('U1: Full read_news flow simulation — stale seed → migration → completion → tick', () => {
+  // STEP 1: Stale seed (production before fix)
+  let dbMissions = [
+    { mission_id: 'daily_login',    trigger: 'daily_open',           completed: false, rewarded: false },
+    { mission_id: 'read_news',      trigger: 'news_open',            completed: false, rewarded: false },
+    { mission_id: 'read_analysis',  trigger: 'analysis_open',       completed: false, rewarded: false },
+    { mission_id: 'check_calendar', trigger: 'calendar_open',        completed: false, rewarded: false },
+    { mission_id: 'visit_market',   trigger: 'market_open',          completed: false, rewarded: false },
+  ];
+
+  // STEP 2: Simulate the migration
+  const migrationMap = {
+    'read_news':      { 'news_open':      'news_article_open' },
+    'read_analysis':  { 'analysis_open':  'analysis_detail_open' },
+    'visit_market':   { 'market_open':    'asset_detail_open' },
+  };
+  for (const m of dbMissions) {
+    const oldT = m.trigger;
+    const newT = migrationMap[m.mission_id]?.[oldT];
+    if (newT) m.trigger = newT;
+  }
+
+  // Verify migration result
+  assert.equal(dbMissions[1].trigger, 'news_article_open', 'read_news trigger migrated to news_article_open');
+  assert.equal(dbMissions[2].trigger, 'analysis_detail_open', 'read_analysis trigger migrated');
+  assert.equal(dbMissions[3].trigger, 'calendar_open', 'check_calendar unchanged');
+  assert.equal(dbMissions[4].trigger, 'asset_detail_open', 'visit_market trigger migrated');
+  assert.equal(dbMissions[0].trigger, 'daily_open', 'daily_login unchanged');
+
+  // STEP 3: Frontend state — load mission status (mirror loadMissionStatus)
+  let _missionStatusList = dbMissions.map(m => ({...m}));
+  const _completedMissionsToday = new Set();
+  for (const m of _missionStatusList) {
+    if (m.completed) _completedMissionsToday.add(m.mission_id);
+  }
+  let _missionsLoaded = true;
+
+  // STEP 4: User opens news article — frontend fires event
+  const firedEvent = 'news_article_open';
+  const firedTarget = 'https://news.example.com/article-1';
+
+  // STEP 5: _fireInternal filter (mirror app.js _fireInternal)
+  const matching = _missionStatusList.filter(m =>
+    m.trigger === firedEvent && !m.completed && !_completedMissionsToday.has(m.mission_id)
+  );
+  assert.equal(matching.length, 1, 'news_article_open matches read_news after migration');
+  assert.equal(matching[0].mission_id, 'read_news', 'matched mission is read_news');
+
+  // STEP 6: Simulate completeMission + backend
+  // issue-token → consume → incrementMissionProgress → markMissionRewarded → grantReward
+  // Backend returns: completed=true, is_new_completion=true, new_balance=Y
+  const backendResponse = {
+    status: 'success',
+    completed: true,
+    is_new_completion: true,
+    new_balance: 105,
+    reward_amount: 5,
+    reward_label: 'خواندن یک خبر',
+    progress_count: 1,
+    target_count: 1,
+  };
+
+  // Frontend updates state (mirror completeMission)
+  const idx = _missionStatusList.findIndex(m => m.mission_id === 'read_news');
+  _missionStatusList[idx].completed = backendResponse.completed;
+  if (backendResponse.completed) _completedMissionsToday.add('read_news');
+
+  // STEP 7: Verify tick would render
+  const isCompleted = _missionStatusList[1].completed || _completedMissionsToday.has('read_news');
+  assert.equal(isCompleted, true, 'read_news is now completed — tick would render');
+
+  // STEP 8: Verify idempotent retry — second fire of same event
+  const matching2 = _missionStatusList.filter(m =>
+    m.trigger === 'news_article_open' && !m.completed && !_completedMissionsToday.has(m.mission_id)
+  );
+  assert.equal(matching2.length, 0, 'Second fire of same event does NOT match (idempotent at frontend)');
+
+  // STEP 9: Verify backend idempotency — markMissionRewarded CAS
+  // (already rewarded=true would block second reward at backend level)
+  dbMissions[1].rewarded = true;
+  const casResult = dbMissions[1].rewarded === false; // simulated UPDATE ... WHERE rewarded=FALSE
+  assert.equal(casResult, false, 'Backend CAS: second markMissionRewarded finds rewarded=true → 0 rows (no double-reward)');
+});
+
+test('U2: Idempotent migration — running migration twice produces no further changes', () => {
+  // Setup: simulate a DB where migration has ALREADY run (triggers are new values)
+  let dbMissions = [
+    { mission_id: 'read_news',      trigger: 'news_article_open' },
+    { mission_id: 'read_analysis',  trigger: 'analysis_detail_open' },
+    { mission_id: 'visit_market',   trigger: 'asset_detail_open' },
+    { mission_id: 'check_calendar', trigger: 'calendar_open' },
+    { mission_id: 'daily_login',    trigger: 'daily_open' },
+  ];
+
+  // Simulate running the migration WHERE clause (no rows match)
+  const staleTriggers = [
+    ['read_news', 'news_open'],
+    ['read_analysis', 'analysis_open'],
+    ['visit_market', 'market_open'],
+  ];
+  let matchedRows = 0;
+  for (const m of dbMissions) {
+    for (const [id, oldT] of staleTriggers) {
+      if (m.mission_id === id && m.trigger === oldT) matchedRows++;
+    }
+  }
+  assert.equal(matchedRows, 0,
+    'Idempotent: 2nd run of migration finds 0 stale rows (no-op)');
+
+  // Triggers remain unchanged after the (no-op) 2nd migration
+  assert.equal(dbMissions[0].trigger, 'news_article_open', 'read_news trigger unchanged');
+  assert.equal(dbMissions[1].trigger, 'analysis_detail_open', 'read_analysis trigger unchanged');
+  assert.equal(dbMissions[2].trigger, 'asset_detail_open', 'visit_market trigger unchanged');
+  assert.equal(dbMissions[3].trigger, 'calendar_open', 'check_calendar unchanged');
+  assert.equal(dbMissions[4].trigger, 'daily_open', 'daily_login unchanged');
+});

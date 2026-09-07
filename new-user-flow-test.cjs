@@ -148,8 +148,30 @@ const startIdx = workerSrc.indexOf('// MISSION EVENT TOKEN SERVICE');
 const endIdx = workerSrc.indexOf('function buildFastApiValidationError', startIdx);
 const tokenServiceSrc = workerSrc.slice(startIdx, endIdx);
 const tokenModule = { exports: {} };
-const tokenEvaluator = new Function('require', 'module', 'exports', 'crypto', tokenServiceSrc + '\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };');
-tokenEvaluator(require, tokenModule, tokenModule.exports, globalThis.crypto);
+
+// FIX (broken test): worker-proxy.js imports `getTehranDateString` from
+// ./src/services/timezone.js and aliases it as `sharedGetTehranDateString`
+// at module scope. The token service block calls `sharedGetTehranDateString()`
+// via `_getTodayISOString()`. When the block is extracted and re-evaluated
+// here in isolation, that binding is missing → ReferenceError.
+//
+// Solution: load the real helper from the timezone service module (the
+// same module worker-proxy.js uses) and inject it as a closure parameter
+// named `sharedGetTehranDateString`. We use the harness's loadFactory
+// pattern (evaluate ES module source as CJS, extract the named export).
+const _tzSrc = fs.readFileSync(path.join(__dirname, 'src/services/timezone.js'), 'utf8');
+const _tzBody = _tzSrc
+  .replace(/export\s+function\s+/g, 'function ')
+  .replace(/export\s+const\s+/g, 'const ');
+const _tzModule = { exports: {} };
+new Function('module', 'exports', _tzBody + '\nmodule.exports = { getTehranDateString };')(_tzModule, _tzModule.exports);
+const _sharedGetTehranDateString = _tzModule.exports.getTehranDateString;
+
+const tokenEvaluator = new Function(
+  'require', 'module', 'exports', 'crypto', 'sharedGetTehranDateString',
+  tokenServiceSrc + '\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };'
+);
+tokenEvaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, _sharedGetTehranDateString);
 const { issueMissionEventToken, consumeMissionEventToken } = tokenModule.exports;
 
 // In-memory KV

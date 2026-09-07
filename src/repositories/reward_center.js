@@ -258,6 +258,77 @@ export function createRewardCenterRepository(deps) {
           ON CONFLICT (mission_id) DO NOTHING
         `);
       }
+
+      // ── ROOT-CAUSE FIX (RC-1: Stale Mission Triggers) ──────────────────
+      // Production was seeded with the OLD trigger names (news_open /
+      // analysis_open / market_open) before commit 6870112 renamed them
+      // to news_article_open / analysis_detail_open / asset_detail_open.
+      // Because the seed above only fires when the table is EMPTY, existing
+      // production rows were never updated — so MissionBus.fire fired the
+      // NEW event names from the frontend but the DB still held the OLD
+      // triggers, and `_fireInternal` filtered with `m.trigger === eventType`
+      // which matched nothing. Result: missions never ticked.
+      //
+      // This idempotent migration promotes stale triggers in EXISTING rows
+      // to the current frontend event names. It:
+      //   - touches ONLY rows whose trigger still equals an OLD value
+      //     (WHERE clauses pin mission_id AND old trigger), so already-fixed
+      //     rows (e.g. fresh installs that used the new seed) are untouched;
+      //   - rewrites ONLY metadata.trigger via jsonb_set — other metadata
+      //     fields (target_count, description, icon) are preserved;
+      //   - is safe to run repeatedly (2nd run finds 0 rows matching the
+      //     WHERE clauses and is a no-op);
+      //   - never depends on the seed block running — works on already-
+      //     seeded production DBs.
+      //
+      // Triggers that did NOT change (daily_login→daily_open,
+      // check_calendar→calendar_open) are intentionally NOT in this
+      // migration to guarantee they remain untouched.
+      //
+      // Note: jsonb_set is supported on real PostgreSQL (Neon/Supabase
+      // production). It is NOT supported by pg-mem, so source-level
+      // regression tests (Q1-Q7 in wallet-perf-ux-regression-test.cjs)
+      // assert the SQL shape rather than executing it on pg-mem.
+      //
+      // CORRECTNESS POLICY: This migration is REQUIRED for mission
+      // correctness on stale-seeded production DBs (without it, the 3
+      // affected missions never tick). If it fails silently and
+      // `_schemaVerified = true` is still set, the next request in this
+      // isolate will NOT retry — the migration is permanently skipped until
+      // the Worker cold-restarts (which can be hours/days). Therefore on
+      // failure we MUST NOT set `_schemaVerified = true`; we throw so the
+      // outer catch (line ~316) skips setting it. The next request retries
+      // ensureSchema — the batchSql (CREATE TABLE IF NOT EXISTS) and seed
+      // (gated on count===0) are both idempotent no-ops on already-existing
+      // tables, so retrying is cheap. This is the same idempotent-retry
+      // pattern the outer catch already documents (see comment below at
+      // line ~317).
+      try {
+        await queryDb(env, `
+          UPDATE mission_rewards SET metadata = jsonb_set(
+              COALESCE(metadata, '{}'::jsonb),
+              '{trigger}',
+              CASE
+                WHEN mission_id = 'read_news'      AND metadata->>'trigger' = 'news_open'      THEN '"news_article_open"'::jsonb
+                WHEN mission_id = 'read_analysis'  AND metadata->>'trigger' = 'analysis_open'  THEN '"analysis_detail_open"'::jsonb
+                WHEN mission_id = 'visit_market'   AND metadata->>'trigger' = 'market_open'    THEN '"asset_detail_open"'::jsonb
+              END
+            )
+          WHERE (mission_id = 'read_news'      AND metadata->>'trigger' = 'news_open')
+             OR (mission_id = 'read_analysis'  AND metadata->>'trigger' = 'analysis_open')
+             OR (mission_id = 'visit_market'   AND metadata->>'trigger' = 'market_open')
+        `);
+      } catch (e) {
+        // CRITICAL: re-throw so the outer catch does NOT set _schemaVerified.
+        // The migration is required for mission correctness; swallowing it
+        // would silently leave stale triggers in place (the very bug RC-1
+        // fixes). The outer catch logs the warning AND returns without
+        // setting _schemaVerified — so the next request retries the whole
+        // ensureSchema (which is idempotent and cheap). Tag the error so
+        // the outer catch's `console.warn` line is identifiable in logs.
+        console.warn('Reward Center stale-trigger migration FAILED — will retry next request:', e.message);
+        throw e;
+      }
       _schemaVerified = true;
     } catch (e) {
       console.warn('Reward Center schema migration warning:', e.message);

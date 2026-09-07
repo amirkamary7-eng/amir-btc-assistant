@@ -8473,15 +8473,21 @@ async function completeMission(missionId, targetId) {
 }
 
 // Backward-compatible alias
+// Frontend mission event constants. These values MUST stay aligned with
+// the `metadata.trigger` strings seeded in src/repositories/reward_center.js
+// (and with the migration that promotes stale triggers to the current names).
+// `MissionBus.fire(<value>)` filters the backend mission list with strict
+// equality `m.trigger === eventType`, so a mismatch here silently causes
+// zero mission matches — no tick, no reward (this was RC-1).
 const MISSION_EVENTS = {
-  NEWS_OPEN: 'news_open',
-  ANALYSIS_OPEN: 'analysis_open',
-  CALENDAR_OPEN: 'calendar_open',
-  DAILY_OPEN: 'daily_open',
-  PROFILE_OPEN: 'profile_open',
-  MARKET_OPEN: 'market_open',
-  WATCHLIST_OPEN: 'watchlist_open',
-  DASHBOARD_OPEN: 'dashboard_open',
+  NEWS_OPEN: 'news_article_open',         // matches seed 'read_news'        trigger
+  ANALYSIS_OPEN: 'analysis_detail_open',   // matches seed 'read_analysis'   trigger
+  CALENDAR_OPEN: 'calendar_open',          // matches seed 'check_calendar' trigger
+  DAILY_OPEN: 'daily_open',                 // matches seed 'daily_login'     trigger
+  PROFILE_OPEN: 'profile_open',            // legacy tab-switch alias (unused; kept for back-compat)
+  MARKET_OPEN: 'asset_detail_open',        // matches seed 'visit_market'   trigger
+  WATCHLIST_OPEN: 'watchlist_open',         // legacy tab-switch alias (unused; kept for back-compat)
+  DASHBOARD_OPEN: 'dashboard_open',         // legacy tab-switch alias (unused; kept for back-compat)
 };
 function fireMissionEvent(eventType) { MissionBus.fire(eventType); }
 
@@ -8773,8 +8779,25 @@ window.fireMissionEvent = fireMissionEvent;
 // FIX 3: Allow wallet.js to trigger a mission reload when the wallet page
 // is re-rendered (page innerHTML replacement destroys the rendered cards).
 // This resets the _missionsLoaded flag and re-fetches mission data.
+//
+// ROOT-CAUSE FIX (RC-2: Weekly Boundary Leak):
+// ALSO clear `_completedMissionsToday` so that missions completed in a
+// PREVIOUS period (e.g. last week for weekly missions) do not leak into
+// the new period. Previously, this Set was only ever ADD-TO — never
+// cleared — so on the boundary (next Saturday Tehran) a user who had
+// completed `read_news` in the prior week had `read_news` stuck in the
+// Set, and `_fireInternal` filtered it out (`!_completedMissionsToday.has(...)`
+// was false) → the new week's mission never fired → no tick, no reward.
+//
+// `loadMissionStatus()` immediately rebuilds the Set authoritatively from
+// `if (m.completed) _completedMissionsToday.add(...)` for missions the
+// backend reports as completed in the CURRENT period. So clearing here
+// does NOT lose any current-period completion — it only drops stale
+// entries from prior periods that the backend no longer reports as
+// completed.
 window.reloadMissions = function() {
   _missionsLoaded = false;
+  _completedMissionsToday.clear();
   return loadMissionStatus();
 };
 window.MISSION_EVENTS = MISSION_EVENTS;
