@@ -353,6 +353,30 @@ const WalletApp = (() => {
   // mutation has occurred. This prevents an in-flight GET (started before a
   // POST mutation) from overwriting the fresh balance with stale data.
   let _walletMutationSeq = 0;
+
+  // AUTHORITATIVE BALANCE GUARD: after a successful mutation (POST), the
+  // response's newBalance is authoritative. We record the mutation seq at
+  // the time of the authoritative response. Any background fetchWallet
+  // that started with the SAME seq (i.e., started AFTER the mutation) but
+  // returns a stale DB snapshot (e.g., Neon read replica lag) will be
+  // detected: if the GET's myMutationSeq is <= _authoritativeBalanceSeq,
+  // it means the GET started at or before the authoritative mutation —
+  // its balance data may be stale. We reject the balance update but still
+  // accept the rest of the wallet data (tier, history).
+  let _authoritativeBalanceSeq = 0;
+  let _authoritativeBalance = null;
+
+  // Call this after ANY successful mutation (POST) that returns newBalance.
+  // It records the authoritative balance + the mutation seq at the time of
+  // the response. Background fetchWallet calls that started at or before
+  // this seq will have their balance overwritten with the authoritative value
+  // (protecting against Neon read replica lag returning a stale snapshot).
+  function _setAuthoritativeBalance(newBalance) {
+    if (typeof newBalance === 'number' && newBalance >= 0) {
+      _authoritativeBalance = newBalance;
+      _authoritativeBalanceSeq = _walletMutationSeq;
+    }
+  }
   // W-STAB-2 FIX: monotonic sequence token to guard loadWalletData against
   // out-of-order promise resolution. Previously, rapid open/close/reopen of
   // the wallet could fire multiple loadWalletData invocations concurrently.
@@ -989,6 +1013,20 @@ const WalletApp = (() => {
         return _walletCache.wallet || walletData;
       }
       if (data.status === 'success') {
+        // AUTHORITATIVE BALANCE GUARD: if a mutation response (POST) has set
+        // an authoritative balance, and this GET's mutation seq is <= the
+        // authoritative seq, the GET's balance may be stale (Neon read
+        // replica lag). We preserve the authoritative balance but accept
+        // the rest of the data (tier, history, etc.).
+        if (_authoritativeBalance !== null && myMutationSeq <= _authoritativeBalanceSeq) {
+          console.warn('[WALLET] fetchWallet: stale balance rejected (authoritative balance from mutation seq', _authoritativeBalanceSeq, 'overrides GET seq', myMutationSeq, ')');
+          // Overwrite balance in the response with authoritative value
+          data.balance = _authoritativeBalance;
+        } else {
+          // GET is fresh enough — clear authoritative guard so future
+          // GETs (without intervening mutations) can update normally
+          _authoritativeBalance = null;
+        }
         walletData = data;
         _walletCache.wallet = data;
         _walletCache.walletAt = Date.now();
@@ -1399,6 +1437,9 @@ const WalletApp = (() => {
           // P0-3 FIX: update _lastKnownBalance so VPN modal and other consumers
           // see the fresh balance immediately — not stale pre-claim value.
           _lastKnownBalance = result.newBalance;
+          // AUTHORITATIVE BALANCE GUARD: record this balance as authoritative
+          // so background fetchWallet cannot overwrite it with stale DB data.
+          _setAuthoritativeBalance(result.newBalance);
           if (walletData) {
             walletData.balance = result.newBalance;
             _walletCache.wallet = walletData;
@@ -1415,11 +1456,23 @@ const WalletApp = (() => {
           }
         }
 
-        // PHASE 2 FIX: use refreshWalletAfterMutation for consistent post-mutation
-        // behavior (profile card refresh, notification badge, wallet data refresh).
-        // This replaces the inline refresh logic with the shared helper.
-        if (typeof window.refreshWalletAfterMutation === 'function') {
-          try { window.refreshWalletAfterMutation(result.newBalance); } catch (_) {}
+        // PERF FIX: refreshWalletAfterMutation fires _refreshWalletData which
+        // calls loadWalletData which does renderWalletPage (full innerHTML rewrite)
+        // + 3 API calls. This is unnecessary after a claim — we already have
+        // the authoritative balance from the POST response (updated above).
+        // The full page refresh would OVERWRITE the streak card we just
+        // rendered (lines 1426-1451), causing a visible flash from
+        // "Day 2/7 ✓" back to "—" and then back to "Day 2/7 ✓" when the
+        // GET /api/wallet/claim response arrives.
+        //
+        // Instead: just refresh profile card + notification badge (fast,
+        // no innerHTML rewrite). The wallet page will get fresh data on
+        // next open (invalidateWalletCache already called above).
+        if (typeof window.WalletApp?.loadProfileCard === 'function') {
+          try { window.WalletApp.loadProfileCard(); } catch (_) {}
+        }
+        if (typeof updateNotifBadge === 'function') {
+          try { updateNotifBadge(); } catch (_) {}
         }
 
         // PHASE UX-V2.1: Update daily check-in card summary
@@ -1727,7 +1780,14 @@ const WalletApp = (() => {
         rewardEl.textContent = `Day ${state.streak_day}/7 · ✓`;
         rewardEl.style.color = '#22C55E';
       } else {
-        const day = state.streak_day > 0 ? state.streak_day : 1;
+        // FIX: when claimed_today=false and streak_day > 0, the user has a
+        // streak from previous day(s) but hasn't claimed today yet. The card
+        // should show the NEXT day to claim (streak_day + 1), not the last
+        // claimed day. This matches _renderStreakDaysHTML's todayDay logic.
+        // Example: streak_day=1, claimed_today=false → card shows "Day 2/7"
+        // (the day they need to claim now), not "Day 1/7" (which was claimed
+        // yesterday and is already ticked).
+        const day = state.streak_day > 0 ? state.streak_day + 1 : 1;
         const nextReward = rewards[Math.max(0, Math.min(6, day - 1))] || 1;
         rewardEl.textContent = `Day ${day}/7 · +${nextReward} AB`;
         rewardEl.style.color = '#f5a623';
@@ -1995,6 +2055,9 @@ const WalletApp = (() => {
         // the server didn't return new_balance (e.g., idempotent path).
         if (typeof resp.new_balance === 'number') {
           _lastKnownBalance = resp.new_balance;
+          // AUTHORITATIVE BALANCE GUARD: protect against stale GET overwriting
+          // the post-purchase balance with a pre-purchase DB snapshot.
+          _setAuthoritativeBalance(resp.new_balance);
           const balEl = document.getElementById('wallet-balance-amount');
           if (balEl) balEl.textContent = resp.new_balance.toLocaleString('en-US');
           // FA-6 FIX: keep walletData.balance in sync with the authoritative
@@ -2172,6 +2235,9 @@ const WalletApp = (() => {
     // P0-1 FIX: expose mutation seq incrementer for external callers
     // (app.js refreshWalletAfterMutation, referral.js wheel spin, cosmetics.js purchase)
     _incrementMutationSeq: () => { _walletMutationSeq++; },
+    // AUTHORITATIVE BALANCE GUARD: expose for external mutation callers
+    // (app.js refreshWalletAfterMutation for mission/wheel/referral rewards)
+    _setAuthoritativeBalance,
     _refreshWalletData: loadWalletData,
     _updateDailyCheckinCard,
     _startWeeklyCountdown,

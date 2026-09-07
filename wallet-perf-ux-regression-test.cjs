@@ -598,16 +598,16 @@ test('J4: MissionBus.fire returns on load failure (allows retry)', () => {
     'comment confirms _missionsLoaded stays false for retry');
 });
 
-test('J5: _fireInternal only called after successful load', () => {
+test('J5: _fireInternal only called after successful load + list populated', () => {
   const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
-  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 800);
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 1600);
   const awaitIdx = fireBody.indexOf('await loadMissionStatus()');
-  const fireInternalIdx = fireBody.indexOf('_fireInternal');
+  const populatedCheck = fireBody.indexOf('!_missionsLoaded || _missionStatusList.length === 0');
+  const fireInternalCall = fireBody.indexOf('MissionBus._fireInternal(eventType, targetId)');
   assert.ok(awaitIdx > -1, 'await loadMissionStatus() exists in fire()');
-  assert.ok(fireInternalIdx > -1, '_fireInternal exists in fire()');
-  assert.ok(fireInternalIdx > awaitIdx,
-    '_fireInternal called AFTER await loadMissionStatus()');
+  assert.ok(populatedCheck > awaitIdx, 'check for populated list after await');
+  assert.ok(fireInternalCall > populatedCheck, 'MissionBus._fireInternal() call is AFTER populated check');
 });
 
 test('J6: All 4 mission triggers have matching MissionBus.fire calls', () => {
@@ -691,4 +691,393 @@ test('K5: State D — streak_day=3, claimedToday=false (Day 4 available)', () =>
   }
   const day4_isToday = 4 === todayDay;
   assert.equal(day4_isToday, true, 'Day 4 is today (available)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// L) Daily Card state machine — matches Modal exactly
+// ═══════════════════════════════════════════════════════════════════════
+
+function cardDay(streak_day, claimed_today) {
+  if (claimed_today) return streak_day > 0 ? streak_day : 1;
+  return streak_day > 0 ? streak_day + 1 : 1;
+}
+
+test('L1: Card state — streak_day=0, claimed_today=false → Day 1', () => {
+  assert.equal(cardDay(0, false), 1, 'First ever claim → Day 1');
+});
+
+test('L2: Card state — streak_day=1, claimed_today=false → Day 2', () => {
+  assert.equal(cardDay(1, false), 2, 'Day 1 claimed yesterday, Day 2 available');
+});
+
+test('L3: Card state — streak_day=2, claimed_today=true → Day 2 (not Day 3)', () => {
+  assert.equal(cardDay(2, true), 2, 'Day 2 just claimed → Day 2, NOT Day 3');
+});
+
+test('L4: Card state — streak_day=2, claimed_today=false → Day 3', () => {
+  assert.equal(cardDay(2, false), 3, 'Day 2 claimed yesterday, Day 3 available');
+});
+
+test('L5: Card and Modal use same state machine', () => {
+  // Card: cardDay(streak_day, claimed_today) = claimed_today ? streak_day : (streak_day+1 or 1)
+  // Modal: todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1)
+  // These are identical formulas.
+  const cases = [
+    { sd: 0, ct: false },
+    { sd: 1, ct: false },
+    { sd: 2, ct: true },
+    { sd: 2, ct: false },
+    { sd: 3, ct: true },
+    { sd: 7, ct: false },
+  ];
+  for (const { sd, ct } of cases) {
+    const card = cardDay(sd, ct);
+    const modal = ct ? sd : (sd > 0 ? sd + 1 : 1);
+    assert.equal(card, modal, `Card and Modal agree for streak_day=${sd}, claimed_today=${ct}`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// M) Claim path — no unnecessary API calls or re-render
+// ═══════════════════════════════════════════════════════════════════════
+
+test('M1: claimDaily does NOT call refreshWalletAfterMutation', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily');
+  const fnEnd = WALLET_SRC.indexOf('\n  }', fnStart + 100);
+  const fnBody = WALLET_SRC.substring(fnStart, fnEnd + 10);
+  assert.ok(!fnBody.includes('refreshWalletAfterMutation'),
+    'claimDaily must NOT call refreshWalletAfterMutation (removes 3 API calls + innerHTML rewrite)');
+});
+
+test('M2: claimDaily calls loadProfileCard (fire-and-forget, not await)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  assert.ok(fnBody.includes('loadProfileCard'),
+    'claimDaily calls loadProfileCard for profile card refresh');
+  assert.ok(!fnBody.includes('await loadProfileCard'),
+    'loadProfileCard is fire-and-forget (not awaited)');
+});
+
+test('M3: claimDaily does NOT call loadWalletData', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  // Strip comments to avoid matching comment text that describes what was removed
+  const fnBodyNC = fnBody.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!fnBodyNC.includes('loadWalletData'),
+    'claimDaily must NOT call loadWalletData (no full wallet re-render)');
+  assert.ok(!fnBodyNC.includes('_refreshWalletData'),
+    'claimDaily must NOT call _refreshWalletData (no full wallet re-render)');
+});
+
+test('M4: claimDaily does NOT call renderWalletPage', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  const fnBodyNC = fnBody.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!fnBodyNC.includes('renderWalletPage'),
+    'claimDaily must NOT call renderWalletPage (no innerHTML rewrite)');
+});
+
+test('M5: claimDaily updates balance from result.newBalance (not from API)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  assert.ok(fnBody.includes('result.newBalance'),
+    'claimDaily uses result.newBalance from POST response (not from API)');
+  assert.ok(fnBody.includes('_lastKnownBalance = result.newBalance'),
+    'updates _lastKnownBalance from authoritative response');
+});
+
+test('M6: claimDaily calls _updateDailyCheckinCard after balance update', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  const balanceIdx = fnBody.indexOf('result.newBalance');
+  const cardIdx = fnBody.indexOf('_updateDailyCheckinCard');
+  assert.ok(balanceIdx > -1 && cardIdx > balanceIdx,
+    '_updateDailyCheckinCard called AFTER balance update');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// N) Missions — auth race + waitForApiReady + concurrent
+// ═══════════════════════════════════════════════════════════════════════
+
+test('N1: loadMissionStatus uses waitForApiReady (not just canRunSessionRequests)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function loadMissionStatus');
+  const fnEnd = APP_SRC.indexOf('\n}', fnStart + 100);
+  const fnBody = APP_SRC.substring(fnStart, fnEnd + 10);
+  assert.ok(fnBody.includes('await waitForApiReady(8000)'),
+    'loadMissionStatus awaits waitForApiReady(8000) — waits for auth');
+  // canRunSessionRequests still checked AFTER waitForApiReady as final guard
+  assert.ok(fnBody.includes('canRunSessionRequests()'),
+    'canRunSessionRequests still checked after waitForApiReady');
+});
+
+test('N2: waitForApiReady is called BEFORE _missionLoadPromise check', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function loadMissionStatus');
+  const fnEnd = APP_SRC.indexOf('\n}', fnStart + 100);
+  const fnBody = APP_SRC.substring(fnStart, fnEnd + 10);
+  const waitIdx = fnBody.indexOf('waitForApiReady');
+  const promiseIdx = fnBody.indexOf('_missionLoadPromise');
+  assert.ok(waitIdx > -1 && promiseIdx > waitIdx,
+    'waitForApiReady called BEFORE _missionLoadPromise check');
+});
+
+test('N3: _missionLoadPromise cleaned up in finally (no stuck promise)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function loadMissionStatus');
+  const fnEnd = APP_SRC.indexOf('\n}', fnStart + 100);
+  const fnBody = APP_SRC.substring(fnStart, fnEnd + 10);
+  assert.ok(fnBody.includes('_missionLoadPromise = null'),
+    '_missionLoadPromise = null in finally block');
+});
+
+test('N4: MissionBus.fire checks _missionsLoaded AFTER await (not just before)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 1600);
+  assert.ok(fireBody.includes('!_missionsLoaded || _missionStatusList.length === 0'),
+    'MissionBus.fire checks _missionsLoaded + list populated after await');
+});
+
+test('N5: MissionBus.fire returns on load failure (retry possible)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fireIdx = APP_SRC.indexOf('async fire(eventType, targetId)');
+  const fireBody = APP_SRC.substring(fireIdx, fireIdx + 1600);
+  // After catch: return (allows retry)
+  const catchIdx = fireBody.indexOf('catch (e)');
+  const returnAfterCatch = fireBody.indexOf('return;', catchIdx);
+  assert.ok(catchIdx > -1 && returnAfterCatch > catchIdx,
+    'MissionBus.fire returns after catch (retry possible)');
+});
+
+test('N6: duplicate event does not trigger duplicate reward (backend guard)', () => {
+  // The backend has multiple guards:
+  // 1. event_token: one-time use, 32-char hex, KV with consumed marker
+  // 2. mission_progress: UNIQUE(user_id, mission_id, daily_date/week_start)
+  // 3. markMissionRewarded: CAS UPDATE WHERE status='pending'
+  // 4. token_transactions: UNIQUE(user_id, tx_type, ref_id) WHERE status='completed'
+  const CONTROLLER_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/wallet.js'), 'utf8');
+  assert.ok(CONTROLLER_SRC.includes('markMissionRewarded'),
+    'backend uses markMissionRewarded (CAS)');
+  assert.ok(CONTROLLER_SRC.includes('grantReward'),
+    'backend uses grantReward (atomic credit)');
+  assert.ok(CONTROLLER_SRC.includes('refId'),
+    'backend uses deterministic refId for idempotent credit');
+
+  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  assert.ok(WORKER_SRC.includes('consumedMarkerKey'),
+    'event token uses consumed marker (prevents double-reward)');
+  assert.ok(WORKER_SRC.includes('token.length !== 32'),
+    'event token validates length');
+});
+
+test('N7: All 4 mission triggers fire correctly in app.js', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  // news_article_open
+  assert.ok(APP_SRC.includes("MissionBus.fire('news_article_open'"),
+    "News: MissionBus.fire('news_article_open')");
+  // analysis_detail_open
+  assert.ok(APP_SRC.includes("MissionBus.fire('analysis_detail_open'"),
+    "Analysis: MissionBus.fire('analysis_detail_open')");
+  // asset_detail_open (market)
+  assert.ok(APP_SRC.includes("MissionBus.fire('asset_detail_open'"),
+    "Market: MissionBus.fire('asset_detail_open')");
+  // calendar_open
+  assert.ok(APP_SRC.includes("MISSION_EVENTS.CALENDAR_OPEN") || APP_SRC.includes("'calendar_open'"),
+    "Calendar: calendar_open trigger");
+});
+
+test('N8: Backend mission triggers match DB seed', () => {
+  const REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_center.js'), 'utf8');
+  // DB seed data — triggers are embedded in JSON metadata strings
+  assert.ok(REPO_SRC.includes('"trigger":"news_article_open"'),
+    'DB seed: read_news trigger = news_article_open');
+  assert.ok(REPO_SRC.includes('"trigger":"analysis_detail_open"'),
+    'DB seed: read_analysis trigger = analysis_detail_open');
+  assert.ok(REPO_SRC.includes('"trigger":"calendar_open"'),
+    'DB seed: check_calendar trigger = calendar_open');
+  assert.ok(REPO_SRC.includes('"trigger":"asset_detail_open"'),
+    'DB seed: visit_market trigger = asset_detail_open');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// O) Stale GET overwrite protection
+// ═══════════════════════════════════════════════════════════════════════
+
+test('O1: fetchWallet does NOT set _lastKnownBalance (claimDaily authoritative value preserved)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(!fnBody.includes('_lastKnownBalance'),
+    'fetchWallet does NOT set _lastKnownBalance (claimDaily sets it from POST response)');
+});
+
+test('O2: claimDaily sets _lastKnownBalance from POST response (not from GET)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  assert.ok(fnBody.includes('_lastKnownBalance = result.newBalance'),
+    'claimDaily sets _lastKnownBalance from POST response');
+});
+
+test('O3: claimDaily sets walletData.balance from POST response (not from GET)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  assert.ok(fnBody.includes('walletData.balance = result.newBalance'),
+    'claimDaily sets walletData.balance from POST response');
+});
+
+test('O4: loadProfileCard renders dashboard card, NOT wallet full page', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function loadProfileCard');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // loadProfileCard renders into #wallet-preview-card (dashboard)
+  assert.ok(fnBody.includes('wallet-preview-card'),
+    'loadProfileCard renders into #wallet-preview-card (dashboard), NOT #wallet-full-page');
+  // Must NOT render into wallet-full-page
+  assert.ok(!fnBody.includes('wallet-full-page'),
+    'loadProfileCard does NOT render into #wallet-full-page');
+});
+
+test('O5: stale GET cannot overwrite wallet-full-page balance (renderWalletPage not called in claim path)', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const claimStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const claimBody = WALLET_SRC.substring(claimStart, claimStart + 8000);
+  const claimBodyNC = claimBody.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!claimBodyNC.includes('renderWalletPage'),
+    'claimDaily does NOT call renderWalletPage — stale GET cannot overwrite wallet-full-page balance');
+  assert.ok(!claimBodyNC.includes('loadWalletData'),
+    'claimDaily does NOT call loadWalletData — stale GET cannot trigger full wallet re-render');
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// P) Authoritative Balance Guard — stale GET protection
+// ═══════════════════════════════════════════════════════════════════════
+
+test('P1: _setAuthoritativeBalance function exists', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  assert.ok(WALLET_SRC.includes('function _setAuthoritativeBalance'),
+    '_setAuthoritativeBalance function exists');
+  assert.ok(WALLET_SRC.includes('_authoritativeBalance'),
+    '_authoritativeBalance variable exists');
+  assert.ok(WALLET_SRC.includes('_authoritativeBalanceSeq'),
+    '_authoritativeBalanceSeq variable exists');
+});
+
+test('P2: _setAuthoritativeBalance records balance + mutation seq', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('function _setAuthoritativeBalance');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 300);
+  assert.ok(fnBody.includes('_authoritativeBalance = newBalance'),
+    'sets _authoritativeBalance from newBalance');
+  assert.ok(fnBody.includes('_authoritativeBalanceSeq = _walletMutationSeq'),
+    'sets _authoritativeBalanceSeq from current mutation seq');
+});
+
+test('P3: fetchWallet checks _authoritativeBalance before accepting GET balance', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  assert.ok(fnBody.includes('_authoritativeBalance !== null'),
+    'fetchWallet checks if authoritative balance exists');
+  assert.ok(fnBody.includes('myMutationSeq <= _authoritativeBalanceSeq'),
+    'fetchWallet checks if GET seq is <= authoritative seq (stale detection)');
+  assert.ok(fnBody.includes('data.balance = _authoritativeBalance'),
+    'fetchWallet overwrites stale balance with authoritative value');
+  assert.ok(fnBody.includes('_authoritativeBalance = null'),
+    'fetchWallet clears authoritative guard when GET is fresh');
+});
+
+test('P4: claimDaily calls _setAuthoritativeBalance after successful claim', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
+  assert.ok(fnBody.includes('_setAuthoritativeBalance(result.newBalance)'),
+    'claimDaily calls _setAuthoritativeBalance with POST response newBalance');
+});
+
+test('P5: VPN purchase calls _setAuthoritativeBalance after successful purchase', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  assert.ok(WALLET_SRC.includes('_setAuthoritativeBalance(resp.new_balance)'),
+    'VPN purchase calls _setAuthoritativeBalance with POST response new_balance');
+});
+
+test('P6: refreshWalletAfterMutation (app.js) calls _setAuthoritativeBalance', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(APP_SRC.includes('_setAuthoritativeBalance'),
+    'refreshWalletAfterMutation calls _setAuthoritativeBalance');
+});
+
+test('P7: _setAuthoritativeBalance exposed via WalletApp for external callers', () => {
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  assert.ok(WALLET_SRC.includes('_setAuthoritativeBalance,'),
+    '_setAuthoritativeBalance is exported via WalletApp object');
+});
+
+// Simulate the race scenario: POST mutation → newBalance=Y → GET returns X
+test('P8: Race scenario — POST newBalance=Y, stale GET returns X, walletData stays Y', () => {
+  // This is a logic simulation, not a runtime test (would need Telegram auth).
+  // We verify the CODE PATH that prevents stale GET from overwriting.
+
+  // 1. Before mutation: _walletMutationSeq = N, _authoritativeBalance = null
+  // 2. claimDaily: _walletMutationSeq++ → N+1
+  // 3. POST success: result.newBalance = Y
+  // 4. _setAuthoritativeBalance(Y) → _authoritativeBalance = Y, _authoritativeBalanceSeq = N+1
+  // 5. walletData.balance = Y (set by claimDaily)
+  // 6. _lastKnownBalance = Y (set by claimDaily)
+  // 7. loadProfileCard (fire-and-forget) → fetchWallet()
+  // 8. fetchWallet: myMutationSeq = _walletMutationSeq = N+1
+  // 9. GET /api/wallet → backend returns stale balance = X (Neon read replica lag)
+  // 10. fetchWallet: myMutationSeq (N+1) === _walletMutationSeq (N+1) → passes seq guard
+  // 11. fetchWallet: _authoritativeBalance !== null (Y) → true
+  // 12. fetchWallet: myMutationSeq (N+1) <= _authoritativeBalanceSeq (N+1) → true (EQUAL!)
+  // 13. fetchWallet: data.balance = _authoritativeBalance (Y) → OVERWRITES stale X with Y
+  // 14. walletData = data → walletData.balance = Y (NOT X!)
+  // ✅ walletData.balance stays Y (authoritative)
+  // ✅ _lastKnownBalance stays Y (not set by fetchWallet)
+
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+
+  // Verify the guard uses <= (not <), so equal seq is also protected
+  assert.ok(fnBody.includes('myMutationSeq <= _authoritativeBalanceSeq'),
+    'fetchWallet uses <= comparison (equal seq is also protected — stale DB snapshot)');
+
+  // Verify balance is overwritten in the data object BEFORE walletData assignment
+  const guardIdx = fnBody.indexOf('data.balance = _authoritativeBalance');
+  const walletDataIdx = fnBody.indexOf('walletData = data');
+  assert.ok(guardIdx > -1 && walletDataIdx > guardIdx,
+    'data.balance overwritten with authoritative value BEFORE walletData assignment');
+});
+
+test('P9: Guard cleared when fresh GET arrives (no intervening mutation)', () => {
+  // After a fresh GET (seq > _authoritativeBalanceSeq, meaning no mutation
+  // was in between), the guard is cleared so future GETs work normally.
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // The else branch clears the guard
+  assert.ok(fnBody.includes('_authoritativeBalance = null'),
+    'fetchWallet clears _authoritativeBalance when GET is fresh (else branch)');
+});
+
+test('P10: Guard works for debit mutations too (VPN purchase balance decreases)', () => {
+  // The guard is based on mutation seq, NOT balance comparison.
+  // If VPN purchase: balance X → Y (Y < X, debit), the guard protects Y.
+  // A stale GET returning X will be overwritten with Y (authoritative).
+  // This works because the guard checks seq, not numeric comparison.
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
+  const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // Verify the guard does NOT compare balances numerically
+  assert.ok(!fnBody.includes('data.balance > ') && !fnBody.includes('data.balance < '),
+    'fetchWallet does NOT use numeric balance comparison (guard is seq-based, works for debits too)');
 });

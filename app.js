@@ -8307,6 +8307,15 @@ const MissionBus = {
                 // _missionsLoaded stays false → next fire() will retry
                 return;
             }
+            // RELIABILITY FIX: loadMissionStatus returns silently (no throw)
+            // when canRunSessionRequests() is false. In that case _missionsLoaded
+            // is still false and _missionStatusList is still empty. We must NOT
+            // proceed to _fireInternal — it would silently no-op.
+            if (!_missionsLoaded || _missionStatusList.length === 0) {
+                console.warn('[MissionBus] loadMissionStatus did not populate missions for event:', eventType,
+                    '(canRunSessionRequests may be false, or auth not ready)');
+                return;
+            }
         }
 
         // After load (or if already loaded), filter and fire.
@@ -8328,7 +8337,30 @@ const MissionBus = {
  * Load today's mission status from the server. Called once on bootstrap.
  */
 async function loadMissionStatus() {
-    if (_missionsLoaded || !API_BASE || !canRunSessionRequests()) return;
+    if (_missionsLoaded || !API_BASE) return;
+
+    // PERF/RELIABILITY FIX: replaced canRunSessionRequests() with waitForApiReady().
+    // canRunSessionRequests() returns false INSTANTLY when auth is not ready —
+    // causing loadMissionStatus to silently return without even trying the API.
+    // This was the root cause of missions not completing: the user opens a news
+    // article before auth is ready → MissionBus.fire → loadMissionStatus →
+    // canRunSessionRequests() false → silent return → event lost.
+    //
+    // waitForApiReady() WAITS up to 8s for auth to become ready (same pattern
+    // as apiFetch). This means if auth becomes ready within 8s, the mission
+    // status WILL be loaded and the event WILL be processed.
+    //
+    // Guest users are still handled: waitForApiReady returns immediately if
+    // !isInTelegram(), so non-Telegram users don't wait 8s.
+    // canRunSessionRequests is still checked AFTER waitForApiReady as a
+    // final guard (e.g., for guest/pending users who shouldn't make API calls).
+    try {
+        await waitForApiReady(8000);
+    } catch (_) {
+        // Auth didn't become ready in 8s — give up
+        return;
+    }
+    if (_missionsLoaded || !canRunSessionRequests()) return;
 
     // PERF FIX: use shared promise to prevent duplicate concurrent loads.
     // If MissionBus.fire triggers a retry while a previous load is in-flight,
@@ -8493,6 +8525,12 @@ function refreshWalletAfterMutation(newBalance) {
     // (fetchWallet / refreshWalletBalance) reject their stale responses.
     if (window.WalletApp && typeof window.WalletApp._incrementMutationSeq === 'function') {
         try { window.WalletApp._incrementMutationSeq(); } catch (_) {}
+    }
+    // AUTHORITATIVE BALANCE GUARD: record the authoritative balance so
+    // background fetchWallet cannot overwrite it with stale DB data.
+    if (typeof newBalance === 'number' && window.WalletApp &&
+        typeof window.WalletApp._setAuthoritativeBalance === 'function') {
+        try { window.WalletApp._setAuthoritativeBalance(newBalance); } catch (_) {}
     }
 
     // 2. Update balance display immediately
