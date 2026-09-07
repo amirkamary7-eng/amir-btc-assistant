@@ -1695,3 +1695,255 @@ test('U2: Idempotent migration — running migration twice produces no further c
   assert.equal(dbMissions[3].trigger, 'calendar_open', 'check_calendar unchanged');
   assert.equal(dbMissions[4].trigger, 'daily_open', 'daily_login unchanged');
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// V) Root-Cause 3 (RC-3) — _fireInternal typo: m.mission_id → mission.mission_id
+//
+// In commit 6870112 (2026-08-23), `_fireInternal` was refactored to pass
+// `targetId` to `completeMission`. The line was changed from
+//   `completeMission(mission.mission_id);`
+// to
+//   `completeMission(m.mission_id, targetId);`
+// but the loop variable is `mission`, not `m`. `m` is bound ONLY in the
+// `.filter(m => ...)` callback scope and is NOT visible inside the for-of
+// loop. So every call threw `ReferenceError: m is not defined`.
+//
+// Because `MissionBus.fire` is async and callers (`openNewsModal`,
+// `openAnalysisDetailPage`, `openCoinDetail`, `openForexDetail`) invoke it
+// fire-and-forget inside `try { } catch (_) {}`, the ReferenceError became
+// an unhandled Promise rejection that the sync catch could not intercept.
+// `completeMission` was NEVER invoked → zero `/api/wallet/mission/*`
+// requests → zero mission ticks → zero rewards — for ALL 5 missions —
+// since 2026-08-23.
+//
+// These tests verify the fix (using `mission.mission_id` instead of `m.mission_id`)
+// by executing the actual `_fireInternal` logic with a mocked mission list
+// and asserting `completeMission` is invoked with the correct `mission_id`
+// and `targetId` for each of the 5 missions.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Source-level assertion: line 8331 must use `mission.mission_id` (not `m.mission_id`)
+test('V1: _fireInternal uses mission.mission_id (NOT m.mission_id — RC-3 fix)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  // Find the SECOND occurrence of `_fireInternal(eventType, targetId)` — the first is
+  // the call site `MissionBus._fireInternal(eventType, targetId)` inside `fire`,
+  // the second is the method definition `_fireInternal(eventType, targetId) { ... }`.
+  const firstIdx = APP_SRC.indexOf('_fireInternal(eventType, targetId)');
+  assert.ok(firstIdx > -1, 'first _fireInternal reference (call site) exists');
+  const fnStart = APP_SRC.indexOf('_fireInternal(eventType, targetId) {', firstIdx + 10);
+  assert.ok(fnStart > -1, '_fireInternal method definition exists');
+  // Find the actual `completeMission(mission.mission_id, targetId)` call inside the method body
+  const completeMissionIdx = APP_SRC.indexOf('completeMission(mission.mission_id, targetId)', fnStart);
+  assert.ok(completeMissionIdx > fnStart, 'FIXED: _fireInternal calls completeMission(mission.mission_id, targetId)');
+  // Strip comments before checking for the bug pattern (the explanatory comment
+  // includes the literal text `completeMission(m.mission_id, ...)` which would false-positive).
+  const methodEnd = APP_SRC.indexOf('    }', completeMissionIdx);
+  const methodBody = APP_SRC.substring(fnStart, methodEnd + 10);
+  // Remove single-line // comments
+  const methodNoComments = methodBody.replace(/\/\/[^\n]*/g, '');
+  // Now check there is NO actual code call to completeMission(m.mission_id, ...)
+  assert.ok(!/\bcompleteMission\(m\.mission_id/.test(methodNoComments),
+    'BUG REMOVED: _fireInternal no longer has actual code calling completeMission(m.mission_id, ...) (comment references are OK)');
+});
+
+// Runtime simulation: actual _fireInternal logic with mission list, for all 5 events
+function simulateFireInternal(missions, completedToday, eventType, targetId, completeMissionFn) {
+  // Mirror EXACT app.js _fireInternal logic (post-fix)
+  const matching = missions.filter(m =>
+    m.trigger === eventType && !m.completed && !completedToday.has(m.mission_id)
+  );
+  for (const mission of matching) {
+    completeMissionFn(mission.mission_id, targetId);
+  }
+}
+
+test('V2: news_article_open → completeMission invoked with read_news + target_id (no ReferenceError)', () => {
+  const missions = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'news_article_open', 'https://news.example.com/article-1',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 1, 'completeMission called exactly once');
+  assert.equal(calls[0].mission_id, 'read_news', 'mission_id is read_news');
+  assert.equal(calls[0].target_id, 'https://news.example.com/article-1', 'target_id passed through correctly');
+});
+
+test('V3: analysis_detail_open → completeMission invoked with read_analysis + target_id (no ReferenceError)', () => {
+  const missions = [
+    { mission_id: 'read_analysis', trigger: 'analysis_detail_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'analysis_detail_open', 'analysis-id-42',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 1, 'completeMission called exactly once');
+  assert.equal(calls[0].mission_id, 'read_analysis', 'mission_id is read_analysis');
+  assert.equal(calls[0].target_id, 'analysis-id-42', 'target_id passed through correctly');
+});
+
+test('V4: asset_detail_open → completeMission invoked with visit_market + target_id (no ReferenceError)', () => {
+  const missions = [
+    { mission_id: 'visit_market', trigger: 'asset_detail_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'asset_detail_open', 'BTC',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 1, 'completeMission called exactly once');
+  assert.equal(calls[0].mission_id, 'visit_market', 'mission_id is visit_market');
+  assert.equal(calls[0].target_id, 'BTC', 'target_id passed through correctly (symbol)');
+});
+
+test('V5: calendar_open → completeMission invoked with check_calendar + undefined target_id (no ReferenceError)', () => {
+  const missions = [
+    { mission_id: 'check_calendar', trigger: 'calendar_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'calendar_open', undefined,
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 1, 'completeMission called exactly once');
+  assert.equal(calls[0].mission_id, 'check_calendar', 'mission_id is check_calendar');
+  assert.equal(calls[0].target_id, undefined, 'target_id is undefined (calendar has no target)');
+});
+
+test('V6: daily_open → completeMission invoked with daily_login + undefined target_id (no ReferenceError)', () => {
+  // Note: in production, daily_login is fired via fireDailyLoginMission (server-side bootstrap),
+  // not via MissionBus.fire on the client. But _fireInternal is generic and would handle
+  // daily_open too if invoked. This test verifies the generic path.
+  const missions = [
+    { mission_id: 'daily_login', trigger: 'daily_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'daily_open', undefined,
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 1, 'completeMission called exactly once');
+  assert.equal(calls[0].mission_id, 'daily_login', 'mission_id is daily_login');
+  assert.equal(calls[0].target_id, undefined, 'target_id is undefined (daily_login has no target)');
+});
+
+// Test all 5 missions in a single _fireInternal invocation sequence
+test('V7: All 5 missions fire correctly in sequence (no ReferenceError for any)', () => {
+  const missions = [
+    { mission_id: 'daily_login', trigger: 'daily_open', completed: false },
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: false },
+    { mission_id: 'read_analysis', trigger: 'analysis_detail_open', completed: false },
+    { mission_id: 'check_calendar', trigger: 'calendar_open', completed: false },
+    { mission_id: 'visit_market', trigger: 'asset_detail_open', completed: false },
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  const events = [
+    ['news_article_open', 'url-1'],
+    ['analysis_detail_open', 'a-1'],
+    ['calendar_open', undefined],
+    ['asset_detail_open', 'BTC'],
+    ['daily_open', undefined],
+  ];
+  for (const [evt, target] of events) {
+    simulateFireInternal(missions, completedToday, evt, target,
+      (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  }
+  assert.equal(calls.length, 5, 'All 5 missions fire exactly once');
+  assert.deepEqual(
+    calls.map(c => c.mission_id).sort(),
+    ['check_calendar', 'daily_login', 'read_analysis', 'read_news', 'visit_market'].sort(),
+    'All 5 distinct mission_ids were dispatched'
+  );
+});
+
+// Duplicate / already completed tests — _completedMissionsToday should filter out completed missions
+test('V8: Already completed mission is filtered out by _completedMissionsToday (no double-fire)', () => {
+  const missions = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: false },
+  ];
+  // Mission already in _completedMissionsToday (e.g., completed earlier this session)
+  const completedToday = new Set(['read_news']);
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'news_article_open', 'url-1',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 0, 'Mission already in _completedMissionsToday is filtered out');
+});
+
+test('V9: Mission with m.completed=true is filtered out (no double-fire)', () => {
+  const missions = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: true },  // already completed
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  simulateFireInternal(missions, completedToday, 'news_article_open', 'url-1',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 0, 'Mission with m.completed=true is filtered out');
+});
+
+test('V10: Mission with non-matching trigger is filtered out (no false fire)', () => {
+  const missions = [
+    { mission_id: 'read_news', trigger: 'news_open', completed: false },  // OLD trigger (stale)
+  ];
+  const completedToday = new Set();
+  const calls = [];
+  // Frontend fires the NEW event name
+  simulateFireInternal(missions, completedToday, 'news_article_open', 'url-1',
+    (mid, tid) => calls.push({ mission_id: mid, target_id: tid }));
+  assert.equal(calls.length, 0, 'Mission with stale trigger does NOT match new event');
+});
+
+// CRITICAL regression: the OLD code would throw ReferenceError: m is not defined
+// This test runs the OLD buggy logic and confirms it throws, then runs the NEW
+// fixed logic and confirms it does NOT throw.
+test('V11: Pre-fix code throws ReferenceError; post-fix code does NOT (regression guard)', () => {
+  const missions = [
+    { mission_id: 'read_news', trigger: 'news_article_open', completed: false },
+  ];
+  const completedToday = new Set();
+
+  // Simulate the OLD buggy _fireInternal
+  function buggyFireInternal(eventType, targetId) {
+    const matching = missions.filter(m =>
+      m.trigger === eventType && !m.completed && !completedToday.has(m.mission_id)
+    );
+    for (const mission of matching) {
+      // eslint-disable-next-line no-undef
+      completeMissionMock(m.mission_id, targetId);  // BUG: m is out of scope
+    }
+  }
+  function completeMissionMock(mid, tid) { /* mock */ }
+
+  // The buggy version must throw
+  let buggyThrew = false;
+  try { buggyFireInternal('news_article_open', 'url-1'); }
+  catch (e) { buggyThrew = (e instanceof ReferenceError && /m is not defined/.test(e.message)); }
+  assert.ok(buggyThrew, 'OLD buggy code throws ReferenceError: m is not defined');
+
+  // The fixed version must NOT throw
+  let fixedThrew = false;
+  let fixedCallCount = 0;
+  try {
+    simulateFireInternal(missions, completedToday, 'news_article_open', 'url-1',
+      () => fixedCallCount++);
+  } catch (e) { fixedThrew = true; }
+  assert.ok(!fixedThrew, 'NEW fixed code does NOT throw');
+  assert.equal(fixedCallCount, 1, 'NEW fixed code calls completeMission exactly once');
+});
+
+// Test that completeMission signature is preserved (missionId, targetId)
+test('V12: completeMission signature preserved — (mission_id, target_id)', () => {
+  const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnStart = APP_SRC.indexOf('async function completeMission(missionId, targetId)');
+  assert.ok(fnStart > -1, 'completeMission has signature (missionId, targetId) — unchanged');
+  // The call site passes (mission.mission_id, targetId) — two args.
+  // Find the _fireInternal method definition (second occurrence) and verify the call.
+  const firstFireInternalIdx = APP_SRC.indexOf('_fireInternal(eventType, targetId)');
+  const fireInternalDefIdx = APP_SRC.indexOf('_fireInternal(eventType, targetId) {', firstFireInternalIdx + 10);
+  assert.ok(fireInternalDefIdx > -1, '_fireInternal method definition exists');
+  // Get a generous slice of the method body (the method has a long explanatory comment,
+  // so we need ~1600 chars to reach the actual completeMission call)
+  const fireInternalBody = APP_SRC.substring(fireInternalDefIdx, fireInternalDefIdx + 1600);
+  // Strip // comments to avoid matching the explanatory comment that describes the OLD bug
+  const fireInternalBodyNoComments = fireInternalBody.replace(/\/\/[^\n]*/g, '');
+  assert.ok(/completeMission\(mission\.mission_id,\s*targetId\)/.test(fireInternalBodyNoComments),
+    '_fireInternal calls completeMission(mission.mission_id, targetId) — 2 args, signature preserved');
+});

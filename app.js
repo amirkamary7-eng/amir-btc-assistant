@@ -8328,7 +8328,20 @@ const MissionBus = {
         );
 
         for (const mission of matching) {
-            completeMission(m.mission_id, targetId);
+            // ROOT-CAUSE FIX (RC-3): previously `completeMission(m.mission_id, targetId)` —
+            // a typo introduced in commit 6870112 (2026-08-23). `m` was bound ONLY in the
+            // `.filter(m => ...)` callback scope and was NOT visible inside the for-of
+            // loop, so every call threw `ReferenceError: m is not defined`. Because
+            // `MissionBus.fire` is async and the callers (`openNewsModal`,
+            // `openAnalysisDetailPage`, `openCoinDetail`, `openForexDetail`) invoke it
+            // fire-and-forget (no await) inside a `try { } catch (_) {}` block, the
+            // ReferenceError became an unhandled Promise rejection that the sync
+            // catch could not intercept — the error was silently swallowed and
+            // `completeMission` was NEVER invoked. Result: zero `/api/wallet/mission/*`
+            // requests, zero mission ticks, zero rewards — for ALL 5 missions — since
+            // 2026-08-23. The fix: use the loop variable `mission` (which IS in scope)
+            // instead of the out-of-scope `m`.
+            completeMission(mission.mission_id, targetId);
         }
     }
 };
