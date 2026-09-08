@@ -139,7 +139,7 @@ body.user-loading .profile-loading-target.skeleton-text {
    visual spacing instead of 12px — still perfectly balanced and within Header). */
 .brand-logo {
   display: block;
-  height: 34px;
+  height: 37px;
   width: auto;
   object-fit: contain;
 }
