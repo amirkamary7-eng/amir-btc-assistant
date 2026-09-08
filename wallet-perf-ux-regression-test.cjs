@@ -54,9 +54,9 @@ test('A2: handleClaimDaily uses _scheduleBackground for non-blocking notificatio
 });
 
 test('A3: handleClaimDaily response includes result (which has newBalance)', () => {
-  // Function is ~3300 chars — search whole file for the pattern near handleClaimDaily
+  // Function is ~4000 chars with timing instrumentation — search wider
   const fnStart = CONTROLLER_SRC.indexOf('async function handleClaimDaily');
-  const fnBody = CONTROLLER_SRC.substring(fnStart, fnStart + 4000);
+  const fnBody = CONTROLLER_SRC.substring(fnStart, fnStart + 5000);
   assert.ok(fnBody.includes('...result'),
     'response spreads result (which includes newBalance)');
 });

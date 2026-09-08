@@ -1503,10 +1503,11 @@ const WalletApp = (() => {
           if (claimBtn) claimBtn.remove();
         }
 
-        // PHASE UX-V2.1: Update notification badge immediately
-        if (typeof updateNotifBadge === 'function') {
-          try { updateNotifBadge(); } catch (_) {}
-        }
+        // P3-1 FIX: Removed duplicate updateNotifBadge() call. It was already
+        // called at line 1474 above (in the same success block). The second
+        // call at line 1507 was redundant — apiFetch GET dedup prevented an
+        // extra network request, but the function call itself was wasted.
+        // Notification badge behavior is unchanged.
 
         // FA-9 FIX: refresh transaction history after successful daily claim.
         // DAILY CHECK FIX: fire-and-forget (non-blocking) — previously this was

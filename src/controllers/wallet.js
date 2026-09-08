@@ -248,31 +248,47 @@ export function createWalletHandlers(deps) {
    * POST /api/wallet/claim — Claim daily reward.
    */
   async function handleClaimDaily(request, env) {
-    const authState = await authenticateTelegramRequest(request, env);
+    // P4 TIMING INSTRUMENTATION: structured timing log for Daily Claim latency.
+    // Each step records wall-clock ms. No user PII, no auth tokens, no initData.
+    // This appears in wrangler tail as a single JSON log line at the end.
+    const _t = { start: Date.now() };
+
+    // P2-1 FIX: Reuse auth from PROTECTED_PATHS gate if available (eliminates
+    // duplicate HMAC validation — ~2-5ms saved per request). The gate at
+    // worker-proxy.js:15257 sets request._protectedUser for all /api/wallet/*
+    // routes in production. For tests/direct invocation without the gate,
+    // fall back to full authenticateTelegramRequest.
+    let authState;
+    if (request._protectedUser) {
+      _t.auth = 0; // auth already done by gate
+      authState = { error: null, user: request._protectedUser };
+    } else {
+      _t.authStart = Date.now();
+      authState = await authenticateTelegramRequest(request, env);
+      _t.auth = Date.now() - _t.authStart;
+    }
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
     // Rate limit: 5 claims per 60s (prevents abuse while allowing retries)
+    _t.rlStart = Date.now();
     const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_claim', 5, 60);
+    _t.rl = Date.now() - _t.rlStart;
     if (rlErr) return rlErr;
     try {
       // PHASE UX-V2: Simplified claim flow — eliminated duplicate getStreakStatus.
-      // Previously: controller called getStreakStatus → computed streakDay → looked up
-      // STREAK_REWARDS → computed DAILY_REWARD → passed to claimDailyRewardWithStreak.
-      // That was 1 extra DB query (getStreakStatus) duplicating what claimDailyRewardWithStreak
-      // already does internally. Now: just pass computeReward option + isPremium +
-      // entitlementConfig, and the function computes everything atomically.
+      const _tPremium = Date.now();
       const isPremium = await _isPremiumSafe(env, authState.user.id);
+      _t.premium = Date.now() - _tPremium;
 
       const claimFn = typeof walletRepo.claimDailyRewardWithStreak === 'function'
         ? walletRepo.claimDailyRewardWithStreak
         : walletRepo.claimDailyReward;
 
       // PHASE UX-V2: Pass options so claimDailyRewardWithStreak computes the reward
-      // from STREAK_REWARDS[streak_day] + tier multiplier internally.
-      // For legacy claimDailyReward (no streak), fall back to old behavior.
       let result;
+      const _tClaim = Date.now();
       if (typeof walletRepo.claimDailyRewardWithStreak === 'function') {
         result = await walletRepo.claimDailyRewardWithStreak(env, authState.user.id, 0, {
           computeReward: true,
@@ -283,6 +299,7 @@ export function createWalletHandlers(deps) {
         const DAILY_REWARD = _getDailyRewardAmount(isPremium);
         result = await walletRepo.claimDailyReward(env, authState.user.id, DAILY_REWARD);
       }
+      _t.claim = Date.now() - _tClaim;
 
       // Dispatch notification via NotificationService (single entry point)
       // PERF FIX (Daily Check-in Latency): notification is fire-and-forget —
@@ -304,6 +321,20 @@ export function createWalletHandlers(deps) {
         }));
       }
 
+      // P4 TIMING: emit structured timing log before returning response.
+      // No PII — only durations (ms) and outcome. Appears in wrangler tail.
+      _t.total = Date.now() - _t.start;
+      console.log(JSON.stringify({
+        scope: 'daily-claim-timing',
+        auth_ms: _t.auth,
+        rate_limit_ms: _t.rl,
+        premium_lookup_ms: _t.premium,
+        claim_txn_ms: _t.claim,
+        total_ms: _t.total,
+        outcome: 'success',
+        streak_day: result?.streak_day || null,
+      }));
+
       return jsonResponse({
         status: 'success',
         ...result,
@@ -311,6 +342,17 @@ export function createWalletHandlers(deps) {
         streak_rewards: walletRepo.STREAK_REWARDS || [1, 3, 6, 10, 18, 30, 50],
       }, {}, env);
     } catch (error) {
+      _t.total = Date.now() - _t.start;
+      console.log(JSON.stringify({
+        scope: 'daily-claim-timing',
+        auth_ms: _t.auth,
+        rate_limit_ms: _t.rl,
+        premium_lookup_ms: _t.premium,
+        claim_txn_ms: _t.claim,
+        total_ms: _t.total,
+        outcome: error.code === 'ALREADY_CLAIMED' ? 'already_claimed' : 'error',
+        error: String(error?.message || '').slice(0, 100),
+      }));
       if (error.code === 'ALREADY_CLAIMED') {
         return jsonResponse({ status: 'error', message: 'Already claimed today', code: 'ALREADY_CLAIMED' }, { status: 409 }, env);
       }
