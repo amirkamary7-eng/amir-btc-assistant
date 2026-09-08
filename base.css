@@ -134,11 +134,12 @@ body.user-loading .profile-loading-target.skeleton-text {
 }
 /* Logo image — replaces the old text-based brand (.brand-text / .brand-amirbtc / .brand-tagline).
    The old text CSS rules below are kept for reference but no longer used in HTML.
-   Height: 32px = Header content area (56px header - 12px top padding - 12px bottom padding).
-   This ensures the logo is perfectly centered vertically with no overflow. */
+   Height: 34px (slightly larger than the 32px content area for better visibility;
+   the 2px overflow is centered by align-items:center, creating 11px top/bottom
+   visual spacing instead of 12px — still perfectly balanced and within Header). */
 .brand-logo {
   display: block;
-  height: 32px;
+  height: 34px;
   width: auto;
   object-fit: contain;
 }
