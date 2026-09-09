@@ -1423,7 +1423,10 @@ const WalletApp = (() => {
       const result = await claimDailyRewardAPI();
 
       if (result.status === 'success') {
-        // Update cached state from claim response
+        // P1 UI FIX: Mark local state as claimed IMMEDIATELY — before any
+        // rendering. Even if rendering throws below, the internal state
+        // (_dailyCheckinState, _isClaiming) is already correct so the next
+        // wallet open or refresh shows the claimed state.
         _dailyCheckinState = {
           streak_day: result.streak_day || 1,
           streak_rewards: result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
@@ -1461,9 +1464,7 @@ const WalletApp = (() => {
         // + 3 API calls. This is unnecessary after a claim — we already have
         // the authoritative balance from the POST response (updated above).
         // The full page refresh would OVERWRITE the streak card we just
-        // rendered (lines 1426-1451), causing a visible flash from
-        // "Day 2/7 ✓" back to "—" and then back to "Day 2/7 ✓" when the
-        // GET /api/wallet/claim response arrives.
+        // rendered, causing a visible flash.
         //
         // Instead: just refresh profile card + notification badge (fast,
         // no innerHTML rewrite). The wallet page will get fresh data on
@@ -1475,32 +1476,59 @@ const WalletApp = (() => {
           try { updateNotifBadge(); } catch (_) {}
         }
 
-        // PHASE UX-V2.1: Update daily check-in card summary
-        _updateDailyCheckinCard();
+        // P1 UI FIX: Wrap ALL rendering in try/catch. If any rendering
+        // function throws, we fall back to refreshing claim status from
+        // the server (GET /api/wallet/claim) so the UI recovers to the
+        // correct claimed state — instead of staying stuck on "Claiming...".
+        try {
+          // PHASE UX-V2.1: Update daily check-in card summary
+          _updateDailyCheckinCard();
 
-        // PHASE UX-V2.1: If modal is open, re-render streak days to show ✓ on today
-        const daysGrid = document.getElementById('dcm-days-grid');
-        if (daysGrid) {
-          daysGrid.innerHTML = _renderStreakDaysHTML(
-            result.streak_day || 1,
-            result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
-            true
-          );
-          // Update reward display + hint
-          const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
-          if (rewardDisplay) {
-            rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${WT('claimed_label')}</span>`;
+          // PHASE UX-V2.1: If modal is open, re-render streak days to show ✓ on today
+          const daysGrid = document.getElementById('dcm-days-grid');
+          if (daysGrid) {
+            daysGrid.innerHTML = _renderStreakDaysHTML(
+              result.streak_day || 1,
+              result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+              true
+            );
+            // Update reward display + hint
+            const rewardDisplay = daysGrid.parentElement.querySelector('.dcm-reward-display');
+            if (rewardDisplay) {
+              rewardDisplay.innerHTML = `<span class="dcm-claimed"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> ${WT('claimed_label')}</span>`;
+            }
+            const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
+            if (!hintEl) {
+              const hint = document.createElement('div');
+              hint.className = 'dcm-hint';
+              hint.textContent = WT('come_back_tomorrow_hint');
+              daysGrid.parentElement.appendChild(hint);
+            }
+            // Remove claim button from modal
+            const claimBtn = daysGrid.parentElement.querySelector('.dcm-claim-btn');
+            if (claimBtn) claimBtn.remove();
           }
-          const hintEl = daysGrid.parentElement.querySelector('.dcm-hint');
-          if (!hintEl) {
-            const hint = document.createElement('div');
-            hint.className = 'dcm-hint';
-            hint.textContent = WT('come_back_tomorrow_hint');
-            daysGrid.parentElement.appendChild(hint);
-          }
-          // Remove claim button from modal
-          const claimBtn = daysGrid.parentElement.querySelector('.dcm-claim-btn');
-          if (claimBtn) claimBtn.remove();
+        } catch (renderErr) {
+          // P1 UI FIX: Rendering failed — but the claim SUCCEEDED on the server.
+          // Don't leave the button stuck on "Claiming...". Refresh claim
+          // status from the server to show the correct claimed state.
+          console.warn('[claimDaily] rendering after success threw — falling back to server refresh:', renderErr?.message || renderErr);
+          try {
+            // Re-enable button first so it's not stuck
+            if (btn) { btn.disabled = false; }
+            // Fire-and-forget: fetch fresh claim status to update UI
+            fetchClaimStatus().then(freshStatus => {
+              if (freshStatus && freshStatus.status === 'success') {
+                _dailyCheckinState = {
+                  streak_day: freshStatus.streak_day || 1,
+                  streak_rewards: freshStatus.streak_rewards || result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
+                  claimed_today: true,
+                  last_claim_date: _getTehranDateString(),
+                };
+                _updateDailyCheckinCard();
+              }
+            }).catch(() => {});
+          } catch (_) {}
         }
 
         // P3-1 FIX: Removed duplicate updateNotifBadge() call. It was already
