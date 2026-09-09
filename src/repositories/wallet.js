@@ -286,8 +286,14 @@ export function createWalletRepository(deps) {
    */
   async function getStreakStatus(env, userId) {
     await ensureSchema(env).catch(() => {});
+    // ROOT-CAUSE FIX: use to_char(last_claim_date, 'YYYY-MM-DD') so the value
+    // comes back as a plain string (e.g. '2026-08-21'), NOT a JavaScript Date
+    // object. Previously, the pg/neon driver returned DATE columns as JS Date
+    // objects, and String(date).slice(0,10) produced 'Fri Aug 21' instead of
+    // '2026-08-21' — breaking the streak continuation comparison in
+    // claimDailyRewardWithStreak (streak always reset to Day 1).
     const result = await queryDb(env,
-      `SELECT streak_day, last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
+      `SELECT streak_day, to_char(last_claim_date, 'YYYY-MM-DD') AS last_claim_date, cycle_count FROM daily_checkin_streaks WHERE user_id = $1`,
       [String(userId)],
     );
     return result.rows[0] || null;
@@ -411,7 +417,11 @@ export function createWalletRepository(deps) {
         params: [uid, refId],
       },
       {
-        sql: `SELECT streak_day, last_claim_date, cycle_count
+        // ROOT-CAUSE FIX: use to_char(last_claim_date, 'YYYY-MM-DD') so the
+        // value comes back as a plain string, NOT a JavaScript Date object.
+        // Previously String(date).slice(0,10) gave 'Fri Aug 21' instead of
+        // '2026-08-21', causing streak to always reset to Day 1.
+        sql: `SELECT streak_day, to_char(last_claim_date, 'YYYY-MM-DD') AS last_claim_date, cycle_count
               FROM daily_checkin_streaks WHERE user_id = $1 FOR UPDATE`,
         params: [uid],
       },
@@ -429,8 +439,10 @@ export function createWalletRepository(deps) {
 
     if (current) {
       newCycleCount = Number(current.cycle_count) || 0;
-      const lastClaimDate = current.last_claim_date;
-      const lastClaimStr = lastClaimDate ? String(lastClaimDate).slice(0, 10) : '';
+      // ROOT-CAUSE FIX: last_claim_date now comes from to_char() as a plain
+      // string 'YYYY-MM-DD'. No more String(date).slice(0,10) — that produced
+      // 'Fri Aug 21' (JavaScript Date toString) instead of '2026-08-21'.
+      const lastClaimStr = current.last_claim_date || '';
       const currentStreakDay = Number(current.streak_day) || 0;
 
       if (lastClaimStr === tehranYesterday) {
