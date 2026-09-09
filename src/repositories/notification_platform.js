@@ -738,7 +738,15 @@ export function createNotificationPlatformRepository(deps) {
           SELECT id FROM notification_queue
           WHERE status = 'pending' AND attempts < max_attempts
           AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-          ORDER BY priority DESC, created_at ASC
+          ORDER BY
+            CASE priority
+              WHEN 'critical' THEN 4
+              WHEN 'high' THEN 3
+              WHEN 'medium' THEN 2
+              WHEN 'low' THEN 1
+              ELSE 0
+            END DESC,
+            created_at ASC
           LIMIT ${batchLimit}
           FOR UPDATE SKIP LOCKED
         )
