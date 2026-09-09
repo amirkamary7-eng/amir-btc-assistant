@@ -12525,6 +12525,199 @@ window.clearNotifEventLog = function() {
     console.log('[NOTIF-EVENT] Log cleared');
 };
 
+// ============================================================================
+// DIAGNOSTIC INSTRUMENTATION: First Reintroduction Capture
+// ============================================================================
+// Purpose: capture the EXACT moment a deleted notification ID re-enters state.
+// This is INSTRUMENTATION ONLY — no behavior change, no fix.
+// After the root cause is identified, this block will be removed.
+//
+// window.__NOTIF_WATCHER provides:
+//   - .deletedIds: Set of IDs that were deleted via deleteNotification
+//   - .log: array of all state mutation events with timestamps, caller, IDs
+//   - .getReport(): returns a formatted report of the first reintroduction
+//   - .clear(): resets the watcher state
+//
+// Usage for the user:
+//   1. window.__NOTIF_WATCHER.clear()
+//   2. Reproduce the bug (delete a notification, close panel, reopen panel)
+//   3. JSON.stringify(window.__NOTIF_WATCHER.getReport(), null, 2)
+//
+window.__NOTIF_WATCHER = (function() {
+    const _deletedIds = new Set();
+    const _log = [];
+    const MAX_LOG = 500;
+
+    function _getIds() {
+        return notifications.map(n => n.id);
+    }
+
+    function _checkReintroduced(oldIds, newIds) {
+        const oldSet = new Set(oldIds);
+        for (const id of newIds) {
+            if (_deletedIds.has(id) && !oldSet.has(id)) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    function _capture(type, data) {
+        const entry = {
+            ts: new Date().toISOString(),
+            ms: Date.now(),
+            type: type,
+            seq: _notifReqSeq,
+            inflight: Object.keys(_requestInFlight),
+            state: _getIds(),
+            ...data,
+        };
+        _log.push(entry);
+        if (_log.length > MAX_LOG) _log.splice(0, _log.length - MAX_LOG);
+        return entry;
+    }
+
+    // Wrap deleteNotification to track the deleted ID
+    const _origDelete = window.deleteNotification;
+    window.deleteNotification = async function(id) {
+        _capture('DELETE_START', { deletedId: id, stateBefore: _getIds() });
+        const result = await _origDelete(id);
+        _deletedIds.add(id);
+        _capture('DELETE_END', { deletedId: id, result: result, stateAfter: _getIds(), hasDeletedId: notifications.some(n => n.id === id) });
+        return result;
+    };
+
+    // Wrap loadNotificationsFromServer to track GET apply/drop + state replace
+    const _origLoad = window.loadNotificationsFromServer;
+    window.loadNotificationsFromServer = async function() {
+        const stateBefore = _getIds();
+        const caller = (new Error()).stack?.split('\n')[2]?.trim()?.slice(0, 120) || 'unknown';
+        _capture('GET_START', { stateBefore: stateBefore, caller: caller });
+        const result = await _origLoad();
+        const stateAfter = _getIds();
+        const reintroduced = _checkReintroduced(stateBefore, stateAfter);
+        if (reintroduced) {
+            _capture('FIRST_REINTRODUCTION', {
+                source: 'loadNotificationsFromServer',
+                reintroducedId: reintroduced,
+                stateBefore: stateBefore,
+                stateAfter: stateAfter,
+                caller: caller,
+            });
+        }
+        _capture('GET_END', { stateAfter: stateAfter, result: result });
+        return result;
+    };
+
+    // Wrap addNotification to track local injection
+    const _origAdd = window.addNotification;
+    window.addNotification = function(title, body, opts) {
+        const stateBefore = _getIds();
+        const result = _origAdd(title, body, opts);
+        const stateAfter = _getIds();
+        const reintroduced = _checkReintroduced(stateBefore, stateAfter);
+        if (reintroduced) {
+            _capture('FIRST_REINTRODUCTION', {
+                source: 'addNotification',
+                reintroducedId: reintroduced,
+                stateBefore: stateBefore,
+                stateAfter: stateAfter,
+                title: title,
+            });
+        }
+        _capture('ADD_NOTIF', { stateBefore: stateBefore, stateAfter: stateAfter, title: title });
+        return result;
+    };
+
+    // Wrap markNotifRead
+    const _origMark = window.markNotifRead;
+    window.markNotifRead = async function(id) {
+        const stateBefore = _getIds();
+        const result = await _origMark(id);
+        const stateAfter = _getIds();
+        _capture('MARK_READ', { id: id, stateBefore: stateBefore, stateAfter: stateAfter });
+        return result;
+    };
+
+    // Wrap markAllRead
+    const _origMarkAll = window.markAllRead;
+    window.markAllRead = async function() {
+        const stateBefore = _getIds();
+        const result = await _origMarkAll();
+        const stateAfter = _getIds();
+        _capture('MARK_ALL_READ', { stateBefore: stateBefore, stateAfter: stateAfter });
+        return result;
+    };
+
+    // Wrap clearAllNotifications
+    const _origClear = window.clearAllNotifications;
+    window.clearAllNotifications = async function() {
+        const stateBefore = _getIds();
+        const result = await _origClear();
+        const stateAfter = _getIds();
+        _capture('CLEAR_ALL', { stateBefore: stateBefore, stateAfter: stateAfter });
+        return result;
+    };
+
+    // Wrap renderNotifications to track DOM vs state
+    const _origRender = window.renderNotifications;
+    window.renderNotifications = function() {
+        const stateIds = _getIds();
+        const container = document.getElementById('notif-list');
+        let domIds = [];
+        if (container) {
+            container.querySelectorAll('.notif-item').forEach(function(item) {
+                const onclick = item.getAttribute('onclick') || '';
+                const match = onclick.match(/markNotifRead\('([^']+)'\)/);
+                if (match) domIds.push(match[1]);
+            });
+        }
+        _capture('RENDER', { stateIds: stateIds, domIds: domIds, match: JSON.stringify(stateIds) === JSON.stringify(domIds) });
+        return _origRender();
+    };
+
+    // Wrap toggleNotificationPanel
+    const _origToggle = window.toggleNotificationPanel;
+    window.toggleNotificationPanel = function() {
+        _capture('TOGGLE_PANEL', { stateBefore: _getIds() });
+        return _origToggle();
+    };
+
+    // Wrap closeNotifModal
+    const _origClose = window.closeNotifModal;
+    window.closeNotifModal = function() {
+        _capture('CLOSE_MODAL', { stateBefore: _getIds() });
+        return _origClose();
+    };
+
+    return {
+        deletedIds: _deletedIds,
+        log: _log,
+        clear: function() {
+            _deletedIds.clear();
+            _log.length = 0;
+            console.log('[NOTIF-WATCHER] Cleared');
+        },
+        getReport: function() {
+            const reintroduction = _log.find(function(e) { return e.type === 'FIRST_REINTRODUCTION'; });
+            return {
+                reintroduction: reintroduction || null,
+                deletedIds: Array.from(_deletedIds),
+                fullLog: _log.map(function(e) {
+                    return {
+                        ts: e.ts,
+                        type: e.type,
+                        seq: e.seq,
+                        state: e.state,
+                        inflight: e.inflight,
+                        ...e,
+                    };
+                }),
+            };
+        },
+    };
+})();
+
 // P1-9 FIX: Exponential backoff for notification polling on consecutive errors
 let _notifConsecutiveErrors = 0;
 let _notifBackoffMs = 60000; // start at 60s, double on error, cap at 600s (10 min)
