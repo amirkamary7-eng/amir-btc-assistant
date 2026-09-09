@@ -935,6 +935,33 @@ const WalletApp = (() => {
   }
 
   // =============================================
+  // Frontend Tehran Date Helper
+  // =============================================
+  // ROOT-CAUSE FIX (Daily Claim stuck UI + stale streak on reopen):
+  // The backend-only symbol `_getTehranDateString` (defined in
+  // src/repositories/wallet.js, which the browser never loads) was called
+  // at two sites in this file. That threw ReferenceError inside the claim
+  // success path BEFORE invalidateWalletCache() ran — leaving the button
+  // stuck on "Claiming…" and a stale pre-claim GET response in the 60s
+  // cache, which then rendered Day 1 ticked + Day 2 available on bfcache
+  // reopen.
+  // This local helper mirrors the backend's Tehran-date logic so the
+  // frontend can compute the same 'YYYY-MM-DD' string without relying
+  // on a backend-only symbol.
+  function _feGetTehranDateString() {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Tehran',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+    } catch (_) {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  // =============================================
   // API Calls
   // =============================================
   // ── DASHBOARD SPEED OPTIMIZATION: In-memory cache for wallet responses ──
@@ -1431,7 +1458,7 @@ const WalletApp = (() => {
           streak_day: result.streak_day || 1,
           streak_rewards: result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
           claimed_today: true,
-          last_claim_date: _getTehranDateString(),
+          last_claim_date: _feGetTehranDateString(),
         };
 
         // P0-1 FIX: invalidate wallet cache + update balance immediately from API response
@@ -1523,7 +1550,7 @@ const WalletApp = (() => {
                   streak_day: freshStatus.streak_day || 1,
                   streak_rewards: freshStatus.streak_rewards || result.streak_rewards || [1, 3, 6, 10, 18, 30, 50],
                   claimed_today: true,
-                  last_claim_date: _getTehranDateString(),
+                  last_claim_date: _feGetTehranDateString(),
                 };
                 _updateDailyCheckinCard();
               }
