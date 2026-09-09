@@ -62,6 +62,13 @@ function loadFn(src, name, mocks) {
   const g = {
     notifications: mocks.notifications ?? [],
     _notifReqSeq: mocks._notifReqSeq ?? 0,
+    // Expose the apiFetch dedup map so mutation functions can invalidate
+    // the in-flight GET entry (the dedup-race fix). The test sandbox does
+    // not use the real apiFetch, but the mutation functions now reference
+    // _requestInFlight to invalidate stale GET entries after a successful
+    // mutation. Without this, the mutation functions would throw a
+    // ReferenceError and the tests would fail spuriously.
+    _requestInFlight: mocks._requestInFlight ?? {},
     UserContext: { isGuest: mocks.isGuest ?? (() => false) },
     apiFetch: mocks.apiFetch ?? (async () => ({ status: 'success' })),
     showMiniToast: mocks.showMiniToast ?? (() => {}),
@@ -78,6 +85,7 @@ function loadFn(src, name, mocks) {
   const wrapper = [
     'let notifications = __g.notifications;',
     'let _notifReqSeq = __g._notifReqSeq;',
+    'const _requestInFlight = __g._requestInFlight;',
     'const UserContext = __g.UserContext;',
     'const apiFetch = __g.apiFetch;',
     'const showMiniToast = __g.showMiniToast;',

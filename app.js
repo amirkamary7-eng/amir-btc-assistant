@@ -6253,7 +6253,17 @@ async function apiFetch(path, options = {}) {
 
     // Track in-flight GET request
     if (dedupeKey) {
-        const promise = doRequest().finally(() => { delete _requestInFlight[dedupeKey]; });
+        // IDENTITY-SAFE CLEANUP: only delete the dedup entry if it still points
+        // to THIS promise. If a notification mutation (markNotifRead, delete,
+        // markAllRead, clearAll) has invalidated the entry (via delete
+        // _requestInFlight['/api/notifications']) and a subsequent GET has
+        // already populated a NEW promise in this slot, the new promise's
+        // entry MUST survive P1.finally(). Without the identity check, P1's
+        // .finally() would WRONGLY DELETE P2's entry, defeating the invalidation
+        // and re-introducing the dedup-race bug.
+        const promise = doRequest().finally(() => {
+            if (_requestInFlight[dedupeKey] === promise) delete _requestInFlight[dedupeKey];
+        });
         _requestInFlight[dedupeKey] = promise;
         return promise;
     }
@@ -12304,6 +12314,12 @@ async function markAllRead() {
                 // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
                 // that started DURING this await (stale unread data).
                 _notifReqSeq++;
+                // NOTIF DEDUP INVALIDATION: invalidate the in-flight GET dedup
+                // entry so a subsequent loadNotificationsFromServer (panel open,
+                // poll) does NOT receive the stale GET promise via the dedup
+                // map on apiFetch. Combined with the identity-safe cleanup in
+                // apiFetch, this guarantees fresh GETs after a mutation.
+                delete _requestInFlight['/api/notifications'];
                 _updateBadgeFromLocal();
                 renderNotifications();
                 showMiniToast(t('done') || 'Done');
@@ -12363,6 +12379,12 @@ async function clearAllNotifications() {
                 // TOCTOU FIX: second _notifReqSeq++ bump — invalidates any poll
                 // that started DURING this await (stale data with all notifications).
                 _notifReqSeq++;
+                // NOTIF DEDUP INVALIDATION: invalidate the in-flight GET dedup
+                // entry so a subsequent loadNotificationsFromServer (panel open,
+                // poll) does NOT receive the stale GET promise via the dedup
+                // map on apiFetch. Combined with the identity-safe cleanup in
+                // apiFetch, this guarantees fresh GETs after a mutation.
+                delete _requestInFlight['/api/notifications'];
                 _updateBadgeFromLocal();
                 renderNotifications();
                 closeNotifModal();
@@ -12424,6 +12446,12 @@ async function deleteNotification(id) {
                 // that started DURING this await (its DB query ran before the
                 // DELETE committed → stale data with notification still present).
                 _notifReqSeq++;
+                // NOTIF DEDUP INVALIDATION: invalidate the in-flight GET dedup
+                // entry so a subsequent loadNotificationsFromServer (panel open,
+                // poll) does NOT receive the stale GET promise via the dedup
+                // map on apiFetch. Combined with the identity-safe cleanup in
+                // apiFetch, this guarantees fresh GETs after a mutation.
+                delete _requestInFlight['/api/notifications'];
                 _updateBadgeFromLocal();
                 renderNotifications();
                 _logNotifEvent('DELETE_ONE_END', { reqId, notifId: id, success: true, newSeq: _notifReqSeq });
@@ -12660,6 +12688,12 @@ async function markNotifRead(id) {
                 // mark-read committed → stale unread data). Without this bump,
                 // the poll's mySeq would match and overwrite read=true with false.
                 _notifReqSeq++;
+                // NOTIF DEDUP INVALIDATION: invalidate the in-flight GET dedup
+                // entry so a subsequent loadNotificationsFromServer (panel open,
+                // poll) does NOT receive the stale GET promise via the dedup
+                // map on apiFetch. Combined with the identity-safe cleanup in
+                // apiFetch, this guarantees fresh GETs after a mutation.
+                delete _requestInFlight['/api/notifications'];
                 _updateBadgeFromLocal();
                 renderNotifications();
             } else {
