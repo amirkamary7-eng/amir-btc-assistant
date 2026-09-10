@@ -12604,6 +12604,7 @@ window.__NOTIF_WATCHER = (function() {
                 stateAfter: stateAfter,
                 caller: caller,
             });
+            _autoStore();
         }
         _capture('GET_END', { stateAfter: stateAfter, result: result });
         return result;
@@ -12624,6 +12625,7 @@ window.__NOTIF_WATCHER = (function() {
                 stateAfter: stateAfter,
                 title: title,
             });
+            _autoStore();
         }
         _capture('ADD_NOTIF', { stateBefore: stateBefore, stateAfter: stateAfter, title: title });
         return result;
@@ -12689,6 +12691,26 @@ window.__NOTIF_WATCHER = (function() {
         _capture('CLOSE_MODAL', { stateBefore: _getIds() });
         return _origClose();
     };
+
+    // Auto-store: when FIRST_REINTRODUCTION fires, write the full report to localStorage
+    // so it can be extracted without the user opening the console.
+    // Key: __NOTIF_DIAG_REPORT. Read via: localStorage.getItem('__NOTIF_DIAG_REPORT')
+    function _autoStore() {
+        try {
+            var reintroduction = _log.find(function(e) { return e.type === 'FIRST_REINTRODUCTION'; });
+            if (!reintroduction) return;
+            var report = {
+                capturedAt: new Date().toISOString(),
+                reintroduction: reintroduction,
+                deletedIds: Array.from(_deletedIds),
+                fullLog: _log.map(function(e) { return e; }),
+            };
+            localStorage.setItem('__NOTIF_DIAG_REPORT', JSON.stringify(report));
+            console.log('[NOTIF-WATCHER] FIRST_REINTRODUCTION auto-stored to localStorage');
+        } catch(e) {
+            console.warn('[NOTIF-WATCHER] autoStore failed:', e.message);
+        }
+    }
 
     return {
         deletedIds: _deletedIds,
