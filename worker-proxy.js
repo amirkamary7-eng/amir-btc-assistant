@@ -15231,36 +15231,56 @@ Headlines:
       }
 
       // ── NOTIF DIAG REPORT — temporary diagnostic endpoint for RCA ──
-      // POST: stores the report directly via env.APP_CACHE.put (bypassing writeAppCache dedup).
+      // POST: stores the report in the DATABASE (KV quota is exhausted).
       // GET: returns the stored report.
       // No auth required (the report contains only notification IDs + timestamps, no PII).
       // TEMPORARY — will be removed after RCA is closed.
       if (url.pathname === '/api/notif-diag-report') {
-        const KV_KEY = 'notif_diag_report';
         if (request.method === 'POST') {
           try {
             const body = await request.json();
             const bodyStr = JSON.stringify(body);
-            if (env.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
-              await env.APP_CACHE.put(KV_KEY, bodyStr, { expirationTtl: 3600 });
-              return jsonResponse({ status: 'success', message: 'Report stored in KV', size: bodyStr.length }, {}, env);
+            // Store in database (Neon Postgres — no write quota)
+            try {
+              await queryDb(env, `
+                CREATE TABLE IF NOT EXISTS _diag_notif_report (
+                  id SERIAL PRIMARY KEY,
+                  report JSONB NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+              `);
+              await queryDb(env, `
+                INSERT INTO _diag_notif_report (report) VALUES ($1::jsonb)
+              `, [bodyStr]);
+              return jsonResponse({ status: 'success', message: 'Report stored in DB', size: bodyStr.length }, {}, env);
+            } catch (dbErr) {
+              // Fallback to global memory
+              _notifDiagReport = body;
+              return jsonResponse({ status: 'success', message: 'Report stored in memory (DB failed: ' + (dbErr?.message || '').slice(0, 100) + ')' }, {}, env);
             }
-            _notifDiagReport = body; // fallback to global memory
-            return jsonResponse({ status: 'success', message: 'Report stored in memory (KV unavailable)' }, {}, env);
           } catch (e) {
             return jsonResponse({ status: 'error', message: 'Failed to store: ' + (e?.message || String(e)) }, { status: 500 }, env);
           }
         }
         if (request.method === 'GET') {
           try {
-            let report = null;
-            if (env.APP_CACHE && typeof env.APP_CACHE.get === 'function') {
-              const raw = await env.APP_CACHE.get(KV_KEY);
-              if (raw) report = JSON.parse(raw);
+            // Read from database
+            try {
+              const result = await queryDb(env, `
+                SELECT report FROM _diag_notif_report
+                ORDER BY created_at DESC LIMIT 1
+              `);
+              if (result.rows && result.rows.length > 0) {
+                return jsonResponse({ status: 'success', report: result.rows[0].report, source: 'db' }, {}, env);
+              }
+            } catch (dbErr) {
+              // Fallback to memory
+              if (_notifDiagReport) {
+                return jsonResponse({ status: 'success', report: _notifDiagReport, source: 'memory' }, {}, env);
+              }
             }
-            if (!report && _notifDiagReport) report = _notifDiagReport; // fallback to memory
-            if (report) {
-              return jsonResponse({ status: 'success', report: report, source: 'kv' }, {}, env);
+            if (_notifDiagReport) {
+              return jsonResponse({ status: 'success', report: _notifDiagReport, source: 'memory' }, {}, env);
             }
             return jsonResponse({ status: 'success', report: null, message: 'No report captured yet' }, {}, env);
           } catch (e) {
