@@ -12722,6 +12722,120 @@ window.__NOTIF_WATCHER = (function() {
         return _origClose();
     };
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // LOW-LEVEL apiFetch INTERCEPTOR for /api/notifications
+    // ═══════════════════════════════════════════════════════════════════════
+    // Intercepts EVERY apiFetch call to '/api/notifications' (GET only).
+    // Captures: caller, dedup status, response data, state/DOM before/after,
+    // badge value, whether deleted IDs appeared in the response.
+    // This catches paths the function-level watchers miss (updateNotifBadge).
+    const _origApiFetch = window.apiFetch;
+    window.apiFetch = async function(path, options) {
+        var method = (options && options.method) || 'GET';
+        var isNotifGet = path === '/api/notifications' && method.toUpperCase() === 'GET';
+
+        if (!isNotifGet) {
+            return _origApiFetch.apply(this, arguments);
+        }
+
+        // ── Intercept GET /api/notifications ──
+        var caller = (new Error()).stack?.split('\n')[2]?.trim()?.slice(0, 120) || 'unknown';
+        var stateBefore = _getIds();
+        var inflightBefore = _requestInFlight['/api/notifications'] ? 'HAS_PROMISE' : 'EMPTY';
+        var badgeBefore = '';
+        var badgeEl = document.getElementById('notif-badge');
+        if (badgeEl) badgeBefore = badgeEl.innerText;
+
+        _capture('APIFETCH_NOTIF_GET_START', {
+            path: path, caller: caller,
+            stateBefore: stateBefore,
+            inflightBefore: inflightBefore,
+            badgeBefore: badgeBefore,
+            seq: _notifReqSeq,
+        });
+
+        var result = await _origApiFetch.apply(this, arguments);
+
+        var stateAfter = _getIds();
+        var badgeAfter = '';
+        if (badgeEl) badgeAfter = badgeEl.innerText;
+        var responseIds = (result && result.notifications) ? result.notifications.map(function(n){return n.id;}) : [];
+        var responseUnread = (result && typeof result.unread_count === 'number') ? result.unread_count : null;
+        var deletedIdsInResponse = responseIds.filter(function(id) { return _deletedIds.has(id); });
+
+        _capture('APIFETCH_NOTIF_GET_END', {
+            caller: caller,
+            stateAfter: stateAfter,
+            responseIds: responseIds,
+            responseUnread: responseUnread,
+            deletedIdsInResponse: deletedIdsInResponse,
+            badgeAfter: badgeAfter,
+            seq: _notifReqSeq,
+        });
+
+        // ── INVARIANT: if a deleted ID appears in the response, auto-store ──
+        if (deletedIdsInResponse.length > 0) {
+            _capture('DELETED_ID_IN_RESPONSE', {
+                deletedIdsInResponse: deletedIdsInResponse,
+                caller: caller,
+                responseIds: responseIds,
+                stateBefore: stateBefore,
+                stateAfter: stateAfter,
+                seq: _notifReqSeq,
+            });
+            _autoStore();
+        }
+
+        // ── INVARIANT: if badge count increased after a delete, auto-store ──
+        var badgeBeforeNum = parseInt(badgeBefore) || 0;
+        var badgeAfterNum = parseInt(badgeAfter) || 0;
+        if (_deletedIds.size > 0 && badgeAfterNum > badgeBeforeNum) {
+            _capture('BADGE_INCREASED_AFTER_DELETE', {
+                badgeBefore: badgeBefore, badgeAfter: badgeAfter,
+                caller: caller,
+                deletedIds: Array.from(_deletedIds),
+                seq: _notifReqSeq,
+            });
+            _autoStore();
+        }
+
+        return result;
+    };
+
+    // Wrap updateNotifBadge (NOT wrapped by the original watcher)
+    const _origUpdateBadge = window.updateNotifBadge;
+    window.updateNotifBadge = async function() {
+        _capture('UPDATE_BADGE_START', {
+            stateBefore: _getIds(),
+            badgeBefore: (document.getElementById('notif-badge')||{}).innerText || '',
+            seq: _notifReqSeq,
+            inflight: Object.keys(_requestInFlight),
+        });
+        var result = await _origUpdateBadge.apply(this, arguments);
+        var badgeAfter = (document.getElementById('notif-badge')||{}).innerText || '';
+        _capture('UPDATE_BADGE_END', {
+            badgeAfter: badgeAfter,
+            stateAfter: _getIds(),
+            seq: _notifReqSeq,
+            inflight: Object.keys(_requestInFlight),
+        });
+        // Check: if badge shows MORE than state's unread count after a delete
+        if (_deletedIds.size > 0) {
+            var stateUnread = notifications.filter(function(n){return !n.read;}).length;
+            var badgeNum = parseInt(badgeAfter) || 0;
+            if (badgeNum > stateUnread) {
+                _capture('BADGE_MISMATCH', {
+                    badgeValue: badgeAfter, badgeNum: badgeNum,
+                    stateUnread: stateUnread,
+                    deletedIds: Array.from(_deletedIds),
+                    stateIds: _getIds(),
+                });
+                _autoStore();
+            }
+        }
+        return result;
+    };
+
     // Auto-store: when FIRST_REINTRODUCTION fires, write the full report to localStorage
     // AND POST it to a backend diagnostic endpoint so we can read it remotely.
     // Key: __NOTIF_DIAG_REPORT. Read via: localStorage.getItem('__NOTIF_DIAG_REPORT')
