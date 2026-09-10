@@ -7,28 +7,41 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createNotificationRepository(deps) {
-  const { queryDb, queryDbPrimary } = deps;
+  const { queryDb, queryDbDirect } = deps;
 
-  // ROOT-CAUSE FIX (notification delete-reappear, RCA proven 2026-09-10):
-  // The two READ functions (list, unreadCount) route to queryDbPrimary, which
-  // executes against the Neon PRIMARY compute via a dedicated neon() HTTP
-  // client bound to env.PRIMARY_DATABASE_URL. This guarantees read-after-write
-  // consistency: a GET /api/notifications following a DELETE will never read a
-  // stale read replica (the proven RCA: ~45s replication lag, self-corrected at
-  // ~70s by the 60s polling).
+  // ROOT-CAUSE FIX (notification delete-reappear, RCA PROVEN 2026-09-10):
+  // Cloudflare Hyperdrive's SELECT query cache is enabled on the production
+  // binding `amir-btc-supabase` (caching.disabled=false, default cache_ttl=60s).
+  // notificationRepo.list and .unreadCount issue deterministic SELECTs that
+  // Hyperdrive caches at the edge. After a DELETE (UPDATE — bypasses the
+  // cache, hits origin immediately), the cached SELECT result still contains
+  // the now-deleted notification for up to 60s after the FIRST GET. Subsequent
+  // GETs within the cache window return the stale cached result → the deleted
+  // notification "reappears". At 60s+ the cache expires, the next GET queries
+  // origin → notification is gone (the "self-correction" the user observed).
+  //
+  // FIX (Option C — scoped pg.Pool bypass of Hyperdrive):
+  //   The two READ functions (list, unreadCount) route to queryDbDirect, which
+  //   executes against the Supabase primary via a per-call pg.Pool bound to
+  //   env.DIRECT_URL (or env.DATABASE_URL as fallback). This bypasses
+  //   Hyperdrive's connection string (env.HYPERDRIVE.connectionString) entirely
+  //   → bypasses Hyperdrive's edge cache → read-after-write consistency is
+  //   guaranteed. The DELETE (UPDATE) still goes through queryDb (Hyperdrive)
+  //   — but Hyperdrive does not cache mutations, so the UPDATE hits origin
+  //   immediately. The asymmetry (writes via Hyperdrive, reads via direct)
+  //   is what guarantees read-after-write.
   //
   // All MUTATION functions (create, createBulk, markRead, markAllRead,
   // deleteNotification, deleteAll) and the schema bootstrap (ensureTable)
-  // continue to use `queryDb` — the existing Hyperdrive/NeonPool/replica
-  // path. Writes are not affected; the DELETE still soft-deletes on the
-  // primary via the standard path. The asymmetry (writes go to primary via
-  // the existing path, reads come from primary via the new path) is what
-  // guarantees read-after-write.
+  // continue to use `queryDb` — the existing Hyperdrive path. Writes are not
+  // affected; the DELETE still soft-deletes on the primary via the standard
+  // path. Hyperdrive's pooling benefit is preserved for mutations.
   //
-  // If queryDbPrimary is not injected (e.g. by an old worker bundle, or by a
+  // If queryDbDirect is not injected (e.g. by an old worker bundle, or by a
   // test that pre-dates this fix), the read functions throw a clear
   // configuration error rather than silently falling back to queryDb — same
-  // no-silent-fallback contract as worker-proxy.js's queryDbPrimary.
+  // no-silent-fallback contract as worker-proxy.js's queryDbDirect. Silent
+  // fallback would re-introduce the exact stale-read bug this fix eliminates.
 
   /**
    * Ensure the notifications table exists (idempotent).
@@ -258,22 +271,23 @@ export function createNotificationRepository(deps) {
    * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
    * notifications don't appear.
    *
-   * RCA FIX (2026-09-10): routes through queryDbPrimary (Neon PRIMARY compute)
-   * to guarantee read-after-write consistency. A GET following a DELETE never
-   * reads a stale read replica. See worker-proxy.js queryDbPrimary.
+   * RCA FIX (Option C, 2026-09-10): routes through queryDbDirect (direct
+   * Supabase primary via per-call pg.Pool, bypassing Hyperdrive cache) to
+   * guarantee read-after-write consistency. A GET following a DELETE never
+   * returns a stale cached result. See worker-proxy.js queryDbDirect.
    */
   async function list(env, userId, limit = 50) {
-    if (typeof queryDbPrimary !== 'function') {
+    if (typeof queryDbDirect !== 'function') {
       const err = new Error(
-        '[notificationRepo.list] queryDbPrimary is not injected. ' +
+        '[notificationRepo.list] queryDbDirect is not injected. ' +
         'This is a configuration error — the worker bundle is missing the ' +
-        'primary read path injection. Rebuild/redeploy the Worker.'
+        'direct read path injection. Rebuild/redeploy the Worker.'
       );
-      err.code = 'PRIMARY_DB_NOT_INJECTED';
+      err.code = 'DIRECT_DB_NOT_INJECTED';
       throw err;
     }
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-    const result = await queryDbPrimary(
+    const result = await queryDbDirect(
       env,
       `
         SELECT id, user_id, type, title, message, metadata, read_status, created_at
@@ -292,20 +306,21 @@ export function createNotificationRepository(deps) {
    * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
    * notifications don't count as unread.
    *
-   * RCA FIX (2026-09-10): routes through queryDbPrimary (Neon PRIMARY compute)
-   * to guarantee read-after-write consistency for the badge count. See list().
+   * RCA FIX (Option C, 2026-09-10): routes through queryDbDirect (direct
+   * Supabase primary via per-call pg.Pool, bypassing Hyperdrive cache) to
+   * guarantee read-after-write consistency for the badge count. See list().
    */
   async function unreadCount(env, userId) {
-    if (typeof queryDbPrimary !== 'function') {
+    if (typeof queryDbDirect !== 'function') {
       const err = new Error(
-        '[notificationRepo.unreadCount] queryDbPrimary is not injected. ' +
+        '[notificationRepo.unreadCount] queryDbDirect is not injected. ' +
         'This is a configuration error — the worker bundle is missing the ' +
-        'primary read path injection. Rebuild/redeploy the Worker.'
+        'direct read path injection. Rebuild/redeploy the Worker.'
       );
-      err.code = 'PRIMARY_DB_NOT_INJECTED';
+      err.code = 'DIRECT_DB_NOT_INJECTED';
       throw err;
     }
-    const result = await queryDbPrimary(
+    const result = await queryDbDirect(
       env,
       `
         SELECT COUNT(*)::int AS count

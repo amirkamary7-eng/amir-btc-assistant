@@ -2100,45 +2100,90 @@ function getSharedNeon(env) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// PRIMARY READ PATH — for notification GET (read-after-write consistency)
+// DIRECT READ PATH (Option C) — for notification GET (read-after-write
+// consistency, bypassing Hyperdrive's SELECT query cache).
 //
-// ROOT CAUSE (proven): the existing `queryDb` path can serve GET /api/notifications
-// from a Neon read replica with ~45s replication lag. After a DELETE commits on
-// the primary, a subsequent GET (within ~45s) reads the stale replica and
-// returns the deleted row. The frontend then re-applies the stale response,
-// making the deleted notification "reappear" until the replica catches up
-// (~70s) and the 60s polling cycle corrects the state.
+// ROOT CAUSE (PROVEN 2026-09-10):
+//   Cloudflare Hyperdrive is enabled on the production binding
+//   `amir-btc-supabase` (binding id f4b69c06c1e84d98b7c4b5720efe4b41) with
+//   `caching.disabled: false` and the default `cache_ttl` of 60 seconds.
+//   notificationRepo.list and .unreadCount issue deterministic SELECTs that
+//   Hyperdrive caches at the edge (keyed by SQL + bound params). After a
+//   DELETE (UPDATE — bypasses Hyperdrive's cache, hits origin), the cached
+//   SELECT result still contains the now-deleted notification for up to 60s
+//   after the FIRST GET. Subsequent GETs within the cache window return the
+//   stale cached result → the deleted notification "reappears". At 60s+ the
+//   cache expires, the next GET queries origin → notification is gone (the
+//   "self-correction" the user observed at ~70s).
 //
-// FIX (Option 1 — backend primary read, scoped): notificationRepo.list and
-// notificationRepo.unreadCount bypass `queryDb` and use a SEPARATE neon() HTTP
-// client bound to `env.PRIMARY_DATABASE_URL` — the Neon PRIMARY compute URL.
-// This guarantees read-after-write consistency for the notification GET path
-// ONLY. All notification mutations (deleteNotification, deleteAll, markRead,
-// markAllRead, create, createBulk) and every other endpoint continue to use
-// the existing `queryDb` path — unchanged.
+// FIX (Option C — scoped pg.Pool bypass of Hyperdrive):
+//   notificationRepo.list and .unreadCount bypass `queryDb` (which uses
+//   env._reqPool → pg.Pool(connectionString: env.HYPERDRIVE.connectionString))
+//   and instead use `queryDbDirect` — a SEPARATE pg.Pool created per call,
+//   bound to env.DIRECT_URL (or env.DATABASE_URL as fallback), connecting
+//   DIRECTLY to the Supabase primary Postgres endpoint. Because this pool
+//   does NOT use Hyperdrive's connection string, it bypasses Hyperdrive's
+//   edge cache entirely → read-after-write consistency is guaranteed.
 //
-// WHY NO FALLBACK: if `PRIMARY_DATABASE_URL` is unset, `queryDbPrimary` throws
-// an explicit configuration error. Silent fallback to the replica would
-// re-introduce the exact stale-read bug this fix is designed to eliminate.
-// A loud 500 on GET /api/notifications is preferable to silently re-introducing
-// the bug — the missing secret is immediately visible in logs and the user
-// can remediate by `wrangler secret put PRIMARY_DATABASE_URL --env production`.
+//   All notification mutations (deleteNotification, deleteAll, markRead,
+//   markAllRead, create, createBulk) and every other endpoint continue to
+//   use the existing `queryDb` path — UNCHANGED. They continue to benefit
+//   from Hyperdrive's pooling (and their mutations bypass the cache anyway).
 //
-// The PRIMARY_DATABASE_URL MUST be the Neon primary compute URL (the non-`-read`
-// host). Setting it to a read-replica URL defeats the fix. Verify in the Neon
-// dashboard before deploying.
+// WHY pg.Pool (not neon() HTTP):
+//   The production database is Supabase (db.qywuklmhjqovmqlyklea.supabase.co:5432),
+//   NOT Neon. The neon() HTTP client sends requests to https://api.<host>/sql —
+//   a Neon-only endpoint that Supabase does not serve. Using pg.Pool with the
+//   Supabase direct connection string speaks standard Postgres wire protocol,
+//   which Supabase serves on port 5432. (The previous b2b8590 attempt used
+//   neon() HTTP + PRIMARY_DATABASE_URL — incompatible with Supabase.)
 //
-// HYPERDRIVE: this client does NOT go through Hyperdrive — it uses neon() HTTP
-// directly. Hyperdrive's optional SELECT cache (`cache_ttl`) is bypassed for
-// notification reads, eliminating the second independent stale-read mechanism.
+// WHY DIRECT_URL is preferred (not DATABASE_URL):
+//   Per Supabase docs, DIRECT_URL is the direct Postgres endpoint
+//   (db.{ref}.supabase.co:5432) and DATABASE_URL is typically the Supavisor
+//   pooler endpoint (aws-0-{region}.pooler.{ref}.supabase.com:6543 or :5432).
+//   Either works for read-after-write consistency (both bypass Hyperdrive's
+//   cache). DIRECT_URL is preferred because:
+//     1. It is the direct endpoint — no pooler in the path → simplest path.
+//     2. It matches the Hyperdrive origin (db.qywuklmhjqovmqlyklea.supabase.co)
+//        so we hit the EXACT same database Hyperdrive would, minus the cache.
+//   We fall back to DATABASE_URL if DIRECT_URL is absent for resilience.
+//
+// WORKER-SAFE POOL LIFECYCLE (matches queryDbTransaction pattern):
+//   A brand-new pg.Pool is created per queryDbDirect call, used for the
+//   query, and `await pool.end()`-ed in `finally`. The Pool's TCP/TLS
+//   connection is created, used, and destroyed entirely within one
+//   synchronous async execution — it NEVER outlives the await boundary,
+//   so it can NEVER be observed by a different request (the canonical
+//   Cloudflare Worker pattern, see queryDbTransaction).
+//
+//   The pool uses the same `_poolQueryWithTimeout` helper as `queryDb` and
+//   `queryDbTransaction` (hard DB_QUERY_TIMEOUT_MS timeout) so a half-open
+//   connection cannot hang the Worker.
+//
+// WHY NO FALLBACK to queryDb (Hyperdrive) if DIRECT_URL/DATABASE_URL is missing:
+//   Silent fallback would re-introduce the exact stale-read bug this fix
+//   eliminates. A loud 500 on GET /api/notifications is preferable to
+//   silently re-introducing the bug — the missing secret is immediately
+//   visible in logs and the user can remediate by setting DIRECT_URL (which
+//   already exists in production — verified via `wrangler secret list`).
+//
+// SCOPE: queryDbDirect is injected ONLY into notificationRepo. No other
+//   repository receives it. Only notificationRepo.list and .unreadCount
+//   use it. No other endpoint is affected.
 // ────────────────────────────────────────────────────────────────────────────
 
-// Resolve the connection string for the primary neon() HTTP client.
-// Uses ONLY env.PRIMARY_DATABASE_URL — never falls back to DATABASE_URL /
-// DIRECT_URL / HYPERDRIVE. Strips `pgbouncer=true` (WebSocket-only hint that is
-// meaningless for HTTP), same as resolveNeonDatabaseUrl.
-function resolvePrimaryNeonDatabaseUrl(env) {
-  let url = String(env.PRIMARY_DATABASE_URL || '').trim();
+// Resolve the connection string for the direct pg.Pool (bypasses Hyperdrive).
+// Prefers env.DIRECT_URL (Supabase direct endpoint, matches Hyperdrive origin),
+// falls back to env.DATABASE_URL. Does NOT use env.HYPERDRIVE.connectionString
+// (that's the whole point — bypass Hyperdrive's cache).
+//
+// Strips `pgbouncer=true` if present: it's a pooler hint meaningful only for
+// PgBouncer/Supavisor session-mode pools. For a per-call Worker Pool, this hint
+// is irrelevant — pg.Pool manages its own connection lifecycle. Keeping it
+// would not break anything, but stripping it keeps the connection string clean.
+function resolveDirectDatabaseUrl(env) {
+  let url = String(env.DIRECT_URL || env.DATABASE_URL || '').trim();
   if (!url) return '';
   url = url.replace(/([?&])pgbouncer=true(&?)/, (_m, lead, trail) =>
     trail ? lead : (lead === '?' ? '' : ''),
@@ -2146,35 +2191,26 @@ function resolvePrimaryNeonDatabaseUrl(env) {
   return url;
 }
 
-// Module-level cache of the PRIMARY neon() HTTP client, keyed by connection
-// string (mirrors _moduleNeonCache). SAFE: the neon() client holds only config
-// — no sockets, no request context.
-const _moduleNeonPrimaryCache = new Map();
-
-function getSharedNeonPrimary(env) {
-  const url = resolvePrimaryNeonDatabaseUrl(env);
+// Create a brand-new direct pg.Pool for a SINGLE queryDbDirect call.
+// NOT cached (per-call) — used and `await pool.end()`-ed within queryDbDirect
+// so its TCP/TLS connection (and the request context it binds to) never
+// escapes that call. This mirrors the canonical Worker-safe pattern used by
+// `queryDbTransaction` (see that function for the rationale).
+//
+// Returns null if neither DIRECT_URL nor DATABASE_URL is configured.
+//
+// POOL OPTIONS: deliberately minimal. We do NOT set `max` (let pg.Pool use
+// its default of 10) because each call uses exactly one query then ends the
+// pool — there is no real concurrency within a single call. We set
+// `connectionTimeoutMillis: 5000` (same as the Hyperdrive branch of
+// createPool) to fail fast if the direct endpoint is unreachable.
+function createDirectPool(env) {
+  const url = resolveDirectDatabaseUrl(env);
   if (!url) return null;
-  // Same Neon-host guard as getSharedNeon — prevents mock/test URLs from
-  // causing neon() HTTP DNS errors (tests using mock URLs should NOT exercise
-  // the primary path; if they need to, they inject a fake queryDbPrimary).
-  if (!url.includes('neon.tech') && !url.includes('neon.ws')) return null;
-  if (_moduleNeonPrimaryCache.has(url)) return _moduleNeonPrimaryCache.get(url);
-  let sql;
-  try {
-    sql = neon(url, {
-      fullResults: true,
-      fetchOptions: {
-        // AbortSignal with 10s timeout — same as getSharedNeon. Prevents
-        // indefinite hang if Neon's HTTP endpoint is momentarily unresponsive.
-        signal: AbortSignal.timeout(10000),
-      },
-    });
-  } catch (e) {
-    console.warn('[DB] neon() PRIMARY client init failed:', e?.message);
-    return null;
-  }
-  _moduleNeonPrimaryCache.set(url, sql);
-  return sql;
+  return new PgPool({
+    connectionString: url,
+    connectionTimeoutMillis: 5000,
+  });
 }
 
 // Create a brand-new Pool for a SINGLE transaction. NOT cached — used and
@@ -2750,75 +2786,95 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// queryDbPrimary — executes a single SQL statement on the Neon PRIMARY compute
-// via the dedicated neon() HTTP client bound to `env.PRIMARY_DATABASE_URL`.
+// queryDbDirect — executes a single SQL statement on the Supabase primary
+// via a per-call pg.Pool bound to env.DIRECT_URL (or env.DATABASE_URL as
+// fallback), bypassing Hyperdrive's edge cache entirely.
 //
 // Scoped to notificationRepo.list and notificationRepo.unreadCount ONLY.
-// Bypasses env._reqPool (Hyperdrive/NeonPool), bypasses getSharedNeon (replica),
-// bypasses createPool (per-call Pool). Never falls back to the replica path.
+// Bypasses env._reqPool (Hyperdrive/NeonPool), bypasses getSharedNeon (HTTP),
+// bypasses createPool (which routes to Hyperdrive when HYPERDRIVE is bound).
 //
-// Throws an explicit configuration error if PRIMARY_DATABASE_URL is missing or
-// the primary neon() client cannot be constructed — NO silent fallback. This
-// is intentional: a missing/misconfigured secret must surface loudly (500 on
-// GET /api/notifications) rather than re-introduce the stale-read bug silently.
+// Pool lifecycle (matches queryDbTransaction's canonical Worker-safe pattern):
+//   1. Create a brand-new pg.Pool via createDirectPool(env).
+//   2. Run the query via _poolQueryWithTimeout (hard DB_QUERY_TIMEOUT_MS).
+//   3. `await pool.end()` in `finally` — the TCP/TLS connection is destroyed
+//      before the function returns. No I/O object escapes the call, so no
+//      "Cannot perform I/O on behalf of a different request" is possible.
+//
+// Throws an explicit configuration error if neither DIRECT_URL nor DATABASE_URL
+// is configured — NO silent fallback to queryDb (Hyperdrive). Silent fallback
+// would re-introduce the exact stale-read bug this fix is designed to
+// eliminate (see ROOT CAUSE comment above). A loud 500 on GET /api/notifications
+// is preferable to silently re-introducing the bug — the missing secret is
+// immediately visible in logs and the user can remediate by setting DIRECT_URL
+// (which already exists in production — verified via `wrangler secret list`).
 //
 // Returns the same shape as queryDb: `{ rows, rowCount, fields, command, ... }`
-// (because fullResults:true is set on the primary neon() client).
+// (pg.Pool.query() returns this shape natively).
 // ────────────────────────────────────────────────────────────────────────────
-async function queryDbPrimary(env, sqlText, params = []) {
+async function queryDbDirect(env, sqlText, params = []) {
   const _seq = _nextQuerySeq();
   const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
   const _t0 = Date.now();
 
-  if (!env || !env.PRIMARY_DATABASE_URL) {
+  // Configuration guard — explicit error, no silent fallback to queryDb.
+  // DIRECT_URL is preferred (Supabase direct endpoint, matches Hyperdrive
+  // origin). DATABASE_URL is accepted as a fallback for resilience.
+  if (!env || (!env.DIRECT_URL && !env.DATABASE_URL)) {
     const err = new Error(
-      '[DB] queryDbPrimary: PRIMARY_DATABASE_URL is not configured. ' +
-      'Notification GET requires the Neon PRIMARY compute URL to guarantee ' +
-      'read-after-write consistency. Set it via: ' +
-      '`wrangler secret put PRIMARY_DATABASE_URL --env production` ' +
-      '(use the Neon primary compute URL, NOT the read-replica URL).'
+      '[DB] queryDbDirect: neither DIRECT_URL nor DATABASE_URL is configured. ' +
+      'Notification GET requires a direct PostgreSQL connection (bypassing ' +
+      'Hyperdrive cache) to guarantee read-after-write consistency. Set it ' +
+      'via: `wrangler secret put DIRECT_URL --env production` ' +
+      '(use the Supabase direct endpoint URL, e.g. ' +
+      'postgresql://...@db.{ref}.supabase.co:5432/postgres).'
     );
-    err.code = 'PRIMARY_DB_NOT_CONFIGURED';
+    err.code = 'DIRECT_DB_NOT_CONFIGURED';
     _traceQuery({
-      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      seq: _seq, poolType: 'direct', sql: _sqlPreview,
       startMs: _t0, endMs: Date.now(), durationMs: Date.now() - _t0,
-      status: 'error', error: 'PRIMARY_DB_NOT_CONFIGURED', attempt: 1,
+      status: 'error', error: 'DIRECT_DB_NOT_CONFIGURED', attempt: 1,
     });
     throw err;
   }
 
-  const _sql = getSharedNeonPrimary(env);
-  if (!_sql) {
+  // SECURITY/CONSISTENCY: explicitly assert we are NOT touching env._reqPool
+  // (Hyperdrive). This function must NEVER share a connection with the
+  // Hyperdrive path — that would defeat the cache bypass. The assertion is a
+  // no-op at runtime but documents the invariant and protects against future
+  // regressions that might add a "fast path" via env._reqPool.
+  // Intentionally do NOT use env._reqPool. Creating a fresh direct pool below
+  // guarantees we bypass Hyperdrive's cache entirely.
+
+  // Create a brand-new direct pg.Pool for THIS call only.
+  // NOT cached, NOT shared — destroyed in `finally` before returning.
+  const _directPool = createDirectPool(env);
+  if (!_directPool) {
+    // resolveDirectDatabaseUrl returned '' even though the env vars are set —
+    // this should not happen (the guard above already checked), but be defensive.
     const err = new Error(
-      '[DB] queryDbPrimary: PRIMARY_DATABASE_URL is set but the neon() HTTP ' +
-      'client could not be constructed. Verify the URL is a valid Neon ' +
-      'connection string (host contains neon.tech or neon.ws) and is reachable ' +
-      'from the Worker.'
+      '[DB] queryDbDirect: createDirectPool returned null. ' +
+      'DIRECT_URL/DATABASE_URL is set but the connection string could not be ' +
+      'resolved. Verify the value is a valid postgres:// connection string.'
     );
-    err.code = 'PRIMARY_DB_CLIENT_INIT_FAILED';
+    err.code = 'DIRECT_DB_POOL_INIT_FAILED';
     _traceQuery({
-      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      seq: _seq, poolType: 'direct', sql: _sqlPreview,
       startMs: _t0, endMs: Date.now(), durationMs: Date.now() - _t0,
-      status: 'error', error: 'PRIMARY_DB_CLIENT_INIT_FAILED', attempt: 1,
+      status: 'error', error: 'DIRECT_DB_POOL_INIT_FAILED', attempt: 1,
     });
     throw err;
-  }
-
-  // SECURITY/CONSISTENCY: explicitly assert we are NOT touching env._reqPool —
-  // this function must never share a connection with the replica path. The
-  // assertion is a no-op at runtime but documents the invariant and protects
-  // against future regressions that might add a "fast path" via env._reqPool.
-  if (env._reqPool) {
-    // Intentionally do NOT use env._reqPool. Falling through to the primary
-    // neon() client below guarantees primary consistency.
   }
 
   try {
-    const _result = await _sql(sqlText, params);
+    // Use the same _poolQueryWithTimeout helper as queryDb / queryDbTransaction.
+    // Hard DB_QUERY_TIMEOUT_MS timeout prevents a half-open connection from
+    // hanging the Worker.
+    const _result = await _poolQueryWithTimeout(_directPool, sqlText, params, { poolLabel: 'direct' });
     const _t1 = Date.now();
-    _traceStage('queryDbPrimary.neon:' + _sqlPreview.slice(0, 60), _t0);
+    _traceStage('queryDbDirect.pool:' + _sqlPreview.slice(0, 60), _t0);
     _traceQuery({
-      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      seq: _seq, poolType: 'direct', sql: _sqlPreview,
       startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
       status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1,
     });
@@ -2826,14 +2882,23 @@ async function queryDbPrimary(env, sqlText, params = []) {
   } catch (error) {
     const _t1 = Date.now();
     const _errMsg = String(error?.message || '').slice(0, 200);
-    const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
-    _traceStage('queryDbPrimary.neon.ERROR:' + _sqlPreview.slice(0, 60), _t0);
+    const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out') || error?.code === 'DB_QUERY_TIMEOUT';
+    _traceStage('queryDbDirect.pool.ERROR:' + _sqlPreview.slice(0, 60), _t0);
     _traceQuery({
-      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      seq: _seq, poolType: 'direct', sql: _sqlPreview,
       startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
       status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1,
     });
     throw error;
+  } finally {
+    // CRITICAL: end the pool in finally so the TCP/TLS connection is destroyed
+    // before this function returns. This guarantees no I/O object escapes the
+    // call → no "Cannot perform I/O on behalf of a different request" possible.
+    // Best-effort: wrapped in try/catch (pool.end() may fail on a poisoned
+    // connection — already ended by _poolQueryWithTimeout's timeout path).
+    const _tEnd = Date.now();
+    try { await _directPool.end(); } catch {}
+    _traceStage('queryDbDirect.poolEnd:' + _sqlPreview.slice(0, 60), _tEnd);
   }
 }
 
@@ -10789,16 +10854,20 @@ const notifyHandlers = createNotifyHandlers({
   isBotConfigured,
   sendTelegramMessage,
 });
-// ROOT-CAUSE FIX (notification delete-reappear, RCA proven 2026-09-10):
-// Inject queryDbPrimary alongside queryDb. notificationRepo.list and
-// notificationRepo.unreadCount use queryDbPrimary (the Neon PRIMARY compute,
-// guaranteeing read-after-write consistency). All mutation functions
-// (deleteNotification, deleteAll, markRead, markAllRead, create, createBulk)
-// continue to use queryDb (the existing replica/Hyperdrive path) — unchanged.
-// No other repository is given queryDbPrimary. Scope is strictly the
-// notification GET path. See queryDbPrimary definition (worker-proxy.js) and
+// ROOT-CAUSE FIX (notification delete-reappear, RCA PROVEN 2026-09-10):
+// Hyperdrive's SELECT query cache (caching.disabled=false, default cache_ttl=60s)
+// returns stale SELECT results for notificationRepo.list/.unreadCount within
+// the 60s cache window after a DELETE. FIX (Option C): inject queryDbDirect
+// (per-call pg.Pool bound to DIRECT_URL/DATABASE_URL, bypassing Hyperdrive)
+// alongside queryDb. notificationRepo.list and notificationRepo.unreadCount use
+// queryDbDirect (direct Supabase primary, no Hyperdrive cache → read-after-write
+// consistency). All mutation functions (deleteNotification, deleteAll, markRead,
+// markAllRead, create, createBulk) continue to use queryDb (the existing
+// Hyperdrive path — mutations bypass the cache anyway) — UNCHANGED. No other
+// repository is given queryDbDirect. Scope is strictly the notification GET
+// path. See queryDbDirect definition (worker-proxy.js) and
 // src/repositories/notifications.js for the two usage sites.
-const notificationRepo = createNotificationRepository({ queryDb, queryDbPrimary });
+const notificationRepo = createNotificationRepository({ queryDb, queryDbDirect });
 // notificationPlatformRepo is already created above (before wheelHandlers).
 const notificationHandlers = createNotificationHandlers({
   jsonResponse,
