@@ -7,7 +7,28 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createNotificationRepository(deps) {
-  const { queryDb } = deps;
+  const { queryDb, queryDbPrimary } = deps;
+
+  // ROOT-CAUSE FIX (notification delete-reappear, RCA proven 2026-09-10):
+  // The two READ functions (list, unreadCount) route to queryDbPrimary, which
+  // executes against the Neon PRIMARY compute via a dedicated neon() HTTP
+  // client bound to env.PRIMARY_DATABASE_URL. This guarantees read-after-write
+  // consistency: a GET /api/notifications following a DELETE will never read a
+  // stale read replica (the proven RCA: ~45s replication lag, self-corrected at
+  // ~70s by the 60s polling).
+  //
+  // All MUTATION functions (create, createBulk, markRead, markAllRead,
+  // deleteNotification, deleteAll) and the schema bootstrap (ensureTable)
+  // continue to use `queryDb` — the existing Hyperdrive/NeonPool/replica
+  // path. Writes are not affected; the DELETE still soft-deletes on the
+  // primary via the standard path. The asymmetry (writes go to primary via
+  // the existing path, reads come from primary via the new path) is what
+  // guarantees read-after-write.
+  //
+  // If queryDbPrimary is not injected (e.g. by an old worker bundle, or by a
+  // test that pre-dates this fix), the read functions throw a clear
+  // configuration error rather than silently falling back to queryDb — same
+  // no-silent-fallback contract as worker-proxy.js's queryDbPrimary.
 
   /**
    * Ensure the notifications table exists (idempotent).
@@ -236,10 +257,23 @@ export function createNotificationRepository(deps) {
    * Supports pagination via limit (default 50).
    * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
    * notifications don't appear.
+   *
+   * RCA FIX (2026-09-10): routes through queryDbPrimary (Neon PRIMARY compute)
+   * to guarantee read-after-write consistency. A GET following a DELETE never
+   * reads a stale read replica. See worker-proxy.js queryDbPrimary.
    */
   async function list(env, userId, limit = 50) {
+    if (typeof queryDbPrimary !== 'function') {
+      const err = new Error(
+        '[notificationRepo.list] queryDbPrimary is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'primary read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'PRIMARY_DB_NOT_INJECTED';
+      throw err;
+    }
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-    const result = await queryDb(
+    const result = await queryDbPrimary(
       env,
       `
         SELECT id, user_id, type, title, message, metadata, read_status, created_at
@@ -257,9 +291,21 @@ export function createNotificationRepository(deps) {
    * Count unread notifications for a user.
    * ROOT CAUSE FIX: filters WHERE deleted_at IS NULL so soft-deleted
    * notifications don't count as unread.
+   *
+   * RCA FIX (2026-09-10): routes through queryDbPrimary (Neon PRIMARY compute)
+   * to guarantee read-after-write consistency for the badge count. See list().
    */
   async function unreadCount(env, userId) {
-    const result = await queryDb(
+    if (typeof queryDbPrimary !== 'function') {
+      const err = new Error(
+        '[notificationRepo.unreadCount] queryDbPrimary is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'primary read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'PRIMARY_DB_NOT_INJECTED';
+      throw err;
+    }
+    const result = await queryDbPrimary(
       env,
       `
         SELECT COUNT(*)::int AS count

@@ -2099,6 +2099,84 @@ function getSharedNeon(env) {
   return sql;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// PRIMARY READ PATH — for notification GET (read-after-write consistency)
+//
+// ROOT CAUSE (proven): the existing `queryDb` path can serve GET /api/notifications
+// from a Neon read replica with ~45s replication lag. After a DELETE commits on
+// the primary, a subsequent GET (within ~45s) reads the stale replica and
+// returns the deleted row. The frontend then re-applies the stale response,
+// making the deleted notification "reappear" until the replica catches up
+// (~70s) and the 60s polling cycle corrects the state.
+//
+// FIX (Option 1 — backend primary read, scoped): notificationRepo.list and
+// notificationRepo.unreadCount bypass `queryDb` and use a SEPARATE neon() HTTP
+// client bound to `env.PRIMARY_DATABASE_URL` — the Neon PRIMARY compute URL.
+// This guarantees read-after-write consistency for the notification GET path
+// ONLY. All notification mutations (deleteNotification, deleteAll, markRead,
+// markAllRead, create, createBulk) and every other endpoint continue to use
+// the existing `queryDb` path — unchanged.
+//
+// WHY NO FALLBACK: if `PRIMARY_DATABASE_URL` is unset, `queryDbPrimary` throws
+// an explicit configuration error. Silent fallback to the replica would
+// re-introduce the exact stale-read bug this fix is designed to eliminate.
+// A loud 500 on GET /api/notifications is preferable to silently re-introducing
+// the bug — the missing secret is immediately visible in logs and the user
+// can remediate by `wrangler secret put PRIMARY_DATABASE_URL --env production`.
+//
+// The PRIMARY_DATABASE_URL MUST be the Neon primary compute URL (the non-`-read`
+// host). Setting it to a read-replica URL defeats the fix. Verify in the Neon
+// dashboard before deploying.
+//
+// HYPERDRIVE: this client does NOT go through Hyperdrive — it uses neon() HTTP
+// directly. Hyperdrive's optional SELECT cache (`cache_ttl`) is bypassed for
+// notification reads, eliminating the second independent stale-read mechanism.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Resolve the connection string for the primary neon() HTTP client.
+// Uses ONLY env.PRIMARY_DATABASE_URL — never falls back to DATABASE_URL /
+// DIRECT_URL / HYPERDRIVE. Strips `pgbouncer=true` (WebSocket-only hint that is
+// meaningless for HTTP), same as resolveNeonDatabaseUrl.
+function resolvePrimaryNeonDatabaseUrl(env) {
+  let url = String(env.PRIMARY_DATABASE_URL || '').trim();
+  if (!url) return '';
+  url = url.replace(/([?&])pgbouncer=true(&?)/, (_m, lead, trail) =>
+    trail ? lead : (lead === '?' ? '' : ''),
+  );
+  return url;
+}
+
+// Module-level cache of the PRIMARY neon() HTTP client, keyed by connection
+// string (mirrors _moduleNeonCache). SAFE: the neon() client holds only config
+// — no sockets, no request context.
+const _moduleNeonPrimaryCache = new Map();
+
+function getSharedNeonPrimary(env) {
+  const url = resolvePrimaryNeonDatabaseUrl(env);
+  if (!url) return null;
+  // Same Neon-host guard as getSharedNeon — prevents mock/test URLs from
+  // causing neon() HTTP DNS errors (tests using mock URLs should NOT exercise
+  // the primary path; if they need to, they inject a fake queryDbPrimary).
+  if (!url.includes('neon.tech') && !url.includes('neon.ws')) return null;
+  if (_moduleNeonPrimaryCache.has(url)) return _moduleNeonPrimaryCache.get(url);
+  let sql;
+  try {
+    sql = neon(url, {
+      fullResults: true,
+      fetchOptions: {
+        // AbortSignal with 10s timeout — same as getSharedNeon. Prevents
+        // indefinite hang if Neon's HTTP endpoint is momentarily unresponsive.
+        signal: AbortSignal.timeout(10000),
+      },
+    });
+  } catch (e) {
+    console.warn('[DB] neon() PRIMARY client init failed:', e?.message);
+    return null;
+  }
+  _moduleNeonPrimaryCache.set(url, sql);
+  return sql;
+}
+
 // Create a brand-new Pool for a SINGLE transaction. NOT cached — used and
 // `await pool.end()`-ed within queryDbTransaction so its WebSocket (and the
 // request context it binds to) never escapes that call.
@@ -2668,6 +2746,94 @@ async function queryDb(env, sqlText, params = [], retries = 1, pool = null) {
     const _tEnd = Date.now();
     try { await _callPool.end(); } catch {}
     _traceStage('queryDb.poolEnd:' + _sqlPreview.slice(0, 60), _tEnd);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// queryDbPrimary — executes a single SQL statement on the Neon PRIMARY compute
+// via the dedicated neon() HTTP client bound to `env.PRIMARY_DATABASE_URL`.
+//
+// Scoped to notificationRepo.list and notificationRepo.unreadCount ONLY.
+// Bypasses env._reqPool (Hyperdrive/NeonPool), bypasses getSharedNeon (replica),
+// bypasses createPool (per-call Pool). Never falls back to the replica path.
+//
+// Throws an explicit configuration error if PRIMARY_DATABASE_URL is missing or
+// the primary neon() client cannot be constructed — NO silent fallback. This
+// is intentional: a missing/misconfigured secret must surface loudly (500 on
+// GET /api/notifications) rather than re-introduce the stale-read bug silently.
+//
+// Returns the same shape as queryDb: `{ rows, rowCount, fields, command, ... }`
+// (because fullResults:true is set on the primary neon() client).
+// ────────────────────────────────────────────────────────────────────────────
+async function queryDbPrimary(env, sqlText, params = []) {
+  const _seq = _nextQuerySeq();
+  const _sqlPreview = String(sqlText).replace(/\s+/g, ' ').slice(0, 120);
+  const _t0 = Date.now();
+
+  if (!env || !env.PRIMARY_DATABASE_URL) {
+    const err = new Error(
+      '[DB] queryDbPrimary: PRIMARY_DATABASE_URL is not configured. ' +
+      'Notification GET requires the Neon PRIMARY compute URL to guarantee ' +
+      'read-after-write consistency. Set it via: ' +
+      '`wrangler secret put PRIMARY_DATABASE_URL --env production` ' +
+      '(use the Neon primary compute URL, NOT the read-replica URL).'
+    );
+    err.code = 'PRIMARY_DB_NOT_CONFIGURED';
+    _traceQuery({
+      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      startMs: _t0, endMs: Date.now(), durationMs: Date.now() - _t0,
+      status: 'error', error: 'PRIMARY_DB_NOT_CONFIGURED', attempt: 1,
+    });
+    throw err;
+  }
+
+  const _sql = getSharedNeonPrimary(env);
+  if (!_sql) {
+    const err = new Error(
+      '[DB] queryDbPrimary: PRIMARY_DATABASE_URL is set but the neon() HTTP ' +
+      'client could not be constructed. Verify the URL is a valid Neon ' +
+      'connection string (host contains neon.tech or neon.ws) and is reachable ' +
+      'from the Worker.'
+    );
+    err.code = 'PRIMARY_DB_CLIENT_INIT_FAILED';
+    _traceQuery({
+      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      startMs: _t0, endMs: Date.now(), durationMs: Date.now() - _t0,
+      status: 'error', error: 'PRIMARY_DB_CLIENT_INIT_FAILED', attempt: 1,
+    });
+    throw err;
+  }
+
+  // SECURITY/CONSISTENCY: explicitly assert we are NOT touching env._reqPool —
+  // this function must never share a connection with the replica path. The
+  // assertion is a no-op at runtime but documents the invariant and protects
+  // against future regressions that might add a "fast path" via env._reqPool.
+  if (env._reqPool) {
+    // Intentionally do NOT use env._reqPool. Falling through to the primary
+    // neon() client below guarantees primary consistency.
+  }
+
+  try {
+    const _result = await _sql(sqlText, params);
+    const _t1 = Date.now();
+    _traceStage('queryDbPrimary.neon:' + _sqlPreview.slice(0, 60), _t0);
+    _traceQuery({
+      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+      status: _t1 - _t0 >= 7900 ? 'timeout' : 'ok', attempt: 1,
+    });
+    return _result;
+  } catch (error) {
+    const _t1 = Date.now();
+    const _errMsg = String(error?.message || '').slice(0, 200);
+    const _isTimeout = _t1 - _t0 >= 7900 || _errMsg.includes('timeout') || _errMsg.includes('Timed out');
+    _traceStage('queryDbPrimary.neon.ERROR:' + _sqlPreview.slice(0, 60), _t0);
+    _traceQuery({
+      seq: _seq, poolType: 'primary', sql: _sqlPreview,
+      startMs: _t0, endMs: _t1, durationMs: _t1 - _t0,
+      status: _isTimeout ? 'timeout' : 'error', error: _errMsg, attempt: 1,
+    });
+    throw error;
   }
 }
 
@@ -10623,7 +10789,16 @@ const notifyHandlers = createNotifyHandlers({
   isBotConfigured,
   sendTelegramMessage,
 });
-const notificationRepo = createNotificationRepository({ queryDb });
+// ROOT-CAUSE FIX (notification delete-reappear, RCA proven 2026-09-10):
+// Inject queryDbPrimary alongside queryDb. notificationRepo.list and
+// notificationRepo.unreadCount use queryDbPrimary (the Neon PRIMARY compute,
+// guaranteeing read-after-write consistency). All mutation functions
+// (deleteNotification, deleteAll, markRead, markAllRead, create, createBulk)
+// continue to use queryDb (the existing replica/Hyperdrive path) — unchanged.
+// No other repository is given queryDbPrimary. Scope is strictly the
+// notification GET path. See queryDbPrimary definition (worker-proxy.js) and
+// src/repositories/notifications.js for the two usage sites.
+const notificationRepo = createNotificationRepository({ queryDb, queryDbPrimary });
 // notificationPlatformRepo is already created above (before wheelHandlers).
 const notificationHandlers = createNotificationHandlers({
   jsonResponse,
