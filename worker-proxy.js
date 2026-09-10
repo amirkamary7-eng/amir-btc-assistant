@@ -15228,6 +15228,35 @@ Headlines:
         }, {}, env);
       }
 
+      // ── NOTIF DIAG REPORT — temporary diagnostic endpoint for RCA ──
+      // POST: stores the FIRST_REINTRODUCTION report from the frontend watcher in KV.
+      // GET: returns the stored report so we can read it remotely.
+      // No auth required (the report contains only notification IDs + timestamps, no PII).
+      // TEMPORARY — will be removed after RCA is closed.
+      if (url.pathname === '/api/notif-diag-report') {
+        const KV_KEY = 'notif_diag_report';
+        if (request.method === 'POST') {
+          try {
+            const body = await request.json();
+            await writeAppCache(env, KV_KEY, JSON.stringify(body), 3600);
+            return jsonResponse({ status: 'success', message: 'Report stored' }, {}, env);
+          } catch (e) {
+            return jsonResponse({ status: 'error', message: 'Failed to store report' }, { status: 500 }, env);
+          }
+        }
+        if (request.method === 'GET') {
+          try {
+            const report = env.APP_CACHE ? await env.APP_CACHE.get(KV_KEY) : null;
+            if (report) {
+              return jsonResponse({ status: 'success', report: JSON.parse(report) }, {}, env);
+            }
+            return jsonResponse({ status: 'success', report: null, message: 'No report captured yet' }, {}, env);
+          } catch (e) {
+            return jsonResponse({ status: 'error', message: 'Failed to read report' }, { status: 500 }, env);
+          }
+        }
+      }
+
       // Future: /api/news/stream SSE endpoint for breaking news push.
       // Requires Durable Object for true WebSocket, or simple SSE stream.
       // Current 30s polling + SWR provides adequate UX for Telegram Mini App.

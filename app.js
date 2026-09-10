@@ -12693,7 +12693,7 @@ window.__NOTIF_WATCHER = (function() {
     };
 
     // Auto-store: when FIRST_REINTRODUCTION fires, write the full report to localStorage
-    // so it can be extracted without the user opening the console.
+    // AND POST it to a backend diagnostic endpoint so we can read it remotely.
     // Key: __NOTIF_DIAG_REPORT. Read via: localStorage.getItem('__NOTIF_DIAG_REPORT')
     function _autoStore() {
         try {
@@ -12707,6 +12707,14 @@ window.__NOTIF_WATCHER = (function() {
             };
             localStorage.setItem('__NOTIF_DIAG_REPORT', JSON.stringify(report));
             console.log('[NOTIF-WATCHER] FIRST_REINTRODUCTION auto-stored to localStorage');
+            // Also POST to backend diagnostic endpoint so we can read it remotely
+            try {
+                fetch(API_BASE + '/api/notif-diag-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(report),
+                }).catch(function(){});
+            } catch(e2) {}
         } catch(e) {
             console.warn('[NOTIF-WATCHER] autoStore failed:', e.message);
         }
