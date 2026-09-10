@@ -11065,6 +11065,8 @@ function _classifyFG(value) {
 // Module-level env accessors (set in fetch handler, used by fetchFearGreed)
 let env_CMC_API_KEY = null;
 let env_APP_CACHE = null;
+// TEMPORARY: diagnostic report storage for notification RCA (global memory, not KV)
+let _notifDiagReport = null;
 
 /**
  * Fetch global market stats with multi-source failover.
@@ -15229,16 +15231,15 @@ Headlines:
       }
 
       // ── NOTIF DIAG REPORT — temporary diagnostic endpoint for RCA ──
-      // POST: stores the FIRST_REINTRODUCTION report from the frontend watcher in KV.
+      // POST: stores the report in GLOBAL MEMORY (not KV — KV quota may be exhausted).
       // GET: returns the stored report so we can read it remotely.
       // No auth required (the report contains only notification IDs + timestamps, no PII).
       // TEMPORARY — will be removed after RCA is closed.
       if (url.pathname === '/api/notif-diag-report') {
-        const KV_KEY = 'notif_diag_report';
         if (request.method === 'POST') {
           try {
             const body = await request.json();
-            await writeAppCache(env, KV_KEY, JSON.stringify(body), 3600);
+            _notifDiagReport = body; // store in global memory
             return jsonResponse({ status: 'success', message: 'Report stored' }, {}, env);
           } catch (e) {
             return jsonResponse({ status: 'error', message: 'Failed to store report' }, { status: 500 }, env);
@@ -15246,9 +15247,8 @@ Headlines:
         }
         if (request.method === 'GET') {
           try {
-            const report = env.APP_CACHE ? await env.APP_CACHE.get(KV_KEY) : null;
-            if (report) {
-              return jsonResponse({ status: 'success', report: JSON.parse(report) }, {}, env);
+            if (_notifDiagReport) {
+              return jsonResponse({ status: 'success', report: _notifDiagReport }, {}, env);
             }
             return jsonResponse({ status: 'success', report: null, message: 'No report captured yet' }, {}, env);
           } catch (e) {
