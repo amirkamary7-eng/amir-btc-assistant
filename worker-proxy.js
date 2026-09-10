@@ -15231,28 +15231,40 @@ Headlines:
       }
 
       // ── NOTIF DIAG REPORT — temporary diagnostic endpoint for RCA ──
-      // POST: stores the report in GLOBAL MEMORY (not KV — KV quota may be exhausted).
-      // GET: returns the stored report so we can read it remotely.
+      // POST: stores the report directly via env.APP_CACHE.put (bypassing writeAppCache dedup).
+      // GET: returns the stored report.
       // No auth required (the report contains only notification IDs + timestamps, no PII).
       // TEMPORARY — will be removed after RCA is closed.
       if (url.pathname === '/api/notif-diag-report') {
+        const KV_KEY = 'notif_diag_report';
         if (request.method === 'POST') {
           try {
             const body = await request.json();
-            _notifDiagReport = body; // store in global memory
-            return jsonResponse({ status: 'success', message: 'Report stored' }, {}, env);
+            const bodyStr = JSON.stringify(body);
+            if (env.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
+              await env.APP_CACHE.put(KV_KEY, bodyStr, { expirationTtl: 3600 });
+              return jsonResponse({ status: 'success', message: 'Report stored in KV', size: bodyStr.length }, {}, env);
+            }
+            _notifDiagReport = body; // fallback to global memory
+            return jsonResponse({ status: 'success', message: 'Report stored in memory (KV unavailable)' }, {}, env);
           } catch (e) {
-            return jsonResponse({ status: 'error', message: 'Failed to store report' }, { status: 500 }, env);
+            return jsonResponse({ status: 'error', message: 'Failed to store: ' + (e?.message || String(e)) }, { status: 500 }, env);
           }
         }
         if (request.method === 'GET') {
           try {
-            if (_notifDiagReport) {
-              return jsonResponse({ status: 'success', report: _notifDiagReport }, {}, env);
+            let report = null;
+            if (env.APP_CACHE && typeof env.APP_CACHE.get === 'function') {
+              const raw = await env.APP_CACHE.get(KV_KEY);
+              if (raw) report = JSON.parse(raw);
+            }
+            if (!report && _notifDiagReport) report = _notifDiagReport; // fallback to memory
+            if (report) {
+              return jsonResponse({ status: 'success', report: report, source: 'kv' }, {}, env);
             }
             return jsonResponse({ status: 'success', report: null, message: 'No report captured yet' }, {}, env);
           } catch (e) {
-            return jsonResponse({ status: 'error', message: 'Failed to read report' }, { status: 500 }, env);
+            return jsonResponse({ status: 'error', message: 'Failed to read: ' + (e?.message || String(e)) }, { status: 500 }, env);
           }
         }
       }
