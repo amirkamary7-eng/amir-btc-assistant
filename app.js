@@ -12675,7 +12675,37 @@ window.__NOTIF_WATCHER = (function() {
             });
         }
         _capture('RENDER', { stateIds: stateIds, domIds: domIds, match: JSON.stringify(stateIds) === JSON.stringify(domIds) });
-        return _origRender();
+        // Check for DOM-only reintroduction: a deleted ID is in DOM but NOT in state
+        const domReintroduced = domIds.filter(function(id) {
+            return _deletedIds.has(id) && !stateIds.includes(id);
+        });
+        if (domReintroduced.length > 0) {
+            _capture('DOM_REINTRODUCTION', {
+                domReintroducedIds: domReintroduced,
+                stateIds: stateIds,
+                domIds: domIds,
+            });
+            _autoStore();
+        }
+        // Also check AFTER render: did the DOM actually get updated?
+        var result = _origRender();
+        // Post-render DOM check
+        var postDomIds = [];
+        if (container) {
+            container.querySelectorAll('.notif-item').forEach(function(item) {
+                const onclick = item.getAttribute('onclick') || '';
+                const match = onclick.match(/markNotifRead\('([^']+)'\)/);
+                if (match) postDomIds.push(match[1]);
+            });
+        }
+        if (JSON.stringify(postDomIds) !== JSON.stringify(domIds)) {
+            _capture('DOM_CHANGED_BY_RENDER', {
+                preRenderDomIds: domIds,
+                postRenderDomIds: postDomIds,
+                stateIds: stateIds,
+            });
+        }
+        return result;
     };
 
     // Wrap toggleNotificationPanel
@@ -12697,7 +12727,7 @@ window.__NOTIF_WATCHER = (function() {
     // Key: __NOTIF_DIAG_REPORT. Read via: localStorage.getItem('__NOTIF_DIAG_REPORT')
     function _autoStore() {
         try {
-            var reintroduction = _log.find(function(e) { return e.type === 'FIRST_REINTRODUCTION'; });
+            var reintroduction = _log.find(function(e) { return e.type === 'FIRST_REINTRODUCTION' || e.type === 'DOM_REINTRODUCTION'; });
             if (!reintroduction) return;
             var report = {
                 capturedAt: new Date().toISOString(),
