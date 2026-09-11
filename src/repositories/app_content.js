@@ -349,7 +349,6 @@ export function createAppContentRepository(deps) {
     const lng = normalizeLang(lang);
     const { title, sections, version } = data;
 
-    console.log('[APP_CONTENT] UPDATE START — type:', type, 'lang:', lng, 'title:', title, 'version:', version);
 
     let result;
     if (lng === 'en') {
@@ -390,7 +389,6 @@ export function createAppContentRepository(deps) {
         String(data.updated_by || 'admin'),
       ], 1);
     }
-    console.log('[APP_CONTENT] UPDATE DB RESULT — rowCount:', result.rowCount);
 
     // Invalidate ONLY the saved language's cache key (per-language isolation)
     const cacheKey = CACHE_PREFIX + String(type) + ':' + lng;
@@ -398,7 +396,6 @@ export function createAppContentRepository(deps) {
     try {
       await env.APP_CACHE?.delete?.(cacheKey).catch(() => {});
       await writeAppCache(env, cacheKey, JSON.stringify(cacheData), CACHE_TTL);
-      console.log('[APP_CONTENT] KV CACHE REFRESHED — key:', cacheKey);
     } catch (e) {
       console.warn('[APP_CONTENT] KV cache refresh failed:', e?.message);
     }

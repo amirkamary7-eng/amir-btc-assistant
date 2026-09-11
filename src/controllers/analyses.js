@@ -322,9 +322,7 @@ export function createAnalysisHandlers(deps) {
     const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10)));
 
-    const _tCacheStart = Date.now();
     const cachedState = await readCachedAnalysesState(env);
-    console.log('[ANALYSES] readCachedAnalysesState: ' + (Date.now() - _tCacheStart) + 'ms, version=' + cachedState.version);
 
     // Version match → unchanged (but return cached featured + stats for accuracy)
     if (requestedVersion !== null && cachedState.version !== null && requestedVersion === cachedState.version) {
@@ -366,13 +364,9 @@ export function createAnalysisHandlers(deps) {
     // Need fresh data from DB
     if (isDatabaseConfigured(env)) {
       try {
-        const _tSchema = Date.now();
         await analysisRepo.ensureSchema(env).catch(() => {});
-        console.log('[ANALYSES] ensureSchema: ' + (Date.now() - _tSchema) + 'ms');
 
-        const _tQuery = Date.now();
         const pageData = await analysisRepo.listWithStatsAndFeatured(env, page, limit);
-        console.log('[ANALYSES] listWithStatsAndFeatured: ' + (Date.now() - _tQuery) + 'ms, items=' + (pageData.analyses?.length || 0));
 
         // Cache featured separately (short TTL)
         if (pageData.featured) {
@@ -398,7 +392,6 @@ export function createAnalysisHandlers(deps) {
         // Cache the paginated list with version + signature
         await updateAnalysesCache(env, pageData.analyses, version, newSignature);
 
-        console.log('[ANALYSES] total: ' + (Date.now() - _t0) + 'ms (success)');
         return jsonResponse({
           status: 'success',
           featured: pageData.featured,

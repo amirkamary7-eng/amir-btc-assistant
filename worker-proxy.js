@@ -495,12 +495,6 @@ async function readAppCache(env, key) {
 const _kvWriteCache = new Map();
 const _KV_WRITE_CACHE_MAX = 200;
 
-// ── KV write tracking (DISABLED — was diagnostic instrumentation) ──
-// ROOT-CAUSE FIX: _trackKvWrite and _trackKvSkip ran on EVERY writeAppCache
-// call, doing string splitting + object property updates. Now no-ops.
-const _kvWriteStats = { startedAt: null, totalWrites: 0, totalSkipped: 0, byKey: {}, byPrefix: {} };
-function _trackKvWrite(key) { /* no-op: diagnostic tracking removed */ }
-function _trackKvSkip() { /* no-op */ }
 
 async function writeAppCache(env, key, value, expirationTtl) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.put !== 'function') {
@@ -519,7 +513,6 @@ async function writeAppCache(env, key, value, expirationTtl) {
   if (cachedEntry && cachedEntry.value === value) {
     // Value matches — check if KV entry is still alive
     if (!cachedEntry.expiresAt || Date.now() < cachedEntry.expiresAt) {
-      _trackKvSkip();
       return; // Value unchanged AND KV entry still alive — skip write
     }
     // KV entry has expired — fall through to re-write even though value matches
@@ -533,7 +526,6 @@ async function writeAppCache(env, key, value, expirationTtl) {
     const _t0 = Date.now();
     await env.APP_CACHE.put(key, value, putOpts);
     _traceStage('KV.write:' + key.slice(0, 40), _t0);
-    _trackKvWrite(key);
     if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
       const firstKey = _kvWriteCache.keys().next().value;
       _kvWriteCache.delete(firstKey);
@@ -608,7 +600,6 @@ async function logStartE2E(env, entry) {
 // ============================================================================
 // PURPOSE: Trace the bootstrap + admin detection + join check flow end-to-end.
 // Stored in APP_CACHE KV under key 'bootstrap:e2e_log' (rolling last 30, TTL 1800s).
-// Read via GET /api/bootstrap-diag (public, same as /api/start-diag).
 //
 // SECURITY: userId reduced to 4-char suffix. No tokens, no PII.
 //
@@ -717,7 +708,6 @@ async function setMaintenanceState(env, patch, updatedBy) {
   if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
     try {
       await env.APP_CACHE.put(MAINT_KV_KEY, JSON.stringify(next));
-      _trackKvWrite(MAINT_KV_KEY);
       kvWriteSuccess = true;
       _maintKvWriteFailed = false;
     } catch (err) {
@@ -760,7 +750,6 @@ async function writeRateLimitCache(env, key, value, expirationTtl) {
 
   try {
     await env.RATE_LIMITS.put(key, value, { expirationTtl: effectiveTtl });
-    _trackKvWrite('RATE_LIMITS:' + key);
   } catch (e) {
     console.warn('writeRateLimitCache failed:', e.message || e);
   }
@@ -1952,7 +1941,6 @@ async function _checkRateLimitCoalesced(env, key, limit, windowSeconds) {
       try {
         await env.RATE_LIMITS.put(key, JSON.stringify({ c: merged, w: windowIndex }), { expirationTtl: ttlSec });
         writeOk = true;
-        _trackKvWrite('RATE_LIMITS:' + key);
       } catch (e) {
         // KV write failure (quota exhausted / transient). Delta is NOT reset
         // so the next flush retries. The isolate still self-limits via delta.
@@ -9965,12 +9953,6 @@ async function processNewsAIBatch(env, pool = null) {
       enqueue: enqueueResult,
       ai: summaryResult,
       elapsed: Date.now() - t0,
-      kvWriteStats: {
-        totalWrites: _kvWriteStats.totalWrites,
-        totalSkipped: _kvWriteStats.totalSkipped,
-        byPrefix: Object.entries(_kvWriteStats.byPrefix).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([k,v]) => ({key:k, writes:v})),
-        byKey: Object.entries(_kvWriteStats.byKey).sort((a,b) => b[1]-a[1]).slice(0, 15).map(([k,v]) => ({key:k, writes:v})),
-      },
     };
     // FIX: was `aiResult?.success` (undefined variable) → use `summaryResult`
     stepLog('FINISH', { articlesCached: result.articlesCached, aiSuccess: summaryResult?.success, aiFailed: !summaryResult?.success && summaryResult?.processed ? 1 : 0 });
@@ -13587,14 +13569,12 @@ export default {
         }
         try {
           const body = await request.json();
-          console.log('[CONTENT SAVE] type:', contentType, 'lang:', lang, 'title:', body.title, 'version:', body.version, 'sections_count:', Array.isArray(body.sections) ? body.sections.length : 'N/A');
           const updated = await appContentRepo.updateContent(env, contentType, {
             title: body.title,
             sections: body.sections,
             version: body.version,
             updated_by: String(authState.user.id),
           }, lang);
-          console.log('[CONTENT SAVE] success:', JSON.stringify(updated).substring(0, 200));
           return jsonResponse({ status: 'success', data: updated }, {}, env);
         } catch (e) {
           console.error('[CONTENT SAVE] error:', e?.message);
@@ -14184,576 +14164,8 @@ export default {
         }, {}, env);
       }
 
-      // ── GET /api/diagnostic/nara-eval — TEMPORARY Nara real-key evaluation ──
-      // PURPOSE: Phase 5 forensic evaluation of Nara (https://router.bynara.id/)
-      // as a potential Gemini replacement in News AI ONLY. This endpoint is
-      // TEMPORARY and will be removed after the evaluation is complete.
-      //
-      // SECURITY:
-      //   - Admin-guarded (optionalTelegramAuth + isAdminTelegramId)
-      //   - NEVER logs or returns NARA_API_KEY, Authorization headers, or full
-      //     request payloads. Only returns: HTTP status, latency, truncated
-      //     response samples (500 chars), and rate-limit headers if present.
-      //   - Read-only — does NOT modify any provider chain, circuit, or queue.
-      //
-      // SCOPE: Does NOT touch Groq, Gemini, OpenRouter, Workers AI, or any
-      // existing code path. This is a standalone diagnostic that calls Nara
-      // directly and returns results for human review.
-      //
-      // Query params:
-      //   ?test=A  — single Persian translation
-      //   ?test=B  — JSON batch translation (3 headlines)
-      //   ?test=C  — news analysis (JSON array of objects)
-      //   ?test=D  — article summary (Persian)
-      //   ?test=G  — error handling (invalid model, empty messages)
-      //   ?test=presence — key presence check only (boolean, no value)
-      if (request.method === 'GET' && url.pathname === '/api/diagnostic/nara-eval') {
-        const testType = (url.searchParams.get('test') || 'presence').toLowerCase();
-        const naraKey = env.NARA_API_KEY;
-        const naraUrl = 'https://router.bynara.id/v1/chat/completions';
 
-        // ── Presence check: PUBLIC (no auth) ──
-        // Returns ONLY: boolean (key configured) + 4-char prefix. NEVER the full key.
-        // This is safe because it reveals no secret material — same pattern as
-        // /api/admin-diag which is also public and returns boolean config status.
-        if (testType === 'presence') {
-          return jsonResponse({
-            status: 'success',
-            test: 'presence',
-            nara_api_key_configured: Boolean(naraKey),
-            nara_api_key_prefix: naraKey ? (String(naraKey).substring(0, 4) + '***') : null,
-            nara_endpoint: naraUrl,
-            note: naraKey ? 'Key is present. Use ?test=A|B|C|D|G to run real tests.' : 'NARA_API_KEY is NOT configured as a Cloudflare secret.',
-          }, {}, env);
-        }
 
-        // ── AUTH: admin-only for all real-key tests (A/B/C/D/G) ──
-        // Real-key tests send actual API requests and return response samples.
-        // These MUST be admin-guarded to prevent abuse / cost / rate-limit exhaustion.
-        const auth = await optionalTelegramAuth(request, env);
-        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
-          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
-        }
-
-        // If no key configured, return early (after auth check)
-        if (!naraKey) {
-          return jsonResponse({
-            status: 'error',
-            error: 'nara_api_key_not_configured',
-            note: 'Set NARA_API_KEY as a Cloudflare secret first.',
-          }, { status: 503 }, env);
-        }
-
-        // ── Helper: call Nara with timeout ──
-        async function callNara(model, messages, maxTokens, temperature, timeoutMs) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), timeoutMs || 30000);
-          const t0 = Date.now();
-          try {
-            const res = await fetch(naraUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${naraKey}`,
-              },
-              body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
-              signal: controller.signal,
-            });
-            clearTimeout(timeout);
-            const elapsed = Date.now() - t0;
-            const rate_limit = {
-              retry_after: res.headers.get('retry-after'),
-              limit_requests: res.headers.get('x-ratelimit-limit-requests'),
-              remaining_requests: res.headers.get('x-ratelimit-remaining-requests'),
-              reset_requests: res.headers.get('x-ratelimit-reset-requests'),
-              limit_tokens: res.headers.get('x-ratelimit-limit-tokens'),
-              remaining_tokens: res.headers.get('x-ratelimit-remaining-tokens'),
-              reset_tokens: res.headers.get('x-ratelimit-reset-tokens'),
-            };
-            const body = await res.text();
-            return {
-              status_code: res.status,
-              elapsed_ms: elapsed,
-              rate_limit,
-              body_preview: body.substring(0, 500),
-              body_length: body.length,
-            };
-          } catch (e) {
-            clearTimeout(timeout);
-            const elapsed = Date.now() - t0;
-            const isAbort = e?.name === 'AbortError';
-            return {
-              status_code: 0,
-              elapsed_ms: elapsed,
-              error: isAbort ? 'timeout' : 'network_error',
-              error_detail: (e?.message || '').substring(0, 150),
-              rate_limit: null,
-              body_preview: null,
-              body_length: 0,
-            };
-          }
-        }
-
-        // ── Parse + validate response content ──
-        function parseContent(bodyText) {
-          try {
-            const parsed = JSON.parse(bodyText);
-            const content = parsed?.choices?.[0]?.message?.content;
-            const usage = parsed?.usage;
-            return {
-              content: typeof content === 'string' ? content : null,
-              usage: usage ? {
-                prompt_tokens: usage.prompt_tokens ?? null,
-                completion_tokens: usage.completion_tokens ?? null,
-                total_tokens: usage.total_tokens ?? null,
-              } : null,
-              model_used: parsed?.model || null,
-              finish_reason: parsed?.choices?.[0]?.finish_reason || null,
-            };
-          } catch { return { content: null, usage: null, model_used: null, finish_reason: null }; }
-        }
-
-        // ── Persian validation (reuse existing function) ──
-        function checkPersian(text) {
-          if (!text || typeof text !== 'string') return { valid: false, reason: 'empty' };
-          const validation = validatePersianOutput(text, { minLength: 3 });
-          return {
-            valid: validation.valid,
-            reason: validation.reason || 'ok',
-            stats: validation.stats || null,
-            length: text.length,
-            preview: text.substring(0, 300),
-          };
-        }
-
-        const NARA_MODEL = 'deepseek-v4-flash';
-        let result;
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST RAW — Raw call with full body (for debugging 403/429 errors)
-        // ─────────────────────────────────────────────────────────────────
-        if (testType === 'raw' || testType === 'RAW') {
-          const raw = await callNara(NARA_MODEL, [
-            { role: 'user', content: 'Hello' },
-          ], 100, 0.3, 15000);
-          return jsonResponse({
-            status: 'success',
-            test: 'raw',
-            model: NARA_MODEL,
-            status_code: raw.status_code,
-            elapsed_ms: raw.elapsed_ms,
-            rate_limit: raw.rate_limit,
-            raw_body_full: raw.body_preview,
-            body_length: raw.body_length,
-            error: raw.error,
-          }, {}, env);
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST A — Persian translation (single headline)
-        // ─────────────────────────────────────────────────────────────────
-        if (testType === 'A' || testType === 'a') {
-          const headlines = [
-            'Bitcoin ETF sees record inflows as institutional demand surges',
-            'Ethereum completes major network upgrade successfully',
-            'SEC delays decision on Solana spot ETF application',
-          ];
-          const results = [];
-          for (const headline of headlines) {
-            const messages = [
-              { role: 'system', content: 'You are a professional translator. Translate English to natural Persian (Farsi). Return ONLY the translation, no explanations.' },
-              { role: 'user', content: headline },
-            ];
-            const raw = await callNara(NARA_MODEL, messages, 500, 0.3, 15000);
-            const parsed = parseContent(raw.body_preview && raw.body_length <= 500 ? raw.body_preview + (raw.body_length > 500 ? '...' : '') : '');
-            results.push({
-              input: headline,
-              status: raw.status_code,
-              elapsed_ms: raw.elapsed_ms,
-              rate_limit: raw.rate_limit,
-              translation: parsed.content,
-              persian_validation: checkPersian(parsed.content),
-              usage: parsed.usage,
-              model: parsed.model_used,
-              finish_reason: parsed.finish_reason,
-              error: raw.error || null,
-            });
-          }
-          result = { test: 'A', description: 'Persian translation (3 headlines)', results };
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST B — JSON batch translation (3 headlines → JSON array)
-        // ─────────────────────────────────────────────────────────────────
-        else if (testType === 'B' || testType === 'b') {
-          const sysPrompt = 'You are a professional translator. Translate each English headline to natural Persian (Farsi). Return ONLY a JSON array of strings, where each string is the Persian translation. The array must have exactly the same number of elements as the input. RULES: 1) Output must be 100% Persian — no Chinese/Japanese/Korean (CJK) characters. 2) No English words except crypto symbols (BTC, ETH, USDT) and technical abbreviations (API, AI, ETF). 3) Foreign names must be transliterated: Binance → بایننس, Google → گوگل. 4) Numbers can stay as-is. 5) Return ONLY the JSON array, no other text.';
-          const headlines = ['Bitcoin ETF sees record inflows', 'Ethereum completes major network upgrade', 'SEC delays decision on Solana ETF'];
-          const userPrompt = `Translate these ${headlines.length} headlines to Persian. Return a JSON array of ${headlines.length} strings:\n\n1. ${headlines[0]}\n2. ${headlines[1]}\n3. ${headlines[2]}`;
-          const messages = [
-            { role: 'system', content: sysPrompt },
-            { role: 'user', content: userPrompt },
-          ];
-          const raw = await callNara(NARA_MODEL, messages, 1000, 0.3, 20000);
-          // Fetch FULL body for JSON parsing (not just 500-char preview)
-          let fullBody = raw.body_preview || '';
-          const parsed = parseContent(fullBody);
-          let jsonValid = false, jsonArray = null, jsonError = null, countMatch = false;
-          if (parsed.content) {
-            try {
-              const arr = JSON.parse(parsed.content.match(/\[[\s\S]*\]/)?.[0] || 'null');
-              if (Array.isArray(arr)) {
-                jsonArray = arr;
-                jsonValid = true;
-                countMatch = arr.length === headlines.length;
-              }
-            } catch (e) { jsonError = e?.message?.substring(0, 100); }
-          }
-          result = {
-            test: 'B',
-            description: 'JSON batch translation (3 headlines → JSON array)',
-            input_headlines: headlines,
-            status: raw.status_code,
-            elapsed_ms: raw.elapsed_ms,
-            rate_limit: raw.rate_limit,
-            raw_content: parsed.content?.substring(0, 500) || null,
-            json_valid: jsonValid,
-            json_array: jsonArray,
-            json_count_match: countMatch,
-            json_error: jsonError,
-            has_markdown_fence: parsed.content ? /```/.test(parsed.content) : false,
-            has_prose_around_json: parsed.content ? (parsed.content.trim().startsWith('[') === false || parsed.content.trim().endsWith(']') === false) : false,
-            persian_validation_per_item: jsonArray ? jsonArray.map(t => checkPersian(t)) : null,
-            usage: parsed.usage,
-            model: parsed.model_used,
-            error: raw.error || null,
-          };
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST C — News analysis (JSON array of objects)
-        // ─────────────────────────────────────────────────────────────────
-        else if (testType === 'C' || testType === 'c') {
-          const sysPrompt = 'You are a crypto market analyst. Return ONLY a JSON array, no other text.';
-          const prompt = `You are a professional crypto market analyst. Analyze these 3 news headlines.
-For EACH headline, return a JSON array where each element has:
-- "index": number (1-based)
-- "sentiment": "bullish" | "bearish" | "neutral"
-- "impact": "high" | "medium" | "low"
-- "reason": one short sentence in Persian (Farsi) explaining the analysis
-- "coins": array of related coin symbols (e.g., ["BTC", "ETH"])
-
-Return ONLY the JSON array, no other text.
-
-Headlines:
-1. "Bitcoin ETF sees record inflows"
-2. "Ethereum completes major network upgrade"
-3. "SEC delays decision on Solana ETF"`;
-          const messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: prompt }];
-          const raw = await callNara(NARA_MODEL, messages, 1500, 0.2, 20000);
-          let fullBody = raw.body_preview || '';
-          const parsed = parseContent(fullBody);
-          let jsonValid = false, parsedArray = null, jsonError = null, schemaValid = false;
-          if (parsed.content) {
-            try {
-              const arr = JSON.parse(parsed.content.match(/\[[\s\S]*\]/)?.[0] || 'null');
-              if (Array.isArray(arr)) {
-                jsonValid = true;
-                parsedArray = arr;
-                schemaValid = arr.every(item =>
-                  item && typeof item.index === 'number' &&
-                  ['bullish','bearish','neutral'].includes(item.sentiment) &&
-                  ['high','medium','low'].includes(item.impact) &&
-                  typeof item.reason === 'string' &&
-                  Array.isArray(item.coins)
-                );
-              }
-            } catch (e) { jsonError = e?.message?.substring(0, 100); }
-          }
-          result = {
-            test: 'C',
-            description: 'News analysis (JSON array of objects with sentiment/impact/reason/coins)',
-            status: raw.status_code,
-            elapsed_ms: raw.elapsed_ms,
-            rate_limit: raw.rate_limit,
-            raw_content: parsed.content?.substring(0, 500) || null,
-            json_valid: jsonValid,
-            json_array: parsedArray,
-            schema_valid: schemaValid,
-            json_error: jsonError,
-            has_markdown_fence: parsed.content ? /```/.test(parsed.content) : false,
-            persian_reasons: parsedArray ? parsedArray.map(item => checkPersian(item?.reason)) : null,
-            usage: parsed.usage,
-            model: parsed.model_used,
-            error: raw.error || null,
-          };
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST D — Article summary (Persian 120-200 words)
-        // ─────────────────────────────────────────────────────────────────
-        else if (testType === 'D' || testType === 'd') {
-          const article = `Bitcoin exchange-traded funds (ETFs) witnessed record inflows last week, surpassing $2 billion in net investments. The surge was driven by institutional investors seeking exposure to Bitcoin ahead of the anticipated halving event. BlackRock's iShares Bitcoin Trust (IBIT) led the inflows, attracting over $800 million in a single trading day. Analysts at JPMorgan noted that the institutional demand for Bitcoin ETFs has been accelerating since the SEC approved spot Bitcoin ETFs in January. The approval opened the door for traditional financial advisors and pension funds to allocate a portion of their portfolios to Bitcoin. Market observers believe that if the current pace of inflows continues, Bitcoin ETFs could surpass gold ETFs in total assets under management within the next two years. However, some analysts caution that the inflows may be partly driven by short-term speculation around the halving rather than long-term conviction. The Bitcoin price has rallied 15% over the past month, currently trading above $70,000.`;
-          const sysPrompt = 'You are a professional Persian crypto and financial journalist. Read the full article and write a 120-200 word analysis in fluent Farsi. Preserve all key numbers, names, and dates. Explain what happened, important details, why it matters, and market impact. Write original analysis, not translation. Do NOT invent any facts. Use blank lines between paragraphs.';
-          const messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: article }];
-          const raw = await callNara(NARA_MODEL, messages, 1500, 0.4, 25000);
-          let fullBody = raw.body_preview || '';
-          const parsed = parseContent(fullBody);
-          const summary = parsed.content;
-          const wordCount = summary ? summary.trim().split(/\s+/).length : 0;
-          result = {
-            test: 'D',
-            description: 'Article summary (Persian 120-200 words)',
-            status: raw.status_code,
-            elapsed_ms: raw.elapsed_ms,
-            rate_limit: raw.rate_limit,
-            summary_preview: summary ? summary.substring(0, 500) : null,
-            summary_word_count: wordCount,
-            length_in_range: wordCount >= 100 && wordCount <= 250,
-            persian_validation: checkPersian(summary),
-            usage: parsed.usage,
-            model: parsed.model_used,
-            finish_reason: parsed.finish_reason,
-            error: raw.error || null,
-          };
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // TEST G — Error handling (invalid model, empty messages)
-        // ─────────────────────────────────────────────────────────────────
-        else if (testType === 'G' || testType === 'g') {
-          // G1: invalid model name
-          const g1 = await callNara('nara/fake-model-xyz', [{ role: 'user', content: 'test' }], 100, 0.3, 15000);
-          // G2: empty messages array
-          const g2 = await callNara(NARA_MODEL, [], 100, 0.3, 15000);
-          result = {
-            test: 'G',
-            description: 'Error handling (invalid model + empty messages)',
-            g1_invalid_model: {
-              status: g1.status_code,
-              elapsed_ms: g1.elapsed_ms,
-              rate_limit: g1.rate_limit,
-              body_preview: g1.body_preview,
-              error: g1.error,
-            },
-            g2_empty_messages: {
-              status: g2.status_code,
-              elapsed_ms: g2.elapsed_ms,
-              rate_limit: g2.rate_limit,
-              body_preview: g2.body_preview,
-              error: g2.error,
-            },
-          };
-        }
-
-        else {
-          result = {
-            status: 'error',
-            error: 'unknown_test',
-            available_tests: ['presence', 'A', 'B', 'C', 'D', 'G'],
-            note: 'Use ?test=presence|A|B|C|D|G',
-          };
-        }
-
-        return jsonResponse({ status: 'success', test: testType, timestamp: new Date().toISOString(), result }, {}, env);
-      }
-
-      // ── GET /api/diagnostic/groq-connectivity — TEMPORARY Groq reachability diagnostic ──
-      // PURPOSE: Determine why Groq fetch() returns HTTP 0 from production Worker.
-      //          Captures full error objects (including e.cause) that the production
-      //          _groqRouterCallGateway catch block does NOT capture.
-      // SECURITY:
-      //   - Admin-guarded (optionalTelegramAuth + isAdminTelegramId)
-      //   - NEVER uses real GROQ_API_KEY/GROQ_API_KEY_1. Tests use NO auth or a
-      //     dummy 'INVALID_CONNECTIVITY_TEST_KEY' bearer. No real key is ever sent.
-      //   - Only reports key PRESENCE (boolean) + 6-char prefix, never the full key.
-      //   - Read-only — does NOT modify any provider chain, circuit, or queue.
-      // SCOPE: Standalone diagnostic. Does NOT touch Groq/Gemini/OpenRouter/Workers AI.
-      if (request.method === 'GET' && url.pathname === '/api/diagnostic/groq-connectivity') {
-        const auth = await optionalTelegramAuth(request, env);
-        if (!auth.user || !isAdminTelegramId(env, String(auth.user.id))) {
-          return jsonResponse({ status: 'error', error: 'admin_auth_required' }, { status: 403 }, env);
-        }
-
-        const results = {
-          timestamp: new Date().toISOString(),
-          groq_key0_configured: Boolean(env.GROQ_API_KEY),
-          groq_key1_configured: Boolean(env.GROQ_API_KEY_1),
-          groq_key0_prefix: env.GROQ_API_KEY ? (String(env.GROQ_API_KEY).substring(0, 6) + '***') : null,
-          groq_key1_prefix: env.GROQ_API_KEY_1 ? (String(env.GROQ_API_KEY_1).substring(0, 6) + '***') : null,
-        };
-
-        // Helper: run a fetch test with full error capture (including e.cause)
-        async function runFetchTest(label, urlStr, options, timeoutMs) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), timeoutMs || 15000);
-          const t0 = Date.now();
-          try {
-            const res = await fetch(urlStr, { ...options, signal: controller.signal });
-            clearTimeout(timeout);
-            const elapsed = Date.now() - t0;
-            const body = await res.text();
-            return {
-              label,
-              status: res.status,
-              status_text: res.statusText,
-              elapsed_ms: elapsed,
-              response_headers: {
-                'content-type': res.headers.get('content-type'),
-                'server': res.headers.get('server'),
-                'cf-ray': res.headers.get('cf-ray'),
-                'cf-cache-status': res.headers.get('cf-cache-status'),
-              },
-              body_preview: body.substring(0, 300),
-              body_length: body.length,
-            };
-          } catch (e) {
-            clearTimeout(timeout);
-            const elapsed = Date.now() - t0;
-            const isAbort = e?.name === 'AbortError';
-            return {
-              label,
-              error_name: e?.name || 'Unknown',
-              error_message: (e?.message || '').substring(0, 400),
-              error_cause: e?.cause ? String(e?.cause).substring(0, 400) : null,
-              error_stack: e?.stack ? String(e.stack).split('\n').slice(0, 3).join(' | ') : null,
-              is_abort: isAbort,
-              interpreted_as: isAbort ? 'timeout' : 'network_error',
-              elapsed_ms: elapsed,
-              status: 0,
-            };
-          }
-        }
-
-        // Test 1: Plain GET to api.groq.com root (NO auth) — tests DNS + TLS + HTTP reachability
-        results.test1_get_root_noauth = await runFetchTest(
-          'GET https://api.groq.com/ (no auth)',
-          'https://api.groq.com/',
-          { method: 'GET' },
-          15000
-        );
-
-        // Test 2: POST to /openai/v1/chat/completions with INVALID bearer key — if reachable, expect 401
-        results.test2_post_invalid_key = await runFetchTest(
-          'POST /openai/v1/chat/completions (invalid bearer)',
-          'https://api.groq.com/openai/v1/chat/completions',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer INVALID_CONNECTIVITY_TEST_KEY_NOT_REAL',
-            },
-            body: JSON.stringify({
-              model: 'openai/gpt-oss-120b',
-              messages: [{ role: 'user', content: 'connectivity test' }],
-              max_tokens: 1,
-            }),
-          },
-          15000
-        );
-
-        // Test 3: GET to a known-good external host — sanity check Worker egress
-        results.test3_egress_sanity = await runFetchTest(
-          'GET https://cloudflare.com/cdn-cgi/trace (egress sanity)',
-          'https://cloudflare.com/cdn-cgi/trace',
-          { method: 'GET' },
-          10000
-        );
-
-        // Test 4: GET to another AI API (openrouter.ai) — test if OTHER AI providers are reachable too
-        results.test4_other_ai_provider = await runFetchTest(
-          'GET https://openrouter.ai/api/v1/models (no auth)',
-          'https://openrouter.ai/api/v1/models',
-          { method: 'GET' },
-          15000
-        );
-
-        // Test 5: POST with REAL Key0 (env.GROQ_API_KEY) — minimal request, capture full result.
-        // SECURITY: uses the real key internally (same as production _groqRouterCallGateway), but
-        // NEVER returns the key value. Only returns: HTTP status, elapsed_ms, body preview,
-        // rate-limit headers, and full error object if fetch throws.
-        // PURPOSE: determine if real key gets 403 (WAF), 401 (invalid key), 200 (works),
-        // or HTTP 0 (network error — reproducing the production issue).
-        if (env.GROQ_API_KEY) {
-          results.test5_real_key0 = await runFetchTest(
-            'POST /openai/v1/chat/completions (REAL Key0, minimal request)',
-            'https://api.groq.com/openai/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${env.GROQ_API_KEY}`,
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
-                messages: [{ role: 'user', content: 'Say hello in one word.' }],
-                max_tokens: 10,
-                temperature: 0.3,
-              }),
-            },
-            30000
-          );
-        } else {
-          results.test5_real_key0 = { skipped: 'GROQ_API_KEY not configured' };
-        }
-
-        // Test 6: POST with REAL Key1 (env.GROQ_API_KEY_1) — same test with Key1
-        if (env.GROQ_API_KEY_1) {
-          results.test6_real_key1 = await runFetchTest(
-            'POST /openai/v1/chat/completions (REAL Key1, minimal request)',
-            'https://api.groq.com/openai/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${env.GROQ_API_KEY_1}`,
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-oss-120b',
-                messages: [{ role: 'user', content: 'Say hello in one word.' }],
-                max_tokens: 10,
-                temperature: 0.3,
-              }),
-            },
-            30000
-          );
-        } else {
-          results.test6_real_key1 = { skipped: 'GROQ_API_KEY_1 not configured' };
-        }
-
-        return jsonResponse({ status: 'success', results }, {}, env);
-      }
-
-      // ── GET /api/bootstrap-diag — read [BOOTSTRAP-E2E] diagnostic logs ──
-      // Public (no auth) — same as /api/start-diag, /api/admin-diag.
-      // Returns the last 30 bootstrap flow entries from APP_CACHE KV.
-      // Each entry has: phase, uid (4-char suffix), timestamp, and step-specific
-      // data (joined, reason, is_admin_env, is_admin_final, error, etc.)
-      if (request.method === 'GET' && url.pathname === '/api/bootstrap-diag') {
-        // P0-B migration: KV persistence for [BOOTSTRAP-E2E] REMOVED. Live
-        // traces are now emitted as structured console.log (event:
-        // 'bootstrap_e2e') captured by Cloudflare Observability. This read
-        // returns any RESIDUAL legacy entries still in KV (TTL 1800s, will
-        // expire) for backward compatibility. For fresh traces, use wrangler
-        // tail or the Cloudflare dashboard Logs panel.
-        let entries = [];
-        try {
-          const raw = await env.APP_CACHE?.get('bootstrap:e2e_log').catch(() => null);
-          if (raw) {
-            entries = JSON.parse(raw) || [];
-          }
-        } catch (e) {
-          entries = [{ error: `Failed to read bootstrap:e2e_log: ${e instanceof Error ? e.message : String(e)}` }];
-        }
-        return jsonResponse({
-          status: 'success',
-          server_time: new Date().toISOString(),
-          count: entries.length,
-          entries: entries.slice(-30),
-          migrated: true,
-          live_source: 'cloudflare_observability',
-          note: 'P0-B: KV persistence removed to reduce KV Write consumption. Live [BOOTSTRAP-E2E] traces are now structured console.log (event: "bootstrap_e2e") captured by Cloudflare Observability (wrangler tail / dashboard Logs). These residual KV entries are legacy and will expire (TTL 1800s). Each entry has a 4-char uid suffix for correlation across phases within a single bootstrap flow.',
-        }, {}, env);
-      }
 
       // ── Calendar Reminders (per-user, stored in PostgreSQL) ──
       // POST   /api/calendar/reminders      — create/update
@@ -14834,17 +14246,6 @@ Headlines:
         return jsonResponse({ status: 'error', message: 'Market overview unavailable' }, { status: 503 }, env);
       }
 
-      if (request.method === 'GET' && url.pathname === '/api/market/overview/usage') {
-        // Admin-only: CMC usage monitoring
-        const authState = await authenticateTelegramRequest(request, env);
-        if (authState.error) return authState.error;
-        if (!isAdminTelegramId(env, authState.user.id)) {
-          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
-        }
-        const usage = await marketOverviewSvc.getUsageLog(env);
-        const keyInfo = env.CMC_API_KEY ? await marketOverviewSvc.fetchCMCKeyInfo(env.CMC_API_KEY) : null;
-        return jsonResponse({ status: 'success', usage, keyInfo }, {}, env);
-      }
 
       // ── Admin Panel API Routes (R4) ──
       if (url.pathname === '/api/admin/is-admin' && request.method === 'GET') {
