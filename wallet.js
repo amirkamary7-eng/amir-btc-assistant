@@ -2337,6 +2337,8 @@ const WalletApp = (() => {
     _updateDailyCheckinCard,
     _startWeeklyCountdown,
     _stopWeeklyCountdown,
+    showTokenInfo,
+    closeTokenInfo,
   };
 })();
 
