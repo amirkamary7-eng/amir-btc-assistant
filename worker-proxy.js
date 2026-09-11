@@ -13195,6 +13195,35 @@ class PresenceDO {
     this.state = state;
     this.sessions = new Map(); // userId → expiresAtMs
     this._alarmSet = false;
+    this._hydrated = false;
+    this._hydratePromise = null;
+  }
+
+  // ── Hydration: restore sessions from storage snapshot ──
+  // Uses Promise memoization to prevent concurrent hydration.
+  // If storage fails, degrades gracefully to empty Map (memory-only mode).
+  async _ensureHydrated() {
+    if (this._hydrated) return;
+    if (!this._hydratePromise) {
+      this._hydratePromise = (async () => {
+        try {
+          const snapshot = await this.state.storage.get('sessions_snapshot');
+          if (snapshot && Array.isArray(snapshot)) {
+            const now = Date.now();
+            for (const [userId, expiresAt] of snapshot) {
+              // Filter out already-expired entries during hydration
+              if (expiresAt > now) {
+                this.sessions.set(userId, expiresAt);
+              }
+            }
+          }
+        } catch {
+          // Storage read failure → degrade to memory-only (empty Map)
+        }
+        this._hydrated = true;
+      })();
+    }
+    await this._hydratePromise;
   }
 
   async fetch(request) {
@@ -13203,6 +13232,9 @@ class PresenceDO {
     const userId = url.searchParams.get('userId') || '';
     const ttl = Number(url.searchParams.get('ttl')) || 240000; // default 240s
     const now = Date.now();
+
+    // Hydrate from storage snapshot before any session access
+    await this._ensureHydrated();
 
     // Ensure alarm is set (idempotent)
     if (!this._alarmSet) {
@@ -13243,12 +13275,24 @@ class PresenceDO {
 
   async alarm() {
     const now = Date.now();
+
+    // Hydrate before pruning (in case alarm fires before any fetch on a fresh DO)
+    await this._ensureHydrated();
+
     // Full prune: remove all expired entries
     for (const [userId, expiresAt] of this.sessions) {
       if (expiresAt <= now) {
         this.sessions.delete(userId);
       }
     }
+
+    // Snapshot: persist current sessions to storage for eviction recovery
+    try {
+      await this.state.storage.put('sessions_snapshot', Array.from(this.sessions.entries()));
+    } catch {
+      // Storage write failure → snapshot not updated, old snapshot used on next eviction
+    }
+
     // Reschedule alarm for 60s
     try {
       await this.state.storage.setAlarm(now + 60000);

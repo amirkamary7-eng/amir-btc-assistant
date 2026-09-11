@@ -134,13 +134,20 @@ function loadSessionHandlersFactory() {
 
 function createMockDOState() {
   let alarmAt = null;
+  const kvStore = new Map();
   return {
     storage: {
       async getAlarm() { return alarmAt; },
       async setAlarm(when) { alarmAt = when; },
       async deleteAlarm() { alarmAt = null; },
+      async get(key) { return kvStore.get(key) ?? null; },
+      async put(key, value) { kvStore.set(key, value); },
+      async delete(key) { kvStore.delete(key); },
+      async list() { return new Map(kvStore); },
     },
     _peekAlarm() { return alarmAt; },
+    _peekStorage() { return kvStore; },
+    _clearStorage() { kvStore.clear(); },
   };
 }
 
@@ -172,10 +179,12 @@ function createMockPresenceDOBinding(PresenceDOClass, opts = {}) {
     _state: state,
     _getCalls() { return calls.slice(); },
     _getFetchCount() { return fetchCount; },
-    // Simulate DO eviction: reset in-memory Map but keep alarm storage
+    // Simulate DO eviction: reset in-memory state but keep storage (alarm + snapshot)
     _simulateEviction() {
       instance.sessions = new Map();
       instance._alarmSet = false;
+      instance._hydrated = false;
+      instance._hydratePromise = null;
     },
     // Simulate DO throwing on every fetch
     _simulateFailure(shouldFail) {
@@ -940,11 +949,188 @@ test('P10.do-structure: initial alarm set ~60s on first fetch', () => {
     'first fetch must set initial alarm at now + 60000');
 });
 
-test('P10.do-structure: no persistence (in-memory Map only)', () => {
-  // The class must NOT call state.storage.put/get for session data (only alarm)
-  const storageCalls = (PRESENCE_DO_CLASS_SRC.match(/state\.storage\.(put|get|delete)\(/g) || [])
-    .filter(s => !s.includes('getAlarm') && !s.includes('setAlarm') && !s.includes('deleteAlarm'));
-  assert.equal(storageCalls.length, 0,
-    'PresenceDO must NOT persist session data to storage (in-memory Map only); ' +
-    `found storage calls: ${JSON.stringify(storageCalls)}`);
+test('P10.do-structure: snapshot persistence (storage.put in alarm, storage.get in hydration)', () => {
+  // The class MUST persist sessions via snapshot in alarm() and hydrate in _ensureHydrated()
+  assert.ok(PRESENCE_DO_CLASS_SRC.includes("storage.put('sessions_snapshot'"),
+    'PresenceDO alarm() must call storage.put("sessions_snapshot", ...) for persistence');
+  assert.ok(PRESENCE_DO_CLASS_SRC.includes("storage.get('sessions_snapshot'"),
+    'PresenceDO _ensureHydrated() must call storage.get("sessions_snapshot") for hydration');
+  assert.ok(PRESENCE_DO_CLASS_SRC.includes('_hydrated'),
+    'PresenceDO must have _hydrated flag for hydration memoization');
+  assert.ok(PRESENCE_DO_CLASS_SRC.includes('_hydratePromise'),
+    'PresenceDO must use _hydratePromise for Promise memoization');
+  assert.ok(PRESENCE_DO_CLASS_SRC.includes('expiresAt > now'),
+    'PresenceDO hydration must filter out expired entries (expiresAt > now)');
+});
+
+// ============================================================================
+// P11: Snapshot Persistence — alarm writes snapshot, eviction hydrates
+// ============================================================================
+
+test('P11.alarm-snapshot: alarm() writes sessions_snapshot to storage', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // Send heartbeats
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
+  // Run alarm
+  await binding._instance.alarm();
+  // Verify snapshot exists in storage
+  const snapshot = await binding._state.storage.get('sessions_snapshot');
+  assert.ok(Array.isArray(snapshot), 'snapshot must be an array');
+  assert.equal(snapshot.length, 2, 'snapshot must have 2 entries');
+});
+
+test('P11.eviction-hydration: count survives eviction via snapshot', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // Send heartbeats
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userC&ttl=240000');
+  // Run alarm to write snapshot
+  await binding._instance.alarm();
+  // Verify count before eviction
+  const beforeEviction = await binding.fetch('https://do/internal?action=count');
+  const beforeData = await beforeEviction.json();
+  assert.equal(beforeData.count, 3, 'count before eviction = 3');
+  // Evict
+  binding._simulateEviction();
+  // Count after eviction (should hydrate from snapshot)
+  const afterEviction = await binding.fetch('https://do/internal?action=count');
+  const afterData = await afterEviction.json();
+  assert.equal(afterData.count, 3, 'count after eviction must survive via snapshot hydration');
+});
+
+test('P11.expired-snapshot: expired entries filtered during hydration', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // Manually write a snapshot with mixed expired/valid entries
+  const now = Date.now();
+  await binding._state.storage.put('sessions_snapshot', [
+    ['userA', now + 200000],  // valid (200s remaining)
+    ['userB', now - 1000],    // expired 1s ago
+    ['userC', now + 100000],  // valid (100s remaining)
+    ['userD', now - 100000],  // expired 100s ago
+  ]);
+  // Evict (simulates fresh DO with old snapshot)
+  binding._simulateEviction();
+  // Count should only include valid entries
+  const res = await binding.fetch('https://do/internal?action=count');
+  const data = await res.json();
+  assert.equal(data.count, 2, 'expired entries must be filtered during hydration');
+});
+
+test('P11.empty-snapshot: empty array snapshot → count = 0', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  await binding._state.storage.put('sessions_snapshot', []);
+  binding._simulateEviction();
+  const res = await binding.fetch('https://do/internal?action=count');
+  const data = await res.json();
+  assert.equal(data.count, 0, 'empty snapshot → count = 0');
+});
+
+test('P11.corrupt-snapshot: non-array snapshot → count = 0, no crash', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  await binding._state.storage.put('sessions_snapshot', { not: 'an array' });
+  binding._simulateEviction();
+  const res = await binding.fetch('https://do/internal?action=count');
+  const data = await res.json();
+  assert.equal(data.count, 0, 'corrupt snapshot → count = 0, no crash');
+});
+
+test('P11.storage-get-failure: storage.get throws → degrade to empty Map', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // Poison storage.get to throw
+  const originalGet = binding._state.storage.get;
+  binding._state.storage.get = async () => { throw new Error('STORAGE READ FAILURE'); };
+  binding._simulateEviction();
+  // Should not throw — should degrade to empty Map
+  const res = await binding.fetch('https://do/internal?action=count');
+  const data = await res.json();
+  assert.equal(data.count, 0, 'storage.get failure → count = 0 (graceful degradation)');
+  // Restore
+  binding._state.storage.get = originalGet;
+});
+
+test('P11.storage-put-failure: storage.put throws in alarm → alarm continues, no crash', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  // Poison storage.put to throw
+  const originalPut = binding._state.storage.put;
+  binding._state.storage.put = async () => { throw new Error('STORAGE WRITE FAILURE'); };
+  // alarm() should not throw — it should catch the error and continue
+  await binding._instance.alarm();
+  // Verify alarm was rescheduled (setAlarm should still work)
+  const alarmTime = binding._state._peekAlarm();
+  assert.ok(alarmTime !== null, 'alarm must be rescheduled even if storage.put fails');
+  // Restore
+  binding._state.storage.put = originalPut;
+});
+
+test('P11.concurrent-hydration: multiple concurrent fetches → hydration runs once', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // Seed a snapshot
+  const now = Date.now();
+  await binding._state.storage.put('sessions_snapshot', [
+    ['userA', now + 200000],
+    ['userB', now + 200000],
+  ]);
+  binding._simulateEviction();
+  // Track storage.get calls
+  let getCount = 0;
+  const originalGet = binding._state.storage.get;
+  binding._state.storage.get = async (key) => {
+    if (key === 'sessions_snapshot') getCount++;
+    return originalGet.call(binding._state.storage, key);
+  };
+  // Send 5 concurrent count requests
+  const results = await Promise.all([
+    binding.fetch('https://do/internal?action=count'),
+    binding.fetch('https://do/internal?action=count'),
+    binding.fetch('https://do/internal?action=count'),
+    binding.fetch('https://do/internal?action=count'),
+    binding.fetch('https://do/internal?action=count'),
+  ]);
+  // All should return count = 2
+  for (const res of results) {
+    const data = await res.json();
+    assert.equal(data.count, 2, 'all concurrent requests should see hydrated count');
+  }
+  // Hydration should have called storage.get only once (Promise memoization)
+  assert.equal(getCount, 1, 'storage.get for snapshot must be called only once (Promise memoization)');
+  // Restore
+  binding._state.storage.get = originalGet;
+});
+
+test('P11.first-lifecycle-no-snapshot: first-ever DO lifecycle works without snapshot', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  // No snapshot in storage (first ever lifecycle)
+  const snapshot = await binding._state.storage.get('sessions_snapshot');
+  assert.equal(snapshot, null, 'no snapshot should exist on first lifecycle');
+  // Heartbeat should work normally
+  const res = await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  const data = await res.json();
+  assert.equal(data.online_count, 1, 'first heartbeat on fresh DO → count = 1');
+});
+
+test('P11.heartbeat-after-eviction: heartbeat refreshes user after eviction + hydration', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
+  await binding._instance.alarm(); // Write snapshot
+  // Evict
+  binding._simulateEviction();
+  // Heartbeat from userA (should hydrate first, then refresh userA)
+  const res = await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  const data = await res.json();
+  // Count should be 2 (hydrated from snapshot: userA + userB)
+  assert.equal(data.online_count, 2, 'heartbeat after eviction → count = 2 (hydrated + refreshed)');
 });
