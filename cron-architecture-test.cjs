@@ -72,29 +72,35 @@ test('T9: retryFailedMissionRewards is NOT called inside the isEvery15Min block'
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// T10: retryFailed* ARE in the hourly branch
+// T10: retryFailed* are in the 1-min cron block, gated by UTC minute === 0
 // ────────────────────────────────────────────────────────────────────────────
 
-test('T10: all three retryFailed* jobs are called inside the isHourly block', () => {
-  const hourlyStart = WORKER_SRC.indexOf('if (isHourly) {');
-  assert.ok(hourlyStart > 0, 'isHourly block must exist');
+test('T10: all three retryFailed* jobs are called inside the 1-min block, gated by UTC minute 0', () => {
+  // Verify isHourly is GONE (no 4th cron trigger on Free Plan)
+  assert.ok(!WORKER_SRC.includes('isHourly'),
+    'isHourly variable must NOT exist (Free Plan 3-trigger limit)');
 
-  // Find the closing brace
-  let depth = 0;
-  let hourlyEnd = -1;
-  for (let i = hourlyStart; i < WORKER_SRC.length; i++) {
-    if (WORKER_SRC[i] === '{') depth++;
-    if (WORKER_SRC[i] === '}') { depth--; if (depth === 0) { hourlyEnd = i; break; } }
-  }
-  assert.ok(hourlyEnd > 0, 'Must find closing brace of isHourly block');
+  // Verify the UTC minute guard exists
+  assert.ok(WORKER_SRC.includes('getUTCMinutes()'),
+    'Must use getUTCMinutes() for hourly guard');
+  assert.ok(WORKER_SRC.includes('_hourlyMinute === 0'),
+    'Must guard with _hourlyMinute === 0');
 
-  const block = WORKER_SRC.slice(hourlyStart, hourlyEnd);
+  // Find the 1-min block (isEveryMinute) and verify retryFailed* are inside it
+  const minuteStart = WORKER_SRC.indexOf('if (isEveryMinute)');
+  assert.ok(minuteStart > 0, 'isEveryMinute block must exist');
+
+  // Find the 'return;' that ends the 1-min block
+  const returnIdx = WORKER_SRC.indexOf('Return early', minuteStart);
+  assert.ok(returnIdx > 0, 'Must find the return early marker');
+
+  const block = WORKER_SRC.slice(minuteStart, returnIdx);
   assert.ok(block.includes('await retryFailedReferralRewards'),
-    'retryFailedReferralRewards must be called inside isHourly block');
+    'retryFailedReferralRewards must be called inside 1-min block (gated by UTC minute 0)');
   assert.ok(block.includes('await retryFailedWheelRewards'),
-    'retryFailedWheelRewards must be called inside isHourly block');
+    'retryFailedWheelRewards must be called inside 1-min block (gated by UTC minute 0)');
   assert.ok(block.includes('await retryFailedMissionRewards'),
-    'retryFailedMissionRewards must be called inside isHourly block');
+    'retryFailedMissionRewards must be called inside 1-min block (gated by UTC minute 0)');
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -178,30 +184,34 @@ test('T14: circuit breaker is inside processNewsAIBatch (*/15 only), NOT inside 
 // T15: No duplicate cron registration
 // ────────────────────────────────────────────────────────────────────────────
 
-test('T15: no duplicate cron registration in wrangler.jsonc', () => {
-  // Count occurrences of each cron expression in wrangler.jsonc
-  const crons = ['* * * * *', '*/5 * * * *', '*/15 * * * *', '0 * * * *'];
-  for (const cron of crons) {
-    // Count in the production section (not staging)
-    const prodSection = WRANGLER_SRC.slice(WRANGLER_SRC.indexOf('"production"'));
+test('T15: exactly 3 cron triggers in wrangler.jsonc, no 0 * * * *', () => {
+  // Count occurrences of each cron expression in wrangler.jsonc production section
+  const prodSection = WRANGLER_SRC.slice(WRANGLER_SRC.indexOf('"production"'));
+
+  const expectedCrons = ['* * * * *', '*/5 * * * *', '*/15 * * * *'];
+  for (const cron of expectedCrons) {
     const count = (prodSection.match(new RegExp(`"${cron.replace(/\*/g, '\\*')}"`, 'g')) || []).length;
     assert.ok(count === 1, `Cron "${cron}" must appear exactly once in production (found ${count})`);
   }
+
+  // Verify 0 * * * * is NOT present
+  assert.ok(!prodSection.includes('"0 * * * *"'),
+    '0 * * * * must NOT exist in production crons (Free Plan 3-trigger limit)');
 });
 
 // ────────────────────────────────────────────────────────────────────────────
 // T16: All 4 cron routes exist in scheduled()
 // ────────────────────────────────────────────────────────────────────────────
 
-test('T16: all 4 cron routes exist in scheduled() handler', () => {
+test('T16: exactly 3 cron routes exist in scheduled() handler (no isHourly)', () => {
   assert.ok(WORKER_SRC.includes("const isEveryMinute = cronExpr === '* * * * *'"),
     'isEveryMinute route must exist');
   assert.ok(WORKER_SRC.includes("const isEvery5Min = cronExpr === '*/5 * * * *'"),
     'isEvery5Min route must exist');
   assert.ok(WORKER_SRC.includes("const isEvery15Min = cronExpr === '*/15 * * * *'"),
     'isEvery15Min route must exist');
-  assert.ok(WORKER_SRC.includes("const isHourly = cronExpr === '0 * * * *'"),
-    'isHourly route must exist');
+  assert.ok(!WORKER_SRC.includes('isHourly'),
+    'isHourly must NOT exist (Free Plan 3-trigger limit — hourly retry runs inside 1-min cron)');
 });
 
 // ────────────────────────────────────────────────────────────────────────────

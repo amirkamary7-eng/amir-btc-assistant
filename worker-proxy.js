@@ -15674,7 +15674,6 @@ export default {
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery5Min = cronExpr === '*/5 * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
-    const isHourly = cronExpr === '0 * * * *';
 
     // ═══════════════════════════════════════════════════════════════════
     // DEDICATED PRICE ALERT CRON (every 1 minute)
@@ -15744,6 +15743,72 @@ export default {
       }).catch((e) => {
         console.error(JSON.stringify({ scope: 'cron-unhandled', cron: '* * * * *', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
+
+      // ── HOURLY RETRY (inside 1-min cron, gated to UTC minute === 0) ──
+      // CPU FIX: These retry jobs were previously on the */15 cron, where they
+      // competed with processNewsAIBatch for CPU/subrequest budget and caused
+      // exceededResources on Workers Free plan. They are now run from the
+      // every-minute cron but ONLY at the top of each hour (UTC minute 0).
+      // This gives them their own invocation with a full CPU budget, without
+      // needing a 4th cron trigger (Free Plan limit: 3 triggers).
+      //
+      // Idempotency: Each retry function uses LIMIT 20 + per-item idempotency
+      // (ON CONFLICT DO NOTHING for token_transactions). Running hourly is
+      // safe — backlogs drain at 20 items per function per hour (60 total).
+      //
+      // Failure isolation: Each retry runs in its own ctx.waitUntil — a failure
+      // in one does NOT cancel the alerts/queue work above (already committed
+      // via its own ctx.waitUntil). env._reqPool is nulled before each retry
+      // to prevent stale-pool I/O errors.
+      const _hourlyMinute = new Date().getUTCMinutes();
+      if (_hourlyMinute === 0) {
+        const _savedReqPoolForRetry = env._reqPool;
+        env._reqPool = null;
+        ctx.waitUntil((async () => {
+          try {
+            await retryFailedReferralRewards(env);
+            _logPhase('hourly-referral', 'ok');
+          } catch (e) {
+            _logPhase('hourly-referral', 'error', { error: e?.message });
+            console.warn('[CRON] referral retry failed:', e?.message);
+          } finally {
+            env._reqPool = _savedReqPoolForRetry;
+          }
+        })().catch((e) => {
+          console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedReferral', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+        }));
+        const _savedReqPoolForWheel = env._reqPool;
+        env._reqPool = null;
+        ctx.waitUntil((async () => {
+          try {
+            await retryFailedWheelRewards(env);
+            _logPhase('hourly-wheel', 'ok');
+          } catch (e) {
+            _logPhase('hourly-wheel', 'error', { error: e?.message });
+            console.warn('[CRON] wheel retry failed:', e?.message);
+          } finally {
+            env._reqPool = _savedReqPoolForWheel;
+          }
+        })().catch((e) => {
+          console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedWheel', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+        }));
+        const _savedReqPoolForMission = env._reqPool;
+        env._reqPool = null;
+        ctx.waitUntil((async () => {
+          try {
+            await retryFailedMissionRewards(env);
+            _logPhase('hourly-mission', 'ok');
+          } catch (e) {
+            _logPhase('hourly-mission', 'error', { error: e?.message });
+            console.warn('[CRON] mission reward retry failed:', e?.message);
+          } finally {
+            env._reqPool = _savedReqPoolForMission;
+          }
+        })().catch((e) => {
+          console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedMission', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+        }));
+      }
+
       // Return early — 1-min cron does NOTHING else
       return;
     }
@@ -15969,64 +16034,6 @@ export default {
       console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
     }));
 
-    // HOURLY CRON (0 * * * *) — retry failed referral/wheel/mission rewards
-    // CPU FIX: These retry jobs were previously on the */15 cron, where they
-    // competed with processNewsAIBatch for CPU/subrequest budget and caused
-    // exceededResources on Workers Free plan. Moving them to an hourly cron
-    // gives them their own invocation with a full CPU budget.
-    // Idempotency: Each retry function uses LIMIT 20 + per-item idempotency
-    // (ON CONFLICT DO NOTHING for token transactions, idempotent for rewards).
-    // Running hourly instead of every 15 min is safe — backlogs drain at
-    // 20 items per function per hour (60 total), which is more than enough
-    // for normal operation.
-    // ═══════════════════════════════════════════════════════════════════
-    if (isHourly) {
-      const _savedReqPoolForRetry = env._reqPool;
-      env._reqPool = null;
-      ctx.waitUntil((async () => {
-        try {
-          await retryFailedReferralRewards(env);
-          _logPhase('hourly-referral', 'ok');
-        } catch (e) {
-          _logPhase('hourly-referral', 'error', { error: e?.message });
-          console.warn('[CRON] referral retry failed:', e?.message);
-        } finally {
-          env._reqPool = _savedReqPoolForRetry;
-        }
-      })().catch((e) => {
-        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedReferral', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
-      }));
-      const _savedReqPoolForWheel = env._reqPool;
-      env._reqPool = null;
-      ctx.waitUntil((async () => {
-        try {
-          await retryFailedWheelRewards(env);
-          _logPhase('hourly-wheel', 'ok');
-        } catch (e) {
-          _logPhase('hourly-wheel', 'error', { error: e?.message });
-          console.warn('[CRON] wheel retry failed:', e?.message);
-        } finally {
-          env._reqPool = _savedReqPoolForWheel;
-        }
-      })().catch((e) => {
-        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedWheel', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
-      }));
-      const _savedReqPoolForMission = env._reqPool;
-      env._reqPool = null;
-      ctx.waitUntil((async () => {
-        try {
-          await retryFailedMissionRewards(env);
-          _logPhase('hourly-mission', 'ok');
-        } catch (e) {
-          _logPhase('hourly-mission', 'error', { error: e?.message });
-          console.warn('[CRON] mission reward retry failed:', e?.message);
-        } finally {
-          env._reqPool = _savedReqPoolForMission;
-        }
-      })().catch((e) => {
-        console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedMission', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
-      }));
-    }
   },
 };
 //#endregion
