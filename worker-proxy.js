@@ -9589,6 +9589,42 @@ async function processNewsAIBatch(env, pool = null) {
       queue: isNewsQueueEnabled(env),
     } });
 
+    // ── QUEUE-DEPTH CIRCUIT BREAKER ──
+    // If the summary queue is overloaded (> 40 pending items), skip the
+    // heavy */15 batch processing (RSS fetch, translate, analyze, publish,
+    // enqueue). Let the */5 cron (Phase 1d) drain the queue first.
+    // This prevents the amplification loop: failed processing → stuck items
+    // → queue grows → more dedup queries → more CPU → more failures.
+    // The */5 path processes up to 4 articles per tick = ~32/hour, which
+    // can drain a 40-item queue in ~75 minutes.
+    // Safe: no items are deleted or reset; the queue is simply left for
+    // the */5 path to process. New RSS articles will be enqueued on the
+    // next successful */15 tick once the queue drains below threshold.
+    const NEWS_QUEUE_OVERLOAD_THRESHOLD = 40;
+    try {
+      const queue = await getSummaryQueue(env);
+      const pendingCount = queue.filter(q => q.status === 'pending' || q.status === 'processing').length;
+      if (pendingCount > NEWS_QUEUE_OVERLOAD_THRESHOLD) {
+        stepLog('CIRCUIT_BREAKER_SKIP', {
+          reason: 'queue_overloaded',
+          pending: pendingCount,
+          threshold: NEWS_QUEUE_OVERLOAD_THRESHOLD,
+          queueLength: queue.length,
+        });
+        console.warn('[NEWS-AI-CRON] Queue overloaded — skipping */15 batch. Pending:', pendingCount, 'Threshold:', NEWS_QUEUE_OVERLOAD_THRESHOLD, 'Queue will drain via */5 cron.');
+        return {
+          ok: true,
+          reason: 'queue_overloaded',
+          elapsed: Date.now() - t0,
+          queuePending: pendingCount,
+          queueThreshold: NEWS_QUEUE_OVERLOAD_THRESHOLD,
+        };
+      }
+    } catch (queueCheckErr) {
+      // Non-fatal — if we can't read the queue, proceed with batch
+      stepLog('CIRCUIT_BREAKER_CHECK_FAILED', { error: queueCheckErr?.message });
+    }
+
     // ── STEP 1: RSS FETCH ──
     stepLog('RSS_FETCH_start');
     let sources;
@@ -9879,21 +9915,14 @@ async function processNewsAIBatch(env, pool = null) {
     }
 
     // ── STEP 9: PROCESS ONE ARTICLE FROM QUEUE ──
-    // Each cron tick processes ONE article summary (not 10 sequential).
-    // Queue persists in KV — if Worker is killed, next tick continues.
-    // Feature flag: NEWS_SUMMARY_ENABLED — when off, skip processing.
-    stepLog('SUMMARY_PROCESS_start');
+    // REMOVED from */15 cron: processOneArticleSummary is already executed
+    // by the */5 cron (Phase 1d, up to 4 articles per tick). Running it
+    // here on */15 was redundant and added ~8 subrequests + 1-4 AI calls
+    // to the already-heavy */15 invocation, contributing to exceededResources.
+    // The */5 path is sufficient — it processes up to 4 articles every 5 min
+    // (non-overlap ticks) = ~32 articles/hour, well above the enqueue rate.
+    stepLog('SUMMARY_PROCESS_skipped', { reason: 'moved_to_5min_cron' });
     let summaryResult = { processed: false, empty: true };
-    if (isNewsSummaryEnabled(env)) {
-      try {
-        summaryResult = await processOneArticleSummary(env, pool);
-        stepLog('SUMMARY_PROCESS_done', summaryResult);
-      } catch (e) {
-        stepLog('SUMMARY_PROCESS_FAILED', { error: e?.message });
-      }
-    } else {
-      stepLog('SUMMARY_PROCESS_skipped', { reason: 'flag_disabled' });
-    }
 
     // ── STEP 10: RECORD MONITORING TICK ──
     // Persists stats to KV so /api/news-ai-monitor can show rolling history.
@@ -15645,6 +15674,7 @@ export default {
     const isEveryMinute = cronExpr === '* * * * *';
     const isEvery5Min = cronExpr === '*/5 * * * *';
     const isEvery15Min = cronExpr === '*/15 * * * *';
+    const isHourly = cronExpr === '0 * * * *';
 
     // ═══════════════════════════════════════════════════════════════════
     // DEDICATED PRICE ALERT CRON (every 1 minute)
@@ -15939,59 +15969,41 @@ export default {
       console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
     }));
 
+    // HOURLY CRON (0 * * * *) — retry failed referral/wheel/mission rewards
+    // CPU FIX: These retry jobs were previously on the */15 cron, where they
+    // competed with processNewsAIBatch for CPU/subrequest budget and caused
+    // exceededResources on Workers Free plan. Moving them to an hourly cron
+    // gives them their own invocation with a full CPU budget.
+    // Idempotency: Each retry function uses LIMIT 20 + per-item idempotency
+    // (ON CONFLICT DO NOTHING for token transactions, idempotent for rewards).
+    // Running hourly instead of every 15 min is safe — backlogs drain at
+    // 20 items per function per hour (60 total), which is more than enough
+    // for normal operation.
     // ═══════════════════════════════════════════════════════════════════
-    // PHASE 2 SAFE OPTIMIZATION: Split retryFailedReferralRewards and retryFailedWheelRewards
-    // into SEPARATE ctx.waitUntil calls. Previously both ran in the same ctx.waitUntil
-    // (the withPhasePool block above), which meant they shared the same CPU budget.
-    // Each can use 5-8ms CPU (queryDbTransaction for creditTokens), so combined they
-    // could exceed 10ms. Now each gets its own budget.
-    // ═══════════════════════════════════════════════════════════════════
-    if (isEvery15Min) {
-      // CROSS-REQUEST I/O FIX: Null env._reqPool before retryFailed* so
-      // queryDb falls through to per-call Pool (or neon() HTTP) instead of
-      // using a stale Pool from the 1-min cron's runScheduledAlertsBaseline.
-      //
-      // Root cause: 1-min cron sets env._reqPool = pool1. If the 1-min cron
-      // and */15 cron overlap in the same isolate, retryFailed* (which run
-      // in separate ctx.waitUntil without pool param) read env._reqPool =
-      // pool1. When the 1-min cron finishes, pool1.end() closes the Pool.
-      // retryFailed* then tries to use the closed pool1 → "Cannot perform
-      // I/O on behalf of a different request" error.
-      //
-      // Fix: Save env._reqPool, null it, run retryFailed*, restore in finally.
-      // retryFailed* queryDb calls now skip env._reqPool (it's null) and use
-      // per-call Pool — each creates its own Pool, uses it, closes it. Safe.
-      //
-      // This is safe because:
-      // - retryFailed* run AFTER withPhasePool block completes (pool already closed)
-      // - No other code reads env._reqPool during retryFailed*
-      // - env._reqPool is restored in finally, even on exception
-      // - Neon() HTTP returns null for Supabase URLs → per-call Pool is used
+    if (isHourly) {
       const _savedReqPoolForRetry = env._reqPool;
       env._reqPool = null;
       ctx.waitUntil((async () => {
         try {
           await retryFailedReferralRewards(env);
-          _logPhase('phase2-referral', 'ok');
+          _logPhase('hourly-referral', 'ok');
         } catch (e) {
-          _logPhase('phase2-referral', 'error', { error: e?.message });
+          _logPhase('hourly-referral', 'error', { error: e?.message });
           console.warn('[CRON] referral retry failed:', e?.message);
         } finally {
-          // Restore env._reqPool even if retryFailed threw
           env._reqPool = _savedReqPoolForRetry;
         }
       })().catch((e) => {
         console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedReferral', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
-      // For wheel retry, also null env._reqPool (in case referral retry restored it)
       const _savedReqPoolForWheel = env._reqPool;
       env._reqPool = null;
       ctx.waitUntil((async () => {
         try {
           await retryFailedWheelRewards(env);
-          _logPhase('phase2-wheel', 'ok');
+          _logPhase('hourly-wheel', 'ok');
         } catch (e) {
-          _logPhase('phase2-wheel', 'error', { error: e?.message });
+          _logPhase('hourly-wheel', 'error', { error: e?.message });
           console.warn('[CRON] wheel retry failed:', e?.message);
         } finally {
           env._reqPool = _savedReqPoolForWheel;
@@ -15999,15 +16011,14 @@ export default {
       })().catch((e) => {
         console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedWheel', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
-      // PHASE 2: Mission reward retry — same pattern as referral/wheel retry
       const _savedReqPoolForMission = env._reqPool;
       env._reqPool = null;
       ctx.waitUntil((async () => {
         try {
           await retryFailedMissionRewards(env);
-          _logPhase('phase2-mission', 'ok');
+          _logPhase('hourly-mission', 'ok');
         } catch (e) {
-          _logPhase('phase2-mission', 'error', { error: e?.message });
+          _logPhase('hourly-mission', 'error', { error: e?.message });
           console.warn('[CRON] mission reward retry failed:', e?.message);
         } finally {
           env._reqPool = _savedReqPoolForMission;

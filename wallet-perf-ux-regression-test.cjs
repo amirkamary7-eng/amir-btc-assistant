@@ -630,10 +630,20 @@ test('J6: All 4 mission triggers have matching MissionBus.fire calls', () => {
 // K) Daily Day 1/Day 2 rendering verification
 // ═══════════════════════════════════════════════════════════════════════
 
-test('K1: _renderStreakDaysHTML uses todayDay for unclaimed streak', () => {
+test('K1: _renderStreakDaysHTML uses todayDay for unclaimed streak with gap detection', () => {
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
-  assert.ok(WALLET_SRC.includes('const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1)'),
-    '_renderStreakDaysHTML computes todayDay for unclaimed streak');
+  // GAP DETECTION FIX: todayDay now checks last_claim_date against yesterday
+  // to determine if the streak is alive. If the streak is broken (gap > 1 day),
+  // todayDay = 1 (matching backend behavior). If alive, todayDay = (streak_day % 7) + 1
+  // (with Day 7 wrap matching backend claimDailyRewardWithStreak).
+  assert.ok(WALLET_SRC.includes('_streakAlive'),
+    '_renderStreakDaysHTML uses _streakAlive for gap detection');
+  assert.ok(WALLET_SRC.includes('_feGetTehranYesterdayString'),
+    '_feGetTehranYesterdayString helper exists for gap detection');
+  assert.ok(WALLET_SRC.includes('const todayDay = _streakAlive'),
+    'todayDay is gated on _streakAlive');
+  assert.ok(WALLET_SRC.includes('(currentStreakDay % 7) + 1'),
+    'todayDay uses (streak_day % 7) + 1 for Day 7 wrap');
 });
 
 test('K2: State A — Day 1 claimed, Day 2 available (claimedToday=false, streak_day=1)', () => {

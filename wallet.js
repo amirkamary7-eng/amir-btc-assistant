@@ -961,6 +961,23 @@ const WalletApp = (() => {
     }
   }
 
+  // Mirrors backend getTehranYesterdayString — computes yesterday's
+  // Tehran date as 'YYYY-MM-DD'. Used by streak gap detection to
+  // determine whether the streak is still alive (last_claim_date ===
+  // yesterday) or broken (gap > 1 day → reset to Day 1).
+  function _feGetTehranYesterdayString() {
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Tehran',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    } catch (_) {
+      return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    }
+  }
+
   // =============================================
   // API Calls
   // =============================================
@@ -1783,7 +1800,20 @@ const WalletApp = (() => {
     // (which was already claimed on a previous day).
     // Example: streak_day=1, claimed_today=false → Day 1 is ticked
     // (claimed yesterday), Day 2 is available (today's claim).
-    const todayDay = claimedToday ? currentStreakDay : (currentStreakDay > 0 ? currentStreakDay + 1 : 1);
+    //
+    // GAP DETECTION FIX: If last_claim_date is NOT yesterday (Tehran),
+    // the streak is broken — the backend will reset to Day 1 on claim.
+    // The UI must show Day 1 (not streak_day + 1) to match backend behavior.
+    // Without this check, a user who missed ≥1 day sees "Day N+1 available"
+    // but receives Day 1 reward — perceived as a "streak reset" bug.
+    const _yesterday = _feGetTehranYesterdayString();
+    const _lastClaim = _dailyCheckinState?.last_claim_date || null;
+    const _streakAlive = claimedToday || (_lastClaim === _yesterday);
+    // Day 7 wrap: (streak_day % 7) + 1 — matches backend claimDailyRewardWithStreak
+    // Day 7 + yesterday → Day 1 (wrap), Day 6 + yesterday → Day 7, etc.
+    const todayDay = _streakAlive
+      ? (claimedToday ? currentStreakDay : (currentStreakDay > 0 ? (currentStreakDay % 7) + 1 : 1))
+      : 1;
     let html = '';
     for (let i = 0; i < 7; i++) {
       const day = i + 1;
@@ -1843,7 +1873,16 @@ const WalletApp = (() => {
         // Example: streak_day=1, claimed_today=false → card shows "Day 2/7"
         // (the day they need to claim now), not "Day 1/7" (which was claimed
         // yesterday and is already ticked).
-        const day = state.streak_day > 0 ? state.streak_day + 1 : 1;
+        //
+        // GAP DETECTION FIX: If last_claim_date is NOT yesterday (Tehran),
+        // the streak is broken — show Day 1 to match backend behavior.
+        const _yesterday = _feGetTehranYesterdayString();
+        const _lastClaim = state.last_claim_date || null;
+        const _streakAlive = _lastClaim === _yesterday;
+        // Day 7 wrap: (streak_day % 7) + 1 — matches backend + _renderStreakDaysHTML
+        const day = _streakAlive
+          ? (state.streak_day > 0 ? (state.streak_day % 7) + 1 : 1)
+          : 1;
         const nextReward = rewards[Math.max(0, Math.min(6, day - 1))] || 1;
         rewardEl.textContent = `Day ${day}/7 · +${nextReward} AB`;
         rewardEl.style.color = '#f5a623';
