@@ -547,18 +547,6 @@ async function writeAppCache(env, key, value, expirationTtl) {
   }
 }
 
-// ROOT-CAUSE FIX: diagLog/flushDiagLog/diagLogSync were diagnostic logging
-// functions that ran JSON.stringify + console.log + KV write on EVERY referral
-// flow step (15+ calls per bootstrap). Each call costs ~0.5-1ms CPU.
-// 15 calls × 1ms = 15ms CPU → exceededResources.
-// These were no-op stubs (bodies removed in Phase-12), and all 21 call sites
-// were removed in the performance audit cleanup. The definitions remain here
-// only to avoid breaking any external imports, but are never called.
-// (Kept as safety stub — if any code path still references them, they no-op.)
-async function diagLog(env, entry) { /* no-op: diagnostic logging removed */ }
-async function flushDiagLog(env) { /* no-op */ }
-function diagLogSync(env, entry) { /* no-op */ }
-
 // ═══════════════════════════════════════════════════════════════════════════
 // GROQ-ROUTER-4KEY: The old Global Groq Rate/Token Coordinator (Phase 4) has
 // been REMOVED. The centralized 4-key Groq Router (groqRouterExecute, defined
@@ -10269,14 +10257,12 @@ async function fetchCalendarEvents(env) {
     const _isolateAge = _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : Infinity;
     if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 300000) {
       // Isolate cache is fresh (< 5 min) — serve immediately
-      console.log('[CALENDAR] isolate cache hit: age=' + Math.round(_isolateAge / 1000) + 's, events=' + _calendarIsolateCache.length);
       return _calendarIsolateCache;
     }
 
     // 1. Try fresh KV cache (TTL-enforced by KV itself)
     const _tKVRead = Date.now();
     const cachedEvents = await readAppCache(env, CALENDAR_CACHE_KEY);
-    console.log('[CALENDAR] KV read: ' + (Date.now() - _tKVRead) + 'ms, hit=' + (!!cachedEvents));
     if (cachedEvents) {
       try {
         const parsed = JSON.parse(cachedEvents);
@@ -11125,7 +11111,6 @@ async function handleCalendarEvents(env) {
   let events = [];
   try {
     events = await fetchCalendarEvents(env);
-    console.log('[CALENDAR] fetchCalendarEvents: ' + (Date.now() - _t0) + 'ms, events=' + (events?.length || 0));
     if (!events || !Array.isArray(events)) {
       console.warn('[CALENDAR] fetchCalendarEvents returned non-array: ' + typeof events);
       events = [];
@@ -13712,27 +13697,6 @@ export default {
         return await handleCalendarEvents(env);
       }
 
-      // TEMP: Calendar provider diagnostic
-      if (request.method === 'GET' && url.pathname === '/api/calendar/diag') {
-        const results = [];
-        for (const url of ['https://nfs.faireconomy.media/ff_calendar_thisweek.json', 'https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json']) {
-          const t0 = Date.now();
-          try {
-            const controller = new AbortController();
-            const tid = setTimeout(() => controller.abort(), 5000);
-            const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
-            clearTimeout(tid);
-            const body = await res.text();
-            let count = 'parse-error';
-            try { const j = JSON.parse(body); count = Array.isArray(j) ? j.length : 'not-array'; } catch {}
-            results.push({ url, status: res.status, ms: Date.now() - t0, bodyLength: body.length, events: count });
-          } catch (e) {
-            results.push({ url, error: e?.message || String(e), ms: Date.now() - t0 });
-          }
-        }
-        return jsonResponse({ results, isolateCache: _calendarIsolateCache?.length || 0, isolateAge: _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : null }, {}, env);
-      }
-
       // ── CRON MONITOR: Shows last 200 cron phase execution logs from KV ──
       // This endpoint proves whether cron phases complete successfully.
       // If a phase is "started" but never "complete", the Worker was killed
@@ -15342,103 +15306,6 @@ Headlines:
 
       // ── DIAGNOSTIC: List available Gemini models ──
 
-      // ── NOTIFICATIONS CPU TRACE ──
-      // Instrumented version of /api/notifications that logs wall-time per step.
-      // This route is BEFORE the PROTECTED_PATHS gate so it controls its own auth.
-      // It replicates the EXACT same steps that /api/notifications goes through:
-      //   1. authenticateTelegramRequest (HMAC)
-      //   2. requireChannelJoin (KV read + DB query + maybe Telegram API)
-      //   3. authenticateTelegramRequest AGAIN (inside handleList — redundant)
-      //   4. DB query: notificationRepo.list
-      //   5. DB query: notificationRepo.unreadCount
-      //   6. JSON serialize
-      if (request.method === 'GET' && url.pathname === '/api/notif-cpu-trace') {
-        // P1-11 FIX: Gate debug endpoints behind non-production to prevent
-        // information disclosure and CPU amplification in production.
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
-          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
-        }
-        const trace = [];
-        const t0 = performance.now();
-        const stepAsync = async (name, fn) => {
-          const before = performance.now();
-          try {
-            const r = await fn();
-            const after = performance.now();
-            trace.push({ step: name, wall_delta_ms: Math.round((after - before) * 100) / 100 });
-            return r;
-          } catch (e) {
-            const after = performance.now();
-            trace.push({ step: name + '_ERROR', wall_delta_ms: Math.round((after - before) * 100) / 100, error: String(e?.message || e).slice(0, 200) });
-            throw e;
-          }
-        };
-        const stepSync = (name, fn) => {
-          const before = performance.now();
-          const r = fn();
-          const after = performance.now();
-          trace.push({ step: name, wall_delta_ms: Math.round((after - before) * 100) / 100 });
-          return r;
-        };
-
-        try {
-          // STEP 1: Auth (1st — global middleware equivalent)
-          const authState = await stepAsync('1_auth_telegram_1st', () => authenticateTelegramRequest(request, env))
-          if (authState.error) {
-            return jsonResponse({ status: 'auth_error', trace, total_wall_ms: Math.round((performance.now() - t0) * 100) / 100 }, { status: 401 }, env);
-          }
-
-          // STEP 2: requireChannelJoin (membership check — KV + DB + maybe Telegram API)
-          const userId = String(authState.user.id);
-          const joinBlocked = await stepAsync('2_requireChannelJoin', () => requireChannelJoin(authState.user, env));
-          if (joinBlocked) {
-            return jsonResponse({ status: 'join_required', trace, total_wall_ms: Math.round((performance.now() - t0) * 100) / 100 }, { status: 403 }, env);
-          }
-
-          // STEP 3: Auth (2nd — inside handleList — REDUNDANT?)
-          await stepAsync('3_auth_telegram_2nd_redundant', () => authenticateTelegramRequest(request, env))
-
-          // STEP 4: Parse query params
-          const parsedUrl = stepSync('4_parse_url', () => new URL(request.url));
-          const limit = stepSync('4_parse_limit', () => parseInt(parsedUrl.searchParams.get('limit') || '50', 10) || 50);
-
-          // STEP 5: DB queries (Promise.all of list + unreadCount)
-          let notifications, unread;
-          await stepAsync('5_db_promise_all', async () => {
-            [notifications, unread] = await Promise.all([
-              stepAsync('5a_db_list', () => notificationRepo.list(env, userId, limit)),
-              stepAsync('5b_db_unreadCount', () => notificationRepo.unreadCount(env, userId)),
-            ]);
-          });
-
-          // STEP 6: JSON serialize
-          stepSync('6_json_serialize', () => JSON.stringify({
-            status: 'success', notifications, unread_count: unread,
-          }));
-
-          const totalWall = Math.round((performance.now() - t0) * 100) / 100;
-
-          return jsonResponse({
-            status: 'success',
-            notifications_count: notifications?.length || 0,
-            unread_count: unread,
-            trace,
-            total_wall_ms: totalWall,
-            auth_call_count: 2,
-            db_query_count: 3,
-          }, {}, env);
-        } catch (error) {
-          const totalWall = Math.round((performance.now() - t0) * 100) / 100;
-          return jsonResponse({
-            status: 'error',
-            message: String(error?.message || error).slice(0, 300),
-            trace,
-            total_wall_ms: totalWall,
-          }, { status: 500 }, env);
-        }
-      }
-
       // ── NOTIF TRACE RESULTS — read traces from KV ──
       // Lists all notif_trace_* keys from KV and returns their contents.
       // No auth required (the traces themselves are keyed by random ID).
@@ -15548,120 +15415,19 @@ Headlines:
       // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
       let _protectedUser = null;
       let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|notif-delete-diag|wheel)/;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
-      // ── CPU TRACE: attach trace array to request for instrumentation ──
-      // The global middleware and route handlers both write to this array.
-      // For /api/notifications, the trace is written to KV in the route handler.
-      if (!request._cpuTrace) request._cpuTrace = [];
-      const _gateT0 = performance.now();
-
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
-        const _authT0 = performance.now();
         const _authState = await authenticateTelegramRequest(request, env);
-        request._cpuTrace.push({ step: 'global_auth', wall_ms: Math.round((performance.now() - _authT0) * 100) / 100 });
         if (_authState.error) return _authState.error;
         _protectedUser = _authState.user;
         // PHASE 3 FIX: Set _protectedUser on the request object so notification
         // handlers can use it without calling authenticateTelegramRequest again.
         request._protectedUser = _protectedUser;
 
-        const _joinT0 = performance.now();
         _joinBlocked = await requireChannelJoin(_protectedUser, env);
-        request._cpuTrace.push({ step: 'global_requireChannelJoin', wall_ms: Math.round((performance.now() - _joinT0) * 100) / 100 });
         if (_joinBlocked) return _joinBlocked;
-      }
-      request._cpuTrace.push({ step: 'global_gate_total', wall_ms: Math.round((performance.now() - _gateT0) * 100) / 100 });
-
-      // ── NOTIFICATION DELETE DIAGNOSTIC ──
-      // Proves whether notifications reappear after delete, and WHY.
-      // Placed AFTER PROTECTED_PATHS gate so _protectedUser is set.
-      if (request.method === 'GET' && url.pathname === '/api/notif-delete-diag') {
-        // P1-11 FIX: Gate debug endpoints behind non-production
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
-          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
-        }
-        const result = { server_time: new Date().toISOString(), steps: [] };
-
-        // Step 1: Check broadcasts in 'pending' or 'sending' status
-        try {
-          const broadcasts = await queryDb(env,
-            `SELECT id, title, status, created_at, sent_at, total_sent, total_delivered, last_processed_user_id
-             FROM notification_broadcasts
-             WHERE status IN ('pending', 'sending')
-             ORDER BY created_at ASC LIMIT 10`
-          ).catch(() => ({ rows: [] }));
-          result.steps.push({
-            step: '1_active_broadcasts',
-            count: broadcasts.rows.length,
-            broadcasts: broadcasts.rows.map(r => ({
-              id: r.id, title: (r.title||'').slice(0,50), status: r.status,
-              created_at: r.created_at, sent_at: r.sent_at,
-              total_sent: r.total_sent, total_delivered: r.total_delivered,
-            })),
-          });
-        } catch (e) { result.steps.push({ step: '1_active_broadcasts', error: e?.message }); }
-
-        // Step 2: Check ALL broadcasts in last 24h
-        try {
-          const recentBroadcasts = await queryDb(env,
-            `SELECT id, title, status, created_at, sent_at
-             FROM notification_broadcasts
-             WHERE created_at > NOW() - INTERVAL '24 hours'
-             ORDER BY created_at DESC LIMIT 10`
-          ).catch(() => ({ rows: [] }));
-          result.steps.push({
-            step: '2_recent_broadcasts_24h',
-            count: recentBroadcasts.rows.length,
-            broadcasts: recentBroadcasts.rows.map(r => ({
-              id: r.id, title: (r.title||'').slice(0,50), status: r.status,
-              created_at: r.created_at, sent_at: r.sent_at,
-            })),
-          });
-        } catch (e) { result.steps.push({ step: '2_recent_broadcasts_24h', error: e?.message }); }
-
-        // Step 3: User's notifications with IDs
-        if (_protectedUser?.id) {
-          try {
-            const userId = String(_protectedUser.id);
-            const notifs = await queryDb(env,
-              `SELECT id, type, title, read_status, deleted_at, created_at
-               FROM notifications
-               WHERE user_id = $1
-               ORDER BY created_at DESC LIMIT 20`,
-              [userId]
-            ).catch(() => ({ rows: [] }));
-            result.steps.push({
-              step: '3_user_notifications',
-              userId: userId,
-              count: notifs.rows.length,
-              notifications: notifs.rows.map(r => ({
-                id: r.id, type: r.type, title: (r.title||'').slice(0,40),
-                read_status: r.read_status, deleted_at: r.deleted_at,
-                created_at: r.created_at,
-                is_broadcast: String(r.id).startsWith('bc_'),
-                is_notif_prefix: String(r.id).startsWith('notif_'),
-              })),
-            });
-
-            // Step 4: KV cache
-            try {
-              const cached = await env.APP_CACHE?.get?.('notif_cache_' + userId).catch(() => null);
-              result.steps.push({
-                step: '4_kv_cache',
-                cacheKey: 'notif_cache_' + userId,
-                hasCache: !!cached,
-                cacheLength: cached ? cached.length : 0,
-              });
-            } catch (e) { result.steps.push({ step: '4_kv_cache', error: e?.message }); }
-          } catch (e) { result.steps.push({ step: '3_user_notifications', error: e?.message }); }
-        } else {
-          result.steps.push({ step: '3_user_notifications', note: 'no authenticated user' });
-        }
-
-        return jsonResponse(result, {}, env);
       }
 
       // ── Analyses: Public endpoints ──

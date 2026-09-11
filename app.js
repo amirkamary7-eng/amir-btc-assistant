@@ -8507,7 +8507,6 @@ function refreshWalletAfterMission(newBalance) {
     // The generic helper does the same thing PLUS refreshes the wallet full
     // page if it's open (tier/history/summary). This ensures mission rewards
     // and other mutations (wheel, cosmetics) use the EXACT same refresh path.
-    refreshWalletAfterMission._lastCallAt = Date.now(); // diagnostic
     refreshWalletAfterMutation(newBalance);
 }
 
