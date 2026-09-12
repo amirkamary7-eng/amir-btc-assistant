@@ -32,31 +32,6 @@ export function createSessionHandlers(deps) {
   // ran on every request, defeating PresenceDO + snapshot persistence entirely.
   const PRESENCE_DO_NAME = 'presence-singleton';
 
-  // ============================================================================
-  // [RCA-INSTRUMENTATION] Temporary diagnostic logging for Online Count 1→0 RCA.
-  // PURPOSE: Capture which path produces count=0 (DO real 0 vs KV-empty fallback)
-  //   so we can correlate with frontend badge updates during the next 1→0 jump.
-  // PRIVACY: userId reduced to 4-char suffix (no raw PII). No tokens, no init data.
-  // REMOVAL: Search for "RCA-INSTRUMENTATION" and remove all marked blocks once
-  //   root cause is confirmed. These logs only fire on error/zero paths — zero
-  //   cost on the normal success path.
-  // ============================================================================
-  function _redactUid(userId) {
-    if (!userId) return null;
-    const uid = String(userId);
-    return uid.length > 4 ? '…' + uid.slice(-4) : uid;
-  }
-
-  function _rcaLog(event, fields) {
-    try {
-      console.log(JSON.stringify({
-        event,
-        ts: new Date().toISOString(),
-        ...fields,
-      }));
-    } catch { /* non-fatal — diagnostics must never break request */ }
-  }
-
   // Helper: call PresenceDO via the standard Durable Object invocation pattern.
   // Returns the parsed JSON body, or null on any failure (binding missing,
   // DO fetch throws, JSON parse fails). Caller must handle null by falling
@@ -72,13 +47,6 @@ export function createSessionHandlers(deps) {
       const doResponse = await stub.fetch(`https://presence-do/internal?${params}`);
       return await doResponse.json();
     } catch (e) {
-      // RCA-INSTRUMENTATION: capture DO call errors (exception or unparseable)
-      _rcaLog('presence_do_call_error', {
-        operation: action,
-        errorClass: e?.constructor?.name || 'Error',
-        errorMessage: String(e?.message || '').slice(0, 120),
-        uid: _redactUid(userId),
-      });
       console.warn('[SESSIONS] PresenceDO call failed:', e?.message);
       return null;
     }
@@ -133,15 +101,6 @@ export function createSessionHandlers(deps) {
         console.warn('[SESSIONS] PresenceDO heartbeat failed, falling back to KV:', e?.message);
       }
     }
-
-    // RCA-INSTRUMENTATION: heartbeat reached KV fallback (DO returned null or threw).
-    // This is the path suspected of causing count=0 on subsequent online-count queries
-    // when KV is empty (because the DO path normally succeeds and never writes to KV).
-    _rcaLog('presence_heartbeat_do_fallback', {
-      uid: _redactUid(userId),
-      fallback: 'KV',
-      reason: 'do_null_or_throw',
-    });
 
     // KV FALLBACK (legacy — has race condition at scale but functional)
     const state = await sessionRepo.readPresenceState(env);
@@ -198,15 +157,6 @@ export function createSessionHandlers(deps) {
       try {
         const doResult = await _callPresenceDO(env, 'count');
         if (doResult && typeof doResult.count === 'number') {
-          // RCA-INSTRUMENTATION: DO returned count=0 (real zero from DO).
-          // This distinguishes "DO genuinely has no sessions" from "KV fallback
-          // returned 0 because KV is empty". Only logs on count=0.
-          if (doResult.count === 0) {
-            _rcaLog('presence_online_do_zero', {
-              count: 0,
-              source: 'DO',
-            });
-          }
           // Only cache non-zero counts. A 0 is returned to the caller but
           // NOT stored in the cache, so the next request re-queries the DO.
           if (doResult.count > 0) {
@@ -226,27 +176,14 @@ export function createSessionHandlers(deps) {
       }
     }
 
-    // RCA-INSTRUMENTATION: handleOnline reached KV fallback (DO returned null or threw,
-    // AND no cached non-zero value was available). This is the prime suspect for the
-    // 1→0 jump: if KV is empty (because DO path normally succeeds and never writes to
-    // KV), the KV state object is {} → count=0.
-
     // KV FALLBACK (legacy — read-only, no write)
     const nowMs = Date.now();
     const state = await sessionRepo.readPresenceState(env);
     sessionRepo.prunePresenceState(state, nowMs);
-    const _kvCount = Object.keys(state).length;
-
-    // RCA-INSTRUMENTATION: log the KV fallback outcome with the actual count
-    _rcaLog('presence_online_do_fallback', {
-      fallback: 'KV',
-      kvCount: _kvCount,
-      kvEmpty: _kvCount === 0,
-    });
 
     return jsonResponse({
       status: 'success',
-      count: _kvCount,
+      count: Object.keys(state).length,
     }, {}, env);
   }
 

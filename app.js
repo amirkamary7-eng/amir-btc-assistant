@@ -5744,7 +5744,7 @@ async function sendSessionHeartbeat() {
             sessionId = data.session_id;
             localStorage.setItem('app_session_id', sessionId);
         }
-        updateOnlineBadge(data.online_count, mySeq, 'heartbeat');
+        updateOnlineBadge(data.online_count, mySeq);
         // First successful heartbeat = auth confirmed → load alerts lazily (only once)
         if (!_alertsLoaded && (!alerts.length || alerts.every(a => !a.serverId))) {
             _alertsLoaded = true;
@@ -5773,7 +5773,7 @@ async function fetchOnlineCount() {
     const mySeq = ++_onlineCountSeq;
     try {
         const data = await apiFetch('/api/sessions/online');
-        updateOnlineBadge(data.count, mySeq, 'online');
+        updateOnlineBadge(data.count, mySeq);
     } catch (_) {}
 }
 
@@ -5782,32 +5782,19 @@ async function fetchOnlineCount() {
  * ورودی: پارامترهای `count` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-function updateOnlineBadge(count, seq, source) {
+function updateOnlineBadge(count, seq) {
     // Online-count sequence guard: refuse to apply a response whose captured
     // seq is older than the latest applied seq. This prevents a slow stale
     // fetchOnlineCount (e.g. 600s interval, started before a heartbeat that
     // already set the badge to 1) from later overwriting the fresher value
     // with a stale 0. A response with no seq arg (legacy/defensive) bypasses
     // the guard.
-    const _prevLastApplied = _onlineCountLastApplied;
-    let _applied = false;
     if (typeof seq === 'number' && seq < _onlineCountLastApplied) {
-        // Stale response — refused by sequence guard. Still log for RCA correlation.
-        _rcaLogBadge('presence_badge_update', {
-            count, seq, source, prevLastApplied: _prevLastApplied, applied: false, reason: 'stale_seq',
-        });
         return;
     }
     if (typeof seq === 'number') {
         _onlineCountLastApplied = seq;
     }
-    _applied = true;
-    // RCA-INSTRUMENTATION: log every badge update with count, seq, source, and
-    // the previous _onlineCountLastApplied for correlation with backend events.
-    // No PII: just numbers + source label. Temporary — remove after RCA confirmed.
-    _rcaLogBadge('presence_badge_update', {
-        count, seq, source, prevLastApplied: _prevLastApplied, applied: _applied,
-    });
     // Online badge removed from profile page — no longer displayed
     // Only update live-count in market page header if it exists
     const liveCountEl = document.getElementById('live-count');
@@ -5822,19 +5809,6 @@ function updateOnlineBadge(count, seq, source) {
     } else {
         liveCountEl.innerText = count;
     }
-}
-
-// RCA-INSTRUMENTATION: minimal structured logger for frontend badge updates.
-// Mirrors the backend _rcaLog pattern (console.log JSON.stringify). Non-fatal.
-// Temporary — remove after RCA confirmed.
-function _rcaLogBadge(event, fields) {
-    try {
-        console.log(JSON.stringify({
-            event,
-            ts: new Date().toISOString(),
-            ...fields,
-        }));
-    } catch { /* non-fatal — diagnostics must never break UI */ }
 }
 
 /**
