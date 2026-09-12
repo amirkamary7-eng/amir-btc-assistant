@@ -23,6 +23,15 @@ const ReferralApp = (() => {
   let wheelRotation = 0;
   let wheelConfettiTimer = null;
 
+  // ── Generation guard (F-8 fix) ──────────────────────────────
+  // Monotonically increasing token. Each openReferral() captures a generation
+  // value; after Promise.allSettled settles, the callback only calls
+  // renderPage() if the generation still matches (i.e., the user hasn't
+  // closed+reopened in the meantime). closeReferral() bumps the generation
+  // to invalidate any in-flight responses. This prevents stale responses
+  // from Open #1 overwriting the DOM of Open #2.
+  let _openGeneration = 0;
+
   // =============================================
   // Tier System
   // =============================================
@@ -755,47 +764,55 @@ const ReferralApp = (() => {
   // ─────────────────────────────────────────────
   // LEADERBOARD — Compact Top 3 + View Full link
   // ─────────────────────────────────────────────
+  // F-1 FIX: Extracted buildLeaderboardPodium() so updateDataOnly() can
+  // replace ONLY the podium (not the whole section) during background refresh.
+  // Markup is identical to before — just split for targeted replacement.
+  function buildLeaderboardPodium(leaderboard) {
+    if (!leaderboard?.leaderboard?.length) return '';
+    const all = leaderboard.leaderboard;
+    const top3 = all.slice(0, 3);
+    if (top3.length === 0) return '';
+    const crownColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
+    const currentUserId = String(window.UserContext?.user?.id || window.getTelegramUser?.()?.id || '');
+
+    return `<div class="rc-lb-podium">
+      ${[1, 0, 2].map(podiumIdx => {
+        if (!top3[podiumIdx]) return '<div class="rc-lb-podium-slot rc-lb-podium-empty"></div>';
+        const u = top3[podiumIdx];
+        const rank = podiumIdx + 1;
+        const color = crownColors[podiumIdx];
+        const isCurrentUser = String(u.user_id) === currentUserId;
+        return `
+          <div class="rc-lb-podium-slot rc-lb-podium-${rank} ${isCurrentUser ? 'rc-lb-podium-me' : ''}" style="--rank-color:${color}">
+            ${rank === 1 ? `<div class="rc-lb-podium-crown">${ICONS.crown}</div>` : ''}
+            <div class="rc-lb-podium-avatar" style="border-color:${color}">${esc((u.first_name || u.username || '?').charAt(0).toUpperCase())}</div>
+            <div class="rc-lb-podium-name">${esc((u.first_name || u.username || 'User').substring(0, 12))}</div>
+            <div class="rc-lb-podium-count" style="color:${color}">${formatNumber(u.total_invites)}</div>
+            <div class="rc-lb-podium-label">${esc(RT('invites'))}</div>
+            <div class="rc-lb-podium-rank" style="background:${color}">${rank}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>`;
+  }
+
   function buildLeaderboard(leaderboard) {
     if (!leaderboard?.leaderboard?.length) {
       return `
-        <div class="rc-section">
+        <div class="rc-section" data-section="leaderboard">
           <div class="rc-section-header"><h3>${ICONS.trophy} ${esc(RT('leaderboard'))}</h3></div>
           ${buildEmptyState('leaderboard', ICONS.trophy, RT('no_leaderboard_title'), RT('no_leaderboard_desc'))}
         </div>
       `;
     }
 
-    const all = leaderboard.leaderboard;
-    const top3 = all.slice(0, 3);
-    const crownColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
-    const currentUserId = String(window.UserContext?.user?.id || window.getTelegramUser?.()?.id || '');
-
     return `
-      <div class="rc-section">
+      <div class="rc-section" data-section="leaderboard">
         <div class="rc-section-header">
           <h3>${ICONS.trophy} ${esc(RT('top_referrers'))}</h3>
         </div>
 
-        ${top3.length > 0 ? `
-        <div class="rc-lb-podium">
-          ${[1, 0, 2].map(podiumIdx => {
-            if (!top3[podiumIdx]) return '<div class="rc-lb-podium-slot rc-lb-podium-empty"></div>';
-            const u = top3[podiumIdx];
-            const rank = podiumIdx + 1;
-            const color = crownColors[podiumIdx];
-            const isCurrentUser = String(u.user_id) === currentUserId;
-            return `
-              <div class="rc-lb-podium-slot rc-lb-podium-${rank} ${isCurrentUser ? 'rc-lb-podium-me' : ''}" style="--rank-color:${color}">
-                ${rank === 1 ? `<div class="rc-lb-podium-crown">${ICONS.crown}</div>` : ''}
-                <div class="rc-lb-podium-avatar" style="border-color:${color}">${esc((u.first_name || u.username || '?').charAt(0).toUpperCase())}</div>
-                <div class="rc-lb-podium-name">${esc((u.first_name || u.username || 'User').substring(0, 12))}</div>
-                <div class="rc-lb-podium-count" style="color:${color}">${formatNumber(u.total_invites)}</div>
-                <div class="rc-lb-podium-label">${esc(RT('invites'))}</div>
-                <div class="rc-lb-podium-rank" style="background:${color}">${rank}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>` : ''}
+        ${buildLeaderboardPodium(leaderboard)}
 
       </div>
     `;
@@ -804,14 +821,15 @@ const ReferralApp = (() => {
   // ─────────────────────────────────────────────
   // MISSIONS — Horizontal Carousel (compact, ~170px section height)
   // ─────────────────────────────────────────────
-  function buildMissions(stats) {
+  // F-1 FIX: Extracted pure calculation helper so buildMissions (initial
+  // render) and updateDataOnly (background refresh) share ONE source of
+  // truth for mission progress — no duplicated logic.
+  function computeMissions(stats) {
     const totalInvites = stats?.total || 0;
     const totalEarned = stats?.total_earned || 0;
-    const rewarded = stats?.rewarded || 0;
     const rewardPerInvite = stats?.reward_per_invite || 3;
 
-    // 5 invite-level missions + 1 earning mission
-    const missions = [
+    return [
       { id: 'first', icon: ICONS.userPlus, title: RT('mission_invite_first'), desc: RT('mission_invite_first_desc'),
         current: Math.min(totalInvites, 1), target: 1, reward: rewardPerInvite * 1 },
       { id: 'five', icon: ICONS.users, title: RT('mission_invite_5'), desc: RT('mission_invite_5_desc'),
@@ -825,6 +843,10 @@ const ReferralApp = (() => {
       { id: 'earn100', icon: ICONS.coins, title: RT('mission_earn_100'), desc: RT('mission_earn_100_desc'),
         current: Math.min(totalEarned, 100), target: 100, reward: 50 },
     ];
+  }
+
+  function buildMissions(stats) {
+    const missions = computeMissions(stats);
 
     return `
       <div class="rc-section">
@@ -862,10 +884,12 @@ const ReferralApp = (() => {
   // ─────────────────────────────────────────────
   // ACHIEVEMENTS — Horizontal Carousel
   // ─────────────────────────────────────────────
-  function buildAchievements(stats) {
+  // F-1 FIX: Extracted pure definition + calculation helper so buildAchievements
+  // (initial render) and updateDataOnly (background refresh) share ONE source
+  // of truth for achievement thresholds + progress — no duplicated logic.
+  function computeAchievements(stats) {
     const totalInvites = stats?.total || 0;
 
-    // 5-tier achievement system: Bronze → Silver → Gold → Platinum → Diamond
     const badges = [
       { id: 'bronze',   tier: 'bronze',   icon: ICONS.medal,
         title: RT('ach_bronze_referrer'),    desc: RT('ach_bronze_referrer_desc'),    threshold: 3 },
@@ -879,32 +903,40 @@ const ReferralApp = (() => {
         title: RT('ach_elite_ambassador'),   desc: RT('ach_elite_ambassador_desc'),   threshold: 100 },
     ];
 
+    return badges.map((b, idx) => {
+      const isUnlocked = totalInvites >= b.threshold;
+      const tierColor = getTierColor(b.tier);
+      const tierRgb = getTierRgb(b.tier);
+      const prevThreshold = idx > 0 ? badges[idx - 1].threshold : 0;
+      const progressInTier = isUnlocked ? 100 : Math.max(0, Math.min(100, ((totalInvites - prevThreshold) / (b.threshold - prevThreshold)) * 100));
+      return { ...b, isUnlocked, tierColor, tierRgb, prevThreshold, progressInTier, totalInvites };
+    });
+  }
+
+  function buildAchievements(stats) {
+    const badges = computeAchievements(stats);
+
     return `
       <div class="rc-section">
         <div class="rc-section-header"><h3>${ICONS.sparkles} ${esc(RT('achievements'))}</h3></div>
         <div class="rc-carousel">
-          ${badges.map((b, idx) => {
-            const isUnlocked = totalInvites >= b.threshold;
-            const tierColor = getTierColor(b.tier);
-            const tierRgb = getTierRgb(b.tier);
-            const prevThreshold = idx > 0 ? badges[idx - 1].threshold : 0;
-            const progressInTier = isUnlocked ? 100 : Math.max(0, Math.min(100, ((totalInvites - prevThreshold) / (b.threshold - prevThreshold)) * 100));
+          ${badges.map((b) => {
             return `
-              <div class="rc-ach-card ${isUnlocked ? 'rc-ach-unlocked' : 'rc-ach-locked'}"
-                   style="--ach-color:${tierColor};--ach-rgb:${tierRgb}">
+              <div class="rc-ach-card ${b.isUnlocked ? 'rc-ach-unlocked' : 'rc-ach-locked'}"
+                   style="--ach-color:${b.tierColor};--ach-rgb:${b.tierRgb}">
                 <div class="rc-ach-medal-wrap">
                   <div class="rc-ach-medal-glow"></div>
                   <div class="rc-ach-medal">${b.icon}</div>
-                  ${isUnlocked ? '' : `<div class="rc-ach-lock">${ICONS.lock}</div>`}
+                  ${b.isUnlocked ? '' : `<div class="rc-ach-lock">${ICONS.lock}</div>`}
                 </div>
                 <div class="rc-ach-title">${esc(b.title)}</div>
-                ${isUnlocked
+                ${b.isUnlocked
                   ? `<div class="rc-ach-status rc-ach-unlocked-text">${ICONS.check} ${esc(RT('claimed'))}</div>`
                   : `<div class="rc-ach-status rc-ach-locked-text">${b.threshold}+</div>
                      <div class="rc-ach-progress">
-                       <div class="rc-ach-progress-fill" style="width:${progressInTier}%"></div>
+                       <div class="rc-ach-progress-fill" style="width:${b.progressInTier}%"></div>
                      </div>
-                     <div class="rc-ach-progress-text">${formatNumber(totalInvites)}/${formatNumber(b.threshold)}</div>`}
+                     <div class="rc-ach-progress-text">${formatNumber(b.totalInvites)}/${formatNumber(b.threshold)}</div>`}
               </div>
             `;
           }).join('')}
@@ -1200,20 +1232,379 @@ const ReferralApp = (() => {
         return;
       }
       _lastRenderedSignature = sig;
+
+      // F-1 FIX (background refresh — signature differs): Instead of
+      // page.innerHTML = buildPage(data) (which destroys the entire DOM,
+      // restarts animations, resets count-up from 0, and may reset scroll
+      // position), do targeted DOM updates via updateDataOnly(). This
+      // preserves scroll position, QR panel open state, event listeners,
+      // and does NOT restart entry animations or count-up.
+      // F-6 FIX: runEntryAnimations() is NOT called here — count-up values
+      // are set directly to their final value (no from-0 animation).
+      referralData = data;
+      if (data.wheel) wheelStatus = data.wheel;
+      applyTierVars(page, data.tier?.current || 'Bronze');
+      try {
+        updateDataOnly(data);
+      } catch (e) {
+        // F-1 SAFETY: Do NOT fall back to page.innerHTML = buildPage(data).
+        // A full rebuild would re-introduce the F-1/F-2 bug (animation restart,
+        // count-up from 0, scroll reset, QR state lost). Instead, log the error
+        // and preserve the current DOM + scroll + state. The UI may show stale
+        // data until the next successful background refresh, which is far less
+        // disruptive than a full DOM rebuild mid-scroll.
+        console.error('updateDataOnly failed — preserving current DOM (no full rebuild):', e);
+      }
+      return;
     }
 
+    // Initial render (force=true): full DOM build + entry animations
     // Apply tier vars on the page wrapper for tier-aware coloring
     applyTierVars(page, data.tier?.current || 'Bronze');
 
     page.innerHTML = buildPage(data);
 
-    // Run entry animations after paint
+    // F-6 FIX: Run entry animations ONLY on initial render (force=true).
+    // Background refresh (force=false) does NOT call runEntryAnimations —
+    // count-up values are set directly via updateDataOnly().
     requestAnimationFrame(() => {
       runEntryAnimations();
       // Start countdown timer if wheel has no spins
       const wheelCountdown = document.getElementById('rc-wheel-countdown');
       if (wheelCountdown) startWheelCountdown();
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // F-1 FIX: updateDataOnly() — Targeted DOM updates for background refresh.
+  // Called by renderPage() when force=false AND signature differs.
+  // Does NOT use page.innerHTML — preserves scroll position, QR panel state,
+  // event listeners, and does NOT restart entry animations or count-up.
+  // Count-up values are set DIRECTLY to their final value (no from-0 animation).
+  // ═══════════════════════════════════════════════════════════
+  function updateDataOnly(data) {
+    const page = document.getElementById('referral-full-page');
+    if (!page) return;
+    const { stats, leaderboard, wheel, history, lastPrize, tier } = data;
+
+    // Helper: set a count-up element's final value directly (no animation).
+    function setCountup(el, target) {
+      if (!el) return;
+      el.setAttribute('data-countup', target);
+      el.textContent = formatNumber(target);
+    }
+
+    // ── HERO ──
+    const heroStats = page.querySelectorAll('.rc-hero-stats .rc-hero-stat-value');
+    // heroStats[0] = total invites (data-countup)
+    // heroStats[1] = active invites (data-countup)
+    // heroStats[2] = conversion rate (NO data-countup, plain textContent)
+    if (heroStats[0]) setCountup(heroStats[0], stats?.total || 0);
+    if (heroStats[1]) setCountup(heroStats[1], stats?.active || 0);
+    if (heroStats[2]) {
+      const totalInv = stats?.total || 0;
+      const activeInv = stats?.active || 0;
+      heroStats[2].textContent = (totalInv > 0 ? Math.round((activeInv / totalInv) * 100) : 0) + '%';
+    }
+    // Hero earned value (totalEarned)
+    const earnedEl = page.querySelector('.rc-hero-earned-value');
+    if (earnedEl) {
+      const rewarded = stats?.rewarded || 0;
+      const rewardPerInvite = stats?.reward_per_invite || 3;
+      const totalEarned = (stats?.total_earned != null) ? stats.total_earned : (rewarded * rewardPerInvite);
+      setCountup(earnedEl, totalEarned);
+    }
+    // Tier (data-tier attribute + league name + progress bar + progress text)
+    if (tier) {
+      const heroEl = page.querySelector('.rc-hero');
+      if (heroEl) heroEl.setAttribute('data-tier', getTierKey(tier.current || 'Bronze'));
+      const leagueNameEl = page.querySelector('.rc-hero-league-name');
+      if (leagueNameEl) leagueNameEl.textContent = displayTier(tier.current || 'Bronze');
+      const progressPct = tier.progress != null ? Math.max(0, Math.min(100, Number(tier.progress))) : 0;
+      const progressFill = page.querySelector('.rc-hero-progress-fill');
+      if (progressFill) progressFill.style.width = progressPct + '%';
+      const progressTextEl = page.querySelector('.rc-hero-progress-text');
+      if (progressTextEl) {
+        progressTextEl.textContent = tier.next
+          ? `${Math.round(progressPct)}% → ${displayTier(tier.next)}`
+          : RT('max_tier');
+      }
+    }
+
+    // ── LINK CARD ──
+    const linkMetaItems = page.querySelectorAll('.rc-link-meta-item');
+    const linkUses = stats?.total || 0;
+    const hasActivity = linkUses > 0;
+    if (linkMetaItems[0]) {
+      linkMetaItems[0].classList.toggle('rc-link-meta-active', hasActivity);
+      const span = linkMetaItems[0].querySelector('span');
+      if (span) span.textContent = `${formatNumber(linkUses)} ${RT('link_uses')}`;
+    }
+    if (linkMetaItems[1]) {
+      const span = linkMetaItems[1].querySelector('span');
+      if (span) span.textContent = hasActivity ? formatTime(stats?.last_referral_at) : RT('never_used');
+    }
+
+    // ── STATS GRID ──
+    const statCards = page.querySelectorAll('.rc-stats-grid .rc-stat-value');
+    if (statCards[0]) setCountup(statCards[0], stats?.total || 0);
+    if (statCards[1]) setCountup(statCards[1], stats?.active || 0);
+    if (statCards[2]) setCountup(statCards[2], stats?.rewarded || 0);
+    if (statCards[3]) setCountup(statCards[3], stats?.pending || 0);
+
+    // ── WHEEL CARD ──
+    const totalAvail = wheel?.total_available || 0;
+    const premiumCount = wheel?.premium_spins || 0;
+    const hasSpins = totalAvail > 0;
+    const wheelStatVals = page.querySelectorAll('.rc-wheel-unified-stat-val');
+    if (wheelStatVals[0]) wheelStatVals[0].textContent = String(totalAvail);
+    if (wheelStatVals[1]) wheelStatVals[1].textContent = String(premiumCount);
+    if (wheelStatVals[2]) {
+      wheelStatVals[2].textContent = lastPrize ? '+' + formatNumber(lastPrize.reward_amount || 0) : '--';
+    }
+    // hasSpins state: toggle disabled classes + attributes
+    const wheelUnified = page.querySelector('.rc-wheel-unified');
+    if (wheelUnified) wheelUnified.classList.toggle('rc-wheel-unified-disabled', !hasSpins);
+    const wheelStatusEl = page.querySelector('.rc-wheel-unified-status');
+    if (wheelStatusEl) {
+      wheelStatusEl.classList.toggle('active', hasSpins);
+      wheelStatusEl.classList.toggle('inactive', !hasSpins);
+      // F-1 FIX (Issue 2): Rebuild status inner HTML deterministically instead
+      // of relying on lastChild (which may be a whitespace text node, causing
+      // the status text update to silently fail). This rebuilds the dot span +
+      // status text exactly as buildWheelCard does, guaranteeing correct text
+      // for both hasSpins=true and hasSpins=false. Markup is identical.
+      wheelStatusEl.innerHTML = `<span class="rc-wheel-dot ${hasSpins ? 'rc-wheel-dot-active' : 'rc-wheel-dot-claimed'}"></span> ${esc(hasSpins ? RT('spin_available') : RT('no_spins_available'))}`;
+    }
+    const wheelStage = page.querySelector('.rc-wheel-unified-stage');
+    if (wheelStage) {
+      wheelStage.setAttribute('onclick', hasSpins ? 'ReferralApp.openWheel()' : 'event.preventDefault()');
+      wheelStage.setAttribute('tabindex', hasSpins ? '0' : '-1');
+      wheelStage.setAttribute('aria-disabled', String(!hasSpins));
+    }
+    const wheelBtn = page.querySelector('.rc-wheel-unified-btn');
+    if (wheelBtn) {
+      wheelBtn.classList.toggle('rc-wheel-unified-btn-disabled', !hasSpins);
+      if (hasSpins) {
+        wheelBtn.removeAttribute('disabled');
+        wheelBtn.setAttribute('onclick', 'event.stopPropagation(); ReferralApp.openWheel()');
+        wheelBtn.innerHTML = `${ICONS.bolt}<span>${esc(RT('spin_now'))}</span>`;
+      } else {
+        wheelBtn.setAttribute('disabled', 'disabled');
+        wheelBtn.setAttribute('onclick', 'event.stopPropagation();');
+        wheelBtn.innerHTML = `${ICONS.spinDisabled}<span>${esc(RT('spin_disabled'))}</span>`;
+      }
+    }
+    // Conditional countdown element: show when !hasSpins, hide when hasSpins.
+    // Use a wrapper query to find the countdown div within the wheel header.
+    const wheelHeader = page.querySelector('.rc-wheel-unified-header');
+    const existingCountdown = page.querySelector('#rc-wheel-countdown');
+    if (!hasSpins && !existingCountdown && wheelHeader) {
+      // Insert countdown element (was not present, now needed)
+      const countdownHtml = `<div class="rc-wheel-unified-countdown" id="rc-wheel-countdown">
+        ${ICONS.clock}<span>${esc(RT('next_free_spin'))}:</span>
+        <span class="rc-wheel-countdown-time" id="rc-wheel-countdown-time">--:--:--</span>
+      </div>`;
+      wheelHeader.insertAdjacentHTML('beforeend', countdownHtml);
+      // Start the countdown timer if next_reset_at is available
+      if (wheel?.next_reset_at) {
+        wheelStatus = wheel; // ensure module-level wheelStatus is fresh
+        startWheelCountdown();
+      }
+    } else if (hasSpins && existingCountdown) {
+      // Remove countdown element (was present, no longer needed)
+      stopWheelCountdown();
+      existingCountdown.remove();
+    } else if (!hasSpins && existingCountdown && wheel?.next_reset_at) {
+      // Countdown already exists; restart timer if next_reset_at changed
+      const currentReset = wheelStatus?.next_reset_at;
+      if (currentReset !== wheel.next_reset_at) {
+        wheelStatus = wheel;
+        startWheelCountdown(); // restart with new target
+      }
+    }
+
+    // ── LEADERBOARD (CONTROLLED REPLACEMENT — podium only) ──
+    // Replace only .rc-lb-podium, not the whole section.
+    // Compare by user_id + total_invites + ordering to avoid unnecessary replacement.
+    const lbPodium = page.querySelector('.rc-lb-podium');
+    if (lbPodium) {
+      const newTop3 = (leaderboard?.leaderboard || []).slice(0, 3);
+      if (newTop3.length === 0) {
+        // Podium existed but leaderboard is now empty → replace the whole
+        // leaderboard section with the empty-state markup (matches
+        // buildLeaderboard(empty) output). Uses the stable data-section
+        // selector to find the section wrapper.
+        const lbSection = page.querySelector('[data-section="leaderboard"]');
+        if (lbSection) lbSection.outerHTML = buildLeaderboard(leaderboard);
+      } else {
+        const oldSlots = lbPodium.querySelectorAll('.rc-lb-podium-slot');
+        let needsReplacement = false;
+        if (oldSlots.length !== newTop3.length) {
+          needsReplacement = true;
+        } else {
+          for (let i = 0; i < newTop3.length; i++) {
+            // oldSlots are in display order (1,0,2), newTop3 is in rank order (0,1,2)
+            // To compare, we need to map display order to rank order
+            const displayOrder = [1, 0, 2];
+            const slot = oldSlots[i];
+            const rankIdx = displayOrder[i];
+            const u = newTop3[rankIdx];
+            if (!u) { needsReplacement = true; break; }
+            const name = (u.first_name || u.username || 'User').substring(0, 12);
+            const count = formatNumber(u.total_invites);
+            const nameEl = slot.querySelector('.rc-lb-podium-name');
+            const countEl = slot.querySelector('.rc-lb-podium-count');
+            if (!nameEl || !countEl || nameEl.textContent !== name || countEl.textContent !== count) {
+              needsReplacement = true;
+              break;
+            }
+          }
+        }
+        if (needsReplacement) {
+          lbPodium.outerHTML = buildLeaderboardPodium(leaderboard);
+        }
+      }
+    } else if (leaderboard?.leaderboard?.length > 0) {
+      // Podium didn't exist (empty state was shown) but now we have data.
+      // Need to replace the whole leaderboard section (empty state → podium).
+      // This is a rare transition; safe to rebuild the section.
+      // F-1 FIX (Issue 3): Use stable data-section selector instead of
+      // fragile nth-of-type (which depends on section order + element type).
+      const lbSection = page.querySelector('[data-section="leaderboard"]');
+      if (lbSection) lbSection.outerHTML = buildLeaderboard(leaderboard);
+    }
+
+    // ── MISSIONS ──
+    const missions = computeMissions(stats);
+    // First carousel is missions, second is achievements.
+    const missionsCarousel = page.querySelector('.rc-carousel');
+    const missionCardsInDom = missionsCarousel ? missionsCarousel.querySelectorAll('.rc-mission-card') : [];
+    missions.forEach((m, idx) => {
+      const card = missionCardsInDom[idx];
+      if (!card) return;
+      const isComplete = m.current >= m.target;
+      const progressPct = Math.min(100, (m.current / m.target) * 100);
+      card.classList.toggle('rc-mission-done', isComplete);
+      // Icon
+      const iconWrap = card.querySelector('.rc-mission-icon');
+      if (iconWrap) {
+        iconWrap.classList.toggle('rc-mission-icon-done', isComplete);
+        iconWrap.classList.toggle('rc-mission-icon-locked', !isComplete);
+        iconWrap.innerHTML = isComplete ? ICONS.checkCircle : m.icon;
+      }
+      const top = card.querySelector('.rc-mission-top');
+      if (top) {
+        const existingLock = top.querySelector('.rc-mission-lock');
+        if (isComplete && existingLock) existingLock.remove();
+        if (!isComplete && !existingLock) {
+          const lockDiv = document.createElement('div');
+          lockDiv.className = 'rc-mission-lock';
+          lockDiv.innerHTML = ICONS.lock;
+          top.appendChild(lockDiv);
+        }
+      }
+      const fill = card.querySelector('.rc-mission-progress-fill');
+      if (fill) {
+        fill.style.width = progressPct + '%';
+        fill.style.background = isComplete
+          ? 'linear-gradient(90deg,#22C55E,#16A34A)'
+          : 'linear-gradient(90deg,#F5A623,#FFCC4D)';
+      }
+      const text = card.querySelector('.rc-mission-progress-text span');
+      if (text) text.textContent = `${formatNumber(m.current)}/${formatNumber(m.target)}`;
+      const reward = card.querySelector('.rc-mission-reward');
+      if (reward) reward.innerHTML = `${ICONS.gift} +${formatNumber(m.reward)} AB`;
+    });
+
+    // ── ACHIEVEMENTS ──
+    const badges = computeAchievements(stats);
+    // Find the achievements carousel (second .rc-carousel)
+    const carousels = page.querySelectorAll('.rc-carousel');
+    const achCarousel = carousels[1]; // second carousel is achievements
+    const achCards = achCarousel ? achCarousel.querySelectorAll('.rc-ach-card') : [];
+    badges.forEach((b, idx) => {
+      const card = achCards[idx];
+      if (!card) return;
+      const wasUnlocked = card.classList.contains('rc-ach-unlocked');
+      if (wasUnlocked !== b.isUnlocked) {
+        // State changed — rebuild this card's inner content
+        card.classList.toggle('rc-ach-unlocked', b.isUnlocked);
+        card.classList.toggle('rc-ach-locked', !b.isUnlocked);
+        // Rebuild the medal wrap (show/hide lock)
+        const medalWrap = card.querySelector('.rc-ach-medal-wrap');
+        if (medalWrap) {
+          medalWrap.innerHTML = `
+            <div class="rc-ach-medal-glow"></div>
+            <div class="rc-ach-medal">${b.icon}</div>
+            ${b.isUnlocked ? '' : `<div class="rc-ach-lock">${ICONS.lock}</div>`}
+          `;
+        }
+        // Rebuild status + progress section (after title)
+        const titleEl = card.querySelector('.rc-ach-title');
+        if (titleEl) {
+          // Remove everything after title
+          let next = titleEl.nextSibling;
+          while (next) {
+            const toRemove = next;
+            next = next.nextSibling;
+            toRemove.remove();
+          }
+          // Append new content
+          if (b.isUnlocked) {
+            titleEl.insertAdjacentHTML('afterend',
+              `<div class="rc-ach-status rc-ach-unlocked-text">${ICONS.check} ${esc(RT('claimed'))}</div>`);
+          } else {
+            titleEl.insertAdjacentHTML('afterend',
+              `<div class="rc-ach-status rc-ach-locked-text">${b.threshold}+</div>
+               <div class="rc-ach-progress">
+                 <div class="rc-ach-progress-fill" style="width:${b.progressInTier}%"></div>
+               </div>
+               <div class="rc-ach-progress-text">${formatNumber(b.totalInvites)}/${formatNumber(b.threshold)}</div>`);
+          }
+        }
+      } else if (!b.isUnlocked) {
+        // Still locked — just update progress
+        const fill = card.querySelector('.rc-ach-progress-fill');
+        if (fill) fill.style.width = b.progressInTier + '%';
+        const text = card.querySelector('.rc-ach-progress-text');
+        if (text) text.textContent = `${formatNumber(b.totalInvites)}/${formatNumber(b.threshold)}`;
+      }
+    });
+
+    // ── HISTORY (CONTROLLED REPLACEMENT — list only) ──
+    // Compare first 3 items by id + status + display content.
+    const historyList = page.getElementById('rc-history-list');
+    if (historyList && history) {
+      const newItems = history.slice(0, 3);
+      const oldItems = historyList.querySelectorAll('.rc-hist-item');
+      let needsReplacement = false;
+      if (oldItems.length !== newItems.length) {
+        needsReplacement = true;
+      } else {
+        for (let i = 0; i < newItems.length; i++) {
+          const oldItem = oldItems[i];
+          const newRef = newItems[i];
+          const newName = newRef.invitee_first_name || newRef.invitee_username || ('User ' + (newRef.invitee_id || ''));
+          const oldNameEl = oldItem.querySelector('.rc-hist-name');
+          const oldStatus = oldItem.className;
+          const newStatusClass = newRef.rewarded
+            ? 'rc-hist-item rc-hist-state-rewarded'
+            : (newRef.channel_verified ? 'rc-hist-item rc-hist-state-pending' : 'rc-hist-item rc-hist-state-notjoined');
+          if (!oldNameEl || oldNameEl.textContent !== newName || oldStatus !== newStatusClass) {
+            needsReplacement = true;
+            break;
+          }
+        }
+      }
+      if (needsReplacement) {
+        if (newItems.length > 0) {
+          historyList.innerHTML = newItems.map((r, i) => buildHistoryItem(r, i)).join('');
+        } else {
+          historyList.innerHTML = buildEmptyState('history', ICONS.userPlus, RT('no_history_title'), RT('no_history_desc'));
+        }
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1269,6 +1660,13 @@ const ReferralApp = (() => {
     // FIX 1+2: If fresh data matches cached data signature, renderPage()
     // will skip the redundant full-page re-render (preserving scroll,
     // animations, count-up, and Wheel countdown state).
+    //
+    // F-8 FIX (generation guard): Capture the current generation token before
+    // awaiting. After Promise.allSettled settles, only call renderPage() if
+    // the generation still matches — i.e., the user hasn't closed+reopened
+    // in the meantime. This prevents stale responses from Open #1 from
+    // overwriting the DOM of Open #2.
+    const myGeneration = ++_openGeneration;
     (async () => {
       const results = await Promise.allSettled([
         fetchStats(),
@@ -1278,6 +1676,10 @@ const ReferralApp = (() => {
         fetchWalletSummary(),
         fetchWheelHistory(),
       ]);
+
+      // Generation guard: if the user closed+reopened while we were waiting,
+      // this response is stale — drop it silently (do NOT renderPage).
+      if (myGeneration !== _openGeneration) return;
 
       const stats = results[0].status === 'fulfilled' ? results[0].value : null;
       const leaderboard = results[1].status === 'fulfilled' ? results[1].value : null;
@@ -1301,6 +1703,8 @@ const ReferralApp = (() => {
       };
       historyOffset = (historyRes?.referrals?.length) || 0;
       // No force: true here — if data matches cached signature, skip re-render.
+      // If signature differs, renderPage() will call updateDataOnly() (targeted
+      // DOM updates) instead of page.innerHTML (wholesale rebuild) — F-1 fix.
       renderPage(data);
 
       // Persist to localStorage for instant render on next open
@@ -1317,6 +1721,10 @@ const ReferralApp = (() => {
   function closeReferral() {
     const page = document.getElementById('referral-full-page');
     if (!page) return;
+    // F-8 FIX: Bump generation to invalidate any in-flight responses from
+    // this open. Stale responses will see myGeneration !== _openGeneration
+    // and skip renderPage().
+    _openGeneration++;
     page.classList.remove('open');
     document.body.style.overflow = '';
     // Stop countdown to prevent memory leak
