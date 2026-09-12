@@ -101,12 +101,69 @@ export function createAlertRepository(deps) {
       env.APP_CACHE?.delete?.('alerts:active-list');
     } catch {}
 
+    // BUG 3 FIX (TOCTOU): Replaced the SELECT-then-INSERT pattern with a
+    // single atomic INSERT ... ON CONFLICT DO UPDATE. This eliminates the
+    // race condition where two concurrent requests both pass the SELECT
+    // (no existing) and both INSERT (creating duplicate alerts + double-charge).
+    //
+    // The ON CONFLICT clause targets the unique partial index
+    // idx_price_alerts_dedup_unique ON (user_id, symbol, price, direction)
+    // WHERE status = 'active'. If a conflict occurs (another request already
+    // created the same active alert), the existing row is reactivated instead
+    // of creating a duplicate.
+    //
+    // The reactivation UPDATE preserves the ROOT CAUSE FIX (Bug 1): it resets
+    // last_price and last_checked_at to NULL so reactivated alerts fire
+    // immediately if the target has already been crossed.
+    //
+    // If the unique index doesn't exist yet (pre-migration DB), ON CONFLICT
+    // will throw (no unique constraint to conflict on). In that case, we fall
+    // back to the old SELECT-then-INSERT pattern (with its known TOCTOU race)
+    // to avoid breaking the app before the migration runs.
+    const newId = String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16);
+    try {
+      const upsertResult = await queryDb(
+        env,
+        `
+          INSERT INTO price_alerts (id, user_id, symbol, price, direction, status, created_at)
+          VALUES ($1, $2, $3, $4, $5, 'active', NOW())
+          ON CONFLICT (user_id, symbol, price, direction) WHERE status = 'active' DO UPDATE
+          SET status = 'active',
+              triggered_at = NULL,
+              created_at = NOW(),
+              last_price = NULL,
+              last_checked_at = NULL,
+              last_trigger_price = NULL
+          RETURNING id, user_id, symbol, price, direction, created_at, (xmax = 0) AS inserted
+        `,
+        [newId, normalizedUserId, symbol, Number(payload.price), direction],
+      );
+      const row = upsertResult.rows[0];
+      const wasInserted = row?.inserted === true || row?.inserted === 't' || row?.inserted === 1;
+      return { ...serializeRow(row), reactivated: !wasInserted };
+    } catch (conflictErr) {
+      // ON CONFLICT ON CONSTRAINT failed — the unique index may not exist yet
+      // (pre-migration). Fall back to the old pattern. This is safe for single
+      // requests but retains the TOCTOU race for concurrent requests until the
+      // migration runs. Log prominently so the operator knows to run the migration.
+      if (String(conflictErr?.message || '').includes('idx_price_alerts_dedup_unique') ||
+          String(conflictErr?.message || '').includes('ON CONFLICT') ||
+          String(conflictErr?.message || '').includes('no unique') ||
+          String(conflictErr?.message || '').includes('conflict target')) {
+        console.warn('[alerts] ON CONFLICT failed — unique index may not exist yet. Falling back to SELECT-INSERT (TOCTOU race possible). Run migration to create idx_price_alerts_dedup_unique.');
+      } else {
+        throw conflictErr; // Re-throw unexpected errors
+      }
+    }
+
+    // Fallback: old SELECT-then-INSERT pattern (pre-migration)
     const existingResult = await queryDb(
       env,
       `
         SELECT id, user_id, symbol, price, direction, created_at
         FROM price_alerts
         WHERE user_id = $1 AND symbol = $2 AND price = $3 AND direction = $4
+          AND status = 'active'
         LIMIT 1
       `,
       [normalizedUserId, symbol, Number(payload.price), direction],
@@ -114,16 +171,6 @@ export function createAlertRepository(deps) {
     const existingRow = existingResult.rows[0] || null;
 
     if (existingRow) {
-      // ROOT CAUSE FIX (Bug 1): When reactivating an existing alert, we MUST
-      // reset last_price and last_checked_at to NULL. Previously, these were
-      // NOT reset — so if the alert had previously triggered (setting
-      // last_price to a value above target), the cross-detection logic on the
-      // next cron run would see:
-      //   prevPrice >= targetPrice && currentPrice >= targetPrice
-      //   && last_checked_at != null
-      // → triggerReason = 'still_above_no_retrigger' → NO TRIGGER
-      // This caused alerts with targets below current price to NEVER fire
-      // when reactivated, even though they should trigger immediately.
       await queryDb(
         env,
         `
@@ -158,13 +205,7 @@ export function createAlertRepository(deps) {
         VALUES ($1, $2, $3, $4, $5, 'active', NOW())
         RETURNING id, user_id, symbol, price, direction, created_at
       `,
-      [
-        String(globalThis.crypto?.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/-/g, '').slice(0, 16),
-        normalizedUserId,
-        symbol,
-        Number(payload.price),
-        direction,
-      ],
+      [newId, normalizedUserId, symbol, Number(payload.price), direction],
     );
     return { ...serializeRow(insertResult.rows[0]), reactivated: false };
   }

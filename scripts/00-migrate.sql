@@ -912,6 +912,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_token_tx_user_type_ref
   ON token_transactions (user_id, tx_type, ref_id)
   WHERE ref_id IS NOT NULL AND status = 'completed';
 
+-- ── pending_refunds (BUG 4+5 FIX) ──────────────────────────────────────────
+-- Stores failed refund attempts for cron-based retry. When a debit succeeds
+-- but the subsequent operation fails AND the refund also fails, the refund
+-- is persisted here so retryFailedRefunds cron can process it later.
+-- This prevents permanent token loss for users.
+CREATE TABLE IF NOT EXISTS pending_refunds (
+  id              SERIAL PRIMARY KEY,
+  user_id         VARCHAR(64) NOT NULL REFERENCES users(telegram_id),
+  amount          INTEGER NOT NULL,
+  refund_ref_id   VARCHAR(64) NOT NULL,
+  original_ref_id VARCHAR(64),
+  source          VARCHAR(32) NOT NULL DEFAULT 'alert',
+  description     VARCHAR(256),
+  metadata        JSONB DEFAULT '{}',
+  status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+  retry_count     INTEGER NOT NULL DEFAULT 0,
+  last_retry_at   TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Only one pending refund per refund_ref_id (idempotency)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_refunds_ref_id
+  ON pending_refunds (refund_ref_id)
+  WHERE status = 'pending';
+
+-- For cron to find pending refunds efficiently
+CREATE INDEX IF NOT EXISTS idx_pending_refunds_status_created
+  ON pending_refunds (status, created_at);
+
 
 -- ── watchlist_items ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS watchlist_items (
@@ -946,7 +976,34 @@ ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_checked_at     TIMESTAMPT
 ALTER TABLE price_alerts ADD COLUMN IF NOT EXISTS last_trigger_price  NUMERIC(24,8);
 
 CREATE INDEX IF NOT EXISTS idx_price_alerts_user_status    ON price_alerts (user_id, status);
-CREATE INDEX IF NOT EXISTS idx_price_alerts_dedup          ON price_alerts (user_id, symbol, price, direction);
+
+-- BUG 3 FIX: Replace the non-unique dedup index with a UNIQUE partial index.
+-- The old index (CREATE INDEX ... ON price_alerts (user_id, symbol, price, direction))
+-- allowed concurrent identical INSERTs (TOCTOU race). The new UNIQUE partial index
+-- enforces uniqueness ONLY for active alerts, so:
+--   - Two concurrent POST /api/alerts with same (user_id, symbol, price, direction)
+--     → only one INSERT succeeds, the other gets ON CONFLICT DO UPDATE (reactivation)
+--   - Triggered/old alerts (status != 'active') don't block re-creation
+--
+-- MIGRATION SAFETY: If duplicate active alerts already exist in production,
+-- CREATE UNIQUE INDEX will fail. In that case, the migration must be run
+-- after manually deduplicating. The DO block below attempts the unique index
+-- creation and reports if it fails (does NOT auto-delete duplicates).
+--
+-- First: drop the old non-unique index (safe — it's a subset of the new unique one)
+DROP INDEX IF EXISTS idx_price_alerts_dedup;
+
+-- Then: create the unique partial index (may fail if duplicates exist)
+-- Wrapped in DO block to report failure without aborting the entire migration.
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_price_alerts_dedup_unique
+    ON price_alerts (user_id, symbol, price, direction)
+    WHERE status = 'active';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Could not create unique dedup index: %. Duplicate active alerts may exist. Manual dedup required.', SQLERRM;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_price_alerts_status_created ON price_alerts (status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_price_alerts_status_symbol  ON price_alerts (status, symbol);
 

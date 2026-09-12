@@ -20,6 +20,12 @@
 export function createAlertEconomyRepository(deps) {
   const {
     queryDb,
+    // BUG 2 FIX: queryDbDirect bypasses Hyperdrive's 60s SELECT cache.
+    // checkQuota MUST read the real DB state (not stale cache) to decide
+    // whether an alert is free or paid. A stale cached used_count=0 would
+    // cause the controller to skip debitTokens → free paid alert (quota bypass).
+    // Falls back to queryDb if not injected (backward compat).
+    queryDbDirect = queryDb,
     isDatabaseConfigured,
     isoDate,
     normalizeOptionalString,
@@ -183,7 +189,7 @@ export function createAlertEconomyRepository(deps) {
 
     try {
       const today = _getTehranDateString();
-      const result = await queryDb(env, `
+      const result = await queryDbDirect(env, `
         SELECT used_count FROM alert_quota
         WHERE user_id = $1 AND alert_type = $2 AND quota_date = $3
       `, [String(userId), String(alertType), today]);

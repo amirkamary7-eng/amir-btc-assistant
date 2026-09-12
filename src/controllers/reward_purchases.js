@@ -36,6 +36,8 @@ export function createRewardPurchaseHandlers(deps) {
     notificationService,
     requireAdmin,
     sendTelegramMessage,
+    // BUG 5 FIX: queryDb for persisting failed refunds to pending_refunds table
+    queryDb,
     // W-STAB-4 FIX: Tehran date helper for deterministic refId.
     // Previously refId used Date.now() — each concurrent request got a unique
     // refId, so the wallet's unique index on (user_id, tx_type, ref_id) did
@@ -299,7 +301,33 @@ export function createRewardPurchaseHandlers(deps) {
             env,
           });
         } catch (refundErr) {
-          console.error('[vpn-purchase] CRITICAL: debit succeeded but purchase failed AND refund failed:', refundErr?.message);
+          // BUG 5 FIX: Persist failed refund for cron retry instead of
+          // silently swallowing. This prevents permanent token loss.
+          console.error(JSON.stringify({
+            scope: 'vpn-refund-failed',
+            user_id: userId,
+            refund_ref_id: `${refId}_refund`,
+            amount: plan.costAb,
+            original_error: String(e?.message || e).slice(0, 200),
+            refund_error: String(refundErr?.message || refundErr).slice(0, 200),
+          }));
+          try {
+            await queryDb(env,
+              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+               VALUES ($1, $2, $3, $4, 'vpn', $5, $6, 'pending')
+               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+              [
+                String(userId),
+                Number(plan.costAb),
+                `${refId}_refund`,
+                refId,
+                `Refund: VPN ${plan.gb}GB purchase failed`,
+                JSON.stringify({ reason: 'purchase_record_failure', plan_id: plan.id }),
+              ],
+            );
+          } catch (persistErr) {
+            console.error('[vpn-purchase] Failed to persist pending refund:', persistErr?.message);
+          }
         }
         throw e;
       }
@@ -318,7 +346,31 @@ export function createRewardPurchaseHandlers(deps) {
             env,
           });
         } catch (refundErr) {
-          console.warn('[vpn-purchase] duplicate refund failed:', refundErr?.message);
+          // BUG 5 FIX: Persist failed duplicate refund for cron retry.
+          console.error(JSON.stringify({
+            scope: 'vpn-duplicate-refund-failed',
+            user_id: userId,
+            refund_ref_id: `${refId}_refund`,
+            amount: plan.costAb,
+            refund_error: String(refundErr?.message || refundErr).slice(0, 200),
+          }));
+          try {
+            await queryDb(env,
+              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+               VALUES ($1, $2, $3, $4, 'vpn', $5, $6, 'pending')
+               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+              [
+                String(userId),
+                Number(plan.costAb),
+                `${refId}_refund`,
+                refId,
+                `Refund: VPN ${plan.gb}GB duplicate pending`,
+                JSON.stringify({ reason: 'duplicate_pending_purchase', plan_id: plan.id }),
+              ],
+            );
+          } catch (persistErr) {
+            console.error('[vpn-purchase] Failed to persist pending duplicate refund:', persistErr?.message);
+          }
         }
         return jsonResponse({
           status: 'error',

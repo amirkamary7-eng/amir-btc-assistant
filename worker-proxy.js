@@ -3452,6 +3452,85 @@ async function retryFailedMissionRewards(env) {
 }
 
 /**
+ * BUG 4+5 FIX: Retry failed refunds.
+ *
+ * When a debit succeeds but the subsequent operation (alert creation, VPN
+ * purchase, cosmetic purchase) fails AND the refund also fails, the refund
+ * is persisted in the pending_refunds table. This cron retries those refunds.
+ *
+ * Idempotency: grantReward uses ON CONFLICT DO NOTHING with the deterministic
+ * refund_ref_id, so a successful retry is safe to repeat. The pending_refunds
+ * row is marked 'completed' on success. Failed retries increment retry_count
+ * and remain 'pending' for the next cron tick. After 10 retries, the row is
+ * marked 'exhausted' to prevent infinite retries.
+ *
+ * Runs on the every-15-min cron (same as other retry crons).
+ */
+async function retryFailedRefunds(env) {
+  if (!isDatabaseConfigured(env)) return;
+  if (!economyService) return;
+  try {
+    const result = await queryDb(env,
+      `SELECT id, user_id, amount, refund_ref_id, original_ref_id, source,
+              description, metadata, retry_count
+       FROM pending_refunds
+       WHERE status = 'pending' AND retry_count < 10
+       ORDER BY created_at ASC
+       LIMIT 20`,
+    );
+    if (result.rows.length === 0) return;
+
+    let succeeded = 0;
+    for (const row of result.rows) {
+      try {
+        await economyService.grantReward({
+          userId: String(row.user_id),
+          amount: Number(row.amount),
+          rewardType: 'marketplace_refund',
+          description: row.description || `Refund retry (${row.source})`,
+          refId: String(row.refund_ref_id),
+          metadata: row.metadata || {},
+          auditInfo: { actor: 'cron_retry' },
+          env,
+        });
+        // Success — mark as completed
+        await queryDb(env,
+          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [Number(row.id)],
+        );
+        succeeded++;
+      } catch (retryErr) {
+        // Retry failed — increment retry_count, stay pending
+        await queryDb(env,
+          `UPDATE pending_refunds SET retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [Number(row.id)],
+        );
+        console.warn(`[retryFailedRefunds] Refund ${row.refund_ref_id} retry ${row.retry_count + 1} failed:`, retryErr?.message);
+        // Mark as exhausted after 10 retries
+        if (row.retry_count + 1 >= 10) {
+          await queryDb(env,
+            `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1`,
+            [Number(row.id)],
+          );
+          console.error(JSON.stringify({
+            scope: 'refund-retry-exhausted',
+            user_id: row.user_id,
+            refund_ref_id: row.refund_ref_id,
+            amount: row.amount,
+            source: row.source,
+          }));
+        }
+      }
+    }
+    if (succeeded > 0) {
+      console.log(`[retryFailedRefunds] Processed ${succeeded}/${result.rows.length} pending refunds successfully.`);
+    }
+  } catch (e) {
+    console.warn(safeError('refund-retry-cron', e));
+  }
+}
+
+/**
  * Process referral on user bootstrap.
  *
  * ── ROOT-CAUSE FIX (referral not registering for returning users) ──
@@ -10587,6 +10666,9 @@ function handleHealth(env) {
 // ── Alert Economy repository (must be created BEFORE alertHandlers) ──
 const alertEconomyRepo = createAlertEconomyRepository({
   queryDb,
+  // BUG 2 FIX: inject queryDbDirect so checkQuota bypasses Hyperdrive's
+  // 60s SELECT cache and reads the real DB state for quota decisions.
+  queryDbDirect,
   isDatabaseConfigured,
   isoDate: _rcIsoDate,
   normalizeOptionalString,
@@ -10622,6 +10704,8 @@ const alertHandlers = createAlertHandlers({
   economyService,
   // PHASE 3: MembershipAuthority for tier-based alert quota
   membershipAuthority,
+  // BUG 4 FIX: queryDb for persisting failed refunds to pending_refunds table
+  queryDb,
 });
 const watchlistRepo = createWatchlistRepository({ queryDb, queryDbTransaction, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
@@ -10744,6 +10828,8 @@ const rewardPurchaseHandlers = createRewardPurchaseHandlers({
   notificationService,
   requireAdmin: (request, env, perm) => adminHandlers.requireAdmin(request, env, perm),
   sendTelegramMessage,
+  // BUG 5 FIX: queryDb for persisting failed refunds to pending_refunds table
+  queryDb,
   // W-STAB-4 FIX: pass Tehran date helper so controller can build deterministic
   // refId per (user, plan, tehran-today) for concurrent-request idempotency.
   getTehranDateString: sharedGetTehranDateString,
@@ -10765,6 +10851,8 @@ const cosmeticsHandlers = createCosmeticsHandlers({
   cosmeticsRepo,
   membershipAuthority,
   economyService,
+  // BUG 1 FIX: queryDb for persisting failed refunds to pending_refunds table
+  queryDb,
 });
 const sessionRepo = createSessionRepository({ readSessionCache, writeSessionCache, deleteSessionCache });
 const sessionHandlers = createSessionHandlers({
@@ -15869,6 +15957,22 @@ export default {
           }
         })().catch((e) => {
           console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedMission', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
+        }));
+        // BUG 4+5 FIX: Retry failed refunds (same hourly slot as other retry crons)
+        const _savedReqPoolForRefunds = env._reqPool;
+        env._reqPool = null;
+        ctx.waitUntil((async () => {
+          try {
+            await retryFailedRefunds(env);
+            _logPhase('hourly-refunds', 'ok');
+          } catch (e) {
+            _logPhase('hourly-refunds', 'error', { error: e?.message });
+            console.warn('[CRON] refund retry failed:', e?.message);
+          } finally {
+            env._reqPool = _savedReqPoolForRefunds;
+          }
+        })().catch((e) => {
+          console.error(JSON.stringify({ scope: 'cron-unhandled', cron: _cronTickExpr, source: 'retryFailedRefunds', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
         }));
       }
 

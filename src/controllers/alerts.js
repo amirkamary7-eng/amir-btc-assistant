@@ -24,6 +24,8 @@ export function createAlertHandlers(deps) {
     economyService,
     // PHASE 3: MembershipAuthority for tier-based quota lookup.
     membershipAuthority,
+    // BUG 4 FIX: queryDb for persisting failed refunds to pending_refunds table
+    queryDb,
   } = deps;
 
   /**
@@ -244,7 +246,33 @@ export function createAlertHandlers(deps) {
             env,
           });
         } catch (refundErr) {
-          console.warn('[alerts] Refund failed after alert creation error:', refundErr?.message);
+          // BUG 4 FIX: Persist failed refund for cron retry instead of
+          // silently swallowing. This prevents permanent token loss.
+          console.error(JSON.stringify({
+            scope: 'alert-refund-failed',
+            user_id: payload.user_id,
+            refund_ref_id: `${alertRefId}_refund`,
+            amount: debitAmount,
+            original_error: String(error?.message || error).slice(0, 200),
+            refund_error: String(refundErr?.message || refundErr).slice(0, 200),
+          }));
+          try {
+            await queryDb(env,
+              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+               VALUES ($1, $2, $3, $4, 'alert', $5, $6, 'pending')
+               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+              [
+                String(payload.user_id),
+                Number(debitAmount),
+                `${alertRefId}_refund`,
+                alertRefId,
+                `Refund: alert creation failed (${rawSymbol} ${rawDirection} ${rawPrice})`,
+                JSON.stringify({ reason: 'alert_create_failure', symbol: rawSymbol, price: rawPrice, direction: rawDirection, debited_amount: debitAmount }),
+              ],
+            );
+          } catch (persistErr) {
+            console.error('[alerts] Failed to persist pending refund:', persistErr?.message);
+          }
         }
       }
       // A failed creation must not consume the claimed free slot (M5-A).

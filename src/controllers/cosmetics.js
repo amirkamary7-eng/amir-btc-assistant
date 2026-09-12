@@ -25,6 +25,8 @@ export function createCosmeticsHandlers(deps) {
     cosmeticsRepo,
     membershipAuthority,
     economyService,
+    // BUG 1 FIX: queryDb for persisting failed refunds to pending_refunds table
+    queryDb,
   } = deps;
 
   async function _isPremiumSafe(env, userId) {
@@ -212,7 +214,65 @@ export function createCosmeticsHandlers(deps) {
           purchased_at: ownership.purchased_at,
         },
       }, { status: 201 }, env);
-    } catch (e) { return safeDbErrorResponse(e, {}, env); }
+    } catch (e) {
+      // BUG 1 FIX (phantom debit): If debitUser succeeded (tokens were
+      // deducted) but a subsequent operation (createOwnership, response
+      // building, etc.) threw an error, we MUST refund the deducted tokens.
+      // Without this, the user loses tokens with no cosmetic.
+      // The refund is idempotent: grantReward uses ON CONFLICT DO NOTHING
+      // with the deterministic refId `cosmetic_purchase_${userId}_${cosmeticId}_refund`.
+      // If this request was idempotent (debitResult.idempotent=true), the
+      // real debit was done by a concurrent twin — but that twin either
+      // also failed (in which case the refund is needed) or succeeded
+      // (in which case the ownership already exists and createOwnership
+      // wouldn't have thrown). Either way, attempting the refund is safe
+      // because the deterministic refId prevents double-refund.
+      if (debitResult && !debitResult.idempotent) {
+        try {
+          await economyService.grantReward({
+            userId,
+            amount: debitResult.amount || cosmetic.token_cost,
+            rewardType: 'marketplace_refund',
+            description: `Refund: Cosmetic purchase failed (${cosmeticId})`,
+            refId: `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
+            metadata: { cosmetic_id: cosmeticId, original_ref_id: refId, reason: 'createOwnership_failed' },
+            env,
+          });
+        } catch (refundErr) {
+          // BUG 1 FIX: Persist failed refund for cron retry (same pattern as
+          // alerts.js and reward_purchases.js). This prevents permanent token
+          // loss when both the operation AND the refund fail.
+          console.error(JSON.stringify({
+            scope: 'cosmetics-refund-failed',
+            user_id: userId,
+            cosmetic_id: cosmeticId,
+            original_ref_id: refId,
+            refund_ref_id: `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
+            amount: debitResult.amount || cosmetic.token_cost,
+            original_error: String(e?.message || e).slice(0, 200),
+            refund_error: String(refundErr?.message || refundErr).slice(0, 200),
+          }));
+          try {
+            await queryDb(env,
+              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+               VALUES ($1, $2, $3, $4, 'cosmetic', $5, $6, 'pending')
+               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+              [
+                String(userId),
+                Number(debitResult.amount || cosmetic.token_cost),
+                `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
+                refId,
+                `Refund: Cosmetic purchase failed (${cosmeticId})`,
+                JSON.stringify({ cosmetic_id: cosmeticId, original_ref_id: refId, reason: 'createOwnership_failed' }),
+              ],
+            );
+          } catch (persistErr) {
+            console.error('[cosmetics] Failed to persist pending refund:', persistErr?.message);
+          }
+        }
+      }
+      return safeDbErrorResponse(e, {}, env);
+    }
   }
 
   /** POST /api/cosmetics/:id/activate — activate an owned cosmetic (Premium only) */
