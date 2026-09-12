@@ -12820,7 +12820,16 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     let alerts = null;
     let alertsFromCache = false;
     const isolateCacheAge = _alertsIsolateCacheAt ? Date.now() - _alertsIsolateCacheAt : Infinity;
-    if (_alertsIsolateCache && _alertsIsolateCache.length > 0 && isolateCacheAge < _ALERTS_ISOLATE_CACHE_TTL_MS) {
+    // FIX: Cache empty arrays too — when DB returns 0 alerts, the empty array
+    // is cached in module memory. Previously, the .length > 0 check caused
+    // empty arrays to be treated as cache misses, falling through to KV read
+    // → DB query → KV write of '0' marker every single minute. Now, an empty
+    // array is a valid cache hit (0 alerts = nothing to check), and the cron
+    // exits early without any KV write or DB query for the next 60s.
+    // Safety: create()/delete() invalidate KV cache (delete keys) → other
+    // isolates will re-query DB. This isolate may use stale empty cache for
+    // up to 60s — same behavior as stale non-empty cache (acceptable).
+    if (Array.isArray(_alertsIsolateCache) && isolateCacheAge < _ALERTS_ISOLATE_CACHE_TTL_MS) {
       alerts = _alertsIsolateCache;
       alertsFromCache = true;
     }
@@ -12863,9 +12872,18 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
           await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', ALERTS_LIST_TTL);
         } catch {}
       } else {
+        // FIX: Cache empty array in module memory (same as non-empty above).
+        // Do NOT write '0' to KV — the alerts:active-exists key is never read
+        // by any code path (verified: grep for readAppCache.*ALERTS_EXIST = empty).
+        // The empty module-level cache will cause Step 1 to HIT on the next tick,
+        // skipping both KV read and DB query entirely.
+        // KV invalidation by create() still works: when a user creates an alert,
+        // create() deletes alerts:active-list and alerts:active-exists from KV.
+        // On the next cron tick, this isolate's module cache may still be empty
+        // (up to 60s), but OTHER isolates will see the KV deletion → DB query
+        // → find the new alert. This is the same cross-isolate behavior as before.
         _alertsIsolateCache = [];
         _alertsIsolateCacheAt = Date.now();
-        try { await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '0', ALERTS_LIST_TTL); } catch {}
       }
     }
 
