@@ -8971,3 +8971,86 @@ Stage Summary:
 - Frontend, schema, API contract, polling, Hyperdrive config: ALL UNCHANGED.
 - b2b8590 NOT pushed, NOT deployed (still local HEAD only).
 - Ready for push + deploy upon user approval.
+
+---
+Task ID: OPTION-C-DEPLOYED
+Agent: Z.ai Code (Orchestrator)
+Task: Finalize Option C — verify DIRECT_URL, commit, push, deploy, smoke test. Report results.
+
+Work Log:
+- Step 1: Verified DIRECT_URL is the Supabase Direct PostgreSQL endpoint (db.qywuklmhjqovmqlyklea.supabase.co:5432, postgres wire protocol). Verified indirectly via:
+  * Hyperdrive origin (Cloudflare API): postgres://db.qywuklmhjqovmqlyklea.supabase.co:5432/postgres — the exact Supabase Direct endpoint format (db.{ref}.supabase.co:5432, NOT the Supavisor pooler aws-0-{region}.pooler.{ref}.supabase.com:6543).
+  * Git history (commit in prior RCA investigation): "Attempted Supabase session/transaction pooler (aws-0-eu-central-1.pooler.supabase.com) — ENOTFOUND/ENOIDENTIFIER (pooler not configured for this project)" — confirms Supavisor pooler is NOT configured for this project, so DIRECT_URL must point at the direct endpoint.
+  * Project code comment at worker-proxy.js:2043: "Prefers DIRECT_URL (non-pooler)" — confirms DIRECT_URL is the direct (non-pooler) endpoint.
+  * Cloudflare API does not return secret values — value not printed (per spec).
+- Step 2: Committed Option C as new commit 2745906 (superseding b2b8590). 7 files: worker-proxy.js (+181/-112), src/repositories/notifications.js (+45/-30), 2 new test files, 2 deleted obsolete b2b8590 test files, worklog.md append. git diff --cached --check clean.
+- Step 3: Pushed to origin/main. origin/main now at 2745906 (matches local HEAD). 11 commits pushed (9 RCA diagnostic + b2b8590 + 2745906). Ephemeral git credential helper cleaned up. Verified no credentials in any project file.
+- Step 4: Deployed Worker to production via `wrangler deploy --env production`. Output: "Uploaded amir-btc-assistant-api-production (3.91 sec) / Deployed amir-btc-assistant-api-production triggers (1.26 sec) / Current Version ID: cf99f4a9-1503-40f1-8aee-245bb38dd25f". All 24 bindings detected.
+- Step 5: Verified production is running the new version:
+  * Cloudflare versions API: latest version id = cf99f4a9-1503-40f1-8aee-245bb38dd25f — matches the wrangler deploy output. ✓
+  * Health check /api/notif-diag-report: HTTP 200, 0.5s response. ✓ (queryDb/Hyperdrive path works)
+  * Anonymous /api/notifications: HTTP 401 "Missing Telegram init data" — auth gate works (route alive, Option C did not break auth). ✓
+  * Anonymous DELETE /api/notifications/test-id: HTTP 401 (auth gate). ✓
+  * Anonymous DELETE /api/notifications (clear all): HTTP 401 (auth gate). ✓
+- Step 6: Smoke tests executed from sandbox:
+  * Anonymous GET/DELETE on /api/notifications: all return 401 (auth gate works — Option C did not break the auth flow).
+  * /api/notif-diag-report health endpoint: HTTP 200 consistently (0.06s–0.42s — queryDb/Hyperdrive path still works for cron-exercised DB).
+  * 90-second wrangler tail monitoring session captured:
+    - 2 cron triggers (every minute "* * * * *"): both Ok
+    - 6 GET requests to /api/notif-diag-report: all Ok
+    - 1 GET /api/calendar/reminders: Ok
+    - 1 GET /api/farsi-news: Ok
+    - 0 errors, 0 exceptions, 0 warnings
+- Step 7 (real Telegram Mini App smoke test): NOT executed from sandbox. The sandbox cannot authenticate as a real Telegram user (no HMAC-signed init_data, no real Telegram account). User must run the 5× Delete→GET/reopen + deleteAll test in the actual Telegram Mini App.
+
+Stage Summary:
+- DIRECT_URL verified: Supabase Direct PostgreSQL endpoint (db.qywuklmhjqovmqlyklea.supabase.co:5432, postgres). Value never printed.
+- Commit: 27459061cee6bebb2e53b39125640438dcb8f8ac
+- Push: SUCCESS (origin/main now at 2745906)
+- Worker deployment Version ID: cf99f4a9-1503-40f1-8aee-245bb38dd25f
+- Production URL: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
+- Health: PASS (HTTP 200 on /api/notif-diag-report)
+- Auth gate: PASS (HTTP 401 on anonymous /api/notifications — route alive, Option C did not break auth)
+- 90s wrangler tail: 0 errors, 0 exceptions — production Worker healthy
+- Sandbox limitation: real Telegram Mini App smoke test (5× Delete→GET/reopen + deleteAll) requires real Telegram auth — user must run this manually.
+- No new code changes, no new secrets, no schema changes, no Hyperdrive config changes, no frontend changes, no polling changes, no API contract changes (per scope lock).
+
+Awaiting user's Telegram Mini App smoke test results:
+1. Open Mini App, notification panel.
+2. Pick a notification, click Delete, close panel within 2-5s, reopen — deleted notification must NOT reappear.
+3. Repeat 5× with different notifications.
+4. Test deleteAll once.
+5. If any notification reappears within 0-60s after delete, immediately extract /api/notif-diag-report and report back (no speculation, no new fix).
+
+Sanity expected behavior post-Option C:
+- /api/notifications for an authenticated user should return 200 with the current notification list (no deleted items, no 60s self-correction delay).
+- queryDbDirect bypasses Hyperdrive cache → every GET returns fresh DB state.
+- Even within 0-60s after a DELETE, GET should NOT return the deleted notification.
+
+NO PUSH OR DEPLOY PENDING — Option C is LIVE in production. Awaiting smoke test results.
+
+---
+Task ID: AUDIT-FINAL-READ-ONLY
+Agent: Z.ai Code (Orchestrator) + 2 Explore subagents
+Task: Read-only audit of all diagnostics/instrumentation/watchers/temporary-logging at HEAD 2745906. NO code changes. NO commits/pushes/deployments.
+
+Work Log:
+- Verified HEAD = 2745906 (Option C commit). Working tree changes to worklog.md only (other "M" files are pre-existing whitespace-only, 0/0 line diffs).
+- Launched 2 parallel Explore subagents (AUDIT-NOTIF-BS + AUDIT-DB-KV-NEWS-OTHER).
+- Cross-checked findings for false positives (reward_center._log, market_overview.USAGE_LOG_KEY, _probeLockInMemory — all confirmed production logic, NOT diagnostics).
+- Total items identified across both audits: 50 items (frontend notif diag + production race guards + backend notif diag + bootstrap diag + DB/KV/News/other diag + endpoints + logging).
+- All findings consolidated into the final report below.
+
+Stage Summary:
+- Total items: 50 (24 frontend + 7 production logic + 19 backend notif/bootstrap/DB/KV/News/other)
+- REMOVE NOW (no smoke-test dep): 8 items (~250 lines): Cluster A (KV dead code 14/15/16 + reads), Cluster B (diagLog stubs 18), Cluster C (3 per-request [CALENDAR] logs), Cluster H (/api/calendar/diag 41), Cluster I (notif RCA endpoints 42/43/45 + request._cpuTrace 47 — all gated to non-prod)
+- KEEP UNTIL FINAL SMOKE TEST (per user STOP CONDITION): 7 items: Cluster J (44 /api/notif-diag-report + 48 _notifDiagReport memory + B5 _diag_notif_report table) + frontend F1-F6 (~225 lines) — NOT removable until Option C smoke test confirms fix
+- DEPRECATE (after RCA sign-off): 6 items (~560 lines): Cluster D (calendar timing logs 10217/10225/10305/10322/10334/10346/10352/10363/10377/10392 — ~10 lines), Cluster E (stepLog 27 — ~33 lines), Cluster F (/api/diagnostic/nara-eval 38 — ~370 lines), Cluster G (/api/diagnostic/groq-connectivity 39 — ~165 lines), Cluster L (/api/bootstrap-diag 40 — ~30 lines), Cluster K (trace gated no-ops 4/5/6/7/2 — ~40 lines, requires test updates)
+- KEEP-CONDITIONAL (low cost, still useful as observability): 5 items: BS1 logStartE2E + BS6 14 call sites, BS2 logBootstrapE2E + BS7 11 call sites, BS3 /api/start-diag GET, BS5 /api/bootstrap-diag, BS8 PROTECTED_PATHS notif-delete-diag token
+- KEEP (production): 27 items: all production race guards (P1-P7), production observability (_setTraceContext, _traceStage, _poolQueryWithTimeout, queryDb, queryDbDirect, queryDbTransaction, createPool, etc.), production endpoints (/api/health, /api/system/status, /api/cron-monitor, /api/admin-diag, /api/start-diag POST self-heal, /api/news-ai-monitor/timing/pending, /api/admin/trigger-alerts, /api/_diag/* gate)
+- CONFIRMED ABSENT: /api/_news_audit_verify, /api/_settings_audit_verify, /api/_news_phase1_verify, /api/_diag/{bot-token,init-data,self-test,signature-test,analyses-db,kv-write-stats}, _bsDiag, _bsLog, _bsDiagId, BOOT_TRACE_KEY, _bsT0/T1
+- Sensitive data exposure: NO diagnostic logs Telegram initData/bot token/webhook secret/full user IDs. /api/notif-diag-report is intentionally unauthenticated per comment "report contains only notification IDs + timestamps, no PII" — temporary, will be removed after RCA closure.
+- KV cost: cluster A (dead, always returns 0), /api/notif-diag-report (DB-backed since 3fb8f3a, no KV), /api/news-ai-pending (20-35 KV reads per call — moderate), /api/cron-monitor (1 KV.list, no gets — writes disabled)
+- DB cost: /api/notif-diag-report (1-2 queries on invariant detection only), /api/notif-cpu-trace + /api/notif-delete-diag (gated to non-prod)
+- CPU overhead: highest is request._cpuTrace + 3 pushes (fires on EVERY protected request in production, ~4 ops/request — tiny but unnecessary)
+- No code changes, no commits, no pushes, no deploys. Audit only.

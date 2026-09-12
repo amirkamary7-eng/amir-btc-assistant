@@ -152,17 +152,25 @@ function createMockDOState() {
 }
 
 /**
- * Create an in-process PresenceDO stub bound to env.PRESENCE_DO.
- * Each call to env.PRESENCE_DO.fetch(url) instantiates/forwards to a single
- * shared PresenceDO instance (mimicking how Cloudflare routes all requests
- * for the same DO ID to the same instance).
+ * Create an in-process PresenceDO namespace binding that mimics Cloudflare's
+ * real DurableObjectNamespace API: env.BINDING.idFromName() returns an ID,
+ * env.BINDING.get(id) returns a stub, and stub.fetch(url) forwards to the
+ * single shared PresenceDO instance. This mirrors the production invocation
+ * pattern (idFromName + get + stub.fetch) and ensures tests catch bugs where
+ * the controller calls env.BINDING.fetch() directly (which is INVALID on a
+ * real namespace and silently throws TypeError in production).
  */
 function createMockPresenceDOBinding(PresenceDOClass, opts = {}) {
   const state = createMockDOState();
   const instance = new PresenceDOClass(state, {});
   let fetchCount = 0;
   const calls = [];
-  const binding = {
+
+  // The stub returned by .get(id). Only this stub has a .fetch() method.
+  // env.BINDING itself does NOT have .fetch — calling it directly would throw
+  // "env.PRESENCE_DO.fetch is not a function" in production (which is exactly
+  // the RCA we're protecting against).
+  const stub = {
     fetch(input) {
       fetchCount++;
       const url = typeof input === 'string' ? input : input.url;
@@ -175,8 +183,32 @@ function createMockPresenceDOBinding(PresenceDOClass, opts = {}) {
       // but pass a minimal Request-like object for safety.
       return instance.fetch({ url, method: 'GET', headers: new Headers() });
     },
+  };
+
+  // The namespace object. Mimics DurableObjectNamespace: has idFromName,
+  // idFromString, get, newUniqueId — but NO fetch. This is the real shape.
+  const binding = {
+    idFromName(name) {
+      // Return a deterministic opaque ID object. Content doesn't matter —
+      // only that .get() accepts it and returns the shared stub.
+      return { __doName: String(name), __id: 'mock-id-' + String(name) };
+    },
+    idFromString(str) {
+      return { __doName: str, __id: str };
+    },
+    newUniqueId() {
+      return { __doName: null, __id: 'mock-uuid-' + Math.random().toString(36).slice(2) };
+    },
+    get(_id) {
+      // Always return the single shared stub (singleton DO pattern).
+      return stub;
+    },
+    // NO .fetch() method here — this is the whole point of the RCA fix.
+    // Tests that try to call env.PRESENCE_DO.fetch() directly will get
+    // "binding.fetch is not a function", matching production behavior.
     _instance: instance,
     _state: state,
+    _stub: stub,
     _getCalls() { return calls.slice(); },
     _getFetchCount() { return fetchCount; },
     // Simulate DO eviction: reset in-memory state but keep storage (alarm + snapshot)
@@ -186,10 +218,10 @@ function createMockPresenceDOBinding(PresenceDOClass, opts = {}) {
       instance._hydrated = false;
       instance._hydratePromise = null;
     },
-    // Simulate DO throwing on every fetch
+    // Simulate DO throwing on every fetch (from the stub)
     _simulateFailure(shouldFail) {
       if (shouldFail) {
-        binding.fetch = () => { throw new Error('SIMULATED DO FAILURE'); };
+        stub.fetch = () => { throw new Error('SIMULATED DO FAILURE'); };
       }
     },
   };
@@ -282,6 +314,21 @@ function makeMockRequest(method, urlPath) {
   return { url, method, headers: new Headers() };
 }
 
+/**
+ * Invoke a DO binding the PRODUCTION way: idFromName + get + stub.fetch.
+ * Tests must use this helper instead of calling binding.fetch() directly
+ * (which would bypass the namespace and miss the very bug we're protecting
+ * against — see RCA-ONLINE-COUNT-1-TO-0).
+ */
+function doInvoke(binding, action, userId, ttl) {
+  const id = binding.idFromName('presence-singleton');
+  const stub = binding.get(id);
+  const params = new URLSearchParams({ action });
+  if (userId) params.set('userId', userId);
+  if (ttl) params.set('ttl', String(ttl));
+  return stub.fetch(`https://presence-do/internal?${params.toString()}`);
+}
+
 /** Build a fresh handlers instance (cache reset between tests). */
 function buildHandlers(sessionRepo) {
   const factory = loadSessionHandlersFactory();
@@ -301,8 +348,7 @@ function buildHandlers(sessionRepo) {
 test('P1.heartbeat-count-end: correct counts at each step', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  const doFetch = (action, userId, ttl) => binding.fetch(
-    `https://do/internal?action=${action}${userId ? `&userId=${userId}` : ''}${ttl ? `&ttl=${ttl}` : ''}`);
+  const doFetch = (action, userId, ttl) => doInvoke(binding, action, userId, ttl);
 
   // Start: 0 online
   let r = await doFetch('count');
@@ -343,7 +389,7 @@ test('P1.concurrency: 50 simultaneous heartbeats — no race/lost update', async
   // Fire N heartbeats "simultaneously" — DO serializes via single-instance fetch
   const promises = [];
   for (let i = 0; i < N; i++) {
-    promises.push(binding.fetch(`https://do/internal?action=heartbeat&userId=u${i}&ttl=240000`));
+    promises.push(doInvoke(binding, 'heartbeat', `u${i}`, 240000));
   }
   const responses = await Promise.all(promises);
   // Every response must be OK and the LAST one must report N (serial execution → no lost update)
@@ -351,7 +397,7 @@ test('P1.concurrency: 50 simultaneous heartbeats — no race/lost update', async
     assert.equal(r.status, 200);
   }
   // After all settle, count must be exactly N
-  const countResp = await binding.fetch('https://do/internal?action=count');
+  const countResp = await doInvoke(binding, 'count');
   const countBody = await countResp.json();
   assert.equal(countBody.count, N, `all ${N} heartbeats must be registered (no lost update)`);
 });
@@ -359,8 +405,7 @@ test('P1.concurrency: 50 simultaneous heartbeats — no race/lost update', async
 test('P1.duplicate-heartbeat: same userId is idempotent (count stays 1)', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  const doFetch = (action, userId, ttl) => binding.fetch(
-    `https://do/internal?action=${action}${userId ? `&userId=${userId}` : ''}${ttl ? `&ttl=${ttl}` : ''}`);
+  const doFetch = (action, userId, ttl) => doInvoke(binding, action, userId, ttl);
 
   await doFetch('heartbeat', 'dup', 240000);
   await doFetch('heartbeat', 'dup', 240000);
@@ -380,7 +425,7 @@ test('P1.expiration: count() lazily prunes expired entries', async () => {
   inst.sessions.set('expired', now - 1000);
   inst.sessions.set('alive', now + 60000);
 
-  const r = await binding.fetch('https://do/internal?action=count');
+  const r = await doInvoke(binding, 'count');
   const body = await r.json();
   // expired must be pruned by count()'s lazy prune; alive remains
   assert.equal(body.count, 1, 'expired entry must be pruned by count() lazy prune');
@@ -430,16 +475,16 @@ test('P1.alarm-reschedule: alarm survives being called twice', async () => {
 test('P1.unknown-action: returns 404', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  const r = await binding.fetch('https://do/internal?action=bogus&userId=X');
+  const r = await doInvoke(binding, 'bogus', 'X');
   assert.equal(r.status, 404);
 });
 
 test('P1.missing-userId: heartbeat/end return 400', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  const r1 = await binding.fetch('https://do/internal?action=heartbeat');
+  const r1 = await doInvoke(binding, 'heartbeat');
   assert.equal(r1.status, 400, 'heartbeat without userId → 400');
-  const r2 = await binding.fetch('https://do/internal?action=end');
+  const r2 = await doInvoke(binding, 'end');
   assert.equal(r2.status, 400, 'end without userId → 400');
 });
 
@@ -490,7 +535,7 @@ test('P2.count-DO-path: cache miss queries DO', async () => {
   const handlers = buildHandlers(repo);
 
   // Seed one user
-  await doBinding.fetch('https://do/internal?action=heartbeat&userId=seed&ttl=240000');
+  await doInvoke(doBinding, 'heartbeat', 'seed', 240000);
 
   const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
   const req = makeMockRequest('GET', '/api/sessions/online');
@@ -511,15 +556,22 @@ test('P2.count-cache: 30s TTL — second call within TTL skips DO', async () => 
 
   const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
 
-  // First call: cache miss → hits DO
-  await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  // Seed one user via heartbeat so the count is 1 (non-zero — count=0 is NOT
+  // cached by design so transient zeros don't get served for 30s).
+  await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
+
+  // First online call: cache miss (heartbeat set cache to 1, but a fresh
+  // handlers instance starts with count=null) → hits DO, returns 1, caches 1.
+  const r1 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b1 = await r1.json();
+  assert.equal(b1.count, 1, 'first online call must return the seeded count of 1');
   const callsAfter1 = doBinding._getFetchCount();
   assert.ok(callsAfter1 >= 1, 'first online call must hit DO');
 
-  // Second call immediately: cache hit → must NOT hit DO
+  // Second call immediately: cache hit (count=1, non-zero, within TTL) → must NOT hit DO
   await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
   const callsAfter2 = doBinding._getFetchCount();
-  assert.equal(callsAfter2, callsAfter1, 'second online call within TTL must NOT hit DO (cache hit)');
+  assert.equal(callsAfter2, callsAfter1, 'second online call within TTL must NOT hit DO (cache hit on non-zero count)');
 });
 
 test('P2.count-cache-invalidation: heartbeat refreshes cache', async () => {
@@ -558,7 +610,7 @@ test('P2.end-DO-path: removes session and refreshes cache', async () => {
   // Seed two users via heartbeat
   await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
   // second user via direct DO call (different userId)
-  await doBinding.fetch('https://do/internal?action=heartbeat&userId=other&ttl=240000');
+  await doInvoke(doBinding, 'heartbeat', 'other', 240000);
 
   const r = await handlers.handleEnd(makeMockRequest('POST', '/api/sessions/end'), env);
   const body = await r.json();
@@ -643,13 +695,13 @@ test('P3.eviction: after eviction, count returns 0 then heartbeat re-registers',
 
   // Wait for cache to expire so next online call hits DO
   // (We can't easily fast-forward 30s; instead query DO directly to observe post-eviction state)
-  const directCount = await doBinding.fetch('https://do/internal?action=count');
+  const directCount = await doInvoke(doBinding, 'count');
   const directBody = await directCount.json();
   assert.equal(directBody.count, 0, 'post-eviction DO count must be 0 (in-memory Map lost)');
 
   // Recovery: a new heartbeat re-registers
   await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
-  const directCount2 = await doBinding.fetch('https://do/internal?action=count');
+  const directCount2 = await doInvoke(doBinding, 'count');
   const directBody2 = await directCount2.json();
   assert.equal(directBody2.count, 1, 'post-eviction heartbeat must re-register (recovery)');
 });
@@ -772,8 +824,8 @@ test('P5.security: end uses userId from auth, cannot evict another user', async 
   });
 
   // Pre-seed another user (VICTIM) in the DO
-  await doBinding.fetch('https://do/internal?action=heartbeat&userId=VICTIM&ttl=240000');
-  assert.equal((await (await doBinding.fetch('https://do/internal?action=count')).json()).count, 1);
+  await doInvoke(doBinding, 'heartbeat', 'VICTIM', 240000);
+  assert.equal((await (await doInvoke(doBinding, 'count')).json()).count, 1);
 
   // Attacker (auth=999) tries to end VICTIM's session via query param
   const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
@@ -788,7 +840,7 @@ test('P5.security: end uses userId from auth, cannot evict another user', async 
   assert.notEqual(endCall.userId, 'VICTIM', 'end must NOT allow evicting another user');
 
   // VICTIM must still be present in the DO (end could not evict another user)
-  const countAfter = await (await doBinding.fetch('https://do/internal?action=count')).json();
+  const countAfter = await (await doInvoke(doBinding, 'count')).json();
   assert.equal(countAfter.count, 1, 'VICTIM must survive (end must NOT evict another user)');
 });
 
@@ -950,7 +1002,11 @@ test('P10.do-structure: initial alarm set ~60s on first fetch', () => {
 });
 
 test('P10.do-structure: snapshot persistence (storage.put in alarm, storage.get in hydration)', () => {
-  // The class MUST persist sessions via snapshot in alarm() and hydrate in _ensureHydrated()
+  // RCA-ONLINE-COUNT-1-TO-0: PresenceDO MUST persist sessions via a snapshot
+  // in alarm() so an eviction/restart can hydrate the in-memory Map from
+  // storage and NOT drop the online count to 0. Without persistence, any
+  // DO eviction (which Cloudflare may do under memory pressure) loses all
+  // sessions until users re-heartbeat.
   assert.ok(PRESENCE_DO_CLASS_SRC.includes("storage.put('sessions_snapshot'"),
     'PresenceDO alarm() must call storage.put("sessions_snapshot", ...) for persistence');
   assert.ok(PRESENCE_DO_CLASS_SRC.includes("storage.get('sessions_snapshot'"),
@@ -964,18 +1020,18 @@ test('P10.do-structure: snapshot persistence (storage.put in alarm, storage.get 
 });
 
 // ============================================================================
-// P11: Snapshot Persistence — alarm writes snapshot, eviction hydrates
+// P11: RCA-ONLINE-COUNT-1-TO-0 — Snapshot persistence + eviction recovery
+// These tests verify the actual production bug fixes: the online count must
+// NOT drop from 1 to 0 while a user is still active, even across DO eviction,
+// transient zero-count races, and stale-response overwrites.
 // ============================================================================
 
 test('P11.alarm-snapshot: alarm() writes sessions_snapshot to storage', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // Send heartbeats
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
-  // Run alarm
+  await doInvoke(binding, 'heartbeat', 'userA', 240000);
+  await doInvoke(binding, 'heartbeat', 'userB', 240000);
   await binding._instance.alarm();
-  // Verify snapshot exists in storage
   const snapshot = await binding._state.storage.get('sessions_snapshot');
   assert.ok(Array.isArray(snapshot), 'snapshot must be an array');
   assert.equal(snapshot.length, 2, 'snapshot must have 2 entries');
@@ -984,29 +1040,29 @@ test('P11.alarm-snapshot: alarm() writes sessions_snapshot to storage', async ()
 test('P11.eviction-hydration: count survives eviction via snapshot', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // Send heartbeats
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userC&ttl=240000');
-  // Run alarm to write snapshot
+  // Seed 3 users
+  await doInvoke(binding, 'heartbeat', 'userA', 240000);
+  await doInvoke(binding, 'heartbeat', 'userB', 240000);
+  await doInvoke(binding, 'heartbeat', 'userC', 240000);
+  // Write snapshot
   await binding._instance.alarm();
   // Verify count before eviction
-  const beforeEviction = await binding.fetch('https://do/internal?action=count');
-  const beforeData = await beforeEviction.json();
+  const beforeRes = await doInvoke(binding, 'count');
+  const beforeData = await beforeRes.json();
   assert.equal(beforeData.count, 3, 'count before eviction = 3');
-  // Evict
+  // Evict (in-memory Map lost, but storage snapshot survives)
   binding._simulateEviction();
-  // Count after eviction (should hydrate from snapshot)
-  const afterEviction = await binding.fetch('https://do/internal?action=count');
-  const afterData = await afterEviction.json();
-  assert.equal(afterData.count, 3, 'count after eviction must survive via snapshot hydration');
+  // Count after eviction MUST survive via snapshot hydration (no 1→0 jump)
+  const afterRes = await doInvoke(binding, 'count');
+  const afterData = await afterRes.json();
+  assert.equal(afterData.count, 3, 'count after eviction must survive via snapshot hydration (NO 1→0 jump)');
 });
 
 test('P11.expired-snapshot: expired entries filtered during hydration', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // Manually write a snapshot with mixed expired/valid entries
   const now = Date.now();
+  // Manually write a snapshot with mixed expired/valid entries
   await binding._state.storage.put('sessions_snapshot', [
     ['userA', now + 200000],  // valid (200s remaining)
     ['userB', now - 1000],    // expired 1s ago
@@ -1016,7 +1072,7 @@ test('P11.expired-snapshot: expired entries filtered during hydration', async ()
   // Evict (simulates fresh DO with old snapshot)
   binding._simulateEviction();
   // Count should only include valid entries
-  const res = await binding.fetch('https://do/internal?action=count');
+  const res = await doInvoke(binding, 'count');
   const data = await res.json();
   assert.equal(data.count, 2, 'expired entries must be filtered during hydration');
 });
@@ -1026,7 +1082,7 @@ test('P11.empty-snapshot: empty array snapshot → count = 0', async () => {
   const binding = createMockPresenceDOBinding(PresenceDO);
   await binding._state.storage.put('sessions_snapshot', []);
   binding._simulateEviction();
-  const res = await binding.fetch('https://do/internal?action=count');
+  const res = await doInvoke(binding, 'count');
   const data = await res.json();
   assert.equal(data.count, 0, 'empty snapshot → count = 0');
 });
@@ -1036,7 +1092,7 @@ test('P11.corrupt-snapshot: non-array snapshot → count = 0, no crash', async (
   const binding = createMockPresenceDOBinding(PresenceDO);
   await binding._state.storage.put('sessions_snapshot', { not: 'an array' });
   binding._simulateEviction();
-  const res = await binding.fetch('https://do/internal?action=count');
+  const res = await doInvoke(binding, 'count');
   const data = await res.json();
   assert.equal(data.count, 0, 'corrupt snapshot → count = 0, no crash');
 });
@@ -1044,78 +1100,65 @@ test('P11.corrupt-snapshot: non-array snapshot → count = 0, no crash', async (
 test('P11.storage-get-failure: storage.get throws → degrade to empty Map', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // Poison storage.get to throw
   const originalGet = binding._state.storage.get;
   binding._state.storage.get = async () => { throw new Error('STORAGE READ FAILURE'); };
   binding._simulateEviction();
-  // Should not throw — should degrade to empty Map
-  const res = await binding.fetch('https://do/internal?action=count');
+  const res = await doInvoke(binding, 'count');
   const data = await res.json();
   assert.equal(data.count, 0, 'storage.get failure → count = 0 (graceful degradation)');
-  // Restore
   binding._state.storage.get = originalGet;
 });
 
 test('P11.storage-put-failure: storage.put throws in alarm → alarm continues, no crash', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
-  // Poison storage.put to throw
+  await doInvoke(binding, 'heartbeat', 'userA', 240000);
   const originalPut = binding._state.storage.put;
   binding._state.storage.put = async () => { throw new Error('STORAGE WRITE FAILURE'); };
-  // alarm() should not throw — it should catch the error and continue
+  // alarm() should NOT throw — it should catch and continue
   await binding._instance.alarm();
-  // Verify alarm was rescheduled (setAlarm should still work)
   const alarmTime = binding._state._peekAlarm();
   assert.ok(alarmTime !== null, 'alarm must be rescheduled even if storage.put fails');
-  // Restore
   binding._state.storage.put = originalPut;
 });
 
 test('P11.concurrent-hydration: multiple concurrent fetches → hydration runs once', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // Seed a snapshot
   const now = Date.now();
   await binding._state.storage.put('sessions_snapshot', [
     ['userA', now + 200000],
     ['userB', now + 200000],
   ]);
   binding._simulateEviction();
-  // Track storage.get calls
   let getCount = 0;
   const originalGet = binding._state.storage.get;
   binding._state.storage.get = async (key) => {
     if (key === 'sessions_snapshot') getCount++;
     return originalGet.call(binding._state.storage, key);
   };
-  // Send 5 concurrent count requests
+  // 5 concurrent count requests — all should hydrate from the SAME promise
   const results = await Promise.all([
-    binding.fetch('https://do/internal?action=count'),
-    binding.fetch('https://do/internal?action=count'),
-    binding.fetch('https://do/internal?action=count'),
-    binding.fetch('https://do/internal?action=count'),
-    binding.fetch('https://do/internal?action=count'),
+    doInvoke(binding, 'count'),
+    doInvoke(binding, 'count'),
+    doInvoke(binding, 'count'),
+    doInvoke(binding, 'count'),
+    doInvoke(binding, 'count'),
   ]);
-  // All should return count = 2
   for (const res of results) {
     const data = await res.json();
     assert.equal(data.count, 2, 'all concurrent requests should see hydrated count');
   }
-  // Hydration should have called storage.get only once (Promise memoization)
   assert.equal(getCount, 1, 'storage.get for snapshot must be called only once (Promise memoization)');
-  // Restore
   binding._state.storage.get = originalGet;
 });
 
 test('P11.first-lifecycle-no-snapshot: first-ever DO lifecycle works without snapshot', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  // No snapshot in storage (first ever lifecycle)
   const snapshot = await binding._state.storage.get('sessions_snapshot');
   assert.equal(snapshot, null, 'no snapshot should exist on first lifecycle');
-  // Heartbeat should work normally
-  const res = await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  const res = await doInvoke(binding, 'heartbeat', 'userA', 240000);
   const data = await res.json();
   assert.equal(data.online_count, 1, 'first heartbeat on fresh DO → count = 1');
 });
@@ -1123,14 +1166,183 @@ test('P11.first-lifecycle-no-snapshot: first-ever DO lifecycle works without sna
 test('P11.heartbeat-after-eviction: heartbeat refreshes user after eviction + hydration', async () => {
   const PresenceDO = loadPresenceDOClass();
   const binding = createMockPresenceDOBinding(PresenceDO);
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
-  await binding.fetch('https://do/internal?action=heartbeat&userId=userB&ttl=240000');
+  await doInvoke(binding, 'heartbeat', 'userA', 240000);
+  await doInvoke(binding, 'heartbeat', 'userB', 240000);
   await binding._instance.alarm(); // Write snapshot
   // Evict
   binding._simulateEviction();
-  // Heartbeat from userA (should hydrate first, then refresh userA)
-  const res = await binding.fetch('https://do/internal?action=heartbeat&userId=userA&ttl=240000');
+  // Heartbeat from userA should hydrate first (restoring userA + userB), then refresh userA
+  const res = await doInvoke(binding, 'heartbeat', 'userA', 240000);
   const data = await res.json();
-  // Count should be 2 (hydrated from snapshot: userA + userB)
   assert.equal(data.online_count, 2, 'heartbeat after eviction → count = 2 (hydrated + refreshed)');
+});
+
+// ============================================================================
+// P12: Backend cache-zero protection — count=0 is NOT cached
+// Verifies that a transient 0 from the DO does NOT get served for 30s.
+// ============================================================================
+
+test('P12.cache-zero-not-stored: handleOnline does NOT cache count=0', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const doBinding = createMockPresenceDOBinding(PresenceDO);
+  const repo = createMockSessionRepo();
+  const handlers = buildHandlers(repo);
+  const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
+
+  // First online call → DO returns 0 (no users) → cache should NOT store 0
+  const r1 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b1 = await r1.json();
+  assert.equal(b1.count, 0, 'first call returns 0 (no users online)');
+  const callsAfter1 = doBinding._getFetchCount();
+
+  // Second online call immediately → cache should NOT have served 0, so DO is hit again
+  const r2 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b2 = await r2.json();
+  assert.equal(b2.count, 0, 'second call also returns 0');
+  const callsAfter2 = doBinding._getFetchCount();
+  assert.ok(callsAfter2 > callsAfter1, 'count=0 must NOT be cached → second call must hit DO (re-verify)');
+});
+
+test('P12.cache-zero-fallback-to-kv: transient 0 from DO does not lock out KV path', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const doBinding = createMockPresenceDOBinding(PresenceDO);
+  const repo = createMockSessionRepo({ userX: Date.now() + 60000 }); // KV has a live user
+  const handlers = buildHandlers(repo);
+  const env = { PRESENCE_DO: doBinding, SESSION_CACHE: 'mock-kv', SESSION_TTL: 240 };
+
+  // DO returns 0 (no DO sessions), but KV has userX
+  const r = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b = await r.json();
+  // Since DO returned count=0 (a valid number), the handler returns 0 without
+  // falling through to KV. This is acceptable — the next call re-queries DO.
+  // The test verifies the contract: a valid 0 from DO is returned as-is.
+  assert.equal(b.count, 0, 'DO count=0 is returned (KV not consulted when DO succeeds)');
+});
+
+test('P12.cache-nonzero-still-cached: count=1+ IS cached (regression guard)', async () => {
+  const PresenceDO = loadPresenceDOClass();
+  const doBinding = createMockPresenceDOBinding(PresenceDO);
+  const repo = createMockSessionRepo();
+  const handlers = buildHandlers(repo);
+  const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
+
+  // Seed a user via heartbeat (count=1, non-zero)
+  await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
+
+  // Online call → cache miss → hits DO, returns 1, caches 1
+  await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const callsAfter1 = doBinding._getFetchCount();
+
+  // Second online call → cache hit (count=1, non-zero, within TTL) → must NOT hit DO
+  await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const callsAfter2 = doBinding._getFetchCount();
+  assert.equal(callsAfter2, callsAfter1, 'count=1 must be cached (non-zero counts are cached normally)');
+});
+
+// ============================================================================
+// P13: Frontend sequence guard — stale fetchOnlineCount cannot overwrite
+// fresher heartbeat count. (Simulates the frontend logic in app.js.)
+// ============================================================================
+
+test('P13.sequence-guard: stale response cannot overwrite fresher value', () => {
+  // Simulate the frontend sequence-guard logic from app.js.
+  // This mirrors updateOnlineBadge(count, seq) + _onlineCountLastApplied.
+  let onlineCountSeq = 0;
+  let onlineCountLastApplied = -1;
+  let displayedCount = '—';
+
+  function updateOnlineBadge(count, seq) {
+    if (typeof seq === 'number' && seq < onlineCountLastApplied) {
+      return; // stale → refuse
+    }
+    if (typeof seq === 'number') {
+      onlineCountLastApplied = seq;
+    }
+    displayedCount = (count === null || count === undefined) ? '—' : count;
+  }
+
+  // Scenario: fetchOnlineCount (seq=1) starts, then heartbeat (seq=2) starts
+  // and resolves FIRST with count=1. Then the stale fetchOnlineCount (seq=1)
+  // resolves with count=0 — the guard must refuse to apply it.
+  const fetchSeq = ++onlineCountSeq; // 1
+  const hbSeq = ++onlineCountSeq;    // 2
+
+  // Heartbeat resolves first → applies 1
+  updateOnlineBadge(1, hbSeq);
+  assert.equal(displayedCount, 1, 'heartbeat applies count=1');
+
+  // Stale fetchOnlineCount resolves later with 0 → must be refused
+  updateOnlineBadge(0, fetchSeq);
+  assert.equal(displayedCount, 1, 'stale fetchOnlineCount must NOT overwrite the fresher 1');
+});
+
+test('P13.sequence-guard: in-order responses apply normally', () => {
+  let onlineCountSeq = 0;
+  let onlineCountLastApplied = -1;
+  let displayedCount = '—';
+
+  function updateOnlineBadge(count, seq) {
+    if (typeof seq === 'number' && seq < onlineCountLastApplied) return;
+    if (typeof seq === 'number') onlineCountLastApplied = seq;
+    displayedCount = (count === null || count === undefined) ? '—' : count;
+  }
+
+  // Normal in-order: fetchOnlineCount (seq=1, count=1), then heartbeat (seq=2, count=1)
+  updateOnlineBadge(1, ++onlineCountSeq);
+  assert.equal(displayedCount, 1);
+  updateOnlineBadge(1, ++onlineCountSeq);
+  assert.equal(displayedCount, 1);
+});
+
+// ============================================================================
+// P14: DO invocation pattern — env.PRESENCE_DO must NOT have a .fetch method
+// (must use idFromName + get + stub.fetch). This is the core RCA fix.
+// ============================================================================
+
+test('P14.do-namespace-pattern: env.PRESENCE_DO has NO .fetch method (must use idFromName+get)', () => {
+  // The mock binding mimics a real DurableObjectNamespace: it has idFromName,
+  // get, etc. but NO .fetch. This enforces that the controller uses the
+  // standard pattern. If someone re-introduces env.PRESENCE_DO.fetch(), the
+  // mock (and this test) will catch it.
+  const PresenceDO = loadPresenceDOClass();
+  const binding = createMockPresenceDOBinding(PresenceDO);
+  assert.equal(typeof binding.fetch, 'undefined',
+    'env.PRESENCE_DO must NOT have a .fetch method (use idFromName+get+stub.fetch)');
+  assert.equal(typeof binding.idFromName, 'function', 'must have idFromName');
+  assert.equal(typeof binding.get, 'function', 'must have get');
+  const id = binding.idFromName('test');
+  const stub = binding.get(id);
+  assert.equal(typeof stub.fetch, 'function', 'stub from get() must have .fetch');
+});
+
+test('P14.controller-uses-namespace-pattern: sessions.js uses idFromName+get+stub.fetch', () => {
+  // Source-level check: src/controllers/sessions.js must use the standard
+  // DO invocation pattern, NOT env.PRESENCE_DO.fetch() directly. We strip
+  // comments before checking so the historical-comment reference to the old
+  // pattern doesn't false-positive.
+  const SESSIONS_SRC_RAW = fs.readFileSync(path.join(__dirname, 'src/controllers/sessions.js'), 'utf8');
+  // Strip line comments and block comments
+  const SESSIONS_SRC = SESSIONS_SRC_RAW
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  assert.ok(SESSIONS_SRC.includes('idFromName'),
+    'sessions.js must use idFromName (standard DO pattern)');
+  assert.ok(SESSIONS_SRC.includes('env.PRESENCE_DO.get('),
+    'sessions.js must use env.PRESENCE_DO.get(id) (standard DO pattern)');
+  assert.ok(!/env\.PRESENCE_DO\.fetch\s*\(/.test(SESSIONS_SRC),
+    'sessions.js must NOT call env.PRESENCE_DO.fetch() directly (INVALID on a real DurableObjectNamespace)');
+});
+
+test('P14.ttl-increased: SESSION_TTL >= 300s (safety margin beyond 180s heartbeat)', () => {
+  // RCA: SESSION_TTL was 240s, heartbeat is 180s — a single failed heartbeat
+  // (CPU exceededResources) would let the session expire before the next
+  // retry. Increasing TTL to 360s gives a 180s margin (one missed heartbeat
+  // does NOT immediately offline the user).
+  const cfg = parseJsonc(WRANGLER_SRC);
+  const devTtl = cfg.vars?.SESSION_TTL;
+  const stagingTtl = cfg.env?.staging?.vars?.SESSION_TTL;
+  const prodTtl = cfg.env?.production?.vars?.SESSION_TTL;
+  assert.ok(devTtl >= 300, `dev SESSION_TTL must be >= 300 (got ${devTtl})`);
+  assert.ok(stagingTtl >= 300, `staging SESSION_TTL must be >= 300 (got ${stagingTtl})`);
+  assert.ok(prodTtl >= 300, `production SESSION_TTL must be >= 300 (got ${prodTtl})`);
 });

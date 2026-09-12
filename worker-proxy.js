@@ -13195,13 +13195,17 @@ class PresenceDO {
     this.state = state;
     this.sessions = new Map(); // userId → expiresAtMs
     this._alarmSet = false;
+    // Hydration state for snapshot persistence. On DO eviction/restart the
+    // in-memory Map is lost. _ensureHydrated() reads the last snapshot from
+    // storage (written by alarm()) so sessions survive eviction and the
+    // online count does NOT drop to 0 until sessions actually expire.
     this._hydrated = false;
     this._hydratePromise = null;
   }
 
   // ── Hydration: restore sessions from storage snapshot ──
-  // Uses Promise memoization to prevent concurrent hydration.
-  // If storage fails, degrades gracefully to empty Map (memory-only mode).
+  // Uses Promise memoization so concurrent fetch() calls hydrate only once.
+  // On storage failure, degrades gracefully to an empty Map (memory-only).
   async _ensureHydrated() {
     if (this._hydrated) return;
     if (!this._hydratePromise) {
@@ -13210,11 +13214,16 @@ class PresenceDO {
           const snapshot = await this.state.storage.get('sessions_snapshot');
           if (snapshot && Array.isArray(snapshot)) {
             const now = Date.now();
+            let restored = 0;
             for (const [userId, expiresAt] of snapshot) {
               // Filter out already-expired entries during hydration
               if (expiresAt > now) {
                 this.sessions.set(userId, expiresAt);
+                restored++;
               }
+            }
+            if (restored > 0) {
+              console.log(`[PresenceDO] hydrated ${restored} session(s) from snapshot`);
             }
           }
         } catch {
@@ -13233,7 +13242,7 @@ class PresenceDO {
     const ttl = Number(url.searchParams.get('ttl')) || 240000; // default 240s
     const now = Date.now();
 
-    // Hydrate from storage snapshot before any session access
+    // Hydrate from storage snapshot before any session access (eviction recovery)
     await this._ensureHydrated();
 
     // Ensure alarm is set (idempotent)
@@ -13262,12 +13271,21 @@ class PresenceDO {
     if (action === 'count') {
       // Lazy prune: remove expired entries (in case alarm didn't fire recently)
       // Only check entries that are definitely expired (cheap O(n) but n is small)
+      let pruned = 0;
       for (const [uid, expiresAt] of this.sessions) {
         if (expiresAt <= now) {
           this.sessions.delete(uid);
+          pruned++;
         }
       }
-      return Response.json({ count: this.sessions.size });
+      const count = this.sessions.size;
+      // RCA-ONLINE-COUNT: minimal diagnostic — log only when count is 0 AND
+      // we pruned something this call (indicates session-expiry path), so we
+      // can correlate with frontend 1→0 reports without logging every request.
+      if (count === 0 && pruned > 0) {
+        console.log(`[PresenceDO] count=0 after pruning ${pruned} expired session(s)`);
+      }
+      return Response.json({ count });
     }
 
     return Response.json({ error: 'unknown action' }, { status: 404 });
@@ -13275,24 +13293,25 @@ class PresenceDO {
 
   async alarm() {
     const now = Date.now();
-
-    // Hydrate before pruning (in case alarm fires before any fetch on a fresh DO)
+    // Hydrate before pruning in case alarm fires before any fetch on a fresh DO
     await this._ensureHydrated();
-
+    const before = this.sessions.size;
     // Full prune: remove all expired entries
     for (const [userId, expiresAt] of this.sessions) {
       if (expiresAt <= now) {
         this.sessions.delete(userId);
       }
     }
-
-    // Snapshot: persist current sessions to storage for eviction recovery
+    const after = this.sessions.size;
+    // Snapshot: persist current sessions to storage for eviction recovery.
+    // Always write — the write is cheap (single key, small array) and the
+    // "skip if unchanged" optimization added complexity (and a bug) for
+    // minimal benefit. The snapshot reflects the post-prune state.
     try {
       await this.state.storage.put('sessions_snapshot', Array.from(this.sessions.entries()));
     } catch {
       // Storage write failure → snapshot not updated, old snapshot used on next eviction
     }
-
     // Reschedule alarm for 60s
     try {
       await this.state.storage.setAlarm(now + 60000);

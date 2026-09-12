@@ -24,14 +24,27 @@ export function createSessionHandlers(deps) {
   let _onlineCountCache = { count: null, expiresAt: 0 };
   const ONLINE_COUNT_CACHE_TTL_MS = 30000; // 30s
 
-  // Helper: call PresenceDO
+  // PRESENCE_DO singleton name — all presence requests route to this single DO
+  // instance (per worker environment). Using idFromName + get is the standard
+  // Durable Object invocation pattern. Previously env.PRESENCE_DO.fetch() was
+  // called directly which is INVALID on a DurableObjectNamespace (only stubs
+  // returned by .get() have a .fetch method) → silent TypeError → KV fallback
+  // ran on every request, defeating PresenceDO + snapshot persistence entirely.
+  const PRESENCE_DO_NAME = 'presence-singleton';
+
+  // Helper: call PresenceDO via the standard Durable Object invocation pattern.
+  // Returns the parsed JSON body, or null on any failure (binding missing,
+  // DO fetch throws, JSON parse fails). Caller must handle null by falling
+  // back to the legacy KV path.
   async function _callPresenceDO(env, action, userId, ttl) {
     if (!env.PRESENCE_DO) return null;
     const params = new URLSearchParams({ action });
     if (userId) params.set('userId', userId);
     if (ttl) params.set('ttl', String(ttl));
     try {
-      const doResponse = await env.PRESENCE_DO.fetch(`https://presence-do/internal?${params}`);
+      const id = env.PRESENCE_DO.idFromName(PRESENCE_DO_NAME);
+      const stub = env.PRESENCE_DO.get(id);
+      const doResponse = await stub.fetch(`https://presence-do/internal?${params}`);
       return await doResponse.json();
     } catch (e) {
       console.warn('[SESSIONS] PresenceDO call failed:', e?.message);
@@ -126,27 +139,37 @@ export function createSessionHandlers(deps) {
 
     // PRESENCE DO PATH (primary — race-free)
     if (env.PRESENCE_DO) {
-      // Check Worker cache first (30s TTL — reduces DO requests by ~95%)
+      // Check Worker cache first (30s TTL — reduces DO requests by ~95%).
+      // NOTE: count=0 is NOT cached — a transient 0 (from a stale DO isolate
+      // or a race between session-expiry and heartbeat) would otherwise be
+      // served for up to 30s, causing the visible 1→0 jump. By invalidating
+      // the cache on 0, the next online-count request always re-queries the
+      // DO and picks up the freshest value. The cost is one extra DO call
+      // only when count is genuinely 0, which is rare (single-user or empty).
       const now = Date.now();
-      if (_onlineCountCache.count !== null && now < _onlineCountCache.expiresAt) {
+      if (_onlineCountCache.count !== null && _onlineCountCache.count > 0 && now < _onlineCountCache.expiresAt) {
         return jsonResponse({
           status: 'success',
           count: _onlineCountCache.count,
         }, {}, env);
       }
-      // Cache miss → query DO
+      // Cache miss, expired, or cached-0 (re-verify) → query DO
       try {
         const doResult = await _callPresenceDO(env, 'count');
         if (doResult && typeof doResult.count === 'number') {
-          _onlineCountCache = { count: doResult.count, expiresAt: now + ONLINE_COUNT_CACHE_TTL_MS };
+          // Only cache non-zero counts. A 0 is returned to the caller but
+          // NOT stored in the cache, so the next request re-queries the DO.
+          if (doResult.count > 0) {
+            _onlineCountCache = { count: doResult.count, expiresAt: now + ONLINE_COUNT_CACHE_TTL_MS };
+          }
           return jsonResponse({
             status: 'success',
             count: doResult.count,
           }, {}, env);
         }
       } catch (e) {
-        // DO failed — return cached value if available, else fall through to KV
-        if (_onlineCountCache.count !== null) {
+        // DO failed — return cached value if available and non-zero, else fall through to KV
+        if (_onlineCountCache.count !== null && _onlineCountCache.count > 0) {
           return jsonResponse({ status: 'success', count: _onlineCountCache.count }, {}, env);
         }
         console.warn('[SESSIONS] PresenceDO count failed, falling back to KV:', e?.message);

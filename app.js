@@ -445,6 +445,15 @@ let _subTabVisibleCounts = {};
 let lastMarketFetchTime = 0;
 // R3-4: App visibility tracking — polling pauses when Mini App is hidden
 let _appVisible = true;
+// Online-count sequence guard — monotonically increasing token that each
+// online-count-producing request (heartbeat or fetchOnlineCount) captures
+// BEFORE its await. updateOnlineBadge refuses to apply a response whose
+// captured seq is older than the latest applied seq, so a slow stale
+// fetchOnlineCount (e.g. 600s interval) cannot overwrite a fresher
+// heartbeat response. Mirrors the pattern used by _notifReqSeq for
+// notifications. See RCA-ONLINE-COUNT-1-TO-0 in worklog.
+let _onlineCountSeq = 0;
+let _onlineCountLastApplied = -1;
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
@@ -5723,6 +5732,10 @@ async function sendSessionHeartbeat() {
     // milliseconds. The guard ensures only one heartbeat is in-flight at a time.
     if (sendSessionHeartbeat._inFlight) return;
     sendSessionHeartbeat._inFlight = true;
+    // Capture sequence token BEFORE the await so a later stale response
+    // (from a fetchOnlineCount that started earlier but resolves slower)
+    // cannot overwrite this fresher heartbeat result.
+    const mySeq = ++_onlineCountSeq;
     try {
         const params = new URLSearchParams({ user_id: uid });
         if (sessionId) params.set('session_id', sessionId);
@@ -5731,7 +5744,7 @@ async function sendSessionHeartbeat() {
             sessionId = data.session_id;
             localStorage.setItem('app_session_id', sessionId);
         }
-        updateOnlineBadge(data.online_count);
+        updateOnlineBadge(data.online_count, mySeq);
         // First successful heartbeat = auth confirmed → load alerts lazily (only once)
         if (!_alertsLoaded && (!alerts.length || alerts.every(a => !a.serverId))) {
             _alertsLoaded = true;
@@ -5753,9 +5766,14 @@ async function sendSessionHeartbeat() {
  */
 async function fetchOnlineCount() {
     if (!canRunSessionRequests()) return;
+    // Capture sequence token BEFORE the await so a stale fetchOnlineCount
+    // response (e.g. the slow 600s interval request that started before a
+    // fresher heartbeat completed) cannot overwrite the newer heartbeat
+    // value. Mirrors the _notifReqSeq pattern used for notifications.
+    const mySeq = ++_onlineCountSeq;
     try {
         const data = await apiFetch('/api/sessions/online');
-        updateOnlineBadge(data.count);
+        updateOnlineBadge(data.count, mySeq);
     } catch (_) {}
 }
 
@@ -5764,7 +5782,19 @@ async function fetchOnlineCount() {
  * ورودی: پارامترهای `count` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-function updateOnlineBadge(count) {
+function updateOnlineBadge(count, seq) {
+    // Online-count sequence guard: refuse to apply a response whose captured
+    // seq is older than the latest applied seq. This prevents a slow stale
+    // fetchOnlineCount (e.g. 600s interval, started before a heartbeat that
+    // already set the badge to 1) from later overwriting the fresher value
+    // with a stale 0. A response with no seq arg (legacy/defensive) bypasses
+    // the guard.
+    if (typeof seq === 'number' && seq < _onlineCountLastApplied) {
+        return;
+    }
+    if (typeof seq === 'number') {
+        _onlineCountLastApplied = seq;
+    }
     // Online badge removed from profile page — no longer displayed
     // Only update live-count in market page header if it exists
     const liveCountEl = document.getElementById('live-count');
@@ -15786,6 +15816,22 @@ window.addEventListener('pageshow', (event) => {
                 tryLateBootstrap();
             }
         }
+        // RCA-ONLINE-COUNT FIX: On bfcache restore, the page may have been
+        // frozen long enough for the PresenceDO session to expire (TTL=360s
+        // now, but a long minimize can exceed it). visibilitychange:visible
+        // does NOT reliably fire on Telegram MiniApp restore on all platforms,
+        // so _startAllPolling() may not have re-run. Force a fresh heartbeat
+        // here to re-register the user immediately, and also kick _startAllPolling
+        // in case it didn't run (idempotent — no-ops if already running). This
+        // prevents the visible 1→0 jump that occurred when the user reopened
+        // the MiniApp after a long background stay and fetchOnlineCount hit
+        // before any heartbeat could re-register.
+        _appVisible = true;
+        _startAllPolling();
+        ensureTelegramAuthReady(8000).then(() => {
+            if (!_appVisible) return;
+            sendSessionHeartbeat();
+        }).catch(() => {});
     }
     _pageHiddenAt = 0;
 });
