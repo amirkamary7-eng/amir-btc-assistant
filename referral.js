@@ -1751,7 +1751,11 @@ const ReferralApp = (() => {
       // No force: true here — if data matches cached signature, skip re-render.
       // If signature differs, renderPage() will call updateDataOnly() (targeted
       // DOM updates) instead of page.innerHTML (wholesale rebuild) — F-1 fix.
-      renderPage(data);
+      // ROOT CAUSE FIX (skeleton persists): on no-cache first open, the DOM is
+      // skeleton (buildSkeleton), not buildPage. updateDataOnly queries
+      // .rc-hero, .rc-stats-grid, etc. which don't exist in skeleton → no-op.
+      // force: !hasCache ensures full buildPage rebuild when skeleton is showing.
+      renderPage(data, { force: !hasCache });
 
       // Persist to localStorage for instant render on next open
       // P2 FIX: Add 10-minute TTL matching wallet_state_cache pattern
