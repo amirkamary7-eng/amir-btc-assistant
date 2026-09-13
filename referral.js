@@ -1620,6 +1620,15 @@ const ReferralApp = (() => {
   // PUBLIC ACTIONS
   // ═══════════════════════════════════════════════════════════
   function openReferral() {
+    // [REFERRAL-RCA] Instrumentation point 1: entry state
+    try {
+      const _rcaPage = document.getElementById('referral-full-page');
+      console.log('[REFERRAL-RCA] open:start', JSON.stringify({
+        _referralOpen,
+        pageExists: !!_rcaPage,
+        pageHasOpen: !!(_rcaPage && _rcaPage.classList.contains('open')),
+      }));
+    } catch (_) {}
     const page = document.getElementById('referral-full-page');
     if (!page) return;
     // Guard: if already open, do nothing (prevents duplicate tgBackPush entries
@@ -1630,6 +1639,18 @@ const ReferralApp = (() => {
     applyTierVars(page, 'Bronze'); // default until summary loads
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
+
+    // [REFERRAL-RCA] Instrumentation point 2: overlay opened
+    try {
+      const _rcaCs = getComputedStyle(page);
+      console.log('[REFERRAL-RCA] open:overlay-open', JSON.stringify({
+        _referralOpen,
+        pageHasOpen: page.classList.contains('open'),
+        display: _rcaCs.display,
+        visibility: _rcaCs.visibility,
+        opacity: _rcaCs.opacity,
+      }));
+    } catch (_) {}
 
     // Telegram Back button: push a close handler so pressing Back closes
     // Referral instead of being a no-op. The closeFn checks _referralOpen
@@ -1744,6 +1765,15 @@ const ReferralApp = (() => {
   }
 
   function closeReferral() {
+    // [REFERRAL-RCA] Instrumentation point 3: close entry state
+    try {
+      const _rcaPage = document.getElementById('referral-full-page');
+      console.log('[REFERRAL-RCA] close:start', JSON.stringify({
+        _referralOpen,
+        pageExists: !!_rcaPage,
+        pageHasOpen: !!(_rcaPage && _rcaPage.classList.contains('open')),
+      }));
+    } catch (_) {}
     // Guard: if already closed, do nothing (prevents double-close from
     // in-page back button calling closeReferral while tgBackPop's closeFn
     // is also calling closeReferral).

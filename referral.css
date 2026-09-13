@@ -837,7 +837,6 @@
   transition: transform 0.2s var(--rc-ease-soft), border-color 0.2s ease;
 }
 .rc-mission-card:hover {
-  transform: translateY(-2px);
   border-color: rgba(245,166,35,0.18);
 }
 .rc-mission-done {
@@ -906,7 +905,6 @@
   transition: transform 0.2s var(--rc-ease-soft), border-color 0.2s ease;
 }
 .rc-ach-card:hover {
-  transform: translateY(-2px);
   border-color: rgba(var(--ach-rgb), 0.30);
 }
 .rc-ach-unlocked {
