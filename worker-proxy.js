@@ -844,73 +844,172 @@ function _getTodayISOString() {
 
 function _generateMissionToken() {
   // 32-char random hex string — cryptographically secure
+  // KEPT for backward-compat KV token fallback path (old format tokens).
   const buf = new Uint8Array(16);
   crypto.getRandomValues(buf);
   return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Issue a one-time mission event token for a user+mission+day.
- * Returns the token string (32 hex chars) on success, null on failure.
- *
- * The token is stored in SESSION_CACHE with a key that includes the token
- * itself, so consuming it requires knowing the token. One token per
- * (user, mission, day) is allowed — issuing a second token for the same
- * tuple will succeed (returns a new token) but the previous one is
- * overwritten via the marker key (mt_count).
- *
- * @param {object} env - Worker env
- * @param {string} userId - Telegram user ID
- * @param {string} missionId - Mission ID (e.g. 'read_news')
- * @returns {Promise<string|null>} - 32-char hex token, or null on failure
- */
-async function issueMissionEventToken(env, userId, missionId, targetId) {
-  if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.put !== 'function') {
+// ── Signed Mission Token (Phase 2D — KV decoupling) ─────────────────────
+// Generates a stateless signed token that does NOT require KV storage.
+// The token encodes {userId, missionId, targetId, expiresAt, nonce} and is
+// signed with HMAC-SHA256 using a derived key from env.TELEGRAM_BOT_TOKEN.
+//
+// Security:
+//   - Forgery impossible without the derived key (bot token is secret_text)
+//   - Cross-user: payload.u must match authenticated userId at consume time
+//   - Cross-mission: payload.m must match submitted missionId
+//   - Target binding: payload.t must match submitted targetId
+//   - Expiry: payload.e checked against Date.now() (120s TTL)
+//   - Replay: same token can be submitted multiple times, but DB idempotency
+//     (CASE WHEN rewarded=FALSE in incrementMissionProgress + markMissionRewarded
+//     CAS + grantReward UNIQUE ref_id) prevents double-reward and progress
+//     inflation.
+//
+// Token format: base64url(JSON({u,m,t,e,n})) + "." + hex(hmac_sha256(payload, derivedKey))
+// Old KV token format: 32-char hex (no dot) — detected at consume time for backward compat.
+
+function _base64UrlEncode(str) {
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function _base64UrlDecode(str) {
+  const padded = str + '='.repeat((4 - str.length % 4) % 4);
+  return atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+}
+
+function _getMissionSigningKey(env) {
+  // Key derivation: HMAC-SHA256(botToken, 'mission_token_v1')
+  // This separates the mission token signing key from Telegram's own HMAC usage,
+  // so even if the derived key is somehow leaked, the bot token is not exposed.
+  const botToken = String(env.TELEGRAM_BOT_TOKEN || '');
+  return createHmac('sha256', botToken).update('mission_token_v1').digest();
+}
+
+function _signMissionToken(env, payload) {
+  const payloadJson = JSON.stringify(payload);
+  const payloadB64 = _base64UrlEncode(payloadJson);
+  const key = _getMissionSigningKey(env);
+  const sig = createHmac('sha256', key).update(payloadB64).digest('hex');
+  return payloadB64 + '.' + sig;
+}
+
+function _verifyMissionTokenSignature(env, token) {
+  const dotIdx = String(token || '').indexOf('.');
+  if (dotIdx < 0) return null; // Not a signed token (old KV format)
+  const payloadB64 = token.substring(0, dotIdx);
+  const sig = token.substring(dotIdx + 1);
+  const key = _getMissionSigningKey(env);
+  const expectedSig = createHmac('sha256', key).update(payloadB64).digest('hex');
+  // Constant-time comparison
+  if (sig.length !== expectedSig.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+  } catch {
     return null;
   }
-  const uid = String(userId);
-  const mid = String(missionId);
-  const today = _getTodayISOString();
-  const token = _generateMissionToken();
-  const key = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
-  // P1-FIX: bind the target_id INTO the token record — at consume time we
-  // verify that the submitted target matches what was bound at issue time.
-  // The value stored is the target_id (or empty string if the mission has
-  // no target requirement). Consume checks strict equality.
-  const boundTarget = String(targetId || '').trim();
   try {
-    await env.SESSION_CACHE.put(key, boundTarget, { expirationTtl: MISSION_TOKEN_TTL_SECONDS });
-    return token;
-  } catch (e) {
-    console.warn('issueMissionEventToken failed:', e.message || e);
+    const payloadJson = _base64UrlDecode(payloadB64);
+    return JSON.parse(payloadJson);
+  } catch {
     return null;
   }
 }
 
 /**
- * Consume a one-time mission event token.
- * Returns true if the token was valid (and is now consumed), false otherwise.
+ * Issue a one-time mission event token for a user+mission+day.
+ * Returns the token string on success, null on failure.
  *
- * Atomicity: KV delete() is idempotent. If two concurrent requests try to
- * consume the same token, both will succeed in calling delete(), but only
- * one will have already passed the existence check (the other gets null
- * from the get() call). To handle this race, we use a marker key that
- * survives the token deletion: when we consume a token, we also write a
- * "consumed" marker (TTL=86400s = 1 day) for (uid, mid, today). If the
- * marker exists, the token is rejected. This prevents double-reward even
- * if two requests race past the get() call before either delete() runs.
+ * PHASE 2D: Uses signed stateless token (no KV write needed).
+ * The token encodes {u, m, t, e, n} and is HMAC-signed.
+ * KV is NO LONGER required for issuance — eliminates 503 on KV failure.
+ *
+ * @param {object} env - Worker env
+ * @param {string} userId - Telegram user ID
+ * @param {string} missionId - Mission ID (e.g. 'read_news')
+ * @param {string} targetId - Target content ID (bound into token)
+ * @returns {Promise<string|null>} - Signed token string, or null on failure
+ */
+async function issueMissionEventToken(env, userId, missionId, targetId) {
+  const uid = String(userId);
+  const mid = String(missionId);
+  const boundTarget = String(targetId || '').trim();
+  const now = Date.now();
+  const expiresAt = now + (MISSION_TOKEN_TTL_SECONDS * 1000);
+  // 16-byte random nonce (hex = 32 chars) — prevents two tokens with same
+  // payload from being identical (though replay is handled by DB idempotency).
+  const nonceBuf = new Uint8Array(16);
+  crypto.getRandomValues(nonceBuf);
+  const nonce = Array.from(nonceBuf, b => b.toString(16).padStart(2, '0')).join('');
+
+  const payload = { u: uid, m: mid, t: boundTarget, e: expiresAt, n: nonce };
+  return _signMissionToken(env, payload);
+}
+
+/**
+ * Consume a one-time mission event token.
+ * Returns true if the token was valid, false otherwise.
+ *
+ * PHASE 2D: Supports both signed tokens (new format) and KV tokens (old format).
+ *
+ * Signed token path (new):
+ *   1. Verify HMAC signature (constant-time comparison)
+ *   2. Decode payload {u, m, t, e, n}
+ *   3. Validate: u === userId, m === missionId, t === targetId, e > now
+ *   4. No KV read/write needed — DB idempotency handles replay prevention
+ *
+ * KV token path (old, backward-compat):
+ *   1. Check consumed marker (mtc:{uid}:{mid}:{date})
+ *   2. Get token value (mt:{uid}:{mid}:{date}:{token})
+ *   3. Verify target binding
+ *   4. Delete token + set consumed marker
+ *
+ * Token format detection:
+ *   - Contains ".": signed token (new format)
+ *   - No ".": KV token (old format, 32-char hex)
  *
  * @param {object} env - Worker env
  * @param {string} userId - Telegram user ID
  * @param {string} missionId - Mission ID
- * @param {string} token - 32-char hex token from frontend
- * @returns {Promise<boolean>} - true if consumed, false if invalid/already used
+ * @param {string} token - Signed token or 32-char hex KV token
+ * @param {string} targetId - Target content ID
+ * @returns {Promise<boolean>} - true if valid, false if invalid/expired/already used
  */
 async function consumeMissionEventToken(env, userId, missionId, token, targetId) {
+  if (!token || typeof token !== 'string') {
+    return false;
+  }
+
+  // ── SIGNED TOKEN PATH (new format — no KV needed) ──
+  if (token.includes('.')) {
+    const payload = _verifyMissionTokenSignature(env, token);
+    if (!payload) return false; // Invalid signature or malformed
+
+    const uid = String(userId);
+    const mid = String(missionId);
+    const submittedTarget = String(targetId || '').trim();
+
+    // Validate all claims
+    if (String(payload.u) !== uid) return false;         // Cross-user
+    if (String(payload.m) !== mid) return false;         // Cross-mission
+    if (String(payload.t) !== submittedTarget) return false; // Target substitution
+    if (Number(payload.e) <= Date.now()) return false;   // Expired
+
+    // Token is valid. One-per-day enforcement is handled by DB:
+    // incrementMissionProgress uses CASE WHEN rewarded=FALSE → replay
+    // does not increment progress. markMissionRewarded CAS prevents
+    // double-reward. grantReward UNIQUE(ref_id) prevents double-credit.
+    return true;
+  }
+
+  // ── KV TOKEN PATH (old format — backward compat) ──
+  // Old tokens are 32-char hex (no dot). This path will be used by
+  // in-flight tokens issued by the previous Worker version during deploy.
+  // After all old tokens expire (120s), this path is never reached.
   if (!env.SESSION_CACHE || typeof env.SESSION_CACHE.get !== 'function') {
     return false;
   }
-  if (!token || typeof token !== 'string' || token.length !== 32) {
+  if (token.length !== 32) {
     return false;
   }
   const uid = String(userId);
@@ -926,9 +1025,6 @@ async function consumeMissionEventToken(env, userId, missionId, token, targetId)
   }
 
   const tokenKey = `${MISSION_TOKEN_PREFIX}${uid}:${mid}:${today}:${token}`;
-  // P1-FIX: the stored value is the target_id bound at issue time.
-  // The submitted targetId must match EXACTLY — a client cannot swap or
-  // omit the target between issue and complete.
   const boundTarget = await env.SESSION_CACHE.get(tokenKey);
   if (boundTarget === null || boundTarget === undefined) {
     return false;

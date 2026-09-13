@@ -76,8 +76,9 @@ module.exports = {
 `;
 
 const tokenModule = { exports: {} };
-const evaluator = new Function('require', 'module', 'exports', 'crypto', 'sharedGetTehranDateString', wrappedSrc);
-evaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, sharedGetTehranDateString);
+const { createHmac, timingSafeEqual } = require('node:crypto');
+const evaluator = new Function('require', 'module', 'exports', 'crypto', 'createHmac', 'timingSafeEqual', 'sharedGetTehranDateString', wrappedSrc);
+evaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, createHmac, timingSafeEqual, sharedGetTehranDateString);
 const {
   issueMissionEventToken,
   consumeMissionEventToken,
@@ -86,8 +87,8 @@ const {
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
-test('MISSION-001: issueMissionEventToken returns a 32-char hex token', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+test('MISSION-001: issueMissionEventToken returns a signed token string', async () => {
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '11111111';
   const missionId = 'read_news';
 
@@ -96,12 +97,11 @@ test('MISSION-001: issueMissionEventToken returns a 32-char hex token', async ()
 
   assert.ok(token, 'Token must be returned');
   assert.equal(typeof token, 'string');
-  assert.equal(token.length, 32, 'Token must be 32 chars');
-  assert.ok(/^[0-9a-f]{32}$/.test(token), 'Token must be hex');
+  assert.ok(token.includes('.'), 'Signed token must contain a dot separator');
 });
 
 test('MISSION-002: consumeMissionEventToken returns true for valid token', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '22222222';
   const missionId = 'read_news';
 
@@ -111,8 +111,13 @@ test('MISSION-002: consumeMissionEventToken returns true for valid token', async
   assert.equal(consumed, true, 'Valid token MUST be consumed successfully');
 });
 
-test('MISSION-003: Token is one-time use — second consume returns false', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+test('MISSION-003: Signed token consume succeeds — DB idempotency handles replay', async () => {
+  // PHASE 2D: Signed tokens are stateless — consume always returns true for
+  // a valid token. Replay prevention is handled by DB idempotency:
+  //   - incrementMissionProgress: CASE WHEN rewarded=FALSE (no progress inflation)
+  //   - markMissionRewarded: WHERE rewarded=FALSE (CAS, only one reward)
+  //   - grantReward: UNIQUE(ref_id) ON CONFLICT DO NOTHING (no double-credit)
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '33333333';
   const missionId = 'read_news';
 
@@ -121,63 +126,52 @@ test('MISSION-003: Token is one-time use — second consume returns false', asyn
   const c2 = await consumeMissionEventToken(env, userId, missionId, token);
 
   assert.equal(c1, true, 'First consume must succeed');
-  assert.equal(c2, false, 'Second consume MUST fail (one-time use)');
+  assert.equal(c2, true, 'Second consume also succeeds (stateless token) — DB handles replay');
 });
 
-test('MISSION-004: Replay attack rejected — used token cannot be replayed', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+test('MISSION-004: Replay returns true at token level — DB prevents double-reward', async () => {
+  // PHASE 2D: Signed tokens are stateless. The same token can be consumed
+  // multiple times at the token level (returns true each time). The DB
+  // is the authoritative safety net:
+  //   - markMissionRewarded CAS: only first call sets rewarded=TRUE
+  //   - grantReward UNIQUE(ref_id): only first call credits tokens
+  //   - incrementMissionProgress CASE WHEN rewarded=FALSE: no progress inflation
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '44444444';
   const missionId = 'read_news';
 
-  // Issue token, consume it (mission completed)
   const token = await issueMissionEventToken(env, userId, missionId);
   await consumeMissionEventToken(env, userId, missionId, token);
 
-  // Attacker tries to replay the SAME token to claim reward again
+  // Replay — token is still valid (stateless)
   const replayResult = await consumeMissionEventToken(env, userId, missionId, token);
-  assert.equal(replayResult, false, 'Replay attack MUST be rejected');
-
-  // Also verify via isMissionEventTokenConsumed
-  const isConsumed = await isMissionEventTokenConsumed(env, userId, missionId);
-  assert.equal(isConsumed, true, 'Mission should be marked as consumed');
+  assert.equal(replayResult, true, 'Replay succeeds at token level — DB prevents double-reward');
 });
 
 test('MISSION-005: Concurrent consume — DB-level idempotency is the final safety net', async () => {
-  // NOTE: This test documents a known limitation of the token-based approach.
-  // In a real KV (network-bound), the time between get() and delete() allows
-  // other concurrent requests to also pass the get() check. The KV doesn't
-  // support atomic compare-and-set, so concurrent consume of the same token
-  // could theoretically all succeed.
-  //
-  // However, the DB-level safety net (markMissionRewarded with
-  // UPDATE ... WHERE rewarded = FALSE RETURNING id) is the FINAL authority
-  // and is atomic in PostgreSQL. Even if multiple concurrent consumes
-  // succeed at the token level, only ONE will get the reward at the DB level.
-  //
-  // This test verifies the SEQUENTIAL behavior (which always works):
-  const env = { SESSION_CACHE: createMemoryKv() };
+  // PHASE 2D: Signed tokens are stateless — all consumes succeed at token level.
+  // DB idempotency is the authoritative safety net:
+  //   - markMissionRewarded CAS: only one sets rewarded=TRUE
+  //   - grantReward UNIQUE(ref_id): only one credits tokens
+  //   - incrementMissionProgress CASE WHEN rewarded=FALSE: no progress inflation
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '55555555';
   const missionId = 'read_news';
 
   const token = await issueMissionEventToken(env, userId, missionId);
 
-  // Sequential consumes — only first succeeds
+  // All consumes succeed at token level — DB is the safety net
   const c1 = await consumeMissionEventToken(env, userId, missionId, token);
   const c2 = await consumeMissionEventToken(env, userId, missionId, token);
   const c3 = await consumeMissionEventToken(env, userId, missionId, token);
 
-  assert.equal(c1, true, 'First sequential consume must succeed');
-  assert.equal(c2, false, 'Second sequential consume must fail (one-time)');
-  assert.equal(c3, false, 'Third sequential consume must fail');
-
-  // For concurrent consume, the DB-level idempotency (markMissionRewarded +
-  // UNIQUE(user_id, mission_id, daily_date) + creditTokens UNIQUE on ref_id)
-  // is the authoritative safety net. Even if multiple concurrent token consumes
-  // succeed, only ONE reward is granted at the DB level.
+  assert.equal(c1, true, 'First consume succeeds (stateless token)');
+  assert.equal(c2, true, 'Second consume succeeds (stateless token) — DB prevents double-reward');
+  assert.equal(c3, true, 'Third consume succeeds (stateless token) — DB prevents double-reward');
 });
 
 test('MISSION-006: Token from one user cannot be consumed by another user', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userA = '66666661';
   const userB = '66666662';
   const missionId = 'read_news';
@@ -195,7 +189,7 @@ test('MISSION-006: Token from one user cannot be consumed by another user', asyn
 });
 
 test('MISSION-007: Token from one mission cannot be used for another mission', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '77777777';
   const mission1 = 'read_news';
   const mission2 = 'read_analysis';
@@ -209,7 +203,7 @@ test('MISSION-007: Token from one mission cannot be used for another mission', a
 });
 
 test('MISSION-008: Invalid token formats rejected', async () => {
-  const env = { SESSION_CACHE: createMemoryKv() };
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '88888888';
   const missionId = 'read_news';
 
@@ -227,29 +221,26 @@ test('MISSION-008: Invalid token formats rejected', async () => {
   assert.equal(await consumeMissionEventToken(env, userId, missionId, 'z'.repeat(32)), false);
 });
 
-test('MISSION-009: KV unavailable — issue returns null, consume returns false (fail-safe)', async () => {
-  // No SESSION_CACHE binding
-  const env1 = {};
+test('MISSION-009: KV unavailable — signed token issue still works (no KV dependency)', async () => {
+  // PHASE 2D: Signed tokens do NOT require KV. Issue should succeed
+  // even with no SESSION_CACHE binding.
+  const env1 = { TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const token = await issueMissionEventToken(env1, '99999999', 'read_news');
-  assert.equal(token, null, 'Issue must return null if KV unavailable');
+  assert.ok(token, 'Issue must succeed without KV (signed token)');
+  assert.ok(token.includes('.'), 'Token must be signed format');
 
-  // SESSION_CACHE present but missing methods
-  const env2 = { SESSION_CACHE: {} };
-  const token2 = await issueMissionEventToken(env2, '99999999', 'read_news');
-  assert.equal(token2, null);
-
-  const consumed = await consumeMissionEventToken(env2, '99999999', 'read_news', 'a'.repeat(32));
-  assert.equal(consumed, false, 'Consume must return false if KV unavailable');
+  // Consume also works without KV (signed token verification)
+  const consumed = await consumeMissionEventToken(env1, '99999999', 'read_news', token);
+  assert.equal(consumed, true, 'Consume must succeed without KV (signed token)');
 });
 
-test('MISSION-010: Multiple issues per day allowed but consume marker blocks double-reward', async () => {
-  // Scenario: User opens news tab, gets token, completes mission.
-  // User opens news tab again later same day, gets a new token.
-  // But they cannot complete the mission AGAIN (already rewarded).
-  // The mission_progress UNIQUE(user_id, mission_id, daily_date) + rewarded flag
-  // handles this at the DB level. The token mechanism handles it at the API level
-  // via the consumed marker.
-  const env = { SESSION_CACHE: createMemoryKv() };
+test('MISSION-010: Multiple issues allowed — DB CASE WHEN rewarded=FALSE prevents progress inflation', async () => {
+  // PHASE 2D: Signed tokens are stateless — multiple tokens can be issued
+  // and consumed. One-per-day enforcement is handled by DB:
+  //   - incrementMissionProgress: CASE WHEN rewarded=FALSE → no increment if already rewarded
+  //   - markMissionRewarded CAS: only one reward
+  //   - grantReward UNIQUE(ref_id): no double-credit
+  const env = { SESSION_CACHE: createMemoryKv(), TELEGRAM_BOT_TOKEN: 'test-bot-token' };
   const userId = '10101010';
   const missionId = 'read_news';
 
@@ -258,12 +249,13 @@ test('MISSION-010: Multiple issues per day allowed but consume marker blocks dou
   const c1 = await consumeMissionEventToken(env, userId, missionId, token1);
   assert.equal(c1, true, 'First action — token consumed');
 
-  // Second action same day — issue a NEW token (this is allowed)
+  // Second action same day — issue a NEW token (allowed)
   const token2 = await issueMissionEventToken(env, userId, missionId);
   assert.ok(token2, 'Second token can be issued');
   assert.notEqual(token2, token1, 'Tokens must be different');
 
-  // Try to consume — MUST fail because already consumed today
+  // Consume second token — succeeds at token level (stateless)
+  // DB CASE WHEN rewarded=FALSE prevents progress inflation
   const c2 = await consumeMissionEventToken(env, userId, missionId, token2);
-  assert.equal(c2, false, 'Second consume same day MUST fail (already consumed)');
+  assert.equal(c2, true, 'Second consume succeeds at token level — DB prevents progress inflation');
 });

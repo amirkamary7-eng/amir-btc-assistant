@@ -66,34 +66,34 @@ function loadTokenService() {
   };
   const wrapped = `${TOKEN_SERVICE_SRC}\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };`;
   const mod = { exports: {} };
-  new Function('module', 'exports', 'sharedGetTehranDateString', wrapped)(mod, mod.exports, sharedGetTehranDateString);
+  const { createHmac, timingSafeEqual } = require('node:crypto');
+  new Function('module', 'exports', 'sharedGetTehranDateString', 'createHmac', 'timingSafeEqual', wrapped)(mod, mod.exports, sharedGetTehranDateString, createHmac, timingSafeEqual);
   return mod.exports;
 }
 
 // ── P1 Tests ───────────────────────────────────────────────────────────────
 
-test('P1-1: issueMissionEventToken stores target_id (not just "1")', async () => {
-  const { issueMissionEventToken } = loadTokenService();
-  const kv = createMemoryKv();
-  const env = { SESSION_CACHE: kv };
+test('P1-1: issueMissionEventToken binds target_id into signed token', async () => {
+  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const env = { TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'read_news', 'article_123');
-  assert.ok(token && token.length === 32, 'token issued');
+  assert.ok(token, 'token issued');
+  assert.ok(token.includes('.'), 'token is signed format (contains dot)');
 
-  // The KV value must be the target_id, not '1'
-  // FA-7: key now uses Tehran date (not UTC) — match the implementation
-  const tehranToday = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date());
-  const key = `mt:${'u1'}:${'read_news'}:${tehranToday}:${token}`;
-  const stored = await kv.get(key);
-  assert.equal(stored, 'article_123', 'stored value must be the bound target_id');
+  // The target_id is bound INTO the token payload — verify by consuming
+  // with matching target_id (success) and non-matching (failure)
+  const consumedMatch = await consumeMissionEventToken(env, 'u1', 'read_news', token, 'article_123');
+  assert.equal(consumedMatch, true, 'consume with matching target_id succeeds');
+
+  const consumedMismatch = await consumeMissionEventToken(env, 'u1', 'read_news', token, 'wrong_target');
+  assert.equal(consumedMismatch, false, 'consume with wrong target_id fails');
 });
 
 test('P1-2: consume with MATCHING target_id → success', async () => {
   const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
   const kv = createMemoryKv();
-  const env = { SESSION_CACHE: kv };
+  const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'read_news', 'article_456');
   const consumed = await consumeMissionEventToken(env, 'u1', 'read_news', token, 'article_456');
@@ -103,7 +103,7 @@ test('P1-2: consume with MATCHING target_id → success', async () => {
 test('P1-3: consume with DIFFERENT target_id → REJECTED', async () => {
   const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
   const kv = createMemoryKv();
-  const env = { SESSION_CACHE: kv };
+  const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'read_news', 'article_789');
   // Try to complete with a DIFFERENT target
@@ -114,7 +114,7 @@ test('P1-3: consume with DIFFERENT target_id → REJECTED', async () => {
 test('P1-4: consume with NO target when one was bound → REJECTED', async () => {
   const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
   const kv = createMemoryKv();
-  const env = { SESSION_CACHE: kv };
+  const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'read_news', 'article_X');
   // Try to complete without any target
@@ -125,7 +125,7 @@ test('P1-4: consume with NO target when one was bound → REJECTED', async () =>
 test('P1-5: issue with NO target + consume with NO target → success (no-target missions)', async () => {
   const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
   const kv = createMemoryKv();
-  const env = { SESSION_CACHE: kv };
+  const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'check_calendar', '');
   const consumed = await consumeMissionEventToken(env, 'u1', 'check_calendar', token, '');

@@ -816,8 +816,12 @@ export function createRewardCenterRepository(deps) {
            ON CONFLICT (user_id, mission_id, week_start)
            WHERE week_start IS NOT NULL
            DO UPDATE SET
-             progress_count = mission_progress.progress_count + 1,
-             completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+             progress_count = CASE WHEN mission_progress.rewarded = FALSE
+               THEN LEAST(mission_progress.progress_count + 1, mission_progress.target_count)
+               ELSE mission_progress.progress_count END,
+             completed = CASE WHEN mission_progress.rewarded = FALSE
+               THEN (mission_progress.progress_count + 1 >= mission_progress.target_count)
+               ELSE mission_progress.completed END,
              updated_at = NOW()
            RETURNING *`,
           [String(userId), String(missionId), Number(targetCount), tehranToday, weekStart],
@@ -836,8 +840,12 @@ export function createRewardCenterRepository(deps) {
            VALUES ($1, $2, 1, $3, ($3 <= 1), FALSE, $4)
            ON CONFLICT (user_id, mission_id, daily_date)
            DO UPDATE SET
-             progress_count = mission_progress.progress_count + 1,
-             completed = (mission_progress.progress_count + 1 >= mission_progress.target_count),
+             progress_count = CASE WHEN mission_progress.rewarded = FALSE
+               THEN LEAST(mission_progress.progress_count + 1, mission_progress.target_count)
+               ELSE mission_progress.progress_count END,
+             completed = CASE WHEN mission_progress.rewarded = FALSE
+               THEN (mission_progress.progress_count + 1 >= mission_progress.target_count)
+               ELSE mission_progress.completed END,
              updated_at = NOW()
            RETURNING *`,
           [String(userId), String(missionId), Number(targetCount), tehranToday],
