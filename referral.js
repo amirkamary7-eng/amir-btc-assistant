@@ -1101,11 +1101,10 @@ const ReferralApp = (() => {
   }
 
   function runEntryAnimations() {
-    // Count-up numbers
+    // Count-up numbers — set final value immediately (no animation)
     document.querySelectorAll('[data-countup]').forEach(el => {
       const target = Number(el.getAttribute('data-countup')) || 0;
-      if (target > 0) animateCountUp(el, target);
-      else el.textContent = '0';
+      el.textContent = formatNumber(target);
     });
 
     // Progress bars

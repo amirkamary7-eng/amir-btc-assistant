@@ -107,7 +107,7 @@
   -webkit-overflow-scrolling: touch;
   display: none;
   padding: 0;
-  animation: rcSlideUp 0.32s var(--rc-ease);
+  animation: none;
   font-family: inherit;
   color: var(--rc-text);
 }
@@ -160,7 +160,7 @@
 .rc-brand-quote {
   display: flex; align-items: center; gap: 12px;
   padding: 16px 20px 6px;
-  animation: rcFadeIn 0.5s var(--rc-ease) 0.05s both;
+  animation: none;
 }
 .rc-brand-quote-line {
   flex: 1; height: 1px;
@@ -194,7 +194,7 @@
     0 8px 24px rgba(0, 0, 0, 0.35),
     0 0 40px rgba(var(--tier-rgb), 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  animation: rcFadeIn 0.5s var(--rc-ease) 0.1s both;
+  animation: none;
 }
 
 .rc-hero-bg {
@@ -316,7 +316,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(255,255,255,0.05);
   border-radius: 16px; padding: 14px;
-  animation: rcFadeIn 0.5s var(--rc-ease) 0.15s both;
+  animation: none;
   transition: border-color 0.22s ease;
 }
 .rc-link-card:hover { border-color: rgba(245,166,35,0.18); }
@@ -389,7 +389,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(245,166,35,0.18);
   border-radius: 16px; padding: 14px;
-  animation: rcFadeIn 0.4s var(--rc-ease) both;
+  animation: none;
 }
 .rc-qr-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -434,7 +434,7 @@
   border: 1px solid rgba(255,255,255,0.05);
   border-radius: 16px; padding: 14px;
   display: flex; flex-direction: column; gap: 6px; align-items: center;
-  animation: rcFadeIn 0.5s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.22s var(--rc-ease-soft), border-color 0.22s ease;
 }
 .rc-stat-card:hover {
@@ -474,7 +474,7 @@
   border: 1px solid rgba(245,166,35,0.20);
   border-radius: 18px; padding: 14px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.30), 0 0 30px rgba(245,166,35,0.05);
-  animation: rcFadeIn 0.5s var(--rc-ease) 0.2s both;
+  animation: none;
 }
 .rc-wheel-unified-glow {
   position: absolute; top: -40%; left: 50%; transform: translateX(-50%);
@@ -643,7 +643,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: 14px; padding: 12px;
-  animation: rcFadeIn 0.5s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.22s var(--rc-ease-soft), border-color 0.22s ease;
 }
 .rc-lb-item:hover { transform: translateY(-1px); }
@@ -677,7 +677,7 @@
   letter-spacing: -0.1px;
 }
 .rc-lb-invites { font-size: 11px; color: var(--rc-text-sub); font-weight: 600; }
-.rc-lb-crown { color: #FFD700; animation: rcBadgePop 0.6s var(--rc-ease) 0.4s both; }
+.rc-lb-crown { color: #FFD700; animation: none; }
 .rc-lb-crown svg { width: 20px; height: 20px; }
 
 /* Podium — top 3 special layout */
@@ -691,7 +691,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(var(--rank-color, 255,255,255), 0.20);
   border-radius: 14px;
-  animation: rcFadeIn 0.5s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.22s var(--rc-ease-soft);
 }
 .rc-lb-podium-slot:hover { transform: translateY(-2px); }
@@ -711,7 +711,7 @@
   position: absolute; top: -12px;
   color: var(--rank-color, #FFD700);
   filter: drop-shadow(0 2px 8px rgba(255,215,0,0.4));
-  animation: rcBadgePop 0.6s var(--rc-ease) 0.4s both;
+  animation: none;
 }
 .rc-lb-podium-crown svg { width: 22px; height: 22px; }
 .rc-lb-podium-avatar {
@@ -752,7 +752,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: 12px; padding: 10px 12px;
-  animation: rcFadeIn 0.4s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.22s var(--rc-ease-soft), border-color 0.22s ease;
 }
 .rc-lb-row:hover { transform: translateY(-1px); border-color: rgba(245,166,35,0.15); }
@@ -790,7 +790,7 @@
   background: linear-gradient(135deg, rgba(245,166,35,0.06), rgba(255,255,255,0.02));
   border: 1px solid rgba(245,166,35,0.15);
   border-radius: 12px;
-  animation: rcFadeIn 0.5s var(--rc-ease) both;
+  animation: none;
 }
 .rc-lb-your-rank > svg { width: 20px; height: 20px; color: var(--rc-accent); flex-shrink: 0; }
 .rc-lb-your-rank-info { flex: 1; min-width: 0; }
@@ -833,7 +833,7 @@
   border-radius: 14px; padding: 12px;
   display: flex; flex-direction: column; gap: 6px;
   width: 140px;
-  animation: rcFadeIn 0.4s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.2s var(--rc-ease-soft), border-color 0.2s ease;
 }
 .rc-mission-card:hover {
@@ -902,7 +902,7 @@
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   text-align: center;
   width: 120px;
-  animation: rcFadeIn 0.4s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.2s var(--rc-ease-soft), border-color 0.2s ease;
 }
 .rc-ach-card:hover {
@@ -1010,7 +1010,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: 14px; padding: 12px;
-  animation: rcFadeIn 0.4s var(--rc-ease) both;
+  animation: none;
   transition: transform 0.22s var(--rc-ease-soft), border-color 0.22s ease;
 }
 .rc-hist-item:hover {
@@ -1120,7 +1120,7 @@
   background: var(--rc-card);
   border: 1px solid rgba(255,255,255,0.04);
   border-radius: 18px;
-  animation: rcFadeIn 0.5s var(--rc-ease) both;
+  animation: none;
 }
 .rc-empty-illustration {
   position: relative;
@@ -1386,7 +1386,7 @@
 /* Result Card */
 .rc-wheel-result {
   margin-top: 16px;
-  animation: rcFadeIn 0.5s var(--rc-ease);
+  animation: none;
 }
 .rc-wheel-result-card {
   background: linear-gradient(180deg, rgba(22, 199, 132, 0.10), rgba(11, 18, 32, 0.6));
