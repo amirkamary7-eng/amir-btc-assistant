@@ -5722,7 +5722,7 @@ function renderAnalysisSlider() {
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
-async function sendSessionHeartbeat() {
+async function sendSessionHeartbeat(_rcaTrigger) {
     if (!_appVisible) return;
     const uid = getUserId();
     if (!canRunSessionRequests(uid)) return;
@@ -5736,15 +5736,20 @@ async function sendSessionHeartbeat() {
     // (from a fetchOnlineCount that started earlier but resolves slower)
     // cannot overwrite this fresher heartbeat result.
     const mySeq = ++_onlineCountSeq;
+    // [PRESENCE-RCA] A: heartbeat start
+    try { console.log('[PRESENCE-RCA] heartbeat:start', JSON.stringify({ ts: Date.now(), trigger: _rcaTrigger || 'unknown', seq: mySeq, uid: uid?.slice(-6) })); } catch (_) {}
+    const _rcaT0 = Date.now();
     try {
         const params = new URLSearchParams({ user_id: uid });
         if (sessionId) params.set('session_id', sessionId);
         const data = await apiFetch(`/api/sessions/heartbeat?${params}`, { method: 'POST' });
+        // [PRESENCE-RCA] B: heartbeat response
+        try { console.log('[PRESENCE-RCA] heartbeat:response', JSON.stringify({ ts: Date.now(), http: 200, online_count: data?.online_count, seq: mySeq, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
         if (data.session_id) {
             sessionId = data.session_id;
             localStorage.setItem('app_session_id', sessionId);
         }
-        updateOnlineBadge(data.online_count, mySeq);
+        updateOnlineBadge(data.online_count, mySeq, 'heartbeat');
         // First successful heartbeat = auth confirmed → load alerts lazily (only once)
         if (!_alertsLoaded && (!alerts.length || alerts.every(a => !a.serverId))) {
             _alertsLoaded = true;
@@ -5753,7 +5758,11 @@ async function sendSessionHeartbeat() {
         // P0-5 FIX: Removed redundant loadNotificationsFromServer() from heartbeat.
         // The dedicated 60s notification poller already handles this. Running it
         // here too caused 2× API calls every 180s (heartbeat interval).
-    } catch (e) { console.warn('heartbeat:', e); }
+    } catch (e) {
+        console.warn('heartbeat:', e);
+        // [PRESENCE-RCA] B: heartbeat error
+        try { console.log('[PRESENCE-RCA] heartbeat:error', JSON.stringify({ ts: Date.now(), seq: mySeq, dur_ms: Date.now() - _rcaT0, err: String(e?.message || e).slice(0, 100) })); } catch (_) {}
+    }
     finally {
         sendSessionHeartbeat._inFlight = false;
     }
@@ -5764,17 +5773,25 @@ async function sendSessionHeartbeat() {
  * ورودی: بدون ورودی.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
-async function fetchOnlineCount() {
+async function fetchOnlineCount(_rcaTrigger) {
     if (!canRunSessionRequests()) return;
     // Capture sequence token BEFORE the await so a stale fetchOnlineCount
     // response (e.g. the slow 600s interval request that started before a
     // fresher heartbeat completed) cannot overwrite the newer heartbeat
     // value. Mirrors the _notifReqSeq pattern used for notifications.
     const mySeq = ++_onlineCountSeq;
+    // [PRESENCE-RCA] C: online count request
+    try { console.log('[PRESENCE-RCA] online:request', JSON.stringify({ ts: Date.now(), trigger: _rcaTrigger || 'unknown', seq: mySeq })); } catch (_) {}
+    const _rcaT0 = Date.now();
     try {
         const data = await apiFetch('/api/sessions/online');
-        updateOnlineBadge(data.count, mySeq);
-    } catch (_) {}
+        // [PRESENCE-RCA] D: online count response
+        try { console.log('[PRESENCE-RCA] online:response', JSON.stringify({ ts: Date.now(), http: 200, count: data?.count, seq: mySeq, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
+        updateOnlineBadge(data.count, mySeq, _rcaTrigger || 'unknown');
+    } catch (e) {
+        // [PRESENCE-RCA] D: online count error
+        try { console.log('[PRESENCE-RCA] online:error', JSON.stringify({ ts: Date.now(), seq: mySeq, dur_ms: Date.now() - _rcaT0, err: String(e?.message || e).slice(0, 100) })); } catch (_) {}
+    }
 }
 
 /**
@@ -5782,13 +5799,21 @@ async function fetchOnlineCount() {
  * ورودی: پارامترهای `count` را دریافت می‌کند.
  * خروجی: خروجی صریحی برنمی‌گرداند و اثر آن روی وضعیت یا رابط کاربری اعمال می‌شود.
  */
-function updateOnlineBadge(count, seq) {
+function updateOnlineBadge(count, seq, _rcaSource) {
+    // [PRESENCE-RCA] F: updateOnlineBadge entry + previous DOM value
+    const _rcaEl = document.getElementById('live-count');
+    const _rcaPrevDom = _rcaEl?.innerText ?? null;
+    try { console.log('[PRESENCE-RCA] badge:entry', JSON.stringify({ ts: Date.now(), count, seq, source: _rcaSource || 'unknown', prev_dom: _rcaPrevDom, last_applied: _onlineCountLastApplied })); } catch (_) {}
+
     // Online-count sequence guard: refuse to apply a response whose captured
     // seq is older than the latest applied seq. This prevents a slow stale
     // fetchOnlineCount (e.g. 600s interval, started before a heartbeat that
     // already set the badge to 1) from later overwriting the fresher value
     // with a stale 0. A response with no seq arg (legacy/defensive) bypasses
     // the guard.
+    // [PRESENCE-RCA] E: sequence guard decision
+    const _rcaGuardAccepted = !(typeof seq === 'number' && seq < _onlineCountLastApplied);
+    try { console.log('[PRESENCE-RCA] guard:decision', JSON.stringify({ ts: Date.now(), incoming_count: count, incoming_seq: seq, last_applied: _onlineCountLastApplied, accepted: _rcaGuardAccepted })); } catch (_) {}
     if (typeof seq === 'number' && seq < _onlineCountLastApplied) {
         return;
     }
@@ -5808,6 +5833,12 @@ function updateOnlineBadge(count, seq) {
         liveCountEl.innerText = '—';
     } else {
         liveCountEl.innerText = count;
+    }
+    // [PRESENCE-RCA] F: DOM changed
+    try { console.log('[PRESENCE-RCA] badge:dom-changed', JSON.stringify({ ts: Date.now(), new_dom: liveCountEl.innerText })); } catch (_) {}
+    // [PRESENCE-RCA] Zero event — most important
+    if (count === 0) {
+        try { console.log('[PRESENCE-RCA] online_count_zero', JSON.stringify({ ts: Date.now(), source: _rcaSource || 'unknown', count, seq, prev_applied_seq: _onlineCountLastApplied, prev_dom: _rcaPrevDom, trigger: _rcaSource || 'unknown' })); } catch (_) {}
     }
 }
 
@@ -14687,7 +14718,7 @@ function switchTab(pageId, btn) {
         // Subsequent visits use local data already rendered.
         if (!tabLoaded.profile) {
             loadUser(); // loadUser internally calls loadReferralStats + WalletApp.loadProfileCard
-            fetchOnlineCount();
+            fetchOnlineCount('profile');
             tabLoaded.profile = true;
         }
     }
@@ -15724,11 +15755,11 @@ function _startAllPolling() {
         // whose _onlineCountCache (30s TTL, per-isolate) is stale,
         // returning 0 and overwriting the correct count from the heartbeat.
         // The 600s online-count interval (below) still refreshes periodically.
-        sendSessionHeartbeat();
+        sendSessionHeartbeat('startup');
     });
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
-        sendSessionHeartbeat();
+        sendSessionHeartbeat('interval');
     }, 180000));
 
     // ── Online count — 600s (all pages) ──
@@ -15738,7 +15769,7 @@ function _startAllPolling() {
     // GLOBAL header (index.html), not the profile page.
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return;
-        fetchOnlineCount();
+        fetchOnlineCount('600s_interval');
     }, 600000));
 }
 
@@ -15842,7 +15873,7 @@ window.addEventListener('pageshow', (event) => {
         _startAllPolling();
         ensureTelegramAuthReady(8000).then(() => {
             if (!_appVisible) return;
-            sendSessionHeartbeat();
+            sendSessionHeartbeat('pageshow');
         }).catch(() => {});
     }
     _pageHiddenAt = 0;

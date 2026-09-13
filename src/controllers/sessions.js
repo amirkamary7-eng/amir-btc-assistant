@@ -86,7 +86,10 @@ export function createSessionHandlers(deps) {
     // PRESENCE DO PATH (primary — race-free)
     if (env.PRESENCE_DO) {
       try {
+        const _rcaT0 = Date.now();
         const doResult = await _callPresenceDO(env, 'heartbeat', userId, ttlSeconds * 1000);
+        // [PRESENCE-RCA] backend: heartbeat DO result
+        try { console.log('[PRESENCE-RCA] backend:heartbeat', JSON.stringify({ ts: Date.now(), endpoint: 'heartbeat', do_success: !!(doResult && typeof doResult.online_count === 'number'), online_count: doResult?.online_count, dur_ms: Date.now() - _rcaT0, uid_tail: userId?.slice(-6) })); } catch (_) {}
         if (doResult && typeof doResult.online_count === 'number') {
           // Update Worker count cache
           _onlineCountCache = { count: doResult.online_count, expiresAt: Date.now() + ONLINE_COUNT_CACHE_TTL_MS };
@@ -98,11 +101,15 @@ export function createSessionHandlers(deps) {
           }, {}, env);
         }
       } catch (e) {
+        // [PRESENCE-RCA] backend: heartbeat DO failure → KV fallback
+        try { console.log('[PRESENCE-RCA] backend:heartbeat_do_fail', JSON.stringify({ ts: Date.now(), endpoint: 'heartbeat', err: String(e?.message || e).slice(0, 100), kv_fallback: true })); } catch (_) {}
         console.warn('[SESSIONS] PresenceDO heartbeat failed, falling back to KV:', e?.message);
       }
     }
 
     // KV FALLBACK (legacy — has race condition at scale but functional)
+    // [PRESENCE-RCA] backend: heartbeat KV fallback executing
+    try { console.log('[PRESENCE-RCA] backend:heartbeat_kv', JSON.stringify({ ts: Date.now(), endpoint: 'heartbeat', kv_namespace: 'SESSION_CACHE', op: 'read+write' })); } catch (_) {}
     const state = await sessionRepo.readPresenceState(env);
     sessionRepo.prunePresenceState(state, now.getTime());
     state[userId] = now.getTime() + ttlSeconds * 1000;
@@ -147,7 +154,12 @@ export function createSessionHandlers(deps) {
       // DO and picks up the freshest value. The cost is one extra DO call
       // only when count is genuinely 0, which is rare (single-user or empty).
       const now = Date.now();
-      if (_onlineCountCache.count !== null && _onlineCountCache.count > 0 && now < _onlineCountCache.expiresAt) {
+      const _rcaCacheHit = _onlineCountCache.count !== null && _onlineCountCache.count > 0 && now < _onlineCountCache.expiresAt;
+      // [PRESENCE-RCA] backend: online cache check
+      try { console.log('[PRESENCE-RCA] backend:online_cache', JSON.stringify({ ts: now, cache_hit: _rcaCacheHit, cache_count: _onlineCountCache.count, cache_expired: now >= _onlineCountCache.expiresAt })); } catch (_) {}
+      if (_rcaCacheHit) {
+        // [PRESENCE-RCA] backend: online cache HIT response
+        try { console.log('[PRESENCE-RCA] backend:online', JSON.stringify({ ts: Date.now(), endpoint: 'online', cache_hit: true, do_called: false, returned_count: _onlineCountCache.count })); } catch (_) {}
         return jsonResponse({
           status: 'success',
           count: _onlineCountCache.count,
@@ -155,7 +167,10 @@ export function createSessionHandlers(deps) {
       }
       // Cache miss, expired, or cached-0 (re-verify) → query DO
       try {
+        const _rcaT0 = Date.now();
         const doResult = await _callPresenceDO(env, 'count');
+        // [PRESENCE-RCA] backend: online DO result
+        try { console.log('[PRESENCE-RCA] backend:online', JSON.stringify({ ts: Date.now(), endpoint: 'online', cache_hit: false, do_called: true, do_success: !!(doResult && typeof doResult.count === 'number'), returned_count: doResult?.count, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
         if (doResult && typeof doResult.count === 'number') {
           // Only cache non-zero counts. A 0 is returned to the caller but
           // NOT stored in the cache, so the next request re-queries the DO.
@@ -169,6 +184,8 @@ export function createSessionHandlers(deps) {
         }
       } catch (e) {
         // DO failed — return cached value if available and non-zero, else fall through to KV
+        // [PRESENCE-RCA] backend: online DO failure → KV fallback
+        try { console.log('[PRESENCE-RCA] backend:online_do_fail', JSON.stringify({ ts: Date.now(), endpoint: 'online', err: String(e?.message || e).slice(0, 100), kv_fallback: true })); } catch (_) {}
         if (_onlineCountCache.count !== null && _onlineCountCache.count > 0) {
           return jsonResponse({ status: 'success', count: _onlineCountCache.count }, {}, env);
         }
@@ -177,6 +194,8 @@ export function createSessionHandlers(deps) {
     }
 
     // KV FALLBACK (legacy — read-only, no write)
+    // [PRESENCE-RCA] backend: online KV fallback executing
+    try { console.log('[PRESENCE-RCA] backend:online_kv', JSON.stringify({ ts: Date.now(), endpoint: 'online', kv_namespace: 'SESSION_CACHE', op: 'read' })); } catch (_) {}
     const nowMs = Date.now();
     const state = await sessionRepo.readPresenceState(env);
     sessionRepo.prunePresenceState(state, nowMs);

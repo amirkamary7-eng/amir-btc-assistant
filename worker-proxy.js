@@ -13460,7 +13460,10 @@ class PresenceDO {
 
     if (action === 'heartbeat') {
       if (!userId) return Response.json({ error: 'userId required' }, { status: 400 });
+      const _rcaBefore = this.sessions.size;
       this.sessions.set(userId, now + ttl);
+      // [PRESENCE-RCA] DO: heartbeat
+      try { console.log('[PRESENCE-RCA] do:heartbeat', JSON.stringify({ ts: now, action: 'heartbeat', uid_tail: userId?.slice(-6), sessions_before: _rcaBefore, sessions_after: this.sessions.size, returned_count: this.sessions.size })); } catch (_) {}
       return Response.json({ online_count: this.sessions.size });
     }
 
@@ -13473,6 +13476,7 @@ class PresenceDO {
     if (action === 'count') {
       // Lazy prune: remove expired entries (in case alarm didn't fire recently)
       // Only check entries that are definitely expired (cheap O(n) but n is small)
+      const _rcaBeforePrune = this.sessions.size;
       let pruned = 0;
       for (const [uid, expiresAt] of this.sessions) {
         if (expiresAt <= now) {
@@ -13481,6 +13485,8 @@ class PresenceDO {
         }
       }
       const count = this.sessions.size;
+      // [PRESENCE-RCA] DO: count
+      try { console.log('[PRESENCE-RCA] do:count', JSON.stringify({ ts: now, action: 'count', sessions_before_prune: _rcaBeforePrune, expired_sessions: pruned, sessions_after_prune: count, returned_count: count })); } catch (_) {}
       // RCA-ONLINE-COUNT: minimal diagnostic — log only when count is 0 AND
       // we pruned something this call (indicates session-expiry path), so we
       // can correlate with frontend 1→0 reports without logging every request.
