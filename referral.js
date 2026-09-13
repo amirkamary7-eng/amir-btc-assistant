@@ -32,6 +32,16 @@ const ReferralApp = (() => {
   // from Open #1 overwriting the DOM of Open #2.
   let _openGeneration = 0;
 
+  // ── Telegram Back button integration ──────────────────────────
+  // Tracks whether the Referral overlay is currently open, and whether
+  // closeReferral() was triggered by the Telegram Back button (via
+  // tgBackPop → closeFn) vs. an in-page close (back button / switchTab).
+  // This prevents double-pop and recursion:
+  //   - Telegram Back path: tgBackPop → closeFn → closeReferral (flag set, skip tgBackPop)
+  //   - In-page back path: closeReferral → tgBackPop → closeFn (no-op, _referralOpen already false)
+  let _referralOpen = false;
+  let _referralClosingFromBack = false;
+
   // =============================================
   // Tier System
   // =============================================
@@ -473,7 +483,7 @@ const ReferralApp = (() => {
   function buildSkeleton() {
     return `
       <div class="rc-header">
-        <button class="rc-back-btn" aria-label="${esc(RT('back'))}">${ICONS.back}</button>
+        <button class="rc-back-btn" onclick="ReferralApp.closeReferral()" aria-label="${esc(RT('back'))}">${ICONS.back}</button>
         <div class="rc-header-text"><h2>${esc(RT('referral_center'))}</h2></div>
       </div>
       <div class="rc-skeleton">
@@ -1613,10 +1623,26 @@ const ReferralApp = (() => {
   function openReferral() {
     const page = document.getElementById('referral-full-page');
     if (!page) return;
+    // Guard: if already open, do nothing (prevents duplicate tgBackPush entries
+    // and duplicate API calls on rapid double-tap of the referral entry card).
+    if (_referralOpen) return;
+    _referralOpen = true;
     applyDir(page);
     applyTierVars(page, 'Bronze'); // default until summary loads
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
+
+    // Telegram Back button: push a close handler so pressing Back closes
+    // Referral instead of being a no-op. The closeFn checks _referralOpen
+    // to handle stale stack entries gracefully (e.g., after tgBackReset
+    // cleared the stack but _referralOpen was not reset).
+    if (typeof window.tgBackPush === 'function') {
+      window.tgBackPush(function() {
+        if (!_referralOpen) return; // stale entry — already closed
+        _referralClosingFromBack = true;
+        closeReferral();
+      });
+    }
 
     // FIX 1+2: Reset the data signature on each open so the first render
     // always runs (even if data matches a previous visit's signature).
@@ -1719,6 +1745,22 @@ const ReferralApp = (() => {
   }
 
   function closeReferral() {
+    // Guard: if already closed, do nothing (prevents double-close from
+    // in-page back button calling closeReferral while tgBackPop's closeFn
+    // is also calling closeReferral).
+    if (!_referralOpen) return;
+    _referralOpen = false;
+
+    // If NOT closed via Telegram Back button, we need to pop our entry from
+    // the back stack. tgBackPop will call our closeFn, but _referralOpen is
+    // already false so the closeFn is a no-op (no recursion, no double-close).
+    // If the stack was already cleared (e.g., by tgBackReset in closeAllOverlays),
+    // tgBackPop is a harmless no-op on an empty stack.
+    if (!_referralClosingFromBack && typeof window.tgBackPop === 'function') {
+      window.tgBackPop();
+    }
+    _referralClosingFromBack = false;
+
     const page = document.getElementById('referral-full-page');
     if (!page) return;
     // F-8 FIX: Bump generation to invalidate any in-flight responses from

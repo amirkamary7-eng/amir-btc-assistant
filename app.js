@@ -14571,6 +14571,18 @@ function closeAllOverlays() {
     // 3) Clear the Telegram BackButton navigation stack — switching main tabs
     //    resets the history so the Back button is hidden on top-level pages.
     try { tgBackReset(); } catch (_) {}
+
+    // 4) Close the Referral full-page overlay if open. This overlay uses
+    //    position:fixed + z-index:10002, so if it stays open it blocks all
+    //    interaction with the newly-switched tab. ReferralApp.closeReferral()
+    //    handles the back-stack cleanup gracefully (tgBackPop is a no-op on
+    //    the already-cleared stack) and closes the overlay + restores body scroll.
+    try {
+        const _referralOverlay = document.getElementById('referral-full-page');
+        if (_referralOverlay && _referralOverlay.classList.contains('open') && window.ReferralApp) {
+            window.ReferralApp.closeReferral();
+        }
+    } catch (_) {}
 }
 
 function switchTab(pageId, btn) {
