@@ -1232,7 +1232,11 @@ export function createAdminRepository(deps) {
         (async () => {
           const t0 = Date.now();
           try {
-            const testKey = 'health-check:' + Date.now();
+            // KV-WRITE-OPT: Use a fixed key instead of health-check:{Date.now()}
+            // to avoid creating a new KV key on every health-check call. The TTL
+            // (60s) means the old key expires naturally; the fixed key is simply
+            // overwritten. Semantics unchanged — still a write+read liveness probe.
+            const testKey = 'health-check:probe';
             await env.APP_CACHE.put(testKey, 'ok', { expirationTtl: 60 });
             const val = await env.APP_CACHE.get(testKey);
             const latency = Date.now() - t0;

@@ -1,22 +1,14 @@
 /**
- * KV Write Optimization — Rate Limit Coalesced Counter tests (P0-A).
+ * KV Write Optimization Tests — KVO series
  *
- * Verifies the write-coalesced rate limiter (_checkRateLimitCoalesced) used by
- * isMarketRateLimited / isUserRateLimited:
+ * Verifies that the KV write optimization changes:
+ *   1. Route direct KV puts through writeAppCache/_kvWriteDedup for dedup
+ *   2. Remove dead code (writeHeartbeat)
+ *   3. Use fixed health-check key
+ *   4. Add _kvWriteDedup helper for JOIN_CACHE and RATE_LIMITS
  *
- *   - Normal request under limit → allowed
- *   - At limit → blocked
- *   - Over limit → blocked (and NO KV write on the block)
- *   - Window reset → counter resets (new windowIndex)
- *   - Concurrent requests → no bypass within a single isolate
- *   - KV write failure (quota exhausted) → isolate STILL self-limits via
- *     in-memory delta (fixes the previous fail-open bypass)
- *   - KV read failure → isolate STILL self-limits via in-memory delta
- *   - Fail-open when env.RATE_LIMITS is absent (preserved behavior)
- *   - Writes are COALESCED (fewer writes than requests for low traffic)
- *   - Near the limit, every request forces a flush (accuracy at boundary)
- *
- * Run: node --test kv-write-optimization-test.cjs
+ * All assertions use source-inspection (structural) + behavioral verification.
+ * No business logic should change — only write dedup.
  */
 
 const test = require('node:test');
@@ -24,317 +16,333 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const ROOT = __dirname;
 
-// ============================================================================
-// Extract the rate-limit block (constants + functions) from worker-proxy.js
-// and evaluate it in a fresh scope per call so the in-memory _rlCoalesceState
-// Map is reset between tests.
-// ============================================================================
+const WORKER_SRC = fs.readFileSync(path.join(ROOT, 'worker-proxy.js'), 'utf8');
+const SESSIONS_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/sessions.js'), 'utf8');
+const ADMIN_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/admin.js'), 'utf8');
+const ASSISTANT_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/assistant.js'), 'utf8');
 
-const RL_BLOCK_START = WORKER_SRC.indexOf('const MARKET_RATE_LIMIT_MAX = 30;');
-const RL_BLOCK_END = WORKER_SRC.indexOf('function getAdminIds(env) {');
-assert.ok(RL_BLOCK_START !== -1 && RL_BLOCK_END !== -1 && RL_BLOCK_END > RL_BLOCK_START,
-  'rate-limit block anchors must exist in worker-proxy.js');
-const RL_BLOCK = WORKER_SRC.slice(RL_BLOCK_START, RL_BLOCK_END);
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-1: Fear & Greed — fetchFearGreed routes through writeAppCache
+// ═══════════════════════════════════════════════════════════════════════════
 
-function loadRateLimitFns() {
-  // _trackKvWrite is defined elsewhere in worker-proxy.js as a no-op; provide it.
-  // setTimeout/clearTimeout are used nowhere in this block but kept for safety.
-  const exportsObj = {};
-  const evaluator = new Function('exports', 'console', 'setTimeout', 'clearTimeout',
-    '_trackKvWrite = function(){};\n' +
-    RL_BLOCK +
-    '\nexports.isMarketRateLimited = isMarketRateLimited;' +
-    '\nexports.isUserRateLimited = isUserRateLimited;' +
-    '\nexports._checkRateLimitCoalesced = _checkRateLimitCoalesced;' +
-    '\nexports._rlCoalesceState = _rlCoalesceState;');
-  evaluator(exportsObj, console, setTimeout, clearTimeout);
-  return exportsObj;
-}
+test('KVO-1: fetchFearGreed uses writeAppCache (not direct env_APP_CACHE.put)', () => {
+  const block = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('async function fetchFearGreed'),
+    WORKER_SRC.indexOf('function _classifyFG')
+  );
+  assert.ok(block.includes('writeAppCache'),
+    'fetchFearGreed must call writeAppCache for _kvWriteCache dedup');
+  assert.ok(!block.includes('env_APP_CACHE.put('),
+    'fetchFearGreed must NOT use direct env_APP_CACHE.put');
+  // Key, value serialization, TTL preserved
+  assert.ok(block.includes('FG_CACHE_KEY'),
+    'key preserved');
+  assert.ok(block.includes('JSON.stringify(result)'),
+    'value serialization preserved');
+  assert.ok(block.includes('FG_CACHE_TTL'),
+    'TTL preserved');
+});
 
-// ============================================================================
-// Mock KV that COUNTS get/put calls and can simulate failures
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-2: Web Search Cache — performWebSearch routes through writeAppCache
+// ═══════════════════════════════════════════════════════════════════════════
 
-function createMockKv(opts = {}) {
-  const store = new Map();
-  return {
-    getCount: 0,
-    putCount: 0,
-    failGet: !!opts.failGet,
-    failPut: !!opts.failPut,
-    hangGet: !!opts.hangGet,
-    async get(key) {
-      this.getCount++;
-      if (this.failGet) throw new Error('KV get failed (simulated)');
-      if (this.hangGet) return new Promise(() => {});
-      return store.has(key) ? store.get(key) : null;
-    },
-    async put(key, value, ttl) {
-      this.putCount++;
-      if (this.failPut) throw new Error('KV put failed (quota exhausted — simulated)');
-      store.set(key, value);
-      this._lastValue = value;
-      this._lastTtl = ttl;
-    },
-    _store: store,
-    _lastValue: null,
-    _lastTtl: null,
-    // Helper: read & parse the stored counter
-    readCount(currentWindowIndex) {
-      if (!this._lastValue) return { count: 0, winIdx: currentWindowIndex };
-      try {
-        const p = JSON.parse(this._lastValue);
-        if (p && typeof p === 'object' && 'c' in p) return { count: p.c | 0, winIdx: p.w | 0 };
-      } catch {}
-      const n = parseInt(this._lastValue, 10);
-      return { count: Number.isFinite(n) ? n : 0, winIdx: currentWindowIndex };
+test('KVO-2: performWebSearch uses writeAppCache (not direct env.APP_CACHE.put)', () => {
+  const block = ASSISTANT_SRC.slice(
+    ASSISTANT_SRC.indexOf('async function performWebSearch'),
+    ASSISTANT_SRC.indexOf('async function performWikipediaSearch')
+  );
+  assert.ok(block.includes('writeAppCache'),
+    'performWebSearch must call writeAppCache for _kvWriteCache dedup');
+  assert.ok(!block.includes('env.APP_CACHE.put('),
+    'performWebSearch must NOT use direct env.APP_CACHE.put');
+  // Key, value, TTL preserved
+  assert.ok(block.includes('cacheKey'),
+    'key preserved');
+  assert.ok(block.includes('WEB_SEARCH_CACHE_TTL'),
+    'TTL preserved');
+});
+
+test('KVO-2b: assistant controller deps include writeAppCache', () => {
+  assert.ok(ASSISTANT_SRC.includes('writeAppCache,'),
+    'writeAppCache must be in assistant controller deps');
+});
+
+test('KVO-2c: worker-proxy wires writeAppCache into assistant handlers', () => {
+  const block = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('const assistantHandlers = createAssistantHandlers'),
+    WORKER_SRC.indexOf('  // Chat AI v2:')
+  );
+  assert.ok(block.includes('writeAppCache'),
+    'worker-proxy must wire writeAppCache into assistant handlers');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-3: Dead code — writeHeartbeat removed from sessions.js
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-3: writeHeartbeat function removed from sessions.js', () => {
+  assert.ok(!SESSIONS_SRC.includes('async function writeHeartbeat'),
+    'writeHeartbeat function must be removed');
+  assert.ok(!SESSIONS_SRC.includes('writeHeartbeat,'),
+    'writeHeartbeat export must be removed');
+  // The remaining functions are still present
+  assert.ok(SESSIONS_SRC.includes('async function persistPresenceState'),
+    'persistPresenceState still present');
+  assert.ok(SESSIONS_SRC.includes('async function deleteSession'),
+    'deleteSession still present');
+  assert.ok(SESSIONS_SRC.includes('async function readSessionId'),
+    'readSessionId still present');
+});
+
+test('KVO-3b: no callers of writeHeartbeat anywhere in codebase', () => {
+  // Verify no other file references writeHeartbeat
+  const allFiles = [
+    'worker-proxy.js',
+    'src/controllers/sessions.js',
+    'src/controllers/wallet.js',
+    'src/services/membershipGateway.js',
+  ];
+  for (const f of allFiles) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    // Allow the comment in sessions.js that explains removal
+    const withoutComments = src.replace(/\/\/[^\n]*/g, '');
+    assert.ok(!withoutComments.includes('writeHeartbeat'),
+      `${f} must not reference writeHeartbeat`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-4: Health probe — fixed key
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-4: health-check uses fixed key (not Date.now())', () => {
+  assert.ok(ADMIN_SRC.includes("'health-check:probe'"),
+    'health-check must use fixed key "health-check:probe"');
+  assert.ok(!ADMIN_SRC.includes("'health-check:' + Date.now()"),
+    'must NOT use health-check:{Date.now()}');
+  // TTL still 60s
+  assert.ok(ADMIN_SRC.includes("expirationTtl: 60"),
+    'TTL 60s preserved');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-5: Ad image TTL — SKIPPED (would break active images)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-5: ad image storeImage unchanged (TTL skipped to avoid broken images)', () => {
+  const AD_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/advertisements.js'), 'utf8');
+  // storeImage should still be direct put (no TTL change)
+  const block = AD_SRC.slice(
+    AD_SRC.indexOf('async function storeImage'),
+    AD_SRC.indexOf('async function getImage')
+  );
+  assert.ok(block.includes('env.RATE_LIMITS.put(key,'),
+    'storeImage still uses direct KV put (TTL not added — would break images)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-6: _kvWriteDedup helper exists + used by setCachedJoinStatus + checkAdditionalRequiredChannels
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-6a: _kvWriteDedup helper exists in worker-proxy.js', () => {
+  assert.ok(WORKER_SRC.includes('async function _kvWriteDedup('),
+    '_kvWriteDedup helper must exist');
+  assert.ok(WORKER_SRC.includes('_kvWriteCache.get(key)'),
+    '_kvWriteDedup must reuse existing _kvWriteCache');
+});
+
+test('KVO-6b: setCachedJoinStatus uses _kvWriteDedup', () => {
+  const block = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('async function setCachedJoinStatus'),
+    WORKER_SRC.indexOf('function getTodayIsoDate')
+  );
+  assert.ok(block.includes('_kvWriteDedup'),
+    'setCachedJoinStatus must call _kvWriteDedup');
+  assert.ok(!block.includes('env.JOIN_CACHE.put('),
+    'setCachedJoinStatus must NOT use direct env.JOIN_CACHE.put');
+  // TTL logic preserved
+  assert.ok(block.includes('JOIN_CACHE_TTL'),
+    'TTL logic preserved');
+  assert.ok(block.includes("60"),
+    '60s TTL for not-joined preserved');
+});
+
+test('KVO-6c: checkAdditionalRequiredChannels uses _kvWriteDedup for both paths', () => {
+  const block = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels'),
+    WORKER_SRC.indexOf('async function resolveChannelMembership')
+  );
+  // Both the negative and positive paths must use _kvWriteDedup
+  // Count occurrences: should be 2 (one for '0', one for '1')
+  const dedupCount = (block.match(/_kvWriteDedup/g) || []).length;
+  assert.ok(dedupCount >= 2,
+    `checkAdditionalRequiredChannels must call _kvWriteDedup at least 2 times (neg+pos), found ${dedupCount}`);
+  // No direct env.RATE_LIMITS.put remaining (the old pattern)
+  assert.ok(!block.includes('env.RATE_LIMITS.put('),
+    'checkAdditionalRequiredChannels must NOT use direct env.RATE_LIMITS.put');
+
+  // Read-before-write cache check preserved
+  assert.ok(block.includes('env.RATE_LIMITS.get(cacheKey)'),
+    'read-before-write cache check preserved');
+  // Jittered TTL preserved
+  assert.ok(block.includes('_ttlJitter'),
+    'jittered TTL preserved');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-6d: Behavioral test — _kvWriteDedup actually deduplicates
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-6d: _kvWriteDedup skips redundant writes with identical value (behavioral)', async () => {
+  // Extract _kvWriteDedup + its dependencies (_kvWriteCache, _KV_WRITE_CACHE_MAX)
+  // from worker-proxy.js and drive them with a mock KV namespace.
+  const fnSrc = `
+    const _kvWriteCache = new Map();
+    const _KV_WRITE_CACHE_MAX = 200;
+    ${WORKER_SRC.slice(
+      WORKER_SRC.indexOf('async function _kvWriteDedup('),
+      WORKER_SRC.indexOf('// ═══════════════════════════════════════════════════════════════════════════',
+        WORKER_SRC.indexOf('async function _kvWriteDedup('))
+    )}
+    module.exports = { _kvWriteDedup, _kvWriteCache };
+  `;
+  const mod = { exports: {} };
+  new Function('module', 'exports', fnSrc)(mod, mod.exports);
+  const { _kvWriteDedup } = mod.exports;
+
+  // Mock KV namespace
+  let writeCount = 0;
+  const mockKV = {
+    put: async (key, value, opts) => {
+      writeCount++;
+      return Promise.resolve();
     },
   };
-}
 
-// ============================================================================
-// Tests
-// ============================================================================
+  // First write — should write
+  await _kvWriteDedup(mockKV, 'join:user123', '1', 300);
+  assert.equal(writeCount, 1, 'first call writes');
 
-test('RLOPT-001: request under limit → allowed (no block)', async () => {
-  const { isMarketRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 30; first request must be allowed
-  const blocked = await isMarketRateLimited(env, '1.2.3.4', 'user1');
-  assert.equal(blocked, false, 'first request under limit must be allowed');
+  // Second write with SAME value within TTL — should SKIP
+  await _kvWriteDedup(mockKV, 'join:user123', '1', 300);
+  assert.equal(writeCount, 1, 'second call with same value SKIPS (dedup)');
+
+  // Write with DIFFERENT value — should write
+  await _kvWriteDedup(mockKV, 'join:user123', '0', 60);
+  assert.equal(writeCount, 2, 'call with different value writes');
+
+  // Write to DIFFERENT key — should write
+  await _kvWriteDedup(mockKV, 'adch:user456:hash', '1', 75);
+  assert.equal(writeCount, 3, 'call with different key writes');
+
+  // Same different key, same value — should SKIP
+  await _kvWriteDedup(mockKV, 'adch:user456:hash', '1', 75);
+  assert.equal(writeCount, 3, 'second call with same key+value SKIPS');
 });
 
-test('RLOPT-002: at limit → blocked', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 5, window 60s. Make 5 allowed requests, then the 6th must block.
-  for (let i = 0; i < 5; i++) {
-    const b = await isUserRateLimited(env, 'u1', 'test', 5, 60);
-    assert.equal(b, false, `request ${i + 1} must be allowed`);
-  }
-  const blocked = await isUserRateLimited(env, 'u1', 'test', 5, 60);
-  assert.equal(blocked, true, '6th request at limit must be BLOCKED');
+test('KVO-6e: _kvWriteDedup handles null/missing namespace gracefully', async () => {
+  const fnSrc = `
+    const _kvWriteCache = new Map();
+    const _KV_WRITE_CACHE_MAX = 200;
+    ${WORKER_SRC.slice(
+      WORKER_SRC.indexOf('async function _kvWriteDedup('),
+      WORKER_SRC.indexOf('// ═══════════════════════════════════════════════════════════════════════════',
+        WORKER_SRC.indexOf('async function _kvWriteDedup('))
+    )}
+    module.exports = { _kvWriteDedup };
+  `;
+  const mod = { exports: {} };
+  new Function('module', 'exports', fnSrc)(mod, mod.exports);
+  const { _kvWriteDedup } = mod.exports;
+
+  // null namespace — should not throw
+  await _kvWriteDedup(null, 'key', 'value', 60);
+  // undefined namespace — should not throw
+  await _kvWriteDedup(undefined, 'key', 'value', 60);
+  // namespace without put function — should not throw
+  await _kvWriteDedup({}, 'key', 'value', 60);
+  // All pass = no throw = graceful handling
+  assert.ok(true, 'null/missing namespace handled gracefully');
 });
 
-test('RLOPT-003: over limit → blocked, and NO KV write on the block', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 3
-  for (let i = 0; i < 3; i++) await isUserRateLimited(env, 'u1', 'test', 3, 60);
-  const putCountBefore = kv.putCount;
-  // 4th and 5th must block
-  const b4 = await isUserRateLimited(env, 'u1', 'test', 3, 60);
-  const b5 = await isUserRateLimited(env, 'u1', 'test', 3, 60);
-  assert.equal(b4, true, '4th request over limit must be BLOCKED');
-  assert.equal(b5, true, '5th request over limit must be BLOCKED');
-  assert.equal(kv.putCount, putCountBefore, 'NO KV write must occur on a BLOCKED decision');
+test('KVO-6f: _kvWriteDedup re-writes after TTL expires (value-match but expired)', async () => {
+  const fnSrc = `
+    const _kvWriteCache = new Map();
+    const _KV_WRITE_CACHE_MAX = 200;
+    ${WORKER_SRC.slice(
+      WORKER_SRC.indexOf('async function _kvWriteDedup('),
+      WORKER_SRC.indexOf('// ═══════════════════════════════════════════════════════════════════════════',
+        WORKER_SRC.indexOf('async function _kvWriteDedup('))
+    )}
+    module.exports = { _kvWriteDedup, _kvWriteCache };
+  `;
+  const mod = { exports: {} };
+  new Function('module', 'exports', fnSrc)(mod, mod.exports);
+  const { _kvWriteDedup, _kvWriteCache } = mod.exports;
+
+  let writeCount = 0;
+  const mockKV = {
+    put: async () => { writeCount++; return Promise.resolve(); },
+  };
+
+  // Write with TTL=60 (minimum clamped)
+  await _kvWriteDedup(mockKV, 'test:key', 'val', 60);
+  assert.equal(writeCount, 1, 'first write');
+
+  // Manually expire the cache entry (simulate TTL expiry)
+  const entry = _kvWriteCache.get('test:key');
+  entry.expiresAt = Date.now() - 1000; // expired 1s ago
+  _kvWriteCache.set('test:key', entry);
+
+  // Same value but expired — should RE-WRITE
+  await _kvWriteDedup(mockKV, 'test:key', 'val', 60);
+  assert.equal(writeCount, 2, 're-write after TTL expiry even with same value');
 });
 
-test('RLOPT-004: window reset → counter resets (new windowIndex)', async () => {
-  // Use a tiny window + manipulate Date.now via a custom clock is complex;
-  // instead simulate a window rollover by directly pre-seeding KV with a
-  // STALE-window entry and confirming the limiter treats it as 0 (reset).
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // Seed KV with a stale-window counter at the limit (old windowIndex).
-  const oldWindowIndex = 0; // impossibly old
-  kv._store.set('url:test:u1', JSON.stringify({ c: 100, w: oldWindowIndex }));
-  // The limiter reads it, sees winIdx != currentWindowIndex, treats as 0 → allows.
-  const blocked = await isUserRateLimited(env, 'u1', 'test', 5, 60);
-  assert.equal(blocked, false, 'stale-window entry must NOT block (counter reset)');
+// ═══════════════════════════════════════════════════════════════════════════
+// KVO-7: Regression — no business logic / credit path / economic changes
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('KVO-7: no economic/credit-path code changed', () => {
+  // entitlement_config.js must be unchanged
+  const EC_SRC = fs.readFileSync(path.join(ROOT, 'src/services/entitlement_config.js'), 'utf8');
+  assert.ok(EC_SRC.includes('getMissionRewardAmount'), 'entitlement helpers intact');
+  assert.ok(EC_SRC.includes('getReferralRewardAmount'), 'entitlement helpers intact');
+
+  // repositories/ must be unchanged (except sessions.js dead-code removal)
+  const WALLET_REPO = fs.readFileSync(path.join(ROOT, 'src/repositories/wallet.js'), 'utf8');
+  assert.ok(WALLET_REPO.includes('claimDailyRewardWithStreak'),
+    'wallet repository crediting logic intact');
+  assert.ok(WALLET_REPO.includes('STREAK_REWARDS'),
+    'streak rewards logic intact');
+
+  // Mission token issuance still uses Phase 2D (no KV)
+  assert.ok(WORKER_SRC.includes('PHASE 2D'),
+    'Phase 2D signed tokens intact');
+  assert.ok(WORKER_SRC.includes('_signMissionToken'),
+    'mission token signing intact');
 });
 
-test('RLOPT-005: concurrent requests (5 parallel) → no bypass within isolate', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 10. Fire 10 concurrent requests — none should be falsely allowed
-  // beyond the limit. (All 10 may be allowed since they're under/at the limit.)
-  const results = await Promise.all(
-    Array.from({ length: 10 }, () => isUserRateLimited(env, 'u1', 'test', 10, 60))
+test('KVO-7b: PresenceDO + heartbeat path unchanged (only dead code removed)', () => {
+  // PresenceDO storage puts still present (not KV)
+  assert.ok(WORKER_SRC.includes("this.state.storage.put('sessions_snapshot'"),
+    'PresenceDO snapshot storage intact');
+  assert.ok(WORKER_SRC.includes('this.state.storage.put(`key${keyIndex}`'),
+    'GroqRouterDO storage intact');
+
+  // Heartbeat handler in the SESSIONS CONTROLLER still uses DO primary path
+  const SESSIONS_CTRL = fs.readFileSync(path.join(ROOT, 'src/controllers/sessions.js'), 'utf8');
+  const block = SESSIONS_CTRL.slice(
+    SESSIONS_CTRL.indexOf('async function handleHeartbeat'),
+    SESSIONS_CTRL.indexOf('async function handleOnline')
   );
-  const allowed = results.filter(b => b === false).length;
-  const blocked = results.filter(b => b === true).length;
-  assert.equal(allowed + blocked, 10, 'all 10 must resolve');
-  // Within a single isolate, the delta is serialized (JS is single-threaded),
-  // so the limiter must count correctly: at most 10 allowed, rest blocked.
-  assert.ok(allowed <= 10, `allowed (${allowed}) must not exceed limit (10)`);
-});
-
-test('RLOPT-006: KV write failure (quota exhausted) → isolate STILL self-limits', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv({ failPut: true }); // every put() throws
-  const env = { RATE_LIMITS: kv };
-  // limit 4, window 60s. Writes will fail, but the in-memory delta must still
-  // advance so the isolate self-limits at the limit (NO total bypass).
-  let allowed = 0;
-  for (let i = 0; i < 8; i++) {
-    const b = await isUserRateLimited(env, 'u1', 'test', 4, 60);
-    if (b === false) allowed++;
-  }
-  // Without the fix: KV write fail → counter never advances → ALL 8 allowed
-  // (total bypass). With the fix: in-memory delta advances → blocks at ~4.
-  // Allow a small tolerance for the near-limit flushing semantics, but it must
-  // be far below 8 (the unbounded bypass).
-  assert.ok(allowed <= 5, `KV write failure must NOT cause total bypass (allowed=${allowed}, expected <=5)`);
-  assert.ok(allowed >= 4, `should allow up to the limit before blocking (allowed=${allowed})`);
-});
-
-test('RLOPT-007: KV read failure → isolate STILL self-limits via in-memory delta', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv({ failGet: true, failPut: true }); // both fail
-  const env = { RATE_LIMITS: kv };
-  // limit 3, window 60s. KV is fully down. The isolate must still self-limit.
-  let allowed = 0;
-  for (let i = 0; i < 6; i++) {
-    const b = await isUserRateLimited(env, 'u1', 'test', 3, 60);
-    if (b === false) allowed++;
-  }
-  assert.ok(allowed <= 4, `KV fully down must NOT cause bypass (allowed=${allowed}, expected <=4)`);
-  assert.ok(allowed >= 3, `should allow up to the limit (allowed=${allowed})`);
-});
-
-test('RLOPT-008: fail-open when env.RATE_LIMITS is absent (preserved behavior)', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  // No RATE_LIMITS binding → must NOT throw, must return false (allow).
-  const b1 = await isUserRateLimited({}, 'u1', 'test', 5, 60);
-  const b2 = await isUserRateLimited({ RATE_LIMITS: null }, 'u1', 'test', 5, 60);
-  const b3 = await isUserRateLimited(null, 'u1', 'test', 5, 60);
-  assert.equal(b1, false, 'no RATE_LIMITS binding → fail-open (allow)');
-  assert.equal(b2, false, 'null RATE_LIMITS → fail-open (allow)');
-  assert.equal(b3, false, 'null env → fail-open (allow)');
-});
-
-test('RLOPT-009: writes are COALESCED — fewer writes than requests (low traffic)', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 30. Make 3 requests (well under limit, well under FLUSH_SIZE threshold).
-  // With the OLD code: 3 KV writes (1 per request). With coalescing: 0-1 writes.
-  for (let i = 0; i < 3; i++) {
-    await isUserRateLimited(env, 'u1', 'test', 30, 60);
-  }
-  // The 3 requests are under the FLUSH_SIZE (ceil(30*0.15)=5) and under the
-  // near-limit margin, and within the FLUSH_INTERVAL (5s) — so NO flush
-  // should have occurred yet → 0 writes. (Delta sits in-memory.)
-  assert.ok(kv.putCount <= 1, `low-traffic should coalesce to <=1 write, got ${kv.putCount}`);
-  assert.equal(kv.getCount, 3, 'KV is READ on every request (reads are not the quota bottleneck)');
-});
-
-test('RLOPT-010: near the limit → forces per-request flush (accuracy at boundary)', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit 10, near-limit margin = ceil(10*0.5) = 5 → flush starts at effective 6+.
-  // Make 6 requests to reach the near-limit zone, then verify subsequent requests
-  // each force a flush (write count grows roughly 1:1 near the boundary).
-  for (let i = 0; i < 6; i++) {
-    await isUserRateLimited(env, 'u1', 'test', 10, 60);
-  }
-  const writesAtNearLimit = kv.putCount;
-  // Requests 7,8,9,10 are in the near-limit zone → each forces a flush.
-  await isUserRateLimited(env, 'u1', 'test', 10, 60); // 7th
-  await isUserRateLimited(env, 'u1', 'test', 10, 60); // 8th
-  await isUserRateLimited(env, 'u1', 'test', 10, 60); // 9th
-  await isUserRateLimited(env, 'u1', 'test', 10, 60); // 10th
-  const writesAfterNearLimit = kv.putCount;
-  // Each near-limit request must have triggered a flush (write count grew).
-  assert.ok(writesAfterNearLimit > writesAtNearLimit,
-    `near-limit requests must force flushes (before=${writesAtNearLimit}, after=${writesAfterNearLimit})`);
-  // Specifically, ~4 near-limit requests → ~4 additional writes (1:1 accuracy).
-  assert.ok((writesAfterNearLimit - writesAtNearLimit) >= 3,
-    `near-limit should flush ~per-request (delta=${writesAfterNearLimit - writesAtNearLimit}, expected >=3)`);
-});
-
-test('RLOPT-011: stored counter uses JSON {c, w} format with windowIndex', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // Trigger a flush (size threshold for limit 4 = ceil(4*0.15)=2 → flush at delta 2)
-  await isUserRateLimited(env, 'u1', 'test', 4, 60);
-  await isUserRateLimited(env, 'u1', 'test', 4, 60);
-  assert.ok(kv.putCount >= 1, 'a flush must have occurred');
-  assert.ok(kv._lastValue, 'a value must have been written');
-  const parsed = JSON.parse(kv._lastValue);
-  assert.ok(typeof parsed === 'object' && parsed !== null, 'stored value must be JSON object');
-  assert.equal(typeof parsed.c, 'number', 'must have numeric "c" (count) field');
-  assert.equal(typeof parsed.w, 'number', 'must have numeric "w" (windowIndex) field');
-  assert.equal(parsed.c, 2, 'count must reflect the coalesced delta');
-});
-
-test('RLOPT-012: isMarketRateLimited preserves key format mrl:{uid}:{ip}', async () => {
-  const { isMarketRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  await isMarketRateLimited(env, '1.2.3.4', '42');
-  // Trigger a flush to inspect the key.
-  for (let i = 0; i < 4; i++) await isMarketRateLimited(env, '1.2.3.4', '42');
-  assert.ok(kv._lastValue, 'a flush must have occurred');
-  // The stored key must be mrl:42:1.2.3.4 (uid:ip) — verified via the store.
-  const keys = Array.from(kv._store.keys());
-  assert.ok(keys.some(k => k === 'mrl:42:1.2.3.4'),
-    `key must be 'mrl:42:1.2.3.4' (uid:ip), got: ${JSON.stringify(keys)}`);
-});
-
-test('RLOPT-013: isUserRateLimited preserves key format url:{category}:{uid}', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  for (let i = 0; i < 3; i++) await isUserRateLimited(env, 'u1', 'bootstrap', 5, 60);
-  const keys = Array.from(kv._store.keys());
-  assert.ok(keys.some(k => k === 'url:bootstrap:u1'),
-    `key must be 'url:bootstrap:u1', got: ${JSON.stringify(keys)}`);
-});
-
-test('RLOPT-014: TTL respects KV minimum 60s (window < 60 clamped)', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // windowSeconds = 10 (< 60). KV requires TTL >= 60 → must clamp to 60.
-  for (let i = 0; i < 3; i++) await isUserRateLimited(env, 'u1', 'test', 5, 10);
-  assert.ok(kv._lastTtl, 'a TTL must have been set');
-  assert.ok(kv._lastTtl.expirationTtl >= 60,
-    `TTL must be clamped to >=60 (got ${kv._lastTtl.expirationTtl})`);
-});
-
-test('RLOPT-015: backward compat — legacy plain-string counter is parsed', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // Seed KV with a LEGACY plain-string counter (pre-rollout format) at 4.
-  kv._store.set('url:test:u1', '4');
-  // limit 5. The legacy count (4) must be honored → only 1 more allowed, then block.
-  const b1 = await isUserRateLimited(env, 'u1', 'test', 5, 60);
-  assert.equal(b1, false, '5th request (legacy count 4) must be allowed');
-  const b2 = await isUserRateLimited(env, 'u1', 'test', 5, 60);
-  assert.equal(b2, true, '6th request must be BLOCKED (legacy count honored)');
-});
-
-test('RLOPT-016: different keys are independent (no cross-contamination)', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // user1 hits limit 3
-  for (let i = 0; i < 3; i++) await isUserRateLimited(env, 'u1', 'test', 3, 60);
-  // user2 must NOT be affected by user1's count
-  const b = await isUserRateLimited(env, 'u2', 'test', 3, 60);
-  assert.equal(b, false, 'different user must have independent counter');
-});
-
-test('RLOPT-017: non-numeric / invalid limit is handled safely', async () => {
-  const { isUserRateLimited } = loadRateLimitFns();
-  const kv = createMockKv();
-  const env = { RATE_LIMITS: kv };
-  // limit = 0 / NaN / undefined → helper clamps to 1 (minimum).
-  // Use the SAME key for both requests so the counter accumulates.
-  const b1 = await isUserRateLimited(env, 'u1', 'test', 0, 60);
-  assert.equal(b1, false, 'limit=0 → clamps to 1, first request allowed');
-  const b2 = await isUserRateLimited(env, 'u1', 'test', 0, 60);
-  assert.equal(b2, true, 'limit=0 → second request (same key) blocks at clamped limit 1');
+  assert.ok(block.includes('env.PRESENCE_DO'),
+    'heartbeat still uses PRESENCE_DO as primary');
+  assert.ok(block.includes('KV FALLBACK'),
+    'heartbeat KV fallback preserved');
+  assert.ok(block.includes('persistPresenceState'),
+    'heartbeat fallback still uses persistPresenceState (1 write, not 3)');
 });

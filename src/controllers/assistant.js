@@ -31,6 +31,8 @@ export function createAssistantHandlers(deps) {
     normalizeOptionalString,
     readRateLimitCache,
     writeRateLimitCache,
+    // KV-WRITE-OPT: inject writeAppCache for _kvWriteCache dedup on web search cache
+    writeAppCache,
     getTodayIsoDate,
     getNumericEnv,
     queryDb,
@@ -763,11 +765,10 @@ export function createAssistantHandlers(deps) {
 
     const result = parts.join('\n');
 
-    if (env?.APP_CACHE && typeof env.APP_CACHE.put === 'function') {
-      try {
-        await env.APP_CACHE.put(cacheKey, result, { expirationTtl: WEB_SEARCH_CACHE_TTL });
-      } catch {}
-    }
+    // KV-WRITE-OPT: Route through writeAppCache wrapper to get _kvWriteCache
+    // dedup — prevents redundant KV writes when the search result is unchanged
+    // within the TTL window. Key, value, and TTL are preserved exactly.
+    await writeAppCache(env, cacheKey, result, WEB_SEARCH_CACHE_TTL);
 
     console.log('[ChatAI] web_search SUCCESS:', query.slice(0, 60), '| results:', topResults.length);
     return result;

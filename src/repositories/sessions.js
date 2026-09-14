@@ -51,16 +51,6 @@ export function createSessionRepository(deps) {
   }
 
   /**
-   * Write (or refresh) an individual user's session entry and last-seen timestamp.
-   */
-  async function writeHeartbeat(env, userId, sessionId, lastSeen, ttlSeconds) {
-    await Promise.all([
-      writeSessionCache(env, `${KEY_PREFIX}${userId}`, sessionId, ttlSeconds),
-      writeSessionCache(env, `${KEY_PREFIX}${userId}:seen`, lastSeen, ttlSeconds),
-    ]);
-  }
-
-  /**
    * Delete an individual user's session entries.
    */
   async function deleteSession(env, userId) {
@@ -81,7 +71,9 @@ export function createSessionRepository(deps) {
     readPresenceState,
     prunePresenceState,
     persistPresenceState,
-    writeHeartbeat,
+    // KV-WRITE-OPT: writeHeartbeat removed — confirmed dead code (no callers
+    // anywhere in codebase). The heartbeat path uses PRESENCE_DO (Durable Object)
+    // as primary, with persistPresenceState (1 write) as KV fallback only.
     deleteSession,
     readSessionId,
   });

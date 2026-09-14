@@ -539,6 +539,52 @@ async function writeAppCache(env, key, value, expirationTtl) {
   }
 }
 
+/**
+ * KV-WRITE-OPT: Write to any KV namespace with _kvWriteCache dedup.
+ *
+ * Reuses the EXISTING _kvWriteCache (no new Map). Keys are unique strings
+ * across namespaces because they use distinct prefixes ('join:', 'adch:',
+ * 'fear-greed:', etc.), so sharing the Map is safe — no cross-namespace
+ * collision, no cross-user contamination.
+ *
+ * Behavior:
+ *   - If the key's cached value matches AND the KV TTL hasn't expired → SKIP write
+ *   - If the value changed OR the TTL expired → write to KV + update _kvWriteCache
+ *   - On KV failure → console.warn (graceful, same as writeAppCache)
+ *
+ * This prevents redundant writes when setCachedJoinStatus or
+ * checkAdditionalRequiredChannels is called multiple times for the same
+ * user with the same value within the TTL window (e.g., after the 30s
+ * session cache expires but the KV entry is still alive).
+ */
+async function _kvWriteDedup(kvNamespace, key, value, ttlSec) {
+  if (!kvNamespace || typeof kvNamespace.put !== 'function') return;
+
+  const cachedEntry = _kvWriteCache.get(key);
+  if (cachedEntry && cachedEntry.value === value) {
+    if (!cachedEntry.expiresAt || Date.now() < cachedEntry.expiresAt) {
+      return; // Value unchanged AND KV entry still alive — skip write
+    }
+    // KV entry has expired — fall through to re-write
+  }
+
+  try {
+    const putOpts = {};
+    if (ttlSec && ttlSec > 0) {
+      putOpts.expirationTtl = Math.max(60, Math.floor(ttlSec));
+    }
+    await kvNamespace.put(key, value, putOpts);
+    if (_kvWriteCache.size >= _KV_WRITE_CACHE_MAX) {
+      const firstKey = _kvWriteCache.keys().next().value;
+      _kvWriteCache.delete(firstKey);
+    }
+    const ttlMs = (ttlSec && ttlSec > 0) ? Math.max(60, Math.floor(ttlSec)) * 1000 : 0;
+    _kvWriteCache.set(key, { value, expiresAt: ttlMs > 0 ? Date.now() + ttlMs : 0 });
+  } catch (e) {
+    console.warn('[_kvWriteDedup] KV.put FAILED for key:', key, '| error:', e.message || e);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // GROQ-ROUTER-4KEY: The old Global Groq Rate/Token Coordinator (Phase 4) has
 // been REMOVED. The centralized 4-key Groq Router (groqRouterExecute, defined
@@ -1500,9 +1546,10 @@ async function setCachedJoinStatus(env, userId, joined) {
     const ttl = joined
       ? Math.min(getNumericEnv(env, 'JOIN_CACHE_TTL', 300), 300)  // max 5 min for joined
       : 60;  // 1 min for not-joined
-    await env.JOIN_CACHE.put(getJoinCacheKey(userId), joined ? '1' : '0', {
-      expirationTtl: ttl,
-    });
+    // KV-WRITE-OPT: Route through _kvWriteDedup to reuse _kvWriteCache.
+    // Prevents redundant JOIN_CACHE writes when the value (joined/not-joined)
+    // is unchanged within the TTL window. Fail-open behavior preserved.
+    await _kvWriteDedup(env.JOIN_CACHE, getJoinCacheKey(userId), joined ? '1' : '0', ttl);
   } catch (error) {
     console.warn(safeError('join-cache-write', error));
   }
@@ -4000,17 +4047,17 @@ async function checkAdditionalRequiredChannels(env, userId, { forceRefresh = fal
     const result = channelResults[i];
     if (!result.joined) {
       // Cache negative result (jittered TTL) — avoids hammering Telegram for known-not-members.
-      if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
-        try { await env.RATE_LIMITS.put(cacheKey, '0', { expirationTtl: _ttlNeg }); } catch { /* non-fatal */ }
-      }
+      // KV-WRITE-OPT: Route through _kvWriteDedup to prevent redundant RATE_LIMITS
+      // writes when the value ('0') is unchanged within the TTL window.
+      await _kvWriteDedup(env.RATE_LIMITS, cacheKey, '0', _ttlNeg);
       return { joined: false, channels: channels.length, reason: result.reason || 'not_member', channel: channels[i].username };
     }
   }
 
   // All channels joined — cache positive result (jittered TTL).
-  if (env.RATE_LIMITS && typeof env.RATE_LIMITS.put === 'function') {
-    try { await env.RATE_LIMITS.put(cacheKey, '1', { expirationTtl: _ttlPos }); } catch { /* non-fatal */ }
-  }
+  // KV-WRITE-OPT: Route through _kvWriteDedup to prevent redundant RATE_LIMITS
+  // writes when the value ('1') is unchanged within the TTL window.
+  await _kvWriteDedup(env.RATE_LIMITS, cacheKey, '1', _ttlPos);
   return { joined: true, channels: channels.length };
 }
 
@@ -11078,6 +11125,8 @@ const assistantHandlers = createAssistantHandlers({
   normalizeOptionalString,
   readRateLimitCache,
   writeRateLimitCache,
+  // KV-WRITE-OPT: inject writeAppCache for _kvWriteCache dedup on web search cache
+  writeAppCache,
   getTodayIsoDate,
   getNumericEnv,
   queryDb,
@@ -11440,12 +11489,12 @@ async function fetchFearGreed() {
           const classification = latest.value_classification || _classifyFG(value);
           const timestamp = latest.timestamp || new Date().toISOString();
           const result = { value, classification, timestamp, source: 'coinmarketcap' };
-          // Cache the result
-          if (typeof env_APP_CACHE !== 'undefined' && env_APP_CACHE && typeof env_APP_CACHE.put === 'function') {
-            try {
-              await env_APP_CACHE.put(FG_CACHE_KEY, JSON.stringify(result), { expirationTtl: FG_CACHE_TTL });
-            } catch {}
-          }
+          // KV-WRITE-OPT: Route through writeAppCache wrapper to get _kvWriteCache
+          // dedup — prevents redundant KV writes when the F&G value is unchanged
+          // within the TTL window (the DIRECT env_APP_CACHE.put bypassed dedup,
+          // writing on every successful CMC fetch even if the value was identical).
+          // Key, value serialization, and TTL are preserved exactly.
+          await writeAppCache({ APP_CACHE: env_APP_CACHE }, FG_CACHE_KEY, JSON.stringify(result), FG_CACHE_TTL);
           return result;
         }
       } else {

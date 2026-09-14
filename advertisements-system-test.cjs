@@ -729,11 +729,12 @@ test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jitte
   // KV cache read
   assert.ok(fnBlock.includes('env.RATE_LIMITS.get(cacheKey)'),
     'checkAdditionalRequiredChannels must read per-user KV cache');
-  // KV cache write (positive and negative)
-  assert.ok(fnBlock.includes("env.RATE_LIMITS.put(cacheKey, '1'"),
-    'checkAdditionalRequiredChannels must cache positive result');
-  assert.ok(fnBlock.includes("env.RATE_LIMITS.put(cacheKey, '0'"),
-    'checkAdditionalRequiredChannels must cache negative result');
+  // KV cache write (positive and negative) — KV-WRITE-OPT: now via _kvWriteDedup
+  // (routes through _kvWriteCache for dedup). The key, value, and TTL are preserved.
+  assert.ok(fnBlock.includes("_kvWriteDedup(env.RATE_LIMITS, cacheKey, '1'"),
+    'checkAdditionalRequiredChannels must cache positive result via _kvWriteDedup');
+  assert.ok(fnBlock.includes("_kvWriteDedup(env.RATE_LIMITS, cacheKey, '0'"),
+    'checkAdditionalRequiredChannels must cache negative result via _kvWriteDedup');
   // FIX (audit H3): TTL is now jittered 55-95s to avoid cache stampede.
   // Verify _ttlPos / _ttlNeg variables are used (not hardcoded 60).
   assert.ok(fnBlock.includes('_ttlPos') && fnBlock.includes('_ttlNeg'),
@@ -921,8 +922,8 @@ test('ADS-FIX-H3: checkAdditionalRequiredChannels uses jittered TTL (55-95s)', (
     'must use a jitter seed (per-user + hash) for consistent TTL');
   assert.ok(fnBlock.includes('_ttlJitter'),
     'must compute jitter value (0-40s)');
-  assert.ok(/expirationTtl:\s*_ttl(Pos|Neg)/.test(fnBlock),
-    'KV put must use jittered TTL variable (not hardcoded 60)');
+  assert.ok(/expirationTtl:\s*_ttl(Pos|Neg)/.test(fnBlock) || /_kvWriteDedup\([^)]*,\s*_ttl(Pos|Neg)\)/.test(fnBlock),
+    'KV write must use jittered TTL variable (not hardcoded 60) — via _kvWriteDedup or direct put');
 });
 
 // FIX UI-1: Channel Join frontend uses /api/advertisements/required-channels
