@@ -266,6 +266,17 @@ export function createWalletHandlers(deps) {
     // Rate limit: 5 claims per 60s (prevents abuse while allowing retries)
     const rlErr = await checkWalletRateLimit(env, authState.user.id, 'wallet_claim', 5, 60);
     if (rlErr) return rlErr;
+
+    // Kill switch: if the global reward engine is disabled, block daily claim.
+    // Same pattern as wheel.js:122 and mission check in handleMissionComplete:520.
+    // isSubsystemDisabled checks disable_reward_engine FIRST (global), then
+    // per-subsystem flags. Daily claim doesn't have a dedicated subsystem flag,
+    // so we use 'mission' (which covers daily_login mission rewards and daily
+    // claim — both are daily reward paths). The global flag catches everything.
+    if (rewardCenterRepo && await rewardCenterRepo.isSubsystemDisabled(env, 'mission')) {
+      return jsonResponse({ status: 'error', message: 'Daily rewards are temporarily disabled', code: 'DAILY_DISABLED' }, { status: 403 }, env);
+    }
+
     try {
       // PHASE UX-V2: Simplified claim flow — eliminated duplicate getStreakStatus.
       const isPremium = await _isPremiumSafe(env, authState.user.id);

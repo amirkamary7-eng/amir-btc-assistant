@@ -2077,9 +2077,21 @@ const ReferralApp = (() => {
       if (spinBtn) { spinBtn.disabled = false; spinBtn.classList.remove('spinning'); }
       if (subDiv) subDiv.textContent = RT('spin_disabled');
       const tg = window.getTg?.();
-      const msg = e?.message?.includes('NO_SPINS') || e?.message?.includes('not available')
-        ? RT('no_spins_available')
-        : (RT('connection_error') || 'Connection error');
+      // Classify error: check for known disabled/maintenance states before
+      // falling through to generic "connection error". The backend returns
+      // JSON with code field (WHEEL_DISABLED, WHEEL_MAINTENANCE, MISSION_DISABLED,
+      // etc.) but apiFetch throws with the raw response body as error.message
+      // (it may be a JSON string containing the code). We check both the
+      // raw message and the parsed code for robustness.
+      const _errMsg = String(e?.message || '');
+      let msg;
+      if (_errMsg.includes('NO_SPINS') || _errMsg.includes('not available')) {
+        msg = RT('no_spins_available');
+      } else if (_errMsg.includes('WHEEL_DISABLED') || _errMsg.includes('WHEEL_MAINTENANCE') || _errMsg.includes('MISSION_DISABLED') || _errMsg.includes('DAILY_DISABLED') || _errMsg.includes('disabled')) {
+        msg = RT('spin_disabled');
+      } else {
+        msg = RT('connection_error') || 'Connection error';
+      }
       if (tg?.showPopup) {
         tg.showPopup({ title: RT('lucky_wheel'), message: msg, buttons: [{ type: 'ok' }] });
       } else {
