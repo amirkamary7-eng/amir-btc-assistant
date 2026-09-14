@@ -2897,8 +2897,8 @@ async function createNpBroadcast() {
     try {
         const data = await adminApiFetch('/api/admin/notifications/broadcasts', { method: 'POST', body: JSON.stringify(payload) });
         if (data && data.status === 'success') { adminToast(t('adm_np_send_count', { n: (data.sent || 0) }), 'success'); loadNpBroadcast(); }
-        else { adminToast(t('adm_np_send_error'), 'error'); }
-    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
+        else { adminToast(t('adm_np_send_error') + (data?.message ? ': ' + data.message : ''), 'error'); }
+    } catch (e) { adminToast(t('adm_np_send_error') + (e.message ? ': ' + e.message : ''), 'error'); console.error(e); }
 }
 window.createNpBroadcast = createNpBroadcast;
 
@@ -2906,7 +2906,8 @@ async function sendNpBroadcast(id) {
     try {
         const data = await adminApiFetch('/api/admin/notifications/broadcasts/' + id + '/send', { method: 'POST' });
         if (data && data.status === 'success') { adminToast(t('adm_np_send_count', { n: (data.sent || 0) }), 'success'); loadNpBroadcast(); }
-    } catch (e) { adminToast(t('adm_rc_error'), 'error'); console.error(e); }
+        else { adminToast(t('adm_np_send_error') + (data?.message ? ': ' + data.message : ''), 'error'); }
+    } catch (e) { adminToast(t('adm_np_send_error') + (e.message ? ': ' + e.message : ''), 'error'); console.error(e); }
 }
 window.sendNpBroadcast = sendNpBroadcast;
 

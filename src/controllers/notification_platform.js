@@ -128,9 +128,19 @@ export function createNotificationPlatformHandlers(deps) {
 
     // Phase 2: Premium entitlement check for advertisement settings.
     // ch_promotions is a Premium-only preference. Free users cannot modify it.
+    // P1 FIX: Allow non-Premium (incl. downgraded/expired) users to set
+    // ch_promotions='none' (opt-OUT) so they can clear stale values from their
+    // Premium period. Only setting ch_promotions to a NON-'none' value
+    // (mini_app/telegram/both) requires Premium (opt-IN is Premium-gated).
     const PREMIUM_ONLY_CATEGORIES = ['ch_promotions'];
     const payload = bodyResult.payload || {};
-    const wantsPremiumOnly = PREMIUM_ONLY_CATEGORIES.some(cat => cat in payload);
+    const wantsPremiumOnly = PREMIUM_ONLY_CATEGORIES.some(cat => {
+      if (!(cat in payload)) return false;
+      // ch_promotions='none' is an opt-OUT — allowed for all users
+      if (cat === 'ch_promotions' && payload[cat] === 'none') return false;
+      // Any other value (mini_app/telegram/both) requires Premium
+      return true;
+    });
     if (wantsPremiumOnly && membershipAuthority) {
       try {
         const isPremium = await membershipAuthority.isPremium(env, String(userId));

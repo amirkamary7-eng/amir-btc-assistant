@@ -371,7 +371,8 @@ test('ADS-MSG-06: Free audience filter (no membership row OR FREE OR not approve
 
 test('ADS-MSG-07: Delivery enqueues into notification_queue for async delivery', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 6000);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   // PHASE 2 FIX: delivery now enqueues into notification_queue instead of
   // sequential sendTelegramMessage. The processQueue cron handles actual sends.
   assert.ok(fnBlock.includes('notification_queue'),
@@ -384,7 +385,8 @@ test('ADS-MSG-07: Delivery enqueues into notification_queue for async delivery',
 
 test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → skipped)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   // Bulk fetch ch_promotions preference
   assert.ok(/SELECT\s+user_id,\s+ch_promotions\s+AS\s+pref\s+FROM\s+notification_settings/i.test(fnBlock),
     '_deliverMessageCampaign must bulk-fetch ch_promotions preference from notification_settings');
@@ -396,7 +398,8 @@ test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → 
 
 test('ADS-MSG-09: Telegram delivery is queue-based (not sequential sendTelegramMessage)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   // PHASE 2 FIX: delivery now enqueues into notification_queue with channel='telegram'
   // instead of sequential sendTelegramMessage. The processQueue cron handles actual sends.
   assert.ok(/channel.*telegram/.test(fnBlock) || fnBlock.includes("'telegram'"),
@@ -408,7 +411,8 @@ test('ADS-MSG-09: Telegram delivery is queue-based (not sequential sendTelegramM
 
 test('ADS-MSG-10: No per-request user cap (queue-based, unlimited recipients)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   // PHASE 2 FIX: no 1000-user safety cap needed — queue-based delivery is
   // independent of recipient count. Admin request is fast (only DB inserts).
   // The old safety cap (delivered + skipped >= 1000) is REMOVED.
@@ -494,8 +498,10 @@ test('ADS-SEP-01: Channel Join (ad_channels) does NOT go through ch_promotions (
 });
 
 test('ADS-SEP-02: Message campaigns enqueue into notification_queue with promotions category', () => {
+  // Uses full-function extraction (not fixed window) to handle code growth
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 5000);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   assert.ok(fnBlock.includes('notification_queue'),
     'message campaigns must enqueue into notification_queue');
   assert.ok(/category.*promotions/.test(fnBlock),
@@ -745,7 +751,8 @@ test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jitte
 
 test('ADS-PERF-07: _deliverMessageCampaign uses bulk preference fetch (IN clause) not per-user N+1', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 3500);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   assert.ok(/SELECT\s+user_id,\s+ch_promotions\s+AS\s+pref\s+FROM\s+notification_settings\s+WHERE\s+user_id\s+IN\s*\(/i.test(fnBlock),
     '_deliverMessageCampaign must bulk-fetch preferences via IN clause (not per-user N+1)');
   assert.ok(fnBlock.includes('placeholders'),

@@ -1296,13 +1296,35 @@ export function createNotificationPlatformRepository(deps) {
 
     let checkpoint = broadcast.last_processed_user_id || null;
 
+    // P0 FIX: Respect the admin's target_type selection.
+    // Previously: processBroadcastFull ALWAYS used `WHERE channel_joined = TRUE`
+    // regardless of the stored target_type, making the admin's `all` vs `active`
+    // dropdown a silent no-op.
+    //
+    // Semantics (extracted from existing code/DB — NO new meanings invented):
+    //   'all'     → all channel_joined=TRUE users (unchanged behavior)
+    //   'active'  → channel_joined=TRUE AND users.active=TRUE
+    //               (the `users.active` column exists in the schema:
+    //                `active BOOLEAN NOT NULL DEFAULT TRUE` at 00-migrate.sql)
+    //   default   → same as 'all' (safe fallback for unknown target_type values)
+    //
+    // NOTE: The DB schema has NO CHECK constraint on target_type (it's
+    // VARCHAR(32) DEFAULT 'all'), so any string can be stored. We only
+    // apply special filtering for values the admin UI actually sends
+    // ('all' and 'active' per admin.js:2874). All other values get the
+    // 'all' query (safe default — never returns empty by accident).
+    const targetType = String(broadcast.target_type || 'all').trim().toLowerCase();
+    const activeFilter = targetType === 'active' ? 'AND active = TRUE' : '';
+
     // Process in batches until all users done
     // eslint-disable-next-line no-constant-condition
     while (true) {
       // Get next batch of users (after checkpoint)
+      // P0 FIX: apply activeFilter based on target_type
       const userResult = await queryDb(env, `
         SELECT telegram_id FROM users
         WHERE channel_joined = TRUE
+        ${activeFilter}
         ${checkpoint ? "AND telegram_id > $2" : ""}
         ORDER BY telegram_id ASC
         LIMIT $1
@@ -1350,6 +1372,13 @@ export function createNotificationPlatformRepository(deps) {
         if (deliverToTelegram) telegramUsers.push(uid);
       }
 
+      // P2 FIX: Track whether each bulk INSERT actually succeeded, so we
+      // don't count users as "delivered" when the INSERT failed. Previously
+      // the .catch() swallowed the error and batchDelivered counted ALL
+      // intended users regardless of INSERT outcome → false success.
+      let notifInsertOk = true;
+      let queueInsertOk = true;
+
       // Bulk INSERT in-app notifications (1 query instead of N)
       if (miniAppUsers.length > 0) {
         try {
@@ -1389,9 +1418,11 @@ export function createNotificationPlatformRepository(deps) {
             miniAppUsers.map(() => 'delivered'),                // $11: status[]
           ], 1, pool).catch((e) => {
             console.warn('[broadcast] Bulk INSERT notifications failed:', e?.message);
+            notifInsertOk = false; // P2 FIX: track failure
           });
         } catch (e) {
           console.warn('[broadcast] Mini-app notification batch failed:', e?.message);
+          notifInsertOk = false; // P2 FIX: track failure
         }
       }
 
@@ -1424,21 +1455,29 @@ export function createNotificationPlatformRepository(deps) {
             queuePayloads,                                     // $6: payload[] (jsonb)
           ], 1, pool).catch((e) => {
             console.warn('[broadcast] Bulk INSERT queue failed:', e?.message);
+            queueInsertOk = false; // P2 FIX: track failure
           });
         } catch (e) {
           console.warn('[broadcast] Telegram queue batch failed:', e?.message);
+          queueInsertOk = false; // P2 FIX: track failure
         }
       }
 
-      // Count delivered = users who got at least one delivery channel
-      // (intersection of miniAppUsers and telegramUsers is counted once)
-      const deliveredSet = new Set([...miniAppUsers, ...telegramUsers]);
+      // P2 FIX: Count delivered = users whose INSERT actually SUCCEEDED.
+      // Previously: deliveredSet counted ALL intended users (miniAppUsers +
+      // telegramUsers) regardless of INSERT outcome → false success even when
+      // all INSERTs failed. Now: only count users whose channel INSERT succeeded.
+      // Idempotency preserved: ON CONFLICT DO NOTHING means successful re-runs
+      // still report 0 new inserts (but the INSERT itself succeeds, so the
+      // user IS delivered — just from a previous run).
+      const deliveredSet = new Set();
+      if (notifInsertOk) for (const uid of miniAppUsers) deliveredSet.add(uid);
+      if (queueInsertOk) for (const uid of telegramUsers) deliveredSet.add(uid);
       batchDelivered = deliveredSet.size;
-      // batchFailed = 0: bulk INSERT with ON CONFLICT DO NOTHING doesn't
-      // fail individual users. Users with 'none' preference are simply
-      // skipped (not counted as failures). Real INSERT errors are logged
-      // but don't fail the batch.
-      batchFailed = 0;
+      // P2 FIX: batchFailed now reflects actual INSERT failures (not 0).
+      // Users with 'none' preference are still skipped (not counted as failures).
+      const intendedSet = new Set([...miniAppUsers, ...telegramUsers]);
+      batchFailed = intendedSet.size - deliveredSet.size;
 
       checkpoint = userIds[userIds.length - 1];
       totalProcessed += userIds.length;

@@ -112,6 +112,39 @@ export function createAdvertisementsHandlers(deps) {
     const { userId, error } = await _getUserId(request, env);
     if (error) return error;
     try {
+      // P1 FIX: Premium users who opted out of promotions (ch_promotions='none')
+      // should NOT see ad popups. Free users always see popups (they can't
+      // control ch_promotions — it defaults to 'none' for them, and the
+      // write-path is Premium-gated, so Free can't opt out anyway).
+      //
+      // Requirement:
+      //   Free → show popup ✅ (no check needed)
+      //   Premium + ads ON (ch_promotions=mini_app/telegram/both) → show ✅
+      //   Premium + ads OFF (ch_promotions=none) → hide ❌
+      //
+      // This check uses the SAME membershipAuthority.isPremium() that the
+      // rest of the app uses (60s KV cache, single-flight, invalidate() hooks).
+      if (membershipAuthority && typeof membershipAuthority.isPremium === 'function') {
+        try {
+          const isPremium = await membershipAuthority.isPremium(env, String(userId));
+          if (isPremium) {
+            // Premium user — check ch_promotions preference
+            const prefResult = await queryDb(env,
+              `SELECT ch_promotions FROM notification_settings WHERE user_id = $1`,
+              [String(userId)]
+            ).catch(() => ({ rows: [] }));
+            const pref = prefResult.rows?.[0]?.ch_promotions || 'none';
+            if (pref === 'none') {
+              // Premium user opted out of promotions — suppress popup
+              return jsonResponse({ status: 'success', popup: null }, {}, env);
+            }
+          }
+        } catch (e) {
+          // Fail-open: if isPremium or ch_promotions check fails, show popup
+          // (better to show an ad than to break the popup flow on error)
+        }
+      }
+
       const popups = await advertisementsRepo.listActivePopups(env);
       if (!popups.length) {
         return jsonResponse({ status: 'success', popup: null }, {}, env);
@@ -584,8 +617,16 @@ export function createAdvertisementsHandlers(deps) {
 
     while (true) {
       const params = checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE];
+      // P1 FIX: Select membership columns alongside telegram_id so we can
+      // compute isPremium INLINE (same logic as membershipAuthority.isPremium)
+      // without per-user KV/DB calls. This ensures that downgraded/expired
+      // users (who have stale ch_promotions='both' from their Premium period)
+      // are treated as 'none' — they should NOT receive promotional messages.
       const userResult = await queryDb(env, `
-        SELECT u.telegram_id
+        SELECT u.telegram_id,
+               mu.membership_level,
+               mu.membership_status,
+               mu.expire_at
         FROM users u
         LEFT JOIN membership_users mu ON mu.telegram_id = u.telegram_id
         WHERE u.channel_joined = TRUE
@@ -597,6 +638,25 @@ export function createAdvertisementsHandlers(deps) {
 
       if (!userResult.rows || userResult.rows.length === 0) break;
       const userIds = userResult.rows.map(r => String(r.telegram_id));
+
+      // P1 FIX: Compute isPremium inline per-user using the SAME definition as
+      // membership_authority.js: isPremium = APPROVED AND level ∈ {VIP,PREMIUM,ELITE}
+      // AND (expire_at IS NULL OR expire_at > now). This is a fresh DB read
+      // (not cached), so downgrades are immediately reflected.
+      const premiumSet = new Set();
+      const _PREMIUM_LEVELS = new Set(['VIP', 'PREMIUM', 'ELITE']);
+      const _now = Date.now();
+      for (const row of userResult.rows) {
+        const level = row.membership_level;
+        const status = row.membership_status;
+        const expireAt = row.expire_at;
+        const isPremium = status === 'APPROVED'
+          && _PREMIUM_LEVELS.has(level)
+          && (!expireAt || new Date(expireAt).getTime() > _now);
+        if (isPremium) {
+          premiumSet.add(String(row.telegram_id));
+        }
+      }
 
       // Bulk-fetch ch_promotions preference for this batch.
       const prefMap = new Map();
@@ -612,11 +672,18 @@ export function createAdvertisementsHandlers(deps) {
       }
 
       // Build enqueue values for users who have at least one delivery channel
+      // P1 FIX: Only Premium users can have a non-'none' ch_promotions preference.
+      // Non-Premium users (Free, expired, downgraded) are treated as 'none'
+      // regardless of their stale DB value. This prevents downgraded users from
+      // receiving promotional messages based on a stale 'both' from their
+      // Premium period.
       const enqueueValues = [];
       const enqueueParams = [];
       let paramIdx = 1;
       for (const uid of userIds) {
-        const pref = prefMap.get(uid) || 'none';
+        // P1 FIX: If user is NOT currently Premium, treat ch_promotions as 'none'
+        const isCurrentlyPremium = premiumSet.has(uid);
+        const pref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none';
         if (pref === 'none') { skipped++; continue; }
 
         const deliverMiniApp = (destinations === 'mini_app' || destinations === 'both') &&
