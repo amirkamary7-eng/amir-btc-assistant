@@ -1296,35 +1296,28 @@ export function createNotificationPlatformRepository(deps) {
 
     let checkpoint = broadcast.last_processed_user_id || null;
 
-    // P0 FIX: Respect the admin's target_type selection.
-    // Previously: processBroadcastFull ALWAYS used `WHERE channel_joined = TRUE`
-    // regardless of the stored target_type, making the admin's `all` vs `active`
-    // dropdown a silent no-op.
+    // REGRESSION ROLLBACK: The previous commit (991abeb) added
+    // `AND active = TRUE` for target_type='active', but the `users` table
+    // has NO `active` column — that column exists on the `admins` table only.
+    // This caused PostgreSQL error 42703 when an admin selected 'active',
+    // making every broadcast with that target_type fail silently.
     //
-    // Semantics (extracted from existing code/DB — NO new meanings invented):
-    //   'all'     → all channel_joined=TRUE users (unchanged behavior)
-    //   'active'  → channel_joined=TRUE AND users.active=TRUE
-    //               (the `users.active` column exists in the schema:
-    //                `active BOOLEAN NOT NULL DEFAULT TRUE` at 00-migrate.sql)
-    //   default   → same as 'all' (safe fallback for unknown target_type values)
+    // This rollback restores the pre-991abeb behavior: target_type is stored
+    // but NOT consumed at runtime — both 'all' and 'active' select the same
+    // recipient set (all channel_joined=TRUE users). The 'active' option in
+    // the admin UI remains a no-op until proper semantics are defined via a
+    // product decision (see RCA report).
     //
-    // NOTE: The DB schema has NO CHECK constraint on target_type (it's
-    // VARCHAR(32) DEFAULT 'all'), so any string can be stored. We only
-    // apply special filtering for values the admin UI actually sends
-    // ('all' and 'active' per admin.js:2874). All other values get the
-    // 'all' query (safe default — never returns empty by accident).
-    const targetType = String(broadcast.target_type || 'all').trim().toLowerCase();
-    const activeFilter = targetType === 'active' ? 'AND active = TRUE' : '';
+    // NOTE: No new semantics, no new column, no threshold (24h/7d/30d) is
+    // introduced here. This is purely a regression rollback.
 
     // Process in batches until all users done
     // eslint-disable-next-line no-constant-condition
     while (true) {
       // Get next batch of users (after checkpoint)
-      // P0 FIX: apply activeFilter based on target_type
       const userResult = await queryDb(env, `
         SELECT telegram_id FROM users
         WHERE channel_joined = TRUE
-        ${activeFilter}
         ${checkpoint ? "AND telegram_id > $2" : ""}
         ORDER BY telegram_id ASC
         LIMIT $1

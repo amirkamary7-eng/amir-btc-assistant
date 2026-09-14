@@ -27,50 +27,66 @@ const ADMIN_JS = fs.readFileSync(path.join(ROOT, 'admin.js'), 'utf8');
 const MIGRATE_SQL = fs.readFileSync(path.join(ROOT, 'scripts/00-migrate.sql'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AMF-1 (P0): Broadcast targeting — processBroadcastFull respects target_type
+// AMF-1 (P0): Broadcast targeting — regression rollback
+// The previous commit (991abeb) added `AND active = TRUE` which references
+// a non-existent `users.active` column (it exists on `admins` only).
+// This rollback removes the broken filter. target_type is stored but NOT
+// consumed at runtime — both 'all' and 'active' select the same recipients.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('AMF-1a: processBroadcastFull reads target_type from broadcast row', () => {
+test('AMF-1a: processBroadcastFull does NOT reference users.active column', () => {
   const block = NOTIF_PLATFORM_REPO.slice(
     NOTIF_PLATFORM_REPO.indexOf('async function processBroadcastFull'),
     NOTIF_PLATFORM_REPO.indexOf('async function processOneBatch')
   );
-  assert.ok(block.includes('broadcast.target_type'),
-    'processBroadcastFull must read broadcast.target_type');
-  assert.ok(block.includes("targetType === 'active'"),
-    'must check for target_type === active');
-  assert.ok(block.includes('activeFilter'),
-    'must apply activeFilter based on target_type');
+  // Strip comments to avoid matching `AND active = TRUE` inside comment text
+  const codeOnly = block.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // The broken `AND active = TRUE` must NOT be present in actual code
+  assert.ok(!codeOnly.includes('AND active = TRUE'),
+    'processBroadcastFull must NOT reference `AND active = TRUE` in code (users.active does not exist)');
+  // The activeFilter variable must NOT be present in actual code
+  assert.ok(!codeOnly.includes('activeFilter'),
+    'activeFilter variable must be removed from code (was broken)');
 });
 
-test('AMF-1b: target_type=all → no extra filter (unchanged behavior)', () => {
+test('AMF-1b: target_type=all uses channel_joined=TRUE only (unchanged)', () => {
   const block = NOTIF_PLATFORM_REPO.slice(
-    NOTIF_PLATFORM_REPO.indexOf('P0 FIX: Respect the admin\'s target_type'),
-    NOTIF_PLATFORM_REPO.indexOf('while (true)')
-  );
-  // For 'all', activeFilter should be empty string
-  assert.ok(block.includes("'all'"),
-    'all target is handled');
-  assert.ok(block.includes("activeFilter = targetType === 'active' ? 'AND active = TRUE' : ''"),
-    'all → empty filter (no extra WHERE clause)');
-});
-
-test('AMF-1c: target_type=active → AND active = TRUE filter', () => {
-  const block = NOTIF_PLATFORM_REPO.slice(
-    NOTIF_PLATFORM_REPO.indexOf('const userResult = await queryDb'),
+    NOTIF_PLATFORM_REPO.indexOf('SELECT telegram_id FROM users'),
     NOTIF_PLATFORM_REPO.indexOf('if (!userResult.rows.length)')
   );
-  assert.ok(block.includes('${activeFilter}'),
-    'user query must include activeFilter');
-  // The query still uses channel_joined = TRUE as base
+  // The base query must still use channel_joined = TRUE
   assert.ok(block.includes('channel_joined = TRUE'),
-    'base filter is still channel_joined = TRUE');
+    'base filter must still be channel_joined = TRUE');
+  // No active filter should be present
+  assert.ok(!block.includes('AND active'),
+    'no `AND active` filter should be present (regression rollback)');
 });
 
-test('AMF-1d: users table has active column (schema verification)', () => {
-  // Verify the users table has an `active` column in the migration
-  assert.ok(/active\s+BOOLEAN/i.test(MIGRATE_SQL),
-    'users table must have active BOOLEAN column');
+test('AMF-1c: target_type=active does NOT generate AND active = TRUE SQL', () => {
+  // After rollback, both 'all' and 'active' produce the same query:
+  // SELECT telegram_id FROM users WHERE channel_joined = TRUE
+  // The broken `AND active = TRUE` is removed entirely.
+  const block = NOTIF_PLATFORM_REPO.slice(
+    NOTIF_PLATFORM_REPO.indexOf('async function processBroadcastFull'),
+    NOTIF_PLATFORM_REPO.indexOf('async function processOneBatch')
+  );
+  // Strip comments to avoid matching `AND active = TRUE` inside comment text
+  const codeOnly = block.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/AND\s+active\s*=\s*TRUE/i.test(codeOnly),
+    'no `AND active = TRUE` in actual SQL code (comments stripped)');
+  assert.ok(!/activeFilter/.test(codeOnly),
+    'no activeFilter variable in actual code (comments stripped)');
+});
+
+test('AMF-1d: users table does NOT have active column (schema verification)', () => {
+  // The `users` table definition in the migration should NOT include `active`.
+  // (The `admins` table has it, but NOT `users`.)
+  const usersTable = MIGRATE_SQL.slice(
+    MIGRATE_SQL.indexOf('CREATE TABLE IF NOT EXISTS users'),
+    MIGRATE_SQL.indexOf(');', MIGRATE_SQL.indexOf('CREATE TABLE IF NOT EXISTS users'))
+  );
+  assert.ok(!/active\s+BOOLEAN/i.test(usersTable),
+    'users table must NOT have an `active` column (only admins table does)');
 });
 
 test('AMF-1e: idempotency preserved — ON CONFLICT DO NOTHING still present', () => {
