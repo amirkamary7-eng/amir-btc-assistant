@@ -476,6 +476,12 @@ export function createWalletHandlers(deps) {
     try {
       const userId = String(authState.user.id);
 
+      // Kill switch: if mission rewards are emergency-disabled, block all mission completions.
+      // Same pattern as wheel.js:122 and referral in worker-proxy.js:3148.
+      if (rewardCenterRepo && await rewardCenterRepo.isSubsystemDisabled(env, 'mission')) {
+        return jsonResponse({ status: 'error', message: 'Mission rewards are temporarily disabled', code: 'MISSION_DISABLED' }, { status: 403 }, env);
+      }
+
       // PHASE 6 FIX: parallelize independent DB queries to reduce latency.
       // Previously: getMissionReward → _isPremiumSafe → getActiveMissionRewards (3 sequential)
       // Now: all 3 run in parallel via Promise.all (1 round-trip instead of 3)
@@ -616,6 +622,12 @@ export function createWalletHandlers(deps) {
     const missionId = 'daily_login';
 
     try {
+      // Kill switch: if mission rewards are emergency-disabled, skip daily login reward.
+      // Same pattern as referral in worker-proxy.js:3148 (return null to skip).
+      if (rewardCenterRepo && await rewardCenterRepo.isSubsystemDisabled(env, 'mission')) {
+        return null;
+      }
+
       const missionConfig = rewardCenterRepo
         ? await rewardCenterRepo.getMissionReward(env, missionId)
         : null;

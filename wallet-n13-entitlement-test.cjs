@@ -140,6 +140,7 @@ function makeMissionDeps({ isPremiumUser, membershipFails, entitlementConfig }) 
       getActiveMissionRewards: async () => [{ mission_id: 'read_news', target_count: 1 }],
       incrementMissionProgress: async () => ({ progress_count: 1, target_count: 1, completed: true, rewarded: false }),
       markMissionRewarded: async () => true,
+      isSubsystemDisabled: async () => false,
     },
     economyService: {
       grantReward: async (p) => ({ success: true, newBalance: null, txId: 999, idempotent: false, amount: p.amount }),
