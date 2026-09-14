@@ -83,6 +83,43 @@ export function createWalletHandlers(deps) {
     return 10; // Legacy fallback (Normal)
   }
 
+  /**
+   * PREMIUM-DISPLAY FIX: Return the EFFECTIVE mission reward for display.
+   * Uses the SAME canonical helper (getMissionRewardAmount) that
+   * handleMissionComplete uses when actually crediting the reward, so the
+   * displayed amount always matches the credited amount.
+   *   Free    → base (Math.floor — identical to base for integer DB values)
+   *   Premium → ceil(base × 1.5) — the exact amount the user receives
+   * Does NOT modify m.token_amount in DB. Does NOT change crediting logic.
+   */
+  function _getEffectiveMissionReward(baseAmount, isPremium) {
+    if (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function') {
+      return entitlementConfig.getMissionRewardAmount(baseAmount, isPremium);
+    }
+    return Math.abs(Number(baseAmount) || 0); // Legacy fallback (base, Normal)
+  }
+
+  /**
+   * PREMIUM-DISPLAY FIX: Return the EFFECTIVE streak_rewards array for display.
+   * For Premium, maps each base STREAK_REWARDS entry through the SAME canonical
+   * helper (getMissionRewardAmount) that claimDailyRewardWithStreak uses when
+   * actually crediting each day's reward — so the displayed per-day amount
+   * always matches the credited amount for every streak day.
+   *   Free    → base array unchanged
+   *   Premium → [ceil(base × 1.5) for each day]
+   * This does NOT change the crediting logic in claimDailyRewardWithStreak.
+   */
+  function _getEffectiveStreakRewards(isPremium) {
+    const base = (walletRepo && Array.isArray(walletRepo.STREAK_REWARDS))
+      ? walletRepo.STREAK_REWARDS
+      : [1, 3, 6, 10, 18, 30, 50];
+    if (!isPremium) return base;
+    if (entitlementConfig && typeof entitlementConfig.getMissionRewardAmount === 'function') {
+      return base.map(r => entitlementConfig.getMissionRewardAmount(r, true));
+    }
+    return base; // Legacy fallback (base, Normal)
+  }
+
   // Rate limit helper for wallet mutation endpoints
   async function checkWalletRateLimit(env, userId, category, max, windowSec) {
     if (!isUserRateLimited || !env.RATE_LIMITS) return null;
@@ -235,8 +272,11 @@ export function createWalletHandlers(deps) {
         // AUTHORITATIVE value instead of guessing or caching stale state.
         is_premium: isPremium,
         ...streakInfo,
-        // PHASE UX-V2: include streak_rewards array for frontend UI rendering
-        streak_rewards: walletRepo.STREAK_REWARDS || [1, 3, 6, 10, 18, 30, 50],
+        // PHASE UX-V2: include streak_rewards array for frontend UI rendering.
+        // PREMIUM-DISPLAY FIX: return the EFFECTIVE per-day amounts (base for
+        // Free, ceil(base × 1.5) for Premium) — the exact amounts that
+        // claimDailyRewardWithStreak would credit for each streak day.
+        streak_rewards: _getEffectiveStreakRewards(isPremium),
       }, {}, env);
     } catch (error) {
       console.warn(safeError('get-claim-status', error));
@@ -321,8 +361,12 @@ export function createWalletHandlers(deps) {
       return jsonResponse({
         status: 'success',
         ...result,
-        // PHASE UX-V2: include streak_rewards array for frontend UI rendering
-        streak_rewards: walletRepo.STREAK_REWARDS || [1, 3, 6, 10, 18, 30, 50],
+        // PHASE UX-V2: include streak_rewards array for frontend UI rendering.
+        // PREMIUM-DISPLAY FIX: return the EFFECTIVE per-day amounts (base for
+        // Free, ceil(base × 1.5) for Premium) — the exact amounts that
+        // claimDailyRewardWithStreak credits for each streak day. This does
+        // NOT change the crediting logic (result.amount is the actual credit).
+        streak_rewards: _getEffectiveStreakRewards(isPremium),
       }, {}, env);
     } catch (error) {
       if (error.code === 'ALREADY_CLAIMED') {
@@ -735,6 +779,15 @@ export function createWalletHandlers(deps) {
       // (consistent with daily claim boundary). Previously UTC.
       const today = _getTehranDateString();
 
+      // PREMIUM-DISPLAY FIX: compute the user's tier ONCE, then return the
+      // EFFECTIVE mission reward (base × tier multiplier) for every mission
+      // card. Uses the same canonical helper (getMissionRewardAmount) that
+      // handleMissionComplete uses when actually crediting — so the displayed
+      // reward_amount always matches the amount the user receives on
+      // completion. Does NOT modify m.token_amount in DB; does NOT change
+      // the crediting transaction logic.
+      const isPremium = await _isPremiumSafe(env, userId);
+
       // Get all active mission definitions from DB
       const activeMissions = rewardCenterRepo
         ? await rewardCenterRepo.getActiveMissionRewards(env)
@@ -755,7 +808,9 @@ export function createWalletHandlers(deps) {
         return {
           mission_id: m.mission_id,
           mission_name: m.mission_name,
-          reward_amount: m.token_amount,
+          // PREMIUM-DISPLAY FIX: EFFECTIVE reward (base for Free,
+          // ceil(base × 1.5) for Premium) — matches the actual credited amount.
+          reward_amount: _getEffectiveMissionReward(m.token_amount, isPremium),
           reward_label: m.mission_name,
           trigger: m.trigger,
           target_count: m.target_count,

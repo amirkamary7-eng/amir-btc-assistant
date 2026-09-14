@@ -10825,6 +10825,12 @@ const referralHandlers = createReferralHandlers({
   safeError,
   isDatabaseConfigured,
   referralRepo,
+  // PREMIUM-DISPLAY FIX: wire authority + config so handleStats can return
+  // the EFFECTIVE reward_per_invite (base 3 for Free, 6 for Premium) instead
+  // of the DB base value. The actual crediting path in
+  // processPendingReferralReward already uses these same helpers.
+  membershipAuthority,
+  entitlementConfig: ENTITLEMENT,
 });
 
 // walletRepo + economyService already created above (before alertHandlers).

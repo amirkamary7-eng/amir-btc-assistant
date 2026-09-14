@@ -512,7 +512,9 @@ const ReferralApp = (() => {
     const totalInvites = stats?.total || 0;
     const activeInvites = stats?.active || 0;
     const rewarded = stats?.rewarded || 0;
-    const rewardPerInvite = stats?.reward_per_invite || 3;
+    // PREMIUM-DISPLAY FIX: use the backend-provided EFFECTIVE reward_per_invite
+    // (base 3 for Free, 6 for Premium). Do NOT hardcode 3 or 6 in frontend.
+    const rewardPerInvite = Number(stats?.reward_per_invite || 0);
     const totalEarned = (stats?.total_earned != null) ? stats.total_earned : (rewarded * rewardPerInvite);
     const conversionRate = totalInvites > 0 ? Math.round((activeInvites / totalInvites) * 100) : 0;
 
@@ -837,7 +839,10 @@ const ReferralApp = (() => {
   function computeMissions(stats) {
     const totalInvites = stats?.total || 0;
     const totalEarned = stats?.total_earned || 0;
-    const rewardPerInvite = stats?.reward_per_invite || 3;
+    // PREMIUM-DISPLAY FIX: use the backend-provided EFFECTIVE reward_per_invite
+    // (base 3 for Free, 6 for Premium). Do NOT hardcode 3 or 6 in frontend.
+    // All milestone rewards are derived from this single backend value.
+    const rewardPerInvite = Number(stats?.reward_per_invite || 0);
 
     return [
       { id: 'first', icon: ICONS.userPlus, title: RT('mission_invite_first'), desc: RT('mission_invite_first_desc'),
@@ -964,7 +969,8 @@ const ReferralApp = (() => {
     const username = ref.invitee_username ? '@' + ref.invitee_username : null;
     const isJoined = ref.channel_verified;
     const isRewarded = ref.rewarded;
-    const rewardPerInvite = referralData?.reward_per_invite || 3;
+    // PREMIUM-DISPLAY FIX: use the backend-provided EFFECTIVE reward_per_invite.
+    const rewardPerInvite = Number(referralData?.reward_per_invite || 0);
     const source = ref.source || 'direct';
     const sourceLabel = RT('source_' + source) || RT('source_direct');
 
@@ -1319,7 +1325,8 @@ const ReferralApp = (() => {
     const earnedEl = page.querySelector('.rc-hero-earned-value');
     if (earnedEl) {
       const rewarded = stats?.rewarded || 0;
-      const rewardPerInvite = stats?.reward_per_invite || 3;
+      // PREMIUM-DISPLAY FIX: use the backend-provided EFFECTIVE reward_per_invite.
+      const rewardPerInvite = Number(stats?.reward_per_invite || 0);
       const totalEarned = (stats?.total_earned != null) ? stats.total_earned : (rewarded * rewardPerInvite);
       setCountup(earnedEl, totalEarned);
     }
@@ -1738,7 +1745,7 @@ const ReferralApp = (() => {
       const balance = summary?.balance ?? 0;
 
       const data = {
-        stats: stats || { total: 0, active: 0, rewarded: 0, pending: 0, reward_per_invite: 3, total_earned: 0 },
+        stats: stats || { total: 0, active: 0, rewarded: 0, pending: 0, reward_per_invite: 0, total_earned: 0 },
         balance: balance,
         leaderboard: leaderboard || { leaderboard: [] },
         wheel: wheel || { daily_spin: { available: false }, total_available: 0, premium_spins: 0 },
