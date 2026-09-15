@@ -529,7 +529,9 @@ export function createAdvertisementsHandlers(deps) {
 
       let result;
       try {
-        result = await _deliverMessageCampaign(env, message);
+        // Pass the Worker origin so internal image URLs (/api/advertisements/image/:id)
+      // can be absolutized to a public HTTPS URL for Telegram sendPhoto.
+      result = await _deliverMessageCampaign(env, message, new URL(request.url).origin);
       } catch (deliveryErr) {
         // Release the claim on failure so admin can retry sooner than 5 min.
         await advertisementsRepo.releaseMessageClaim(env, id);
@@ -559,12 +561,31 @@ export function createAdvertisementsHandlers(deps) {
   // ═══════════════════════════════════════════════════════════════════════
 
   /**
-   * Delivers a message campaign to its target audience via the chosen destinations.
-   * Reuses the existing notification_platform pipeline for mini_app delivery and
-   * sendTelegramMessage for telegram delivery. Per-user ch_promotions preference
-   * is enforced (premium-gated; free users default to 'none').
+   * Absolutize an ad image_url for Telegram consumption.
+   * - Internal: `/api/advertisements/image/:id` (served publicly by handleServeImage)
+   *   → prefix with the Worker origin (derived from request.url) so Telegram can
+   *   fetch it. Returns '' if apiOrigin is unavailable (photo dropped → sendMessage).
+   * - External: already an absolute HTTPS URL (validated by isValidExternalImageUrl)
+   *   → returned as-is.
    */
-  async function _deliverMessageCampaign(env, message) {
+  function _absolutizeImageUrl(imageUrl, apiOrigin) {
+    if (!imageUrl || typeof imageUrl !== 'string') return '';
+    if (/^\/api\/advertisements\/image\//.test(imageUrl)) {
+      if (!apiOrigin) return '';
+      return apiOrigin + imageUrl;
+    }
+    return imageUrl;
+  }
+
+  /**
+   * Delivers a message campaign to its target audience via the chosen destinations.
+   * Uses the canonical notificationPlatformRepo.sendNotification pipeline so that:
+   *   - Mini App delivery writes a `notifications` row (visible via GET /api/notifications).
+   *   - Telegram delivery enqueues a `notification_queue` row carrying telegramExtra
+   *     (reply_markup inline_keyboard, photo for sendPhoto, parse_mode).
+   * Per-user ch_promotions preference is enforced (premium-gated; free users → 'none').
+   */
+  async function _deliverMessageCampaign(env, message, apiOrigin) {
     if (!isDatabaseConfigured(env)) {
       return { delivered: 0, skipped: 0, enqueued: 0, audience: message.target_audience || 'all', destinations: message.destinations || 'both', reason: 'db_not_configured' };
     }
@@ -612,12 +633,28 @@ export function createAdvertisementsHandlers(deps) {
       )`;
     }
 
-    // Build message text once
-    const textParts = [message.body_text];
+    // RC1 FIX: Do NOT concatenate button label/url into the body text. The
+    // button is delivered as a Telegram native inline_keyboard via
+    // telegramExtra.reply_markup (consumed by processQueue → sendTelegramMessage).
+    // RC2 FIX: image_url is passed as telegramExtra.photo (absolutized for
+    // internal /api/advertisements/image/:id paths) so sendTelegramMessage uses
+    // sendPhoto. RC6 FIX: parse_mode flows via telegramExtra (not metadata).
+    const telegramExtra = { parse_mode: 'HTML' };
     if (message.button_label && message.button_url) {
-      textParts.push(`\n\n${message.button_label}: ${message.button_url}`);
+      telegramExtra.reply_markup = {
+        inline_keyboard: [[{ text: message.button_label, url: message.button_url }]],
+      };
     }
-    const fullText = textParts.join('');
+    if (message.image_url) {
+      const absPhoto = _absolutizeImageUrl(message.image_url, apiOrigin);
+      if (absPhoto) telegramExtra.photo = absPhoto;
+    }
+    // Metadata stored on the notifications row (Mini App) so the frontend can
+    // render image + CTA. telegramExtra is only for the Telegram queue path.
+    const adMetadata = { campaign_id: message.campaign_id, ad_message_id: message.id };
+    if (message.image_url) adMetadata.image_url = telegramExtra.photo || message.image_url;
+    if (message.button_label) adMetadata.button_label = message.button_label;
+    if (message.button_url) adMetadata.button_url = message.button_url;
 
     while (true) {
       const params = checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE];
@@ -675,15 +712,11 @@ export function createAdvertisementsHandlers(deps) {
         }
       }
 
-      // Build enqueue values for users who have at least one delivery channel
       // P1 FIX: Only Premium users can have a non-'none' ch_promotions preference.
       // Non-Premium users (Free, expired, downgraded) are treated as 'none'
       // regardless of their stale DB value. This prevents downgraded users from
       // receiving promotional messages based on a stale 'both' from their
       // Premium period.
-      const enqueueValues = [];
-      const enqueueParams = [];
-      let paramIdx = 1;
       for (const uid of userIds) {
         // P1 FIX: If user is NOT currently Premium, treat ch_promotions as 'none'
         const isCurrentlyPremium = premiumSet.has(uid);
@@ -703,36 +736,40 @@ export function createAdvertisementsHandlers(deps) {
 
         if (!deliverMiniApp && !deliverTelegram) { skipped++; skipped_no_channel++; continue; }
 
-        // Determine channel for this user (prefer telegram if both, as it's more visible)
-        const channel = deliverTelegram ? 'telegram' : 'mini_app';
-        const payload = JSON.stringify({
-          userId: uid,
-          category: 'promotions',
-          type: 'advertisement',
-          title: message.title,
-          message: fullText,
-          metadata: {
-            campaign_id: message.campaign_id,
-            ad_message_id: message.id,
-            parse_mode: 'HTML',
-          },
-        });
-        enqueueValues.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4})`);
-        enqueueParams.push(uid, channel, 'high', payload, `ad_msg_${message.id}_${uid}`);
-        paramIdx += 5;
-        delivered++;
-      }
+        // RC8 FIX: derive the delivery channel for BOTH destinations, not a single
+        // channel. sendNotification (forceChannel) honors this:
+        //   'both'     → notifications INSERT (mini_app) + notification_queue (telegram)
+        //   'telegram' → notification_queue only
+        //   'mini_app' → notifications INSERT only
+        let channel;
+        if (deliverMiniApp && deliverTelegram) channel = 'both';
+        else if (deliverTelegram) channel = 'telegram';
+        else channel = 'mini_app';
 
-      // Batch INSERT into notification_queue (idempotent via dedupKey UNIQUE)
-      if (enqueueValues.length > 0) {
+        // RC3+RC4 FIX: use the canonical sendNotification pipeline instead of
+        // hand-building a queue INSERT. sendNotification writes the `notifications`
+        // row (so the Mini App sees it via GET /api/notifications) AND enqueues the
+        // `notification_queue` row with telegramExtra (reply_markup/photo/parse_mode).
+        // forceChannel=true because we already enforced the ch_promotions gate above.
+        // enqueueOnly=true keeps the admin request fast (cron delivers telegram).
         try {
-          await queryDb(env, `
-            INSERT INTO notification_queue (user_id, channel, priority, payload, notification_id)
-            VALUES ${enqueueValues.join(', ')}
-            ON CONFLICT (notification_id, user_id) DO NOTHING
-          `, enqueueParams);
+          await notificationPlatformRepo.sendNotification(env, {
+            userId: uid,
+            category: 'promotions',
+            title: message.title,
+            message: message.body_text, // CLEAN body — no button URL concatenation
+            metadata: adMetadata,
+            channel,
+            priority: 'high',
+            dedupKey: 'ad_msg_' + message.id + '_' + uid,
+            forceChannel: true,
+            enqueueOnly: true,
+            telegramExtra: deliverTelegram ? telegramExtra : undefined,
+          }, null);
+          delivered++;
         } catch (e) {
-          console.warn('[advertisements] enqueue batch failed:', e.message);
+          console.warn('[advertisements] sendNotification failed for', uid, ':', e?.message || e);
+          skipped++; skipped_no_channel++;
         }
       }
 
@@ -758,7 +795,7 @@ export function createAdvertisementsHandlers(deps) {
       audience,
       destinations,
       queued: true,
-      note: 'Messages queued for async delivery via processQueue cron. Delivered count reflects enqueued users, not immediate delivery.',
+      note: 'Messages delivered via canonical sendNotification (notifications table for mini_app + notification_queue for telegram). Telegram delivery is async via processQueue cron.'
     };
   }
 

@@ -3981,7 +3981,7 @@ function _adsMessageFormHtml(m) {
             '<div class="rc-field"><label>مخاطب هدف</label>' +
                 '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="free" ' + radioChecked('free', currentAud) + '><span>کاربران رایگان</span></label>' +
                 '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="premium" ' + radioChecked('premium', currentAud) + '><span>کاربران ویژه</span></label>' +
-                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="all" ' + radioChecked('all', currentAud) + '><span>همه کاربران</span></label>' +
+                '<label class="rc-toggle-row"><input type="radio" name="ads-msg-aud" value="all" ' + radioChecked('all', currentAud) + '><span>همه کاربران واجد شرایط (Premium با تبلیغات فعال)</span></label>' +
             '</div>' +
             '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-msg-status">' +
                 '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +

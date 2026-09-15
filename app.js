@@ -13038,6 +13038,7 @@ async function loadNotificationsFromServer() {
                     body: n.message || '',
                     read: Boolean(n.read),
                     date: n.created_at || new Date().toISOString(),
+                    metadata: n.metadata || {},
                 }));
                 _logNotifEvent('GET_APPLIED', { reqId, mySeq, oldCount, newCount: notifications.length, serverUnread: data.unread_count });
                 // Update badge with server-provided unread count (P0-4: cap at 99+)
@@ -13119,10 +13120,19 @@ function renderNotifications() {
         const notificationDate = new Date(n.date);
         const datePart = notificationDate.toLocaleDateString(_notifLocale, _notifDateOpts);
         const timePart = notificationDate.toLocaleTimeString(_notifLocale, _notifTimeOpts);
+        // Advertisement notifications carry metadata.image_url / button_label /
+        // button_url (written by _deliverMessageCampaign via sendNotification).
+        // Render image + CTA ONLY when present (backward-compatible for non-ad
+        // notifications which have empty metadata).
+        const md = n.metadata || {};
+        const imgHtml = (md.image_url) ? '<img class="notif-img" src="' + escapeHtml(md.image_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+        const ctaHtml = (md.button_url && md.button_label) ? '<a class="notif-cta" href="' + escapeHtml(md.button_url) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">' + escapeHtml(md.button_label) + '</a>' : '';
         return `
         <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${escapeHtml(n.id)}')">
+            ${imgHtml}
             <div class="notif-title">${escapeHtml(n.title)}</div>
             <div class="notif-body">${escapeHtml(n.body)}</div>
+            ${ctaHtml}
             <div class="notif-date">${datePart} • ${timePart}</div>
             <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="Delete">×</button>
         </div>`;

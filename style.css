@@ -1016,6 +1016,10 @@ strong.down { color: var(--red); }
 .notif-title { font-weight: 600; }
 .notif-body { font-size: 12px; color: var(--text-dim); }
 .notif-date { font-size: 10px; color: var(--text-sub); text-align: right; }
+/* Advertisement notifications: image + CTA (rendered only when metadata carries them) */
+.notif-img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; display: block; }
+.notif-cta { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; text-decoration: none; }
+.notif-cta:hover { filter: brightness(1.1); }
 .notif-delete-btn {
     position: absolute; top: 8px; inset-inline-end: 8px;
     width: 24px; height: 24px; border: none; border-radius: 50%;

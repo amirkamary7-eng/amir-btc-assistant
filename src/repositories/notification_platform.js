@@ -812,19 +812,33 @@ export function createNotificationPlatformRepository(deps) {
           // If this becomes a real issue, a lightweight KV cache of preferences
           // can be added without a per-item DB query.
 
-          // Phase 2: Build Telegram payload with rich message fields
-          const tgPayload = {
-            chat_id: item.user_id,
-            text,
-          };
+          // Phase 2: Build Telegram payload with rich message fields.
+          // RC2 FIX: forward telegramExtra.photo → tgPayload.photo so
+          // sendTelegramMessage uses sendPhoto (it checks payload.photo at
+          // worker-proxy.js line 1724). For sendPhoto, the body text becomes
+          // the `caption` (Telegram sendPhoto has no `text` field; max 1024 chars).
+          // For sendMessage (no photo), text stays as `text` and
+          // disable_web_page_preview defaults to true.
           const tx = payload.telegramExtra;
-          if (tx && typeof tx === 'object') {
+          const tgPayload = { chat_id: item.user_id };
+          if (tx && typeof tx === 'object' && tx.photo) {
+            // sendPhoto path: photo + caption
+            tgPayload.photo = tx.photo;
+            tgPayload.caption = String(text).slice(0, 1024);
             if (tx.reply_markup) tgPayload.reply_markup = tx.reply_markup;
             if (tx.parse_mode) tgPayload.parse_mode = tx.parse_mode;
-            if (tx.disable_web_page_preview !== undefined) tgPayload.disable_web_page_preview = tx.disable_web_page_preview;
-            else tgPayload.disable_web_page_preview = true;
+            // disable_web_page_preview is a sendMessage-only option; omitted for sendPhoto.
           } else {
-            tgPayload.disable_web_page_preview = true;
+            // sendMessage path: text
+            tgPayload.text = text;
+            if (tx && typeof tx === 'object') {
+              if (tx.reply_markup) tgPayload.reply_markup = tx.reply_markup;
+              if (tx.parse_mode) tgPayload.parse_mode = tx.parse_mode;
+              if (tx.disable_web_page_preview !== undefined) tgPayload.disable_web_page_preview = tx.disable_web_page_preview;
+              else tgPayload.disable_web_page_preview = true;
+            } else {
+              tgPayload.disable_web_page_preview = true;
+            }
           }
           // SAFETY FIX (in-flight retry → duplicate Telegram):
           // sendTelegramMessage's default retries=1 retries on AbortError (8s timeout).

@@ -338,7 +338,8 @@ test('ADS-MSG-03: handleAdminSendMessage rejects non-active campaigns with CAMPA
 
 test('ADS-MSG-04: _deliverMessageCampaign uses audience-filtered SQL JOIN on membership_users', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
-  const fnBlock = ADS_CTRL_SRC.slice(fnStart, fnStart + 3500);
+  const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
   assert.ok(/LEFT\s+JOIN\s+membership_users\s+mu\s+ON\s+mu\.telegram_id\s*=\s*u\.telegram_id/i.test(fnBlock),
     '_deliverMessageCampaign must LEFT JOIN membership_users');
   assert.ok(fnBlock.includes('audienceClause'),
@@ -369,18 +370,20 @@ test('ADS-MSG-06: Free audience filter (no membership row OR FREE OR not approve
     'Free audience must include expired members');
 });
 
-test('ADS-MSG-07: Delivery enqueues into notification_queue for async delivery', () => {
+test('ADS-MSG-07: Delivery enqueues via canonical sendNotification (async delivery)', () => {
   const fnStart = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
   const nextFn = ADS_CTRL_SRC.indexOf('async function', fnStart + 50);
   const fnBlock = nextFn > -1 ? ADS_CTRL_SRC.slice(fnStart, nextFn) : ADS_CTRL_SRC.slice(fnStart, fnStart + 8000);
-  // PHASE 2 FIX: delivery now enqueues into notification_queue instead of
-  // sequential sendTelegramMessage. The processQueue cron handles actual sends.
-  assert.ok(fnBlock.includes('notification_queue'),
-    '_deliverMessageCampaign must enqueue into notification_queue');
-  assert.ok(/INSERT\s+INTO\s+notification_queue/.test(fnBlock),
-    '_deliverMessageCampaign must INSERT into notification_queue');
-  assert.ok(/ON CONFLICT.*DO NOTHING/.test(fnBlock),
-    'enqueue must be idempotent (ON CONFLICT DO NOTHING)');
+  // RC4 FIX: delivery now uses notificationPlatformRepo.sendNotification (canonical
+  // pipeline) which internally enqueues into notification_queue (idempotent via
+  // dedupKey ON CONFLICT) AND writes the notifications row for mini_app.
+  // No direct INSERT in _deliverMessageCampaign anymore.
+  assert.ok(fnBlock.includes('notificationPlatformRepo.sendNotification'),
+    '_deliverMessageCampaign must call notificationPlatformRepo.sendNotification');
+  assert.ok(fnBlock.includes('enqueueOnly: true'),
+    'sendNotification must use enqueueOnly (cron delivers telegram async)');
+  assert.ok(fnBlock.includes('dedupKey:'),
+    'enqueue must use a dedupKey for idempotency (ON CONFLICT handled by sendNotification)');
 });
 
 test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → skipped)', () => {
@@ -2547,3 +2550,248 @@ test('RT-50: Authority matching handles subdomains (www.bbc.com matches bbc.com)
 });
 
 console.log('✅ All Web Search answer quality tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AD-DELIVERY FIX (RC1-RC8): Advertisement Send delivery rewrite
+//   _deliverMessageCampaign now uses canonical notificationPlatformRepo.sendNotification
+//   instead of hand-building a notification_queue INSERT. This fixes:
+//     RC1 — button as Telegram inline_keyboard (not raw text in body)
+//     RC2 — image via sendPhoto (telegramExtra.photo, absolutized for internal URLs)
+//     RC3 — Mini App delivery (notifications row written by sendNotification)
+//     RC4 — uses existing pipeline (no parallel system)
+//     RC6 — parse_mode via telegramExtra (not dead metadata.parse_mode)
+//     RC8 — destinations=both → real dual delivery (channel='both', not single)
+//   processQueue forwards telegramExtra.photo → tgPayload.photo (sendPhoto path).
+//   All source-inspection based (no DB, no network).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Locate the _deliverMessageCampaign function body in the advertisements controller
+const _DELIVER_FN_START = ADS_CTRL_SRC.indexOf('async function _deliverMessageCampaign');
+const _DELIVER_FN_END = ADS_CTRL_SRC.indexOf('  async function handleAdminUploadImage', _DELIVER_FN_START);
+const _DELIVER_FN = ADS_CTRL_SRC.slice(_DELIVER_FN_START, _DELIVER_FN_END > _DELIVER_FN_START ? _DELIVER_FN_END : ADS_CTRL_SRC.length);
+
+// T7+T8 — Button: reply_markup inline_keyboard built ONLY when button_label && button_url
+test('AD-DELIV-T7: reply_markup inline_keyboard built with button_label text + button_url url when button exists', () => {
+  assert.ok(_DELIVER_FN.includes("telegramExtra.reply_markup ="),
+    'Must build reply_markup when button exists');
+  assert.ok(_DELIVER_FN.includes("inline_keyboard: [[{ text: message.button_label, url: message.button_url }]]"),
+    'inline_keyboard must use message.button_label as text and message.button_url as url');
+  assert.ok(/if\s*\(\s*message\.button_label\s*&&\s*message\.button_url\s*\)/.test(_DELIVER_FN),
+    'reply_markup must be conditional on BOTH button_label AND button_url');
+});
+
+test('AD-DELIV-T8: no reply_markup when button absent (conditional block)', () => {
+  // The reply_markup is inside an if-block; no unconditional assignment
+  const rkIdx = _DELIVER_FN.indexOf('telegramExtra.reply_markup =');
+  const before = _DELIVER_FN.slice(Math.max(0, rkIdx - 120), rkIdx);
+  assert.ok(/if\s*\(\s*message\.button_label\s*&&\s*message\.button_url\s*\)/.test(before),
+    'reply_markup assignment must be guarded by if (button_label && button_url) — so absent button → no keyboard');
+});
+
+// T7 — URL NOT appended to body
+test('AD-DELIV-T7b: button URL is NOT concatenated into body text (RC1)', () => {
+  assert.ok(!_DELIVER_FN.includes("textParts.push"),
+    'Must NOT use textParts.push (old raw-text button concat removed)');
+  assert.ok(!_DELIVER_FN.includes("button_label}: ${message.button_url}"),
+    'Must NOT concatenate button_label:button_url into body');
+  // message passed to sendNotification is CLEAN body_text
+  assert.ok(_DELIVER_FN.includes("message: message.body_text"),
+    'sendNotification message must be message.body_text (clean, no button)');
+});
+
+// T6 — Image: sendPhoto via telegramExtra.photo, absolutized for internal URLs
+test('AD-DELIV-T6: telegramExtra.photo set from message.image_url (absolutized)', () => {
+  assert.ok(_DELIVER_FN.includes("if (message.image_url)"),
+    'photo must be conditional on message.image_url');
+  assert.ok(_DELIVER_FN.includes("telegramExtra.photo = absPhoto") || _DELIVER_FN.includes("telegramExtra.photo = _absolutizeImageUrl"),
+    'telegramExtra.photo must be set via _absolutizeImageUrl');
+});
+
+test('AD-DELIV-T6b: _absolutizeImageUrl prefixes internal image path with apiOrigin', () => {
+  const absIdx = ADS_CTRL_SRC.indexOf('function _absolutizeImageUrl');
+  const absFn = ADS_CTRL_SRC.slice(absIdx, absIdx + 400);
+  assert.ok(absIdx > -1, '_absolutizeImageUrl helper must exist');
+  assert.ok(absFn.includes('advertisements'),
+    'Must reference the advertisements image path');
+  assert.ok(absFn.includes('apiOrigin'),
+    'Must use apiOrigin to absolutize');
+  assert.ok(absFn.includes('return apiOrigin + imageUrl'),
+    'Internal image → apiOrigin + imageUrl (absolute HTTPS)');
+});
+
+test('AD-DELIV-T6c: handleAdminSendMessage passes request origin to _deliverMessageCampaign', () => {
+  const callIdx = ADS_CTRL_SRC.indexOf('_deliverMessageCampaign(env, message,');
+  assert.ok(callIdx > -1, 'handleAdminSendMessage must call _deliverMessageCampaign with 3rd arg');
+  const callSite = ADS_CTRL_SRC.slice(callIdx, callIdx + 200);
+  assert.ok(callSite.includes('new URL(request.url).origin'),
+    'Must pass new URL(request.url).origin as apiOrigin');
+});
+
+// T5 — No image → no photo field (sendPhoto only when photo present, enforced by processQueue + sendTelegramMessage)
+test('AD-DELIV-T5: when no image, telegramExtra.photo is absent (sendMessage path)', () => {
+  // photo assignment must be guarded by if (message.image_url) — so absent image
+  // leaves telegramExtra.photo undefined → processQueue sendMessage path.
+  assert.ok(/if\s*\(\s*message\.image_url\s*\)[\s\S]*?telegramExtra\.photo/.test(_DELIVER_FN),
+    'telegramExtra.photo must be inside if (message.image_url) — absent image → no photo → sendMessage');
+});
+
+// T1+T2 — Canonical sendNotification used (not hand-built queue INSERT)
+test('AD-DELIV-T1: _deliverMessageCampaign calls notificationPlatformRepo.sendNotification', () => {
+  assert.ok(_DELIVER_FN.includes("notificationPlatformRepo.sendNotification(env,"),
+    'Must call notificationPlatformRepo.sendNotification (canonical pipeline)');
+});
+
+test('AD-DELIV-T1b: NO direct notification_queue INSERT in _deliverMessageCampaign (RC4)', () => {
+  assert.ok(!_DELIVER_FN.includes("INSERT INTO notification_queue"),
+    'Must NOT hand-build INSERT INTO notification_queue (use sendNotification instead)');
+  assert.ok(!_DELIVER_FN.includes("enqueueValues"),
+    'Must NOT use enqueueValues (old hand-built batch insert removed)');
+});
+
+// T2 — destinations=both → real dual delivery (channel='both')
+test('AD-DELIV-T2: destinations=both with pref=both → channel=both (dual delivery, RC8)', () => {
+  assert.ok(_DELIVER_FN.includes("if (deliverMiniApp && deliverTelegram) channel = 'both'"),
+    "Must set channel='both' when both deliverMiniApp AND deliverTelegram");
+  assert.ok(!_DELIVER_FN.includes("const channel = deliverTelegram ? 'telegram' : 'mini_app'"),
+    "Must NOT use old single-channel selection (deliverTelegram ? 'telegram' : 'mini_app')");
+});
+
+test('AD-DELIV-T2b: sendNotification uses forceChannel:true (pref already checked)', () => {
+  assert.ok(_DELIVER_FN.includes("forceChannel: true"),
+    'Must pass forceChannel:true (preference enforced before sendNotification)');
+  assert.ok(_DELIVER_FN.includes("enqueueOnly: true"),
+    'Must pass enqueueOnly:true (admin request stays fast; cron delivers telegram)');
+});
+
+// T3+T4 — channel derived for mini_app-only / telegram-only
+test('AD-DELIV-T3: pref=mini_app + destinations=both → channel=mini_app (Mini App only)', () => {
+  assert.ok(_DELIVER_FN.includes("else channel = 'mini_app'"),
+    "Must set channel='mini_app' when only deliverMiniApp");
+});
+
+test('AD-DELIV-T4: pref=telegram + destinations=both → channel=telegram (Telegram only)', () => {
+  assert.ok(_DELIVER_FN.includes("else if (deliverTelegram) channel = 'telegram'"),
+    "Must set channel='telegram' when only deliverTelegram");
+});
+
+// T9 — Free users remain blocked (pref='none' override preserved)
+test('AD-DELIV-T9: non-Premium users forced to pref=none (Free delivery block preserved)', () => {
+  assert.ok(_DELIVER_FN.includes("const pref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none'"),
+    'Non-Premium → pref=none (unchanged security behavior)');
+  assert.ok(_DELIVER_FN.includes("skipped_not_premium"),
+    'Free-user skip counter preserved');
+});
+
+// T10/T11/T12 — Audience SQL preserved
+test('AD-DELIV-T10: target_audience=premium SQL clause preserved', () => {
+  assert.ok(/audience === 'premium'/.test(_DELIVER_FN), "premium audience branch preserved");
+  assert.ok(/membership_level IN \('VIP','PREMIUM','ELITE'\)/.test(_DELIVER_FN), "premium SQL preserved");
+});
+
+test('AD-DELIV-T11: target_audience=free SQL clause preserved', () => {
+  assert.ok(/audience === 'free'/.test(_DELIVER_FN), "free audience branch preserved");
+});
+
+test('AD-DELIV-T12: target_audience=all → empty audienceClause (all channel_joined users, pref gate intact)', () => {
+  assert.ok(/audience === 'all'/.test(_DELIVER_FN) || _DELIVER_FN.includes("audienceClause = ''"),
+    "all audience → empty clause (all channel_joined users selected, pref gate still filters)");
+});
+
+// RC6 — parse_mode via telegramExtra (not metadata.parse_mode)
+test('AD-DELIV-RC6: parse_mode flows via telegramExtra.parse_mode (not metadata.parse_mode)', () => {
+  assert.ok(_DELIVER_FN.includes("telegramExtra = { parse_mode: 'HTML' }"),
+    'parse_mode must be in telegramExtra (consumed by processQueue)');
+  assert.ok(!_DELIVER_FN.includes("parse_mode: 'HTML',\n          },\n        });") && !_DELIVER_FN.includes("metadata: {") || !_DELIVER_FN.match(/metadata:\s*\{[^}]*parse_mode/),
+    'parse_mode must NOT be in metadata (dead data — processQueue does not read metadata.parse_mode)');
+});
+
+// Metadata carries image/button for Mini App notifications row
+test('AD-DELIV-MINIAPP: adMetadata carries image_url + button_label + button_url for Mini App', () => {
+  assert.ok(_DELIVER_FN.includes("adMetadata"),
+    'adMetadata must be built for the notifications row');
+  assert.ok(_DELIVER_FN.includes("adMetadata.image_url"),
+    'adMetadata.image_url must be set (Mini App image)');
+  assert.ok(_DELIVER_FN.includes("adMetadata.button_label"),
+    'adMetadata.button_label must be set (Mini App CTA text)');
+  assert.ok(_DELIVER_FN.includes("adMetadata.button_url"),
+    'adMetadata.button_url must be set (Mini App CTA href)');
+  assert.ok(_DELIVER_FN.includes("metadata: adMetadata"),
+    'sendNotification metadata must be adMetadata');
+});
+
+// telegramExtra only passed when deliverTelegram (mini_app-only doesn't need it)
+test('AD-DELIV-EXTRA: telegramExtra passed only when deliverTelegram', () => {
+  assert.ok(_DELIVER_FN.includes("telegramExtra: deliverTelegram ? telegramExtra : undefined"),
+    'telegramExtra passed only when deliverTelegram (mini_app-only skips it)');
+});
+
+// ── processQueue photo-forwarding fix (RC2) ──
+const _PQ_FN_START = NOTIF_PLATFORM_REPO_SRC.indexOf('async function processQueue');
+const _PQ_FN_END = NOTIF_PLATFORM_REPO_SRC.indexOf('async function requeueStaleQueueItems', _PQ_FN_START);
+const _PQ_FN = NOTIF_PLATFORM_REPO_SRC.slice(_PQ_FN_START, _PQ_FN_END > _PQ_FN_START ? _PQ_FN_END : NOTIF_PLATFORM_REPO_SRC.length);
+
+test('AD-DELIV-PQ1: processQueue forwards telegramExtra.photo → tgPayload.photo (sendPhoto)', () => {
+  assert.ok(_PQ_FN.includes("tgPayload.photo = tx.photo"),
+    'processQueue must forward tx.photo → tgPayload.photo so sendTelegramMessage uses sendPhoto');
+});
+
+test('AD-DELIV-PQ2: processQueue uses caption (not text) for sendPhoto path', () => {
+  assert.ok(_PQ_FN.includes("tgPayload.caption"),
+    'sendPhoto path must use caption (Telegram sendPhoto has no text field)');
+  assert.ok(_PQ_FN.includes("String(text).slice(0, 1024)"),
+    'caption must be sliced to 1024 (Telegram caption max)');
+});
+
+test('AD-DELIV-PQ3: processQueue keeps text path for sendMessage (no photo)', () => {
+  assert.ok(_PQ_FN.includes("tgPayload.text = text"),
+    'sendMessage path must keep tgPayload.text');
+});
+
+test('AD-DELIV-PQ4: processQueue photo branch guarded by tx.photo (absent → sendMessage)', () => {
+  assert.ok(/tx\.photo\)/.test(_PQ_FN),
+    'photo branch must be guarded by tx.photo — absent photo → sendMessage path');
+});
+
+// ── Mini App frontend renderer (app.js) ──
+test('AD-DELIV-FE1: notification mapping includes metadata (for image/CTA)', () => {
+  assert.ok(APP_SRC.includes("metadata: n.metadata || {},"),
+    'Frontend notification mapping must include metadata (so renderer can show image/CTA)');
+});
+
+test('AD-DELIV-FE2: renderNotifications renders image when metadata.image_url present', () => {
+  const renderIdx = APP_SRC.indexOf('function renderNotifications');
+  const renderFn = APP_SRC.slice(renderIdx, renderIdx + 3500);
+  assert.ok(renderFn.includes("md.image_url"),
+    'renderNotifications must read metadata.image_url');
+  assert.ok(renderFn.includes("notif-img"),
+    'renderNotifications must render an <img class="notif-img"> when image_url present');
+  assert.ok(renderFn.includes("md.button_url") && renderFn.includes("md.button_label"),
+    'renderNotifications must read metadata.button_url + button_label for CTA');
+  assert.ok(renderFn.includes("notif-cta"),
+    'renderNotifications must render a CTA <a class="notif-cta">');
+});
+
+test('AD-DELIV-FE3: CTA opens button_url in new tab (target=_blank rel=noopener)', () => {
+  const renderIdx = APP_SRC.indexOf('function renderNotifications');
+  const renderFn = APP_SRC.slice(renderIdx, renderIdx + 3500);
+  assert.ok(renderFn.includes('target="_blank"') && renderFn.includes('rel="noopener noreferrer"'),
+    'CTA must open in new tab with rel=noopener (security)');
+  assert.ok(renderFn.includes('event.stopPropagation()'),
+    'CTA click must stopPropagation (so it does not trigger markNotifRead)');
+});
+
+// ── UI label honesty (RC5) ──
+test('AD-DELIV-RC5: target_audience=all label is honest about Premium+promotions gating', () => {
+  assert.ok(ADMIN_JS.includes("همه کاربران واجد شرایط"),
+    'target_audience=all label must indicate eligibility gating (not bare "همه کاربران")');
+});
+
+// ── CSS for new image/CTA elements ──
+test('AD-DELIV-CSS: .notif-img and .notif-cta styles exist', () => {
+  assert.ok(STYLE_SRC.includes(".notif-img"),
+    '.notif-img CSS must exist (image rendering)');
+  assert.ok(STYLE_SRC.includes(".notif-cta"),
+    '.notif-cta CSS must exist (CTA button rendering)');
+});
+
+console.log('✅ All Advertisement delivery fix tests loaded.');
