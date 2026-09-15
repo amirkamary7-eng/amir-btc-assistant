@@ -1,6 +1,9 @@
 name: DB Diagnostic (Read-Only)
 
 on:
+  push:
+    paths:
+      - ".github/trigger-diagnostic.txt"
   workflow_dispatch:
 
 jobs:
