@@ -1355,7 +1355,8 @@ test('ADS-FIX-UI-EMPTY-05: loadAdMessages uses premium empty + error states', ()
 
 test('ADS-FIX-UI-LOAD-01: sendAdMessage has button loading state', () => {
   const fnStart = ADMIN_JS.indexOf('async function sendAdMessage');
-  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2500);
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? ADMIN_JS.slice(fnStart, nextFn) : ADMIN_JS.slice(fnStart, fnStart + 4000);
   assert.ok(fnBlock.includes('sendBtn.disabled = true'),
     'sendAdMessage must disable the send button during API call');
   assert.ok(fnBlock.includes('در حال ارسال'),

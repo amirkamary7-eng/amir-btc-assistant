@@ -1036,13 +1036,13 @@ async function loadAdminList() {
     try {
         const data = await adminApiFetch('/api/admin/admins');
         if (!data || !Array.isArray(data.admins) && !Array.isArray(data)) {
-            container.innerHTML = adminEmpty('No admins found');
+            container.innerHTML = adminEmpty(t('adm_no_admins'));
             return;
         }
 
         const admins = Array.isArray(data.admins) ? data.admins : (Array.isArray(data) ? data : []);
         if (admins.length === 0) {
-            container.innerHTML = adminEmpty('No admins found');
+            container.innerHTML = adminEmpty(t('adm_no_admins'));
             return;
         }
 
@@ -1062,7 +1062,7 @@ async function loadAdminList() {
             const roleBadgeColor = isSuper ? 'red' : (role === 'administrator' ? 'orange' : 'blue');
             // Status badge — FIX #2: "INACTIVE" (gray) instead of "BLOCKED" (red).
             // is_active=false means "no activity in 24h", NOT a ban/suspension.
-            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('INACTIVE', 'gray');
+            const statusBadge = isActive ? adminBadge(t('adm_status_active'), 'green') : adminBadge(t('adm_status_inactive'), 'gray');
 
             // Permission summary: show count + up to 3 badges, then "+N"
             let permBadgesHtml = '';
@@ -1114,7 +1114,7 @@ async function loadAdminList() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load admins', 'loadAdminList');
+        container.innerHTML = adminErrorState(t('adm_admins_load_error'), 'loadAdminList');
         console.error('loadAdminList:', e);
     }
 }
@@ -1213,10 +1213,10 @@ async function toggleAdminActive(id, currentActive) {
             method: 'PUT',
             body: JSON.stringify({ active: !currentActive })
         });
-        showAdminToast('Admin status updated', 'success');
+        showAdminToast(t('adm_admin_status_updated'), 'success');
         loadAdminList();
     } catch (e) {
-        showAdminToast('Failed to update status', 'error');
+        showAdminToast(t('adm_tk_status_update_failed'), 'error');
         console.error('toggleAdminActive:', e);
     }
 }
@@ -1225,11 +1225,11 @@ function removeAdmin(id, telegramId) {
     if (!confirm('Remove this admin? This action cannot be undone.')) return;
     adminApiFetch('/api/admin/admins/' + id, { method: 'DELETE' })
         .then(function () {
-            showAdminToast('Admin removed', 'success');
+            showAdminToast(t('adm_admin_removed'), 'success');
             loadAdminList();
         })
         .catch(function (e) {
-            showAdminToast('Failed to remove admin', 'error');
+            showAdminToast(t('adm_admin_status_updated').replace('به‌روزرسانی', 'حذف'), 'error');
             console.error('removeAdmin:', e);
         });
 }
@@ -1261,7 +1261,7 @@ async function loadAdminUsers(page) {
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.users) && !Array.isArray(data)) {
-            container.innerHTML = adminEmpty('No users found');
+            container.innerHTML = adminEmpty(t('adm_no_users'));
             return;
         }
 
@@ -1269,7 +1269,7 @@ async function loadAdminUsers(page) {
         const totalPages = data.total_pages || Math.ceil((data.total || users.length) / 20) || 1;
 
         if (users.length === 0) {
-            container.innerHTML = adminEmpty('No users found');
+            container.innerHTML = adminEmpty(t('adm_no_users'));
             return;
         }
 
@@ -1293,8 +1293,8 @@ async function loadAdminUsers(page) {
             // the user was banned/suspended/deleted, but is_active=false actually
             // only means "no activity in the last 24h". Renamed to "INACTIVE" to
             // reflect the true meaning without implying a ban.
-            const statusBadge = isActive ? adminBadge('ACTIVE', 'green') : adminBadge('INACTIVE', 'gray');
-            const channelBadge = channelJoined ? adminBadge('JOINED', 'green') : adminBadge('NOT JOINED', 'gray');
+            const statusBadge = isActive ? adminBadge(t('adm_status_active'), 'green') : adminBadge(t('adm_status_inactive'), 'gray');
+            const channelBadge = channelJoined ? adminBadge(t('adm_joined'), 'green') : adminBadge(t('adm_not_joined'), 'gray');
             // FIX #1 (Premium badge disambiguation): previously the badge showed
             // just "PREMIUM" for users.is_premium (Telegram messenger Premium),
             // which admins misread as App Membership Premium. Now:
@@ -1336,7 +1336,7 @@ async function loadAdminUsers(page) {
         container.innerHTML = html;
         adminPagination('admin-users-pagination', _adminUsersPage, totalPages, 'loadAdminUsers');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load users', 'loadAdminUsers');
+        container.innerHTML = adminErrorState(t('adm_users_load_error'), 'loadAdminUsers');
         console.error('loadAdminUsers:', e);
     }
 }
@@ -1411,7 +1411,7 @@ async function loadAdminTickets(page) {
         if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.tickets) && !Array.isArray(data)) {
-            container.innerHTML = adminEmpty('No tickets found');
+            container.innerHTML = adminEmpty(t('adm_tk_no_tickets'));
             return;
         }
 
@@ -1419,7 +1419,7 @@ async function loadAdminTickets(page) {
         const totalPages = data.total_pages || Math.ceil((data.total || tickets.length) / 20) || 1;
 
         if (tickets.length === 0) {
-            container.innerHTML = adminEmpty('No tickets found');
+            container.innerHTML = adminEmpty(t('adm_tk_no_tickets'));
             return;
         }
 
@@ -1505,7 +1505,7 @@ async function loadAdminTickets(page) {
         container.innerHTML = html;
         adminPagination('admin-tickets-pagination', _adminTicketsPage, totalPages, 'loadAdminTickets');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load tickets', 'loadAdminTickets');
+        container.innerHTML = adminErrorState(t('adm_tk_load_error'), 'loadAdminTickets');
         console.error('loadAdminTickets:', e);
     }
 }
@@ -1550,19 +1550,19 @@ async function adminReplyTicket(ticketId) {
     var textarea = document.getElementById('adm-reply-' + ticketId);
     if (!textarea) return;
     var message = textarea.value.trim();
-    if (!message) { showAdminToast('Reply cannot be empty', 'error'); return; }
-    if (message.length > 1500) { showAdminToast('Reply too long (max 1500 chars)', 'error'); return; }
+    if (!message) { showAdminToast(t('adm_tk_reply_empty'), 'error'); return; }
+    if (message.length > 1500) { showAdminToast(t('adm_tk_reply_too_long'), 'error'); return; }
     try {
         await adminApiFetch('/api/admin/tickets/' + ticketId + '/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: message })
         });
-        showAdminToast('Reply sent', 'success');
+        showAdminToast(t('adm_tk_reply_sent'), 'success');
         _adminTicketsExpanded[ticketId] = true;
         loadAdminTickets(_adminTicketsPage);
     } catch (e) {
-        showAdminToast('Failed to send reply', 'error');
+        showAdminToast(t('adm_tk_reply_failed'), 'error');
         console.error('adminReplyTicket:', e);
     }
 }
@@ -1574,11 +1574,11 @@ async function adminSetTicketStatus(ticketId, status) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: status })
         });
-        showAdminToast('Status updated to ' + status, 'success');
+        showAdminToast(t('adm_tk_status_updated') + ': ' + status, 'success');
         _adminTicketsExpanded[ticketId] = true;
         loadAdminTickets(_adminTicketsPage);
     } catch (e) {
-        showAdminToast('Failed to update status', 'error');
+        showAdminToast(t('adm_tk_status_update_failed'), 'error');
         console.error('adminSetTicketStatus:', e);
     }
 }
@@ -1590,11 +1590,11 @@ async function adminDeleteTicket(ticketId) {
         // Previous: /api/tickets/:id (user endpoint, no admin DELETE) → 403
         // Now: /api/admin/tickets/:id (admin DELETE)
         await adminApiFetch('/api/admin/tickets/' + ticketId, { method: 'DELETE' });
-        showAdminToast('Ticket deleted', 'success');
+        showAdminToast(t('adm_tk_deleted'), 'success');
         delete _adminTicketsExpanded[ticketId];
         loadAdminTickets(_adminTicketsPage);
     } catch (e) {
-        showAdminToast('Failed to delete ticket', 'error');
+        showAdminToast(t('adm_tk_delete_failed'), 'error');
         console.error('adminDeleteTicket:', e);
     }
 }
@@ -1628,7 +1628,7 @@ async function sendBroadcast() {
     const contentInput = document.getElementById('admin-broadcast-content');
 
     if (!contentInput || !contentInput.value.trim()) {
-        showAdminToast('Please enter a message', 'error');
+        showAdminToast('پیام را وارد کنید', 'error');
         return;
     }
 
@@ -1658,12 +1658,12 @@ async function sendBroadcast() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        showAdminToast('Broadcast sent successfully', 'success');
+        showAdminToast(t('adm_broadcast_sent'), 'success');
         if (contentInput) contentInput.value = '';
         if (targetIdInput) targetIdInput.value = '';
         loadAdminBroadcasts();
     } catch (e) {
-        showAdminToast('Failed to send broadcast', 'error');
+        showAdminToast(t('adm_broadcast_send_failed'), 'error');
         console.error('sendBroadcast:', e);
     }
 }
@@ -1678,14 +1678,14 @@ async function loadAdminBroadcasts() {
         const data = await adminApiFetch('/api/admin/broadcasts');
         if (_isLoadTokenStale(token)) return;
         if (!data || !Array.isArray(data.broadcasts) && !Array.isArray(data)) {
-            container.innerHTML = adminEmpty('No broadcasts yet');
+            container.innerHTML = adminEmpty(t('adm_no_broadcasts'));
             return;
         }
 
         const broadcasts = Array.isArray(data.broadcasts) ? data.broadcasts : (Array.isArray(data) ? data : []);
 
         if (broadcasts.length === 0) {
-            container.innerHTML = adminEmpty('No broadcasts yet');
+            container.innerHTML = adminEmpty(t('adm_no_broadcasts'));
             return;
         }
 
@@ -1714,7 +1714,7 @@ async function loadAdminBroadcasts() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load broadcasts', 'loadAdminBroadcasts');
+        container.innerHTML = adminErrorState(t('adm_broadcasts_load_error'), 'loadAdminBroadcasts');
         console.error('loadAdminBroadcasts:', e);
     }
 }
@@ -1749,10 +1749,10 @@ async function loadAdminRewards() {
 
         let html = '';
         rewards.forEach(function (r) {
-            const statusBadge = r.status === 'pending' ? adminBadge('Pending', 'orange') :
-                r.status === 'approved' ? adminBadge('Approved', 'blue') :
-                    r.status === 'delivered' ? adminBadge('Delivered', 'green') :
-                        r.status === 'rejected' ? adminBadge('Rejected', 'red') :
+            const statusBadge = r.status === 'pending' ? adminBadge(t('adm_refund_pending'), 'orange') :
+                r.status === 'approved' ? adminBadge(t('adm_refund_approved'), 'blue') :
+                    r.status === 'delivered' ? adminBadge(t('adm_refund_delivered'), 'green') :
+                        r.status === 'rejected' ? adminBadge(t('adm_refund_rejected'), 'red') :
                             adminBadge(String(r.status || ''), 'gray');
 
             html += '<div class="admin-list-item">' +
@@ -3924,7 +3924,7 @@ async function loadAdMessages() {
             section.innerHTML =
                 '<div class="ads-help-banner">' +
                     _adsIcon('info', 'ads-help-icon') +
-                    '<span>فقط کمپین‌های فعال ارسال می‌شوند. Draft/Paused/Archived ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.</span>' +
+                    '<span>فقط کمپین‌های فعال ارسال می‌شوند. پیش‌نویس/متوقف/بایگانی ارسال نمی‌شوند. دکمه «ارسال» پیام را به مخاطبان هدف (بر اساس کانال و مخاطب انتخابی) تحویل می‌دهد. کاربران رایگان فقط در صورت انتخاب «همه» یا «رایگان» پیام را دریافت می‌کنند.</span>' +
                 '</div>' +
                 '<div class="rc-card">' +
                     '<div class="ads-card-head-row">' +
@@ -4125,7 +4125,15 @@ async function sendAdMessage(messageId) {
             var delivered = adminFormatNumber(data.delivered || 0);
             var skipped = adminFormatNumber(data.skipped || 0);
             if (Number(delivered) === 0) {
-                adminToast('هیچ کاربری پیام را دریافت نکرد. تحویل: 0 / رد شده: ' + skipped + '. ممکن است تنظیمات اعلان کاربران مانع ارسال باشد.', 'error');
+                // UX FIX: Show specific skip reasons instead of vague "settings" message
+                var notPremium = adminFormatNumber(data.skipped_not_premium || 0);
+                var promNone = adminFormatNumber(data.skipped_promotions_none || 0);
+                var noChannel = adminFormatNumber(data.skipped_no_channel || 0);
+                var detail = 'تحویل: 0 | بررسی‌شده: ' + skipped;
+                if (Number(notPremium) > 0) detail += ' | غیر Premium: ' + notPremium;
+                if (Number(promNone) > 0) detail += ' | تبلیغات خاموش: ' + promNone;
+                if (Number(noChannel) > 0) detail += ' | بدون کانال: ' + noChannel;
+                adminToast('هیچ کاربری واجد شرایط دریافت نبود. ' + detail + ' | پیام‌های تبلیغاتی فقط برای کاربران Premium با تبلیغات فعال ارسال می‌شوند.', 'error');
             } else {
                 adminToast('ارسال شد — تحویل: ' + delivered + ' / رد شده: ' + skipped, 'success');
             }

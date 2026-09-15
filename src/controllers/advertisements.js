@@ -588,6 +588,10 @@ export function createAdvertisementsHandlers(deps) {
     const BATCH_SIZE = 500;
     let delivered = 0;
     let skipped = 0;
+    // UX FIX: Break down skipped into specific reasons for better admin visibility
+    let skipped_not_premium = 0;
+    let skipped_promotions_none = 0;
+    let skipped_no_channel = 0;
     let checkpoint = null;
     const audience = message.target_audience || 'all';
     const destinations = message.destinations || 'both';
@@ -684,14 +688,20 @@ export function createAdvertisementsHandlers(deps) {
         // P1 FIX: If user is NOT currently Premium, treat ch_promotions as 'none'
         const isCurrentlyPremium = premiumSet.has(uid);
         const pref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none';
-        if (pref === 'none') { skipped++; continue; }
+        if (pref === 'none') {
+          skipped++;
+          // UX FIX: Track skip reason — non-Premium vs Premium-with-promotions-off
+          if (!isCurrentlyPremium) { skipped_not_premium++; }
+          else { skipped_promotions_none++; }
+          continue;
+        }
 
         const deliverMiniApp = (destinations === 'mini_app' || destinations === 'both') &&
                                (pref === 'mini_app' || pref === 'both');
         const deliverTelegram = (destinations === 'telegram' || destinations === 'both') &&
                                 (pref === 'telegram' || pref === 'both');
 
-        if (!deliverMiniApp && !deliverTelegram) { skipped++; continue; }
+        if (!deliverMiniApp && !deliverTelegram) { skipped++; skipped_no_channel++; continue; }
 
         // Determine channel for this user (prefer telegram if both, as it's more visible)
         const channel = deliverTelegram ? 'telegram' : 'mini_app';
@@ -740,6 +750,10 @@ export function createAdvertisementsHandlers(deps) {
     return {
       delivered,
       skipped,
+      // UX FIX: Detailed skip breakdown for admin clarity (backward-compatible — `skipped` still total)
+      skipped_not_premium,
+      skipped_promotions_none,
+      skipped_no_channel,
       enqueued: delivered,
       audience,
       destinations,

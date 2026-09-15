@@ -62,8 +62,9 @@ test('BADGE-06: old single "PREMIUM" badge (ambiguous) is removed', () => {
 // ============================================================================
 
 test('BADGE-07: INACTIVE label used instead of BLOCKED for is_active=false', () => {
-  assert.ok(ADMIN_JS.includes("adminBadge('INACTIVE', 'gray')"),
-    'inactive users must show "INACTIVE" (gray), not "BLOCKED" (red)');
+  // I18N FIX: now uses t('adm_status_inactive') instead of hardcoded 'INACTIVE'
+  assert.ok(ADMIN_JS.includes("adminBadge(t('adm_status_inactive'), 'gray')"),
+    'inactive users must show translated inactive label (gray), not BLOCKED (red)');
   // The old BLOCKED label must be gone from the user list rendering
   assert.ok(!ADMIN_JS.includes("adminBadge('BLOCKED', 'red')"),
     'the old "BLOCKED" red badge must be removed from the user list');
@@ -71,8 +72,9 @@ test('BADGE-07: INACTIVE label used instead of BLOCKED for is_active=false', () 
 
 test('BADGE-08: INACTIVE is gray (not red) — does not imply a ban', () => {
   // gray = neutral state; red = error/ban. INACTIVE is neutral.
-  assert.ok(ADMIN_JS.includes("adminBadge('INACTIVE', 'gray')"),
-    'INACTIVE must be gray (neutral), not red (would imply ban)');
+  // I18N FIX: now uses t('adm_status_inactive') instead of hardcoded 'INACTIVE'
+  assert.ok(ADMIN_JS.includes("adminBadge(t('adm_status_inactive'), 'gray')"),
+    'translated inactive label must be gray (neutral), not red (would imply ban)');
 });
 
 // ============================================================================

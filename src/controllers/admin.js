@@ -529,17 +529,22 @@ export function createAdminHandlers(deps) {
     if (authErr) return authErr;
 
     if (!isDatabaseConfigured(env)) {
+      console.log('[TICKETS-RCA] DB not configured');
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
     const url = new URL(request.url);
     const { page, limit } = getPagination(url);
     const status = url.searchParams.get('status') || '';
+    const _t0 = Date.now();
 
     try {
+      console.log('[TICKETS-RCA] query start page=' + page + ' status=' + status);
       const result = await adminRepo.listTicketsAdmin(env, { status: status || undefined, page, limit });
+      console.log('[TICKETS-RCA] query success duration=' + (Date.now() - _t0) + 'ms total=' + result.total + ' tickets=' + (result.tickets?.length || 0));
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (error) {
+      console.log('[TICKETS-RCA] query FAILED duration=' + (Date.now() - _t0) + 'ms error=' + (error?.message || String(error)).slice(0, 200) + ' code=' + error?.code);
       console.warn(safeError('admin-list-tickets', error));
       return safeDbErrorResponse(error, {}, env);
     }

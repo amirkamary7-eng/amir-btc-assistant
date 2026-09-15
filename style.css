@@ -4056,7 +4056,7 @@ html[dir="rtl"] .market-ticker-track {
 .rc-field { display: flex; flex-direction: column; gap: 4px; }
 .rc-field label {
     font-size: 11px; font-weight: 600; color: var(--admin-text-dim, #6B7A8D);
-    text-transform: uppercase; letter-spacing: 0.3px;
+    text-transform: none; letter-spacing: 0;
 }
 .rc-field input, .rc-field select {
     background: rgba(255,255,255,0.04);
