@@ -952,11 +952,11 @@ async function loadAdminDashboard() {
                 });
             }
             if (Array.isArray(ra.tickets)) {
-                ra.tickets.forEach(function (t) {
+                ra.tickets.forEach(function (activity) {
                     activities.push({
                         type: 'user',
-                        message: t('adm_act_ticket', { title: adminEscapeHtml(t.title || ''), status: adminEscapeHtml(t.status || '') }),
-                        created_at: t.created_at,
+                        message: t('adm_act_ticket', { title: adminEscapeHtml(activity.title || ''), status: adminEscapeHtml(activity.status || '') }),
+                        created_at: activity.created_at,
                     });
                 });
             }
@@ -1424,24 +1424,24 @@ async function loadAdminTickets(page) {
         }
 
         let html = '';
-        tickets.forEach(function (t) {
+        tickets.forEach(function (ticket) {
             const statusInfo = {
                 open: { label: t('adm_tk_status_open'), cls: 'tk-status-open', icon: '🔵' },
                 answered: { label: t('adm_tk_status_answered'), cls: 'tk-status-answered', icon: '🟡' },
                 closed: { label: t('adm_tk_status_closed'), cls: 'tk-status-closed', icon: '⚫' },
             };
-            const si = statusInfo[t.status] || { label: String(t.status || ''), cls: 'tk-status-closed', icon: '⚪' };
-            const isExpanded = !!_adminTicketsExpanded[t.id];
-            const replies = (t.replies && t.replies.length) ? t.replies : [];
-            const priorityCls = t.priority === 'high' ? 'tk-priority-high' : (t.priority === 'medium' ? 'tk-priority-medium' : 'tk-priority-low');
+            const si = statusInfo[ticket.status] || { label: String(ticket.status || ''), cls: 'tk-status-closed', icon: '⚪' };
+            const isExpanded = !!_adminTicketsExpanded[ticket.id];
+            const replies = (ticket.replies && ticket.replies.length) ? ticket.replies : [];
+            const priorityCls = ticket.priority === 'high' ? 'tk-priority-high' : (ticket.priority === 'medium' ? 'tk-priority-medium' : 'tk-priority-low');
 
-            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + adminEscapeHtml(String(t.id)) + '">' +
-                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + adminEscapeHtml(String(t.id)).replace(/'/g, '&#39;') + '\')">' +
+            html += '<div class="tk-card ' + (isExpanded ? 'tk-expanded' : '') + '" id="adm-ticket-' + adminEscapeHtml(String(ticket.id)) + '">' +
+                '<div class="tk-card-header" onclick="toggleAdminTicketDetail(\'' + adminEscapeHtml(String(ticket.id)).replace(/'/g, '&#39;') + '\')">' +
                     '<div class="tk-card-header-left">' +
                         '<span class="tk-card-icon ' + si.cls + '">' + si.icon + '</span>' +
                         '<div class="tk-card-header-text">' +
-                            '<span class="tk-card-subject">' + adminEscapeHtml(t.subject || t.title || t('adm_tk_subject_default', { id: (t.id || '') })) + '</span>' +
-                            '<span class="tk-card-user">' + adminEscapeHtml(t.user_name || t.username || t('adm_users_default_name')) + ' · ID: ' + adminEscapeHtml(String(t.telegram_id || t.user_id || '')) + '</span>' +
+                            '<span class="tk-card-subject">' + adminEscapeHtml(ticket.subject || ticket.title || t('adm_tk_subject_default', { id: (ticket.id || '') })) + '</span>' +
+                            '<span class="tk-card-user">' + adminEscapeHtml(ticket.user_name || ticket.username || t('adm_users_default_name')) + ' · ID: ' + adminEscapeHtml(String(ticket.telegram_id || ticket.user_id || '')) + '</span>' +
                         '</div>' +
                     '</div>' +
                     '<div class="tk-card-header-right">' +
@@ -1449,10 +1449,10 @@ async function loadAdminTickets(page) {
                         '<span class="tk-card-arrow ' + (isExpanded ? 'tk-arrow-open' : '') + '"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></span>' +
                     '</div>' +
                 '</div>' +
-                '<div class="tk-card-preview">' + adminEscapeHtml((t.message || t.last_message || '').substring(0, 120)) + (t.message && t.message.length > 120 ? '…' : '') + '</div>' +
+                '<div class="tk-card-preview">' + adminEscapeHtml((ticket.message || ticket.last_message || '').substring(0, 120)) + (ticket.message && ticket.message.length > 120 ? '…' : '') + '</div>' +
                 '<div class="tk-card-footer">' +
-                    '<span class="tk-card-date">' + adminFormatDate(t.created_at || t.date) + '</span>' +
-                    (t.updated_at ? '<span class="tk-card-updated">' + t('adm_tk_updated', { date: adminFormatDate(t.updated_at) }) + '</span>' : '') +
+                    '<span class="tk-card-date">' + adminFormatDate(ticket.created_at || ticket.date) + '</span>' +
+                    (ticket.updated_at ? '<span class="tk-card-updated">' + t('adm_tk_updated', { date: adminFormatDate(ticket.updated_at) }) + '</span>' : '') +
                     (replies.length ? '<span class="tk-card-replies">' + t('adm_tk_replies', { n: replies.length }) + '</span>' : '') +
                 '</div>';
 
@@ -1464,14 +1464,14 @@ async function loadAdminTickets(page) {
                 html += '<div class="tk-thread adm-ticket-thread">';
                 // Original message
                 html += '<div class="tk-msg tk-msg-user">' +
-                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(t.user_name || t('adm_users_default_name')) + '</span><span class="tk-msg-time">' + adminFormatDate(t.created_at) + '</span></div>' +
-                    '<div class="tk-msg-body">' + adminEscapeHtml(t.message || t.body || '') + '</div>' +
+                    '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(ticket.user_name || t('adm_users_default_name')) + '</span><span class="tk-msg-time">' + adminFormatDate(ticket.created_at) + '</span></div>' +
+                    '<div class="tk-msg-body">' + adminEscapeHtml(ticket.message || ticket.body || '') + '</div>' +
                     '</div>';
                 // Replies
                 replies.forEach(function (r) {
                     var isAdmin = r.from === 'admin' || r.is_admin;
                     html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
-                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? t('adm_tk_admin_label') : adminEscapeHtml(t.user_name || t('adm_users_default_name'))) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
+                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? t('adm_tk_admin_label') : adminEscapeHtml(ticket.user_name || t('adm_users_default_name'))) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
                         '<div class="tk-msg-body">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
                         '</div>';
                 });
@@ -1479,22 +1479,22 @@ async function loadAdminTickets(page) {
 
                 // Reply form
                 html += '<div class="tk-reply-form">' +
-                    '<textarea id="adm-reply-' + adminEscapeHtml(String(t.id)) + '" class="tk-reply-input" placeholder="' + t('adm_tk_reply_ph') + '" rows="3"></textarea>' +
-                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('adm_tk_reply_btn') + '</button>' +
+                    '<textarea id="adm-reply-' + adminEscapeHtml(String(ticket.id)) + '" class="tk-reply-input" placeholder="' + t('adm_tk_reply_ph') + '" rows="3"></textarea>' +
+                    '<button class="tk-btn tk-btn-primary" onclick="adminReplyTicket(\'' + adminEscapeJsId(ticket.id) + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> ' + t('adm_tk_reply_btn') + '</button>' +
                     '</div>';
 
                 // Status controls
                 html += '<div class="tk-actions">';
-                if (t.status !== 'closed') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> ' + t('adm_tk_close_btn') + '</button>';
+                if (ticket.status !== 'closed') {
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(ticket.id) + '\',\'closed\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg> ' + t('adm_tk_close_btn') + '</button>';
                 }
-                if (t.status !== 'open') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> ' + t('adm_tk_open_btn') + '</button>';
+                if (ticket.status !== 'open') {
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(ticket.id) + '\',\'open\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> ' + t('adm_tk_open_btn') + '</button>';
                 }
-                if (t.status !== 'answered') {
-                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(t.id) + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ' + t('adm_tk_answered_btn') + '</button>';
+                if (ticket.status !== 'answered') {
+                    html += '<button class="tk-btn tk-btn-ghost" onclick="adminSetTicketStatus(\'' + adminEscapeJsId(ticket.id) + '\',\'answered\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ' + t('adm_tk_answered_btn') + '</button>';
                 }
-                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + adminEscapeJsId(t.id) + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ' + t('delete') + '</button>';
+                html += '<button class="tk-btn tk-btn-danger" onclick="adminDeleteTicket(\'' + adminEscapeJsId(ticket.id) + '\')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ' + t('delete') + '</button>';
                 html += '</div>';
 
                 html += '</div>';
@@ -2412,14 +2412,14 @@ async function loadRcReferralTiers() {
         const data = await adminApiFetch('/api/admin/reward-center/referral-tiers');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.tiers)) {
-            let rows = data.tiers.map(function (t) {
+            let rows = data.tiers.map(function (tier) {
                 return `<tr>
-                    <td>${adminFormatNumber(t.invite_count)}</td>
-                    <td>${adminFormatNumber(t.token_amount)} AB</td>
-                    <td>${adminFormatNumber(t.bonus_spins)}</td>
-                    <td>${adminEscapeHtml(t.campaign_id || '--')}</td>
-                    <td>${t.is_enabled ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
-                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${adminEscapeHtml(String(t.id))})">${t('delete')}</button></td>
+                    <td>${adminFormatNumber(tier.invite_count)}</td>
+                    <td>${adminFormatNumber(tier.token_amount)} AB</td>
+                    <td>${adminFormatNumber(tier.bonus_spins)}</td>
+                    <td>${adminEscapeHtml(tier.campaign_id || '--')}</td>
+                    <td>${tier.is_enabled ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>'}</td>
+                    <td><button class="adm-btn-sm adm-btn-danger" onclick="deleteRcReferralTier(${adminEscapeHtml(String(tier.id))})">${t('delete')}</button></td>
                 </tr>`;
             }).join('');
             section.innerHTML = `
@@ -2922,14 +2922,14 @@ async function loadNpTemplates() {
         let rows = '';
         if (data && data.status === 'success' && Array.isArray(data.templates)) {
             _npTemplateCache = data.templates;
-            rows = data.templates.map(function (t) {
+            rows = data.templates.map(function (template) {
                 return '<tr>' +
-                    '<td>' + adminEscapeHtml(t.key) + '</td>' +
-                    '<td>' + adminEscapeHtml(t.category) + '</td>' +
-                    '<td>' + adminEscapeHtml(t.priority) + '</td>' +
-                    '<td>' + adminEscapeHtml(t.channel) + '</td>' +
-                    '<td>' + (t.is_active ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>') + '</td>' +
-                    '<td><button class="adm-btn-sm" onclick="editNpTemplate(\'' + adminEscapeJsId(t.id) + '\')">' + t('adm_ads_edit_btn') + '</button></td>' +
+                    '<td>' + adminEscapeHtml(template.key) + '</td>' +
+                    '<td>' + adminEscapeHtml(template.category) + '</td>' +
+                    '<td>' + adminEscapeHtml(template.priority) + '</td>' +
+                    '<td>' + adminEscapeHtml(template.channel) + '</td>' +
+                    '<td>' + (template.is_active ? '<span class="admin-badge green">' + t('adm_status_active') + '</span>' : '<span class="admin-badge gray">' + t('adm_status_inactive') + '</span>') + '</td>' +
+                    '<td><button class="adm-btn-sm" onclick="editNpTemplate(\'' + adminEscapeJsId(template.id) + '\')">' + t('adm_ads_edit_btn') + '</button></td>' +
                 '</tr>';
             }).join('');
         }
