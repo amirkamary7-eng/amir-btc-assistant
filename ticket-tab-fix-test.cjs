@@ -150,3 +150,59 @@ test('TAB-08: clicking tab 2 deactivates tabs 0 and 1 (with correct selector)', 
   assert.deepEqual(result, [false, false, true, false],
     'after clicking tab 2: only tab 2 active');
 });
+
+// ============================================================================
+// Ticket Replies Schema-Fix Regression Test
+// Root cause: listTicketReplies (src/repositories/admin.js) selected columns
+// (user_id, body, is_admin_reply) that do NOT exist in the ticket_replies
+// table (real columns: sender_id, message, sender_type). PostgreSQL threw
+// "column user_id does not exist" → HTTP 503 on GET /api/admin/tickets/:id/replies.
+// Fix: query the real columns + map to the existing frontend response contract.
+// Schema: scripts/00-migrate.sql:1216-1223.
+// ============================================================================
+const ADMIN_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/admin.js'), 'utf8');
+
+test('TR-REPLY-01: listTicketReplies SQL uses real ticket_replies columns (not user_id/body/is_admin_reply)', () => {
+  const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
+  assert.ok(fnStart > -1, 'listTicketReplies function must exist');
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  // Must SELECT the real schema columns
+  assert.ok(/SELECT\s+id,\s*ticket_id,\s*sender_id,\s*message,\s*sender_type,\s*created_at/i.test(fnBlock),
+    'SQL must SELECT id, ticket_id, sender_id, message, sender_type, created_at (real ticket_replies columns)');
+  // Must NOT select the old non-existent columns
+  assert.ok(!/SELECT[^;]*\buser_id\b/.test(fnBlock.replace(/r\.user_id|adMetadata|user_id:/g, '')),
+    'SQL must NOT SELECT user_id (does not exist in ticket_replies)');
+  assert.ok(!fnBlock.includes('SELECT') || !/SELECT[^;]*\bis_admin_reply\b/.test(fnBlock),
+    'SQL must NOT SELECT is_admin_reply (does not exist; real column is sender_type)');
+});
+
+test('TR-REPLY-02: listTicketReplies maps sender_id→user_id, message→body, sender_type→is_admin_reply (frontend contract preserved)', () => {
+  const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  // Mapping must preserve the frontend contract (user_id/body/is_admin_reply)
+  assert.ok(fnBlock.includes('user_id: String(r.sender_id)'),
+    'map sender_id → user_id (frontend field name preserved)');
+  assert.ok(fnBlock.includes('body: normalizeOptionalString(r.message)'),
+    'map message → body (frontend field name preserved)');
+  assert.ok(fnBlock.includes("is_admin_reply: r.sender_type === 'admin'"),
+    'map sender_type === admin → is_admin_reply (boolean, frontend field preserved)');
+  // id, ticket_id, created_at unchanged
+  assert.ok(fnBlock.includes('id: String(r.id)') && fnBlock.includes('ticket_id: String(r.ticket_id)'),
+    'id and ticket_id mapping preserved');
+  assert.ok(fnBlock.includes('created_at: isoDate(r.created_at)'),
+    'created_at mapping preserved');
+});
+
+test('TR-REPLY-03: listTicketReplies must NOT reference the old broken columns in the SELECT', () => {
+  const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  // The SELECT line specifically must not contain user_id/body/is_admin_reply as selected columns
+  const selectLine = fnBlock.match(/SELECT[^\n]*/);
+  assert.ok(selectLine, 'must have a SELECT clause');
+  assert.ok(!selectLine[0].includes('user_id'),
+    'SELECT line must not reference user_id');
+  assert.ok(!selectLine[0].includes('is_admin_reply'),
+    'SELECT line must not reference is_admin_reply');
+});
+
+console.log('✅ Ticket replies schema-fix tests loaded.');

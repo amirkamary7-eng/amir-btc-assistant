@@ -579,19 +579,22 @@ export function createAdminRepository(deps) {
     const result = await queryDb(
       env,
       `
-        SELECT id, ticket_id, user_id, body, is_admin_reply, created_at
+        SELECT id, ticket_id, sender_id, message, sender_type, created_at
         FROM ticket_replies
         WHERE ticket_id = $1
         ORDER BY created_at ASC
       `,
       [String(ticketId)],
     );
+    // Map real ticket_replies columns (sender_id/message/sender_type) to the
+    // existing frontend response contract (user_id/body/is_admin_reply) so
+    // fetchTicketReplies (admin.js) needs no change. Schema: scripts/00-migrate.sql:1216.
     return result.rows.map((r) => ({
       id: String(r.id),
       ticket_id: String(r.ticket_id),
-      user_id: String(r.user_id),
-      body: normalizeOptionalString(r.body),
-      is_admin_reply: Boolean(r.is_admin_reply),
+      user_id: String(r.sender_id),
+      body: normalizeOptionalString(r.message),
+      is_admin_reply: r.sender_type === 'admin',
       created_at: isoDate(r.created_at),
     }));
   }
