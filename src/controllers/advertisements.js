@@ -720,8 +720,19 @@ export function createAdvertisementsHandlers(deps) {
       for (const uid of userIds) {
         // P1 FIX: If user is NOT currently Premium, treat ch_promotions as 'none'
         const isCurrentlyPremium = premiumSet.has(uid);
-        const pref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none';
-        if (pref === 'none') {
+        const storedPref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none';
+
+        // RC5-FIX: for non-Premium (Free) users in 'free'/'all' audience, bypass the
+        // ch_promotions gate — the admin explicitly chose to include Free users, whose
+        // ch_promotions defaults to 'none'. Use the admin's `destinations` as the
+        // effective channel preference. Premium users always respect their own opt-out
+        // (storedPref='none' → still skipped below).
+        const effectivePref =
+            !isCurrentlyPremium && (audience === 'free' || audience === 'all')
+                ? destinations
+                : storedPref;
+
+        if (effectivePref === 'none') {
           skipped++;
           // UX FIX: Track skip reason — non-Premium vs Premium-with-promotions-off
           if (!isCurrentlyPremium) { skipped_not_premium++; }
@@ -730,9 +741,9 @@ export function createAdvertisementsHandlers(deps) {
         }
 
         const deliverMiniApp = (destinations === 'mini_app' || destinations === 'both') &&
-                               (pref === 'mini_app' || pref === 'both');
+                               (effectivePref === 'mini_app' || effectivePref === 'both');
         const deliverTelegram = (destinations === 'telegram' || destinations === 'both') &&
-                                (pref === 'telegram' || pref === 'both');
+                                (effectivePref === 'telegram' || effectivePref === 'both');
 
         if (!deliverMiniApp && !deliverTelegram) { skipped++; skipped_no_channel++; continue; }
 

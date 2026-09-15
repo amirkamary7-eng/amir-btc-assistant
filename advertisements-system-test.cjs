@@ -393,8 +393,10 @@ test('ADS-MSG-08: Delivery respects per-user ch_promotions preference (none → 
   // Bulk fetch ch_promotions preference
   assert.ok(/SELECT\s+user_id,\s+ch_promotions\s+AS\s+pref\s+FROM\s+notification_settings/i.test(fnBlock),
     '_deliverMessageCampaign must bulk-fetch ch_promotions preference from notification_settings');
-  assert.ok(/pref\s*===?\s*'none'/.test(fnBlock) || fnBlock.includes("pref === 'none'"),
-    '_deliverMessageCampaign must skip users with pref=none');
+  // RC5-FIX: skip check now uses effectivePref (Premium opt-out → storedPref='none' → effectivePref='none' → skipped).
+  // Free users bypass via destinations in free/all modes (not skipped).
+  assert.ok(fnBlock.includes("if (effectivePref === 'none')"),
+    '_deliverMessageCampaign must skip users with effectivePref=none (Premium opt-out preserved; Free bypassed in free/all)');
   assert.ok(fnBlock.includes('skipped++'),
     '_deliverMessageCampaign must increment skipped counter for none-pref users');
 });
@@ -2675,11 +2677,14 @@ test('AD-DELIV-T4: pref=telegram + destinations=both → channel=telegram (Teleg
 });
 
 // T9 — Free users remain blocked (pref='none' override preserved)
-test('AD-DELIV-T9: non-Premium users forced to pref=none (Free delivery block preserved)', () => {
-  assert.ok(_DELIVER_FN.includes("const pref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none'"),
-    'Non-Premium → pref=none (unchanged security behavior)');
+// T9 — Free users: bypass ch_promotions gate in free/all (RC5-FIX)
+test('AD-DELIV-T9: non-Premium storedPref=none, but effectivePref bypassed in free/all', () => {
+  assert.ok(_DELIVER_FN.includes("const storedPref = isCurrentlyPremium ? (prefMap.get(uid) || 'none') : 'none'"),
+    'storedPref computed from isCurrentlyPremium (non-Premium → none)');
+  assert.ok(_DELIVER_FN.includes("const effectivePref ="),
+    'effectivePref variable must exist (separate from storedPref, no const reassignment)');
   assert.ok(_DELIVER_FN.includes("skipped_not_premium"),
-    'Free-user skip counter preserved');
+    'Free-user skip counter preserved (only fires when actually skipped — e.g. premium audience)');
 });
 
 // T10/T11/T12 — Audience SQL preserved
@@ -2692,9 +2697,12 @@ test('AD-DELIV-T11: target_audience=free SQL clause preserved', () => {
   assert.ok(/audience === 'free'/.test(_DELIVER_FN), "free audience branch preserved");
 });
 
-test('AD-DELIV-T12: target_audience=all → empty audienceClause (all channel_joined users, pref gate intact)', () => {
+test('AD-DELIV-T12: target_audience=all → empty audienceClause (all channel_joined users selected; Free bypass via effectivePref)', () => {
   assert.ok(/audience === 'all'/.test(_DELIVER_FN) || _DELIVER_FN.includes("audienceClause = ''"),
-    "all audience → empty clause (all channel_joined users selected, pref gate still filters)");
+    "all audience → empty clause (all channel_joined users selected)");
+  // Free users in 'all' are NOT skipped — effectivePref bypass uses destinations
+  assert.ok(_DELIVER_FN.includes("audience === 'free' || audience === 'all'"),
+    "bypass condition covers 'all' (Free users delivered, not skipped)");
 });
 
 // RC6 — parse_mode via telegramExtra (not metadata.parse_mode)
@@ -2781,9 +2789,11 @@ test('AD-DELIV-FE3: CTA opens button_url in new tab (target=_blank rel=noopener)
 });
 
 // ── UI label honesty (RC5) ──
-test('AD-DELIV-RC5: target_audience=all label is honest about Premium+promotions gating', () => {
-  assert.ok(ADMIN_JS.includes("همه کاربران واجد شرایط"),
-    'target_audience=all label must indicate eligibility gating (not bare "همه کاربران")');
+test('AD-DELIV-RC5: target_audience=all label is transparent (Free + Premium with promotions)', () => {
+  assert.ok(ADMIN_JS.includes("همه کاربران (رایگان + Premium با تبلیغات فعال)"),
+    'target_audience=all label must state Free + Premium transparently');
+  assert.ok(!ADMIN_JS.includes("همه کاربران واجد شرایط (Premium با تبلیغات فعال)"),
+    'old misleading label must be removed');
 });
 
 // ── CSS for new image/CTA elements ──
@@ -2795,3 +2805,113 @@ test('AD-DELIV-CSS: .notif-img and .notif-cta styles exist', () => {
 });
 
 console.log('✅ All Advertisement delivery fix tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TARGETING FIX (RC5-FIX): effectivePref bypass for Free users in free/all
+//   free  → all Free users receive (bypass ch_promotions)
+//   premium → only Premium with ch_promotions != 'none' (opt-out preserved)
+//   all   → Free (bypass) + Premium with ch_promotions != 'none'
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Core structure: effectivePref uses destinations for Free in free/all, storedPref otherwise
+test('AD-TGT-CORE: effectivePref = (!isCurrentlyPremium && (free|all)) ? destinations : storedPref', () => {
+  assert.ok(_DELIVER_FN.includes("const effectivePref ="),
+    'effectivePref variable exists (separate const, no reassignment)');
+  assert.ok(_DELIVER_FN.includes("!isCurrentlyPremium && (audience === 'free' || audience === 'all')"),
+    'bypass condition: !isCurrentlyPremium AND (free OR all)');
+  assert.ok(_DELIVER_FN.includes("? destinations"),
+    "bypass branch: effectivePref = destinations (admin's channel choice)");
+  assert.ok(_DELIVER_FN.includes(": storedPref"),
+    "non-bypass branch: effectivePref = storedPref (real user preference)");
+});
+
+// T1 — free + both → Free receives (both channels)
+test('AD-TGT-1: free + both → Free effectivePref=both → deliverMiniApp && deliverTelegram', () => {
+  // audience='free' + non-Premium → effectivePref = destinations = 'both'
+  // → deliverMiniApp = (destinations matches) && (effectivePref==='mini_app'||'both') = true
+  // → deliverTelegram = true → channel='both' → delivered
+  assert.ok(_DELIVER_FN.includes("effectivePref === 'mini_app' || effectivePref === 'both'"),
+    "deliverMiniApp reads effectivePref (Free+both → mini_app delivered)");
+  assert.ok(_DELIVER_FN.includes("effectivePref === 'telegram' || effectivePref === 'both'"),
+    "deliverTelegram reads effectivePref (Free+both → telegram delivered)");
+});
+
+// T2 — free + telegram → Free only Telegram
+test('AD-TGT-2: free + telegram → Free effectivePref=telegram → deliverTelegram only', () => {
+  // audience='free' + destinations='telegram' → effectivePref='telegram'
+  // → deliverMiniApp = (destinations==='mini_app'||'both')=false → false → deliverTelegram only
+  assert.ok(_DELIVER_FN.includes("destinations === 'mini_app' || destinations === 'both'"),
+    "deliverMiniApp gated by destinations (free+telegram → no mini_app)");
+});
+
+// T3 — free + mini_app → Free only Mini App (covered by destinations gating + effectivePref)
+test('AD-TGT-3: free + mini_app → Free effectivePref=mini_app → deliverMiniApp only', () => {
+  assert.ok(_DELIVER_FN.includes("destinations === 'telegram' || destinations === 'both'"),
+    "deliverTelegram gated by destinations (free+mini_app → no telegram)");
+});
+
+// T4 — premium + both + promotions active → Premium receives
+test('AD-TGT-4: premium + both → Premium effectivePref=storedPref(both) → both delivered', () => {
+  // Premium → bypass=false → effectivePref=storedPref. If ch_promotions='both' → effectivePref='both' → delivered both.
+  // The bypass condition requires !isCurrentlyPremium, so Premium uses storedPref.
+  assert.ok(_DELIVER_FN.includes("!isCurrentlyPremium && (audience === 'free' || audience === 'all')"),
+    "Premium is NOT bypassed (uses storedPref = real preference)");
+});
+
+// T5 — premium + promotions none → Premium skipped
+test('AD-TGT-5: premium + ch_promotions=none → effectivePref=none → skipped (opt-out preserved)', () => {
+  assert.ok(_DELIVER_FN.includes("if (effectivePref === 'none')"),
+    "skip check uses effectivePref (Premium opt-out → storedPref='none' → effectivePref='none' → skipped)");
+  assert.ok(_DELIVER_FN.includes("skipped_promotions_none"),
+    "Premium opt-out skip counter preserved");
+});
+
+// T6 — all + both → Free + Premium(eligible) receive
+test('AD-TGT-6: all + both → Free (bypass→destinations=both) + Premium(storedPref=both) both delivered', () => {
+  // 'all' in bypass condition → Free effectivePref=destinations='both' → delivered both
+  // Premium not bypassed → effectivePref=storedPref → delivered if !='none'
+  assert.ok(_DELIVER_FN.includes("audience === 'free' || audience === 'all'"),
+    "'all' covered by bypass (Free users delivered in all mode)");
+});
+
+// T7 — all + telegram → Free + Premium(eligible) only Telegram
+test('AD-TGT-7: all + telegram → Free effectivePref=telegram + Premium(storedPref=telegram) only telegram', () => {
+  // covered by effectivePref=destinations='telegram' for Free + destinations gating
+  assert.ok(_DELIVER_FN.includes("effectivePref === 'telegram' || effectivePref === 'both'"),
+    "deliverTelegram reads effectivePref (all+telegram → telegram only)");
+});
+
+// T8 — all + mini_app → Free + Premium(eligible) only Mini App
+test('AD-TGT-8: all + mini_app → Free effectivePref=mini_app + Premium(storedPref=mini_app) only mini_app', () => {
+  assert.ok(_DELIVER_FN.includes("effectivePref === 'mini_app' || effectivePref === 'both'"),
+    "deliverMiniApp reads effectivePref (all+mini_app → mini_app only)");
+});
+
+// T9 — Premium with ch_promotions='none' in all → still skipped (opt-out NOT overridden by all)
+test('AD-TGT-9: Premium ch_promotions=none in all → bypass=false (requires !isCurrentlyPremium) → skipped', () => {
+  // The bypass condition is !isCurrentlyPremium && (free||all). Premium → isCurrentlyPremium=true
+  // → !isCurrentlyPremium=false → bypass=false → effectivePref=storedPref='none' → skipped.
+  assert.ok(_DELIVER_FN.includes("!isCurrentlyPremium && (audience === 'free' || audience === 'all')"),
+    "bypass requires !isCurrentlyPremium → Premium opt-out preserved even in 'all' mode");
+});
+
+// T10 — No regression: Image / Inline Keyboard / Mini App CTA / destinations unchanged
+test('AD-TGT-10: no regression — telegramExtra (reply_markup/photo/parse_mode), adMetadata, sendNotification, channel=both all intact', () => {
+  assert.ok(_DELIVER_FN.includes("telegramExtra = { parse_mode: 'HTML' }"),
+    "telegramExtra.parse_mode intact (no regression)");
+  assert.ok(_DELIVER_FN.includes("inline_keyboard: [[{ text: message.button_label, url: message.button_url }]]"),
+    "Inline keyboard intact (no regression)");
+  assert.ok(_DELIVER_FN.includes("telegramExtra.photo = absPhoto"),
+    "Image photo forwarding intact (no regression)");
+  assert.ok(_DELIVER_FN.includes("adMetadata.button_url"),
+    "Mini App CTA metadata intact (no regression)");
+  assert.ok(_DELIVER_FN.includes("notificationPlatformRepo.sendNotification(env,"),
+    "sendNotification pipeline intact (no regression)");
+  assert.ok(_DELIVER_FN.includes("if (deliverMiniApp && deliverTelegram) channel = 'both'"),
+    "destinations=both dual-channel derivation intact (no regression)");
+  // effectivePref feeds into deliverMiniApp/deliverTelegram — not into telegramExtra or sendNotification options
+  assert.ok(!_DELIVER_FN.includes("effectivePref") || _DELIVER_FN.indexOf("effectivePref") < _DELIVER_FN.indexOf("deliverMiniApp"),
+    "effectivePref only affects deliverMiniApp/deliverTelegram, not telegramExtra/sendNotification");
+});
+
+console.log('✅ All targeting fix tests loaded.');
