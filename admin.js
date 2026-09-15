@@ -617,11 +617,9 @@ function _updateAdminSidebarUser() {
 function switchAdminSection(section, btn) {
     // Permission guard: if the admin can't access this section, refuse + toast
     if (!_adminCanAccessSection(section)) {
-        console.log('[TICKETS-RCA] switchAdminSection BLOCKED section=' + section + ' reason=no_access');
         showAdminToast(t('adm_no_access'), 'error');
         return;
     }
-    console.log('[TICKETS-RCA] switchAdminSection section=' + section);
     _currentAdminSection = section;
     // Increment load token — any in-flight loader from a previous section
     // will see a stale token and discard its response.
@@ -1396,14 +1394,9 @@ function debounceAdminUserSearch() {
 let _adminTicketsExpanded = {}; // ticket IDs that are expanded to show detail + reply form
 
 async function loadAdminTickets(page) {
-    const _t0 = Date.now();
     const container = document.getElementById('admin-tickets-list');
     const paginationEl = document.getElementById('admin-tickets-pagination');
-    console.log('[TICKETS-RCA] loadAdminTickets start page=' + (page || 1) + ' container_found=' + !!container);
-    if (!container) {
-        console.log('[TICKETS-RCA] container NOT FOUND — returning without API call');
-        return;
-    }
+    if (!container) return;
     container.innerHTML = adminSkeletonGrid(4);
     if (paginationEl) paginationEl.innerHTML = '';
     _adminTicketsPage = page || 1;
@@ -1414,13 +1407,8 @@ async function loadAdminTickets(page) {
         if (_adminTicketsFilter && _adminTicketsFilter !== 'all') {
             url += '&status=' + _adminTicketsFilter;
         }
-        console.log('[TICKETS-RCA] API start url=' + url);
         const data = await adminApiFetch(url);
-        console.log('[TICKETS-RCA] API done dur=' + (Date.now() - _t0) + 'ms status=' + (data?.status || 'unknown') + ' has_tickets=' + !!(data?.tickets));
-        if (_isLoadTokenStale(token)) {
-            console.log('[TICKETS-RCA] token stale — discarding');
-            return;
-        }
+        if (_isLoadTokenStale(token)) return;
 
         if (!data || !Array.isArray(data.tickets) && !Array.isArray(data)) {
             container.innerHTML = adminEmpty(t('adm_tk_no_tickets'));
@@ -1517,7 +1505,6 @@ async function loadAdminTickets(page) {
         container.innerHTML = html;
         adminPagination('admin-tickets-pagination', _adminTicketsPage, totalPages, 'loadAdminTickets');
     } catch (e) {
-        console.log('[TICKETS-RCA] catch err=' + (e?.message || String(e)).slice(0, 150) + ' status=' + e?.status);
         container.innerHTML = adminErrorState(t('adm_tk_load_error'), 'loadAdminTickets');
         console.error('loadAdminTickets:', e);
     }
