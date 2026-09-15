@@ -525,29 +525,30 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleListTickets(request, env) {
-    const _t0 = Date.now();
     const { error: authErr } = await requireAdmin(request, env, 'manage_tickets');
     if (authErr) {
-
+      console.log('[TICKETS-RCA] auth failed status=' + (authErr.status || 'unknown'));
       return authErr;
     }
+    console.log('[TICKETS-RCA] auth ok');
 
     if (!isDatabaseConfigured(env)) {
-
+      console.log('[TICKETS-RCA] DB not configured');
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
     }
 
     const url = new URL(request.url);
     const { page, limit } = getPagination(url);
     const status = url.searchParams.get('status') || '';
+    const _t0 = Date.now();
 
     try {
-
+      console.log('[TICKETS-RCA] query start page=' + page + ' status=' + status);
       const result = await adminRepo.listTicketsAdmin(env, { status: status || undefined, page, limit });
-
+      console.log('[TICKETS-RCA] query ok dur=' + (Date.now() - _t0) + 'ms total=' + result.total + ' tickets=' + (result.tickets?.length || 0));
       return jsonResponse({ status: 'success', ...result }, {}, env);
     } catch (error) {
-
+      console.log('[TICKETS-RCA] query FAILED dur=' + (Date.now() - _t0) + 'ms err=' + (error?.message || String(error)).slice(0, 200) + ' code=' + error?.code);
       console.warn(safeError('admin-list-tickets', error));
       return safeDbErrorResponse(error, {}, env);
     }
