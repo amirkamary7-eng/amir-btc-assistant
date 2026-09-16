@@ -14406,6 +14406,22 @@ export default {
       //      Shows the actual /start handler flow: command_detected →
       //      membership_resolved → reply_built → sendMessage_started →
       //      sendMessage_completed/failed → handler_complete/error.
+      // H3 FIX: Gate /api/start-diag behind non-production (mirrors H2 fix
+      // for /api/notif-diag-report and the /api/notif-trace-results pattern
+      // at line 14399). The GET handler exposes webhook info + config booleans;
+      // the POST handler triggers setWebhook. Both were unauthenticated. The
+      // diagnostic endpoints are not needed in production — wrangler tail and
+      // the Cloudflare dashboard serve the same purpose.
+      if (url.pathname === '/api/start-diag') {
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse(
+            { status: 'error', message: 'Not available in production' },
+            { status: 404 },
+            env
+          );
+        }
+      }
       if (request.method === 'GET' && url.pathname === '/api/start-diag') {
         const result = {
           status: 'success',
