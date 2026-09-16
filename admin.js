@@ -3186,6 +3186,16 @@ var _adsCurrentTab = 'channels';
 var _adsChannelCache = [];
 var _adsPopupCache = [];
 var _adsMessageCache = [];
+// ISSUE 1 (ad delete delay) FIX: per-entity Sets of recently-deleted IDs. Each
+// load function (loadAdChannels/loadAdPopups/loadAdMessages) filters these out
+// of the GET response so a stale Hyperdrive-cached SELECT (default 60s TTL,
+// binding f4b69c06c1e84d98b7c4b5720efe4b41) cannot re-introduce an item the
+// admin just successfully deleted. Mirrors the proven _recentlyDeletedTicketIds
+// pattern in app.js. TTL: 90s (>60s cache window). IDs are namespaced per
+// entity because ad_channels/ad_popups/ad_messages have separate ID spaces.
+var _recentlyDeletedAdChannelIds = new Set();
+var _recentlyDeletedAdPopupIds = new Set();
+var _recentlyDeletedAdMessageIds = new Set();
 
 // ════════════════════════════════════════════════════════════════════
 // PHASE 3 — SVG icon set for Advertisement Admin UI.
@@ -3476,8 +3486,15 @@ async function loadAdChannels() {
         var data = await adminApiFetch('/api/admin/advertisements/channels');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.channels)) {
-            _adsChannelCache = data.channels;
-            var cards = data.channels.map(function (c) {
+            // ISSUE 1 FIX: filter out recently-deleted IDs so the refetch
+            // (which may return stale Hyperdrive-cached data for up to 60s
+            // after a DELETE) cannot re-introduce items the admin just
+            // successfully deleted. Mirrors _recentlyDeletedTicketIds in app.js.
+            var _channelsSrc = (_recentlyDeletedAdChannelIds.size > 0)
+                ? data.channels.filter(function(c) { return !_recentlyDeletedAdChannelIds.has(String(c.id)); })
+                : data.channels;
+            _adsChannelCache = _channelsSrc;
+            var cards = _channelsSrc.map(function (c) {
                 var username = c.channel_username ? '@' + adminEscapeHtml(c.channel_username) : '—';
                 var title = c.channel_title ? adminEscapeHtml(c.channel_title) : '—';
                 var status = c.campaign_status || c.status || 'draft';
@@ -3628,6 +3645,11 @@ async function deleteAdChannel(channelId) {
             if (typeof _adsChannelCache !== 'undefined' && Array.isArray(_adsChannelCache)) {
                 _adsChannelCache = _adsChannelCache.filter(function(c) { return String(c.id) !== String(channelId); });
             }
+            // Track the deleted ID so the loadAdChannels() refetch filters it
+            // out from stale Hyperdrive-cached SELECT results (60s TTL).
+            var _delChId = String(channelId);
+            _recentlyDeletedAdChannelIds.add(_delChId);
+            setTimeout(function() { _recentlyDeletedAdChannelIds.delete(_delChId); }, 90000);
             loadAdChannels().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');
@@ -3673,8 +3695,13 @@ async function loadAdPopups() {
         var data = await adminApiFetch('/api/admin/advertisements/popups');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.popups)) {
-            _adsPopupCache = data.popups;
-            var cards = data.popups.map(function (p) {
+            // ISSUE 1 FIX: filter out recently-deleted popup IDs so the
+            // refetch cannot re-introduce them from stale Hyperdrive cache.
+            var _popupsSrc = (_recentlyDeletedAdPopupIds.size > 0)
+                ? data.popups.filter(function(p) { return !_recentlyDeletedAdPopupIds.has(String(p.id)); })
+                : data.popups;
+            _adsPopupCache = _popupsSrc;
+            var cards = _popupsSrc.map(function (p) {
                 var title = p.title ? adminEscapeHtml(p.title) : '—';
                 var status = p.campaign_status || p.status || 'draft';
                 var statusBadge = _adStatusBadge(status);
@@ -3855,6 +3882,11 @@ async function deleteAdPopup(popupId) {
             if (typeof _adsPopupCache !== 'undefined' && Array.isArray(_adsPopupCache)) {
                 _adsPopupCache = _adsPopupCache.filter(function(p) { return String(p.id) !== String(popupId); });
             }
+            // Track the deleted ID so the loadAdPopups() refetch filters it out
+            // from stale Hyperdrive-cached SELECT results (60s TTL).
+            var _delPopId = String(popupId);
+            _recentlyDeletedAdPopupIds.add(_delPopId);
+            setTimeout(function() { _recentlyDeletedAdPopupIds.delete(_delPopId); }, 90000);
             // Background refresh for synchronization (non-blocking)
             loadAdPopups().catch(function() {});
         } else {
@@ -3917,8 +3949,13 @@ async function loadAdMessages() {
         var data = await adminApiFetch('/api/admin/advertisements/messages');
         if (_isLoadTokenStale(token)) return;
         if (data && data.status === 'success' && Array.isArray(data.messages)) {
-            _adsMessageCache = data.messages;
-            var cards = data.messages.map(function (m) {
+            // ISSUE 1 FIX: filter out recently-deleted message IDs so the
+            // refetch cannot re-introduce them from stale Hyperdrive cache.
+            var _messagesSrc = (_recentlyDeletedAdMessageIds.size > 0)
+                ? data.messages.filter(function(m) { return !_recentlyDeletedAdMessageIds.has(String(m.id)); })
+                : data.messages;
+            _adsMessageCache = _messagesSrc;
+            var cards = _messagesSrc.map(function (m) {
                 var title = m.title ? adminEscapeHtml(m.title) : '—';
                 var status = m.campaign_status || m.status || 'draft';
                 var destBadge = _adsDestinationBadge(m.destinations);
@@ -4099,6 +4136,11 @@ async function deleteAdMessage(messageId) {
             if (typeof _adsMessageCache !== 'undefined' && Array.isArray(_adsMessageCache)) {
                 _adsMessageCache = _adsMessageCache.filter(function(m) { return String(m.id) !== String(messageId); });
             }
+            // Track the deleted ID so the loadAdMessages() refetch filters it
+            // out from stale Hyperdrive-cached SELECT results (60s TTL).
+            var _delMsgId = String(messageId);
+            _recentlyDeletedAdMessageIds.add(_delMsgId);
+            setTimeout(function() { _recentlyDeletedAdMessageIds.delete(_delMsgId); }, 90000);
             loadAdMessages().catch(function() {});
         } else {
             adminToast((data && data.message) || 'خطا در حذف', 'error');

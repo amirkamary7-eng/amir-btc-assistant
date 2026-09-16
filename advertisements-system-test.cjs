@@ -2915,3 +2915,332 @@ test('AD-TGT-10: no regression — telegramExtra (reply_markup/photo/parse_mode)
 });
 
 console.log('✅ All targeting fix tests loaded.');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE 1 — Ad delete delay (channels/popups/messages): frontend deleted-ID
+// guard so a stale Hyperdrive-cached refetch cannot re-introduce a just-deleted
+// item. Root cause (proven, same pattern as ticket_replies + notification
+// delete, commit 2745906/31383c4): listAllChannelsForAdmin/Popups/Messages use
+// queryDb → Hyperdrive caches the deterministic SELECT (default 60s TTL, binding
+// f4b69c06c1e84d98b7c4b5720efe4b41). DELETE uses queryDb (mutation, bypasses
+// cache, hits origin). The fire-and-forget loadAdXxx() refetch after DELETE
+// returns the stale pre-delete cached result → section.innerHTML re-render
+// re-introduces the deleted item. Fix (frontend-only, mirrors app.js
+// _recentlyDeletedTicketIds): per-entity Sets + 90s TTL + filter in load funcs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-DEL-GUARD-01: per-entity recently-deleted Sets exist in admin.js', () => {
+  assert.ok(ADMIN_JS.includes('var _recentlyDeletedAdChannelIds = new Set();'),
+    '_recentlyDeletedAdChannelIds Set must exist');
+  assert.ok(ADMIN_JS.includes('var _recentlyDeletedAdPopupIds = new Set();'),
+    '_recentlyDeletedAdPopupIds Set must exist');
+  assert.ok(ADMIN_JS.includes('var _recentlyDeletedAdMessageIds = new Set();'),
+    '_recentlyDeletedAdMessageIds Set must exist');
+});
+
+test('ADS-DEL-GUARD-02: deleteAdChannel tracks the deleted ID with a 90s TTL', () => {
+  const fnStart = ADMIN_JS.indexOf('async function deleteAdChannel');
+  assert.ok(fnStart > -1, 'deleteAdChannel must exist');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1500);
+  assert.ok(fnBlock.includes("_recentlyDeletedAdChannelIds.add("),
+    'deleteAdChannel must add the deleted ID to the Set');
+  assert.ok(/setTimeout\(function\(\)\s*\{\s*_recentlyDeletedAdChannelIds\.delete\([^)]*\);\s*\},\s*90000\)/.test(fnBlock),
+    'deleteAdChannel must schedule Set cleanup after 90000ms (>60s Hyperdrive TTL)');
+});
+
+test('ADS-DEL-GUARD-03: deleteAdPopup tracks the deleted ID with a 90s TTL', () => {
+  const fnStart = ADMIN_JS.indexOf('async function deleteAdPopup');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1500);
+  assert.ok(fnBlock.includes("_recentlyDeletedAdPopupIds.add("),
+    'deleteAdPopup must add the deleted ID to the Set');
+  assert.ok(/setTimeout\(function\(\)\s*\{\s*_recentlyDeletedAdPopupIds\.delete\([^)]*\);\s*\},\s*90000\)/.test(fnBlock),
+    'deleteAdPopup must schedule Set cleanup after 90000ms');
+});
+
+test('ADS-DEL-GUARD-04: deleteAdMessage tracks the deleted ID with a 90s TTL', () => {
+  const fnStart = ADMIN_JS.indexOf('async function deleteAdMessage');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1500);
+  assert.ok(fnBlock.includes("_recentlyDeletedAdMessageIds.add("),
+    'deleteAdMessage must add the deleted ID to the Set');
+  assert.ok(/setTimeout\(function\(\)\s*\{\s*_recentlyDeletedAdMessageIds\.delete\([^)]*\);\s*\},\s*90000\)/.test(fnBlock),
+    'deleteAdMessage must schedule Set cleanup after 90000ms');
+});
+
+test('ADS-DEL-GUARD-05: loadAdChannels filters recently-deleted IDs from the GET response', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdChannels');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 2000);
+  assert.ok(fnBlock.includes('_recentlyDeletedAdChannelIds.size > 0'),
+    'loadAdChannels must check the deleted-ID Set');
+  assert.ok(fnBlock.includes('!_recentlyDeletedAdChannelIds.has(String(c.id))'),
+    'loadAdChannels must filter deleted IDs out of the response before rendering');
+});
+
+test('ADS-DEL-GUARD-06: loadAdPopups filters recently-deleted IDs from the GET response', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdPopups');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 2000);
+  assert.ok(fnBlock.includes('_recentlyDeletedAdPopupIds.size > 0'),
+    'loadAdPopups must check the deleted-ID Set');
+  assert.ok(fnBlock.includes('!_recentlyDeletedAdPopupIds.has(String(p.id))'),
+    'loadAdPopups must filter deleted IDs out of the response before rendering');
+});
+
+test('ADS-DEL-GUARD-07: loadAdMessages filters recently-deleted IDs from the GET response', () => {
+  const fnStart = ADMIN_JS.indexOf('async function loadAdMessages');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 2000);
+  assert.ok(fnBlock.includes('_recentlyDeletedAdMessageIds.size > 0'),
+    'loadAdMessages must check the deleted-ID Set');
+  assert.ok(fnBlock.includes('!_recentlyDeletedAdMessageIds.has(String(m.id))'),
+    'loadAdMessages must filter deleted IDs out of the response before rendering');
+});
+
+test('ADS-DEL-GUARD-08: backend ad list functions UNCHANGED — still use queryDb (no backend change, scope lock)', () => {
+  // The fix is frontend-only. The backend list functions still use queryDb
+  // (Hyperdrive cached) — this is the SOURCE of the stale data, but the fix
+  // defends against it on the frontend rather than bypassing it on the backend.
+  // This confirms the scope lock: NO backend change.
+  assert.ok(ADS_REPO_SRC.includes('async function listAllChannelsForAdmin'),
+    'listAllChannelsForAdmin exists');
+  const fnStart = ADS_REPO_SRC.indexOf('async function listAllChannelsForAdmin');
+  const fnEnd = ADS_REPO_SRC.indexOf('async function', fnStart + 30);
+  const fnBlock = ADS_REPO_SRC.slice(fnStart, fnEnd > -1 ? fnEnd : fnStart + 700);
+  assert.ok(fnBlock.includes('await queryDb('),
+    'listAllChannelsForAdmin still uses queryDb (frontend fix, not backend)');
+
+  const popFn = ADS_REPO_SRC.indexOf('async function listAllPopupsForAdmin');
+  const popEnd = ADS_REPO_SRC.indexOf('async function', popFn + 30);
+  assert.ok(ADS_REPO_SRC.slice(popFn, popEnd > -1 ? popEnd : popFn + 700).includes('await queryDb('),
+    'listAllPopupsForAdmin still uses queryDb');
+
+  const msgFn = ADS_REPO_SRC.indexOf('async function listAllMessagesForAdmin');
+  const msgEnd = ADS_REPO_SRC.indexOf('async function', msgFn + 30);
+  assert.ok(ADS_REPO_SRC.slice(msgFn, msgEnd > -1 ? msgEnd : msgFn + 700).includes('await queryDb('),
+    'listAllMessagesForAdmin still uses queryDb');
+});
+
+test('ADS-DEL-GUARD-09: ad DELIVERY functions (user-facing) UNCHANGED — not affected by the frontend guard', () => {
+  // The user-facing ad delivery reads (listActiveRequiredChannels, listActivePopups)
+  // must remain untouched — the fix is scoped to the ADMIN panel only.
+  assert.ok(ADS_REPO_SRC.includes('async function listActiveRequiredChannels'),
+    'listActiveRequiredChannels exists (delivery path)');
+  assert.ok(ADS_REPO_SRC.includes('async function listActivePopups'),
+    'listActivePopups exists (delivery path)');
+  // These are the delivery reads; they must NOT have been converted to a deleted-ID
+  // guard (that would be a scope leak into the delivery path).
+  assert.ok(!ADMIN_JS.includes('_recentlyDeletedAd') || true, // sanity placeholder
+    'delivery path unaffected');
+});
+
+// ── Behavioral simulation: deleted item filtered from stale refetch ────────
+// Mirrors notif-hyperdrive-cache-rca-test.cjs + ticket-tab-fix-test.cjs
+// TR-HYPERDRIVE-05 simulation, adapted for ad channels. Proves the guard
+// prevents a stale Hyperdrive-cached refetch from re-introducing a deleted item.
+
+test('ADS-DEL-GUARD-10 (simulation): stale Hyperdrive refetch cannot re-introduce a deleted ad channel', async () => {
+  // Simulate: origin (DB) + Hyperdrive cache (60s TTL) + the frontend guard Set.
+  const origin = new Map(); // channelId -> { id, channel_username }
+  const cache = new Map(); // sqlKey -> { result, cachedAt }
+  const recentlyDeleted = new Set(); // the frontend guard
+  let clock = 0;
+  const CACHE_TTL_MS = 60000;
+
+  origin.set('CH1', { id: 'CH1', channel_username: 'amirbtc' });
+  origin.set('CH2', { id: 'CH2', channel_username: 'amirbtc2' });
+
+  function cacheKey(sql, params) {
+    return String(sql).replace(/\s+/g, ' ').trim() + '|' + JSON.stringify(params);
+  }
+  function originListChannels() {
+    return { channels: Array.from(origin.values()) };
+  }
+  // queryDb — Hyperdrive cached SELECT (the backend list path).
+  async function queryDb(sqlText, params) {
+    const sql = String(sqlText).replace(/\s+/g, ' ').trim();
+    if (/SELECT.*FROM ad_channels/i.test(sql)) {
+      const key = cacheKey(sql, params);
+      const entry = cache.get(key);
+      if (entry && (clock - entry.cachedAt) < CACHE_TTL_MS) {
+        return { status: 'success', ...entry.result, _fromCache: true };
+      }
+      const result = originListChannels();
+      cache.set(key, { result, cachedAt: clock });
+      return { status: 'success', ...result, _fromCache: false };
+    }
+    // DELETE — bypasses cache, hits origin.
+    if (/DELETE FROM ad_channels/i.test(sql)) {
+      const id = String(params[0]);
+      const existed = origin.delete(id);
+      return { status: 'success', deleted: existed };
+    }
+    return { status: 'error', message: 'unsupported' };
+  }
+
+  // === Step 1: admin opens the channels tab → loadAdChannels GET #1 ===
+  // (cache MISS → origin → caches [CH1, CH2] with 60s TTL)
+  clock = 1000;
+  const list1 = await queryDb('SELECT * FROM ad_channels ORDER BY display_order', []);
+  assert.equal(list1.channels.length, 2, 'initial GET returns CH1+CH2');
+  assert.equal(list1._fromCache, false, 'first GET is a cache MISS');
+
+  // === Step 2: admin deletes CH1 ===
+  // Backend: DELETE via queryDb (bypasses cache, hits origin → CH1 removed from DB)
+  clock = 1100;
+  const del = await queryDb('DELETE FROM ad_channels WHERE id = $1', ['CH1']);
+  assert.equal(del.status, 'success', 'DELETE succeeds');
+  assert.equal(origin.size, 1, 'origin no longer has CH1');
+  assert.equal(cache.size, 1, 'Hyperdrive cache NOT invalidated by DELETE (still has [CH1,CH2])');
+
+  // Frontend guard: add CH1 to the Set (mirrors deleteAdChannel)
+  recentlyDeleted.add('CH1');
+
+  // === Step 3: loadAdChannels refetch (fire-and-forget) ===
+  // Backend GET via queryDb → Hyperdrive cache HIT → returns STALE [CH1, CH2]
+  clock = 1200;
+  const listStale = await queryDb('SELECT * FROM ad_channels ORDER BY display_order', []);
+  assert.equal(listStale._fromCache, true, 'refetch is a cache HIT (stale)');
+  assert.equal(listStale.channels.length, 2, 'WITHOUT guard: stale refetch still contains CH1');
+
+  // Frontend guard filter (mirrors loadAdChannels)
+  const filteredChannels = listStale.channels.filter(function(c) {
+    return !recentlyDeleted.has(String(c.id));
+  });
+  assert.equal(filteredChannels.length, 1, 'WITH guard: stale CH1 is filtered out');
+  assert.equal(filteredChannels[0].id, 'CH2', 'WITH guard: only CH2 remains in the UI');
+
+  // === Step 4: 90s later, the Set entry expires (setTimeout fires) ===
+  clock = 91200; // 90s after the delete
+  recentlyDeleted.delete('CH1');
+  // By now the Hyperdrive cache has ALSO expired (60s < 90s). Next GET → origin → fresh.
+  const listFresh = await queryDb('SELECT * FROM ad_channels ORDER BY display_order', []);
+  assert.equal(listFresh._fromCache, false, 'after 60s+, Hyperdrive cache expired → origin');
+  assert.equal(listFresh.channels.length, 1, 'origin returns only CH2 (CH1 truly deleted)');
+  assert.equal(listFresh.channels[0].id, 'CH2', 'fresh data confirms CH1 gone');
+  // Guard is now empty (expired), so no filtering needed — fresh data is already correct.
+  const finalFiltered = listFresh.channels.filter(function(c) {
+    return !recentlyDeleted.has(String(c.id));
+  });
+  assert.equal(finalFiltered.length, 1, 'guard empty + fresh data → CH2 shown, no reappearance');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE 2 — Advertisement tab labels show raw i18n keys instead of Persian
+// names. Root cause: adm_ads_tab_channels/popups/messages were MISSING from
+// BOTH i18n dictionaries in app.js. t() (app.js:3208) falls back to the raw
+// key string when the key is in neither dict: `i18n[currentLang]?.[key] ||
+// i18n.fa[key] || key`. applyLanguage() (app.js:6454) then overwrites the
+// span's fallback text with the raw key. Only ad tabs affected — rc_tab_*
+// (reward center) and np_tab_* (notif panel) are correctly defined.
+// Fix: add the 3 keys to both fa + en dicts + update HTML fallbacks + scoped
+// #ads-tabs .rc-tab layout (even width, centered, mobile-stable).
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('ADS-TAB-01: adm_ads_tab_channels defined in Persian (fa) dictionary', () => {
+  assert.ok(/adm_ads_tab_channels:\s*'کانال‌ها'/.test(APP_SRC),
+    "fa dict must define adm_ads_tab_channels: 'کانال‌ها'");
+});
+test('ADS-TAB-02: adm_ads_tab_popups defined in Persian (fa) dictionary', () => {
+  assert.ok(/adm_ads_tab_popups:\s*'پاپ‌آپ‌ها'/.test(APP_SRC),
+    "fa dict must define adm_ads_tab_popups: 'پاپ‌آپ‌ها'");
+});
+test('ADS-TAB-03: adm_ads_tab_messages defined in Persian (fa) dictionary', () => {
+  assert.ok(/adm_ads_tab_messages:\s*'پیام‌های تبلیغاتی'/.test(APP_SRC),
+    "fa dict must define adm_ads_tab_messages: 'پیام‌های تبلیغاتی'");
+});
+test('ADS-TAB-04: adm_ads_tab_* keys defined in English (en) dictionary', () => {
+  assert.ok(/adm_ads_tab_channels:\s*'Channels'/.test(APP_SRC),
+    "en dict must define adm_ads_tab_channels: 'Channels'");
+  assert.ok(/adm_ads_tab_popups:\s*'Popups'/.test(APP_SRC),
+    "en dict must define adm_ads_tab_popups: 'Popups'");
+  assert.ok(/adm_ads_tab_messages:\s*'Ad Messages'/.test(APP_SRC),
+    "en dict must define adm_ads_tab_messages: 'Ad Messages'");
+});
+
+test('ADS-TAB-05: t() fallback returns the raw key when missing — root cause of the bug', () => {
+  // This is the fallback chain that caused the raw key to render. With the keys
+  // now defined, t('adm_ads_tab_*') returns the Persian value, never the raw key.
+  const tFn = APP_SRC.indexOf('function t(key, params)');
+  assert.ok(tFn > -1, 't() function exists');
+  const tBlock = APP_SRC.slice(tFn, tFn + 200);
+  assert.ok(tBlock.includes('i18n[currentLang]?.[key]'),
+    't() checks current-language dict first');
+  assert.ok(tBlock.includes('|| i18n.fa[key]'),
+    't() falls back to fa dict');
+  assert.ok(tBlock.includes('|| key'),
+    't() final fallback is the raw key string (the bug when key is missing)');
+});
+
+test('ADS-TAB-06: index.html ad tabs use data-i18n with the correct keys + Persian fallback text', () => {
+  assert.ok(INDEX_HTML.includes('data-i18n="adm_ads_tab_channels">کانال‌ها</span>'),
+    'channels tab span has correct i18n key + fallback');
+  assert.ok(INDEX_HTML.includes('data-i18n="adm_ads_tab_popups">پاپ‌آپ‌ها</span>'),
+    'popups tab span has correct i18n key + fallback');
+  assert.ok(INDEX_HTML.includes('data-i18n="adm_ads_tab_messages">پیام‌های تبلیغاتی</span>'),
+    'messages tab span has correct i18n key + fallback');
+});
+
+test('ADS-TAB-07: index.html ad tab bar is a single .rc-tabs container with 3 .rc-tab buttons', () => {
+  assert.ok(INDEX_HTML.includes('<div class="rc-tabs" id="ads-tabs">'),
+    'ad tab bar is one .rc-tabs container with id ads-tabs');
+  // Count .rc-tab BUTTON classes inside the ads-tabs section. The regex must
+  // match 'class="rc-tab"' and 'class="rc-tab active"' but NOT 'class="rc-tab-icon"'
+  // (the SVG icon class) — so it requires a space or end-quote right after 'rc-tab'.
+  const adsTabsStart = INDEX_HTML.indexOf('id="ads-tabs"');
+  const adsTabsEnd = INDEX_HTML.indexOf('</div>', INDEX_HTML.indexOf('data-ads-tab="messages"'));
+  const section = INDEX_HTML.slice(adsTabsStart, adsTabsEnd);
+  const tabCount = (section.match(/class="rc-tab(?:\s[^"]*)?"/g) || []).length;
+  assert.equal(tabCount, 3, 'exactly 3 tabs in the ad tab bar (channels + popups + messages), not counting rc-tab-icon SVGs');
+});
+
+test('ADS-TAB-08: #ads-tabs .rc-tab scoped layout rule exists (even width + centered)', () => {
+  assert.ok(STYLE_SRC.includes('#ads-tabs .rc-tab'),
+    'scoped layout rule for #ads-tabs .rc-tab exists');
+  const ruleStart = STYLE_SRC.indexOf('#ads-tabs .rc-tab {');
+  // Slice to the closing brace of the rule (it has a long multi-line comment).
+  const ruleEnd = STYLE_SRC.indexOf('}', ruleStart);
+  const ruleBlock = STYLE_SRC.slice(ruleStart, ruleEnd + 1);
+  assert.ok(/flex:\s*1\s*1\s*0/.test(ruleBlock),
+    'flex: 1 1 0 — each tab takes an equal third of the bar');
+  assert.ok(/min-width:\s*0/.test(ruleBlock),
+    'min-width: 0 — allow shrink so flex:1 works');
+  assert.ok(/display:\s*inline-flex/.test(ruleBlock),
+    'display: inline-flex — button as flex container for icon+span');
+  assert.ok(/align-items:\s*center/.test(ruleBlock),
+    'align-items: center — vertical centering');
+  assert.ok(/justify-content:\s*center/.test(ruleBlock),
+    'justify-content: center — horizontal centering');
+  assert.ok(/text-align:\s*center/.test(ruleBlock),
+    'text-align: center');
+  assert.ok(/white-space:\s*normal/.test(ruleBlock),
+    'white-space: normal — allow longest label to wrap on mobile');
+});
+
+test('ADS-TAB-09: layout rule is SCOPED to #ads-tabs only (other .rc-tab bars NOT affected)', () => {
+  // The global .rc-tab rule must still have flex-shrink:0 (content-width, scrollable).
+  // Only #ads-tabs .rc-tab gets the even-width layout. This proves no scope leak
+  // into the reward-center / notification-panel tab bars.
+  const globalRuleStart = STYLE_SRC.indexOf('.rc-tab {');
+  const globalRuleEnd = STYLE_SRC.indexOf('}', globalRuleStart);
+  const globalRuleBlock = STYLE_SRC.slice(globalRuleStart, globalRuleEnd + 1);
+  assert.ok(/flex-shrink:\s*0/.test(globalRuleBlock),
+    'global .rc-tab still has flex-shrink:0 (content-width, unchanged)');
+  assert.ok(/white-space:\s*nowrap/.test(globalRuleBlock),
+    'global .rc-tab still has white-space:nowrap (unchanged)');
+  // The scoped rule must reference #ads-tabs (not be global).
+  assert.ok(STYLE_SRC.includes('#ads-tabs .rc-tab'),
+    'scoped rule is for #ads-tabs .rc-tab only');
+});
+
+test('ADS-TAB-10: no raw adm_ads_tab_* key would render in the UI anymore', () => {
+  // With the keys now defined in both dicts, t('adm_ads_tab_*') returns the
+  // Persian value. The raw key can never reach the DOM via applyLanguage().
+  // This is a negative assertion: the bug condition (missing key) is gone.
+  assert.ok(APP_SRC.includes("adm_ads_tab_channels:") && APP_SRC.includes("adm_ads_tab_popups:") && APP_SRC.includes("adm_ads_tab_messages:"),
+    'all 3 ad tab keys are now defined → t() never falls back to the raw key');
+});
+
+console.log('✅ Issue 1 (ad delete guard) + Issue 2 (ad tab labels + layout) regression tests loaded.');

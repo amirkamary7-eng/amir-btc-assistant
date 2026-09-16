@@ -4016,6 +4016,24 @@ html[dir="rtl"] .market-ticker-track {
     background: linear-gradient(135deg, rgba(245,166,35,0.18), rgba(255,204,77,0.10));
     border-color: rgba(245,166,35,0.35); color: #F5A623;
 }
+/* ISSUE 2 + Tab Layout FIX: Advertisement tab bar (#ads-tabs) — even-width,
+   centered, mobile-stable layout. Scoped to #ads-tabs so the OTHER .rc-tab
+   bars (reward center, notification panel) keep their existing content-width,
+   horizontally-scrollable layout. Pure layout (flex/alignment/spacing) — no
+   color/font/border/shadow changes. */
+#ads-tabs .rc-tab {
+    flex: 1 1 0;          /* each of the 3 tabs takes an equal third of the bar */
+    min-width: 0;         /* allow shrink below content width so flex:1 works */
+    display: inline-flex;  /* make the button a flex container for its icon+span */
+    align-items: center;   /* vertically center icon + label */
+    justify-content: center; /* horizontally center icon + label within the tab */
+    gap: 6px;             /* consistent spacing between icon and label */
+    white-space: normal;  /* allow the longest label ("پیام‌های تبلیغاتی") to wrap
+                             cleanly at the space on narrow mobile widths instead
+                             of overflowing or clipping */
+    line-height: 1.3;     /* readable spacing when the label wraps to 2 lines */
+    text-align: center;
+}
 
 .rc-overview-grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

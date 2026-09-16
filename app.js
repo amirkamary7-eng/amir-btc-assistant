@@ -1179,6 +1179,14 @@ const i18n = {
         adm_ae_desc: 'مدیریت سهمیه، هزینه و فعال‌سازی هشدارها',
         adm_ads_title: 'تبلیغات',
         adm_ads_desc: 'مدیریت کانال‌های عضویت، پاپ‌آپ مینی‌اپ و پیام‌های تبلیغاتی',
+        // ISSUE 2 FIX: Advertisement tab labels were MISSING from the i18n
+        // dictionary, so t() (app.js:3208) fell back to the raw key string
+        // and applyLanguage() (app.js:6454) overwrote the span's fallback
+        // text with 'adm_ads_tab_channels' etc. These are the real Persian
+        // labels the admin should see in the tab bar.
+        adm_ads_tab_channels: 'کانال‌ها',
+        adm_ads_tab_popups: 'پاپ‌آپ‌ها',
+        adm_ads_tab_messages: 'پیام‌های تبلیغاتی',
         adm_mb_title: 'عضویت ویژه',
         adm_mb_desc: 'مدیریت درخواست‌های عضویت صرافی و کاربران VIP',
         adm_update_btn: 'به‌روزرسانی',
@@ -2521,6 +2529,10 @@ const i18n = {
         adm_ae_desc: 'Manage alert quotas, costs, and activation',
         adm_ads_title: 'Advertisements',
         adm_ads_desc: 'Manage membership channels, mini-app popups, and ad messages',
+        // ISSUE 2 FIX: Advertisement tab labels (English mirror of the fa dict).
+        adm_ads_tab_channels: 'Channels',
+        adm_ads_tab_popups: 'Popups',
+        adm_ads_tab_messages: 'Ad Messages',
         adm_mb_title: 'Premium Membership',
         adm_mb_desc: 'Manage exchange membership requests and VIP users',
         adm_update_btn: 'Update',

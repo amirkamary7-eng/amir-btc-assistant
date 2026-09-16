@@ -9054,3 +9054,141 @@ Stage Summary:
 - DB cost: /api/notif-diag-report (1-2 queries on invariant detection only), /api/notif-cpu-trace + /api/notif-delete-diag (gated to non-prod)
 - CPU overhead: highest is request._cpuTrace + 3 pushes (fires on EVERY protected request in production, ~4 ops/request — tiny but unnecessary)
 - No code changes, no commits, no pushes, no deploys. Audit only.
+
+---
+Task ID: OPTION-A-TICKETS
+Agent: Z.ai Code (Orchestrator)
+Task: Implement RCA Option A — bypass Hyperdrive cache for listTicketReplies (ticket_replies read-after-write consistency). Strict scope lock: only worker-proxy.js + src/repositories/admin.js + ticket-tab-fix-test.cjs. No admin.js, no app.js, no controller, no Hyperdrive config, no KV, no DB schema, no API contract, no unrelated refactor.
+
+Work Log:
+- RCA (read-only) completed in prior turn. Root cause: listTicketReplies (src/repositories/admin.js:578) used queryDb → Hyperdrive cached the deterministic SELECT (default 60s TTL, binding f4b69c06c1e84d98b7c4b5720efe4b41). After POST reply (INSERT via queryDb — bypasses cache, hits origin), the awaited fetchTicketReplies GET (admin.js:1590) returned the pre-reply cached result, and admin.js:1553 `repliesEl.innerHTML = html` destroyed the optimistic reply (admin.js:1583). Reply reappeared ~30s later when cache expired and a later GET queried origin. Proven pattern — identical to notification RCA fixed in commit 2745906.
+- Edit 1 — worker-proxy.js:11034: createAdminRepository({ queryDb, normalizeOptionalString }) → createAdminRepository({ queryDb, queryDbDirect, normalizeOptionalString }). 1 line.
+- Edit 2 — src/repositories/admin.js:10: const { queryDb, normalizeOptionalString } = deps; → const { queryDb, queryDbDirect, normalizeOptionalString } = deps;
+- Edit 3 — src/repositories/admin.js:586: listTicketReplies SELECT now uses `await queryDbDirect(` (was `await queryDb(`) + 8-line explanatory comment mirroring notificationRepo.list style. SELECT columns, WHERE, ORDER BY, and the user_id/body/is_admin_reply/created_at mapping (lines 599-607) UNCHANGED — API response contract preserved.
+- Edit 4 — ticket-tab-fix-test.cjs: +250 lines, 6 new tests (TR-HYPERDRIVE-01..06):
+  * TR-HYPERDRIVE-01: listTicketReplies uses queryDbDirect (NOT queryDb) — source-text
+  * TR-HYPERDRIVE-02: createAdminRepository destructures queryDbDirect — source-text
+  * TR-HYPERDRIVE-03: worker-proxy.js injects queryDbDirect into createAdminRepository — source-text
+  * TR-HYPERDRIVE-04: listTicketReplies mapping + API response contract unchanged — source-text
+  * TR-HYPERDRIVE-05 (REGRESSION Option A): self-contained Hyperdrive simulation (mirrors notif-hyperdrive-cache-rca-test.cjs). Seeds ticket T1 (0 replies), GET #1 via queryDb (cache MISS, caches []), INSERT reply via queryDb (bypasses cache, hits origin), GET#2 via queryDb within 60s TTL → cache HIT → returns stale [] (bug reproduced), GET#3 via queryDbDirect → bypasses cache → returns [reply] (fix verified), sanity: Hyperdrive cache still stale, t=62100 cache expired → queryDb also fresh.
+  * TR-HYPERDRIVE-06: documents that the awaited GET (admin.js:1590) is the stale path; per-ticket _repliesFetchSeq guard is orthogonal (only prevents older in-flight overwriting newer; here there's 1 GET, it's newest, seq matches, applied — stale data overwrites optimistic).
+- Diff scope verified: `git diff --stat` shows ONLY 3 files with content changes (worker-proxy.js +2/-2, src/repositories/admin.js +11/-3, ticket-tab-fix-test.cjs +250). Other 148 "0-line" working-tree files are pre-existing mode-bit-only (NOT my changes, per prior worklog). No admin.js, no app.js, no controller, no Hyperdrive config, no KV, no schema, no API contract, no package.json, no unrelated refactor.
+- Ticket tests: node --test ticket-tab-fix-test.cjs → 40/40 pass (34 pre-existing + 6 new TR-HYPERDRIVE). 0 fail.
+- Full npm test: 1710 tests, 1708 pass, 0 fail, 2 skipped (pre-existing # TODO in worker-proxy.test.cjs, NOT real failures — verified in prior Option C worklog).
+- Syntax check: node --check ticket-tab-fix-test.cjs → OK. wrangler deploy --dry-run --env production → SUCCESS (Total Upload: 1703.25 KiB / gzip: 344.87 KiB, no errors, no warnings). Worker bundle compiles cleanly with Option A changes.
+- Commit: 31383c4 "fix(tickets): bypass Hyperdrive cache for reply reads" on branch admin-messaging-fix (parent 0d1d0a6). 3 files, 260 insertions, 3 deletions.
+
+Stage Summary:
+- Option A IMPLEMENTED + committed locally as 31383c4.
+- All tests green (40/40 ticket, 1710/1710 npm with 2 pre-existing skips).
+- Wrangler dry-run build SUCCESS.
+- Diff scope: exactly 3 files, within lock. No scope creep.
+- BLOCKER — push + deploy: NO GitHub credentials (no gh CLI, no ~/.git-credentials, no GH_TOKEN/GITHUB_TOKEN env, no credential.helper) AND NO Cloudflare credentials (no CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID env, wrangler whoami → "not authenticated", no wrangler oauth token file) are available in THIS sandbox session. The prior Option C session used an ephemeral git credential helper + a CLOUDFLARE_API_TOKEN that were DELIBERATELY CLEANED UP (per prior worklog: "Ephemeral git credential helper cleaned up. Verified no credentials in any project file."). This continuation session has no access to those credentials.
+- Local commit 31383c4 is READY. When credentials are available:
+  * Push: `git push origin HEAD:main` (fast-forwards origin/main from 0d1d0a6 to 31383c4; verified clean via `git rev-list --count origin/main...HEAD` = "0 1")
+  * Deploy: `npx wrangler deploy --env production` (matches prior Option C manual deploy pattern)
+  * Post-deploy: GET /api/health (expect 200); Cloudflare versions API for active Worker version id; `git rev-parse origin/main` for Pages/asset version (NOTE: this commit changes NO frontend files — admin.js/app.js/index.html untouched — so Pages deployment needs NO rebuild; only the Worker needs redeploy); wrangler tail for 5xx during first reply test; real E2E Admin Reply test in Telegram Mini App (admin: open ticket → reply → reply must NOT disappear; reply visible immediately and stays).
+- NO push performed. NO deploy performed. NO production secrets set. Awaiting credential availability OR user to run push + deploy + post-deploy verification from a credentialed environment.
+
+---
+Task ID: OPTION-A-PUSH-DEPLOY-VERIFY
+Agent: Z.ai Code (Orchestrator)
+Task: Final read-only verify + push + deploy + post-deploy verify for commit 31383c4 (RCA Option A — ticket_replies Hyperdrive cache bypass). User provided GitHub PAT + Cloudflare API token in secure coder environment. Credentials used INLINE only (env vars / per-command git credential helper), NEVER written to any file, cleaned up after each step.
+
+Work Log:
+- Stage 1 (pre-push diff verify, read-only):
+  * git status --short for the 3 files: EMPTY (clean working tree for the committed files)
+  * git rev-parse 31383c4~1 = 0d1d0a68fcac5368dc70c6245a2e7d7abd9c83ac (parent is exactly 0d1d0a6) ✓
+  * git log --oneline 0d1d0a6..31383c4 = exactly 1 commit (31383c4 itself) ✓
+  * git diff --stat 0d1d0a6..31383c4 = exactly 3 files: worker-proxy.js (+2/-... ), src/repositories/admin.js (11), ticket-tab-fix-test.cjs (250). 260 insertions, 3 deletions ✓
+  * git diff 0d1d0a6..31383c4 (full): only 3 functional changes — (1) worker-proxy.js inject queryDbDirect into createAdminRepository, (2) src/repositories/admin.js destructure queryDbDirect, (3) listTicketReplies SELECT queryDb→queryDbDirect + explanatory comment. SELECT columns/WHERE/ORDER BY/mapping UNCHANGED → API contract preserved.
+  * Test file diff: +250/-0 (purely additive, no existing tests modified) ✓
+  * No out-of-scope files touched (grep for anything outside the 3 allowed = empty "scope-clean") ✓
+
+- Stage 2 (tests + syntax + dry-run):
+  * node --test ticket-tab-fix-test.cjs → 40/40 pass (incl. 6 new TR-HYPERDRIVE tests), 0 fail ✓
+  * npm test → 1710 tests, 1708 pass, 0 fail, 2 skipped (pre-existing # TODO in worker-proxy.test.cjs) ✓
+  * node --check worker-proxy.js → SyntaxError "Cannot use import statement outside a module" — FALSE POSITIVE (file uses ESM `import` but package.json type=commonjs; node treats .js as CJS). NOT a real syntax error.
+  * node --check src/repositories/admin.js → SyntaxError "Unexpected token 'export'" — same FALSE POSITIVE (ESM `export` in CJS context).
+  * npx wrangler deploy --dry-run --env production → SUCCESS (Total Upload 1703.25 KiB / gzip 344.87 KiB, 0 errors, 0 warnings, exit 0). This is the AUTHORITATIVE ESM syntax validation (esbuild bundles ESM regardless of package.json type). ✓
+  * No STOP condition triggered (0 test failures, no real syntax errors, dry-run clean, diff in scope).
+
+- Stage 3 (GitHub push, secure, inline creds):
+  * Set GH_TOKEN env var inline (not written to any file).
+  * Used per-command git credential helper: `git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'` — the helper string contains `$GH_TOKEN` (env reference), never the literal token value, so the token is NOT in git config or process args.
+  * git fetch origin main ✓
+  * origin/main BEFORE push = 0d1d0a68fcac5368dc70c6245a2e7d7abd9c83ac (exactly 0d1d0a6, no surprise movement) ✓
+  * git merge-base --is-ancestor origin/main 31383c4 → success (FF-SAFE: origin/main is ancestor of 31383c4) ✓
+  * git push origin 31383c4:main → "0d1d0a6..31383c4  31383c4 -> main" (non-force fast-forward) ✓
+  * origin/main AFTER push+refetch = 31383c4d2c36035ed6cd8875a6c402713aea878c ✓
+  * GH_TOKEN unset (0 matches in env after) ✓ — creds cleaned
+
+- Stage 4 (Worker deploy, inline creds):
+  * Set CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID env vars inline.
+  * npx wrangler deploy --env production → "Uploaded amir-btc-assistant-api-production (3.66 sec) / Deployed ... triggers (1.08 sec) / Current Version ID: 78c11f92-d245-4396-92db-dc78e71e71c3" ✓
+  * Production URL: https://amir-btc-assistant-api-production.amirkamari9939.workers.dev
+  * Crons detected: * * * * *, */5 * * * *, */15 * * * *
+  * deploy-exit=0 ✓
+  * CF creds unset (0 in env after) ✓
+  * Pages NOT deployed (per instruction — no frontend files changed). ✓
+
+- Stage 5 (post-deploy verify):
+  * /api/health: HTTP 200, ~0.05-0.17s, body = {"status":"ok","bot_configured":true,"database_ready":true,"cache_ready":true,...} ✓
+  * /api/system/status: HTTP 200, maintenance disabled ✓
+  * /api/admin/tickets/x/replies (anonymous): HTTP 401 {"detail":"Missing Telegram init data"} ✓ — route alive, auth gate works (this is the route that now uses queryDbDirect; auth fires before listTicketReplies, so 401 confirms route wiring without exercising the queryDbDirect path itself, which requires valid admin auth unavailable in sandbox)
+  * /api/farsi-news (anonymous): HTTP 401 (auth-gated route alive) ✓
+  * Wrangler tail (40s, JSON format): 47 lines, all "outcome":"ok", "exceptions":[] (empty arrays = no exceptions), 0 lines with 5xx status codes. The "2 errors/exceptions" grep count = 2 lines containing the word "exceptions" (both empty []) — i.e. ZERO actual errors. ✓
+  * Cloudflare versions API: result.items shows version 78c11f92 (my manual deploy, 09:23:55Z) AND version 6365a44e (09:25:59Z, ~2min later). The 6365a44e is the GitHub Actions auto-deploy triggered by my push to main (verified: .github/workflows/deploy-production.yml has `on: push: branches: main`). Both built from commit 31383c4.
+  * GitHub Actions run #551 ("Deploy Production"): status=completed, conclusion=success, head_sha=31383c4, head_branch=main, created=2026-09-16T09:23:20Z. This CONFIRMS the GA-orchestrated `npm test` step PASSED in CI before the deploy step ran (the workflow runs tests first, gates deploy on test success). ✓
+
+- Stage 6 (E2E Admin Reply in Telegram Mini App):
+  * This stage is USER-DRIVEN — the sandbox cannot authenticate as a real Telegram admin (no HMAC-signed init_data, no real Telegram account).
+  * Provided the user with the exact E2E checklist (open ticket → reply → send → verify immediate visibility + no disappearance + no 30s gap + persists across collapse/reopen + original message intact + create/delete still work).
+  * Offered to run an on-demand `wrangler tail --env production` while the user runs the E2E, to capture the POST /api/admin/tickets/:id/reply and GET /api/admin/tickets/:id/replies events for verification.
+
+Stage Summary:
+- Commit 31383c4 PUSHED to origin/main (fast-forward, non-force). origin/main = 31383c4d2c36035ed6cd8875a6c402713aea878c.
+- Worker DEPLOYED: manual deploy version 78c11f92 + GitHub Actions auto-deploy version 6365a44e (both from commit 31383c4). Current active = 6365a44e (latest).
+- GitHub Actions run #551 (head_sha 31383c4): completed/success — tests passed in CI + deploy succeeded.
+- /api/health = 200 (ok). All tested routes alive (health, system-status, admin-replies auth gate, farsi-news auth gate).
+- wrangler tail (40s): outcome:ok, no exceptions, no 5xx.
+- Pages: NOT deployed (no frontend files in this commit — admin.js/app.js/index.html untouched). Pages version unchanged.
+- All credentials (GitHub PAT + Cloudflare API token) used inline only, cleaned up after each step. 0 credentials persisted in any file.
+- ONLY remaining step: user-driven E2E Admin Reply test in Telegram Mini App (Stage 6). On-demand wrangler tail offered.
+
+---
+Task ID: ADS-DELETE-DELAY + ADS-TAB-LABELS
+Agent: Z.ai Code (Orchestrator)
+Task: Fix exactly 2 Advertisement System issues. (1) Ad delete (channels/popups/messages) succeeds but item lingers in UI list until page reopen/~60s. (2) Ad tab bar shows raw i18n keys (adm_ads_tab_*) instead of Persian names + uneven tab layout. Strict scope lock: no other ad capability changes, no backend changes, no redesign.
+
+Work Log:
+- RCA Issue 1 (ad delete delay): Traced full delete flow for all 3 entities.
+  * Frontend (admin.js): deleteAdChannel (3618), deleteAdPopup (3842), deleteAdMessage (4089) — all do: optimistic card removal (cardEl.parentNode.removeChild) + cache filter + fire-and-forget loadAdXxx().catch(()=>{}) refetch.
+  * loadAdChannels (3476), loadAdPopups (3673), loadAdMessages (3917) — all re-render section.innerHTML from the GET response (unconditional overwrite).
+  * Backend (src/repositories/advertisements.js): listAllChannelsForAdmin (315), listAllPopupsForAdmin (500), listAllMessagesForAdmin (652) — all use queryDb (Hyperdrive-cached SELECT, default 60s TTL). delete functions use queryDb (mutations bypass cache, hit origin).
+  * Root cause (proven, same pattern as ticket_replies 31383c4 + notification delete 2745906): after DELETE (bypasses cache, hits origin), the refetch GET returns the stale pre-delete cached result (still containing the deleted item) for up to 60s → section.innerHTML re-render re-introduces the item. All 3 entities identical root cause.
+  * Hyperdrive cache TTL = 60s (proven in worker-proxy.js:2228, binding f4b69c06c1e84d98b7c4b5720efe4b41, default cache_ttl).
+- RCA Issue 2 (ad tab labels): adm_ads_tab_channels/popups/messages MISSING from BOTH i18n dicts in app.js. t() (app.js:3208) fallback chain `i18n[currentLang]?.[key] || i18n.fa[key] || key` returns raw key when missing. applyLanguage() (app.js:6454) overwrites span innerText with t(key) → raw key renders. Only ad tabs affected — adm_rc_tab_* (reward center) + adm_np_tab_* (notif panel) ARE defined (verified app.js:1152-1153 fa, 2494-2495 en).
+- Fix Issue 1 (frontend deleted-ID guard, mirrors app.js _recentlyDeletedTicketIds pattern at lines 439, 14347-14349, 14650-14653):
+  * admin.js: added 3 per-entity Sets _recentlyDeletedAdChannelIds/_recentlyDeletedAdPopupIds/_recentlyDeletedAdMessageIds (after cache declarations, ~line 3189).
+  * Each delete handler: after DELETE success, add the ID to the Set + setTimeout 90s cleanup (>60s cache window).
+  * Each load function: filter the Set out of the GET response BEFORE rendering (so stale refetch cannot re-introduce deleted items).
+  * NO backend change (listAll*ForAdmin still use queryDb — verified by ADS-DEL-GUARD-08 test). NO delivery-path change (listActive* untouched — verified by ADS-DEL-GUARD-09).
+- Fix Issue 2 (i18n + layout):
+  * app.js: added adm_ads_tab_channels/popups/messages to fa dict (after adm_ads_desc ~1182) + en dict (after ~2532). Values: کانال‌ها / پاپ‌آپ‌ها / پیام‌های تبلیغاتی (fa) + Channels / Popups / Ad Messages (en).
+  * index.html: updated 2 span fallback texts (پاپ‌آپ → پاپ‌آپ‌ها, پیام‌ها → پیام‌های تبلیغاتی) to match i18n values (channels fallback کانال‌ها already correct).
+  * style.css: added scoped #ads-tabs .rc-tab layout rule (flex:1 1 0, min-width:0, display:inline-flex, align-items:center, justify-content:center, gap:6px, white-space:normal, line-height:1.3, text-align:center). Scoped to #ads-tabs ONLY — other .rc-tab bars (reward center, notif panel) keep existing flex-shrink:0 + white-space:nowrap (verified by ADS-TAB-09). Pure layout — no color/font/border/shadow changes.
+- Tests: added 20 regression tests to advertisements-system-test.cjs:
+  * ADS-DEL-GUARD-01..10: Sets exist (01), each delete handler tracks ID with 90s TTL (02-04), each load function filters Set (05-07), backend unchanged still queryDb (08), delivery path unchanged (09), behavioral simulation proving stale refetch cannot re-introduce deleted item (10).
+  * ADS-TAB-01..10: 3 keys in fa dict (01-03), 3 keys in en dict (04), t() fallback root cause (05), index.html spans correct (06), single tab bar with 3 buttons (07), scoped layout rule properties (08), scope isolation from other .rc-tab bars (09), no raw key renders anymore (10).
+- Test results:
+  * Ad tests: node --test advertisements-system-test.cjs → 269/269 pass (249 pre-existing + 20 new), 0 fail.
+  * Full npm test: 1730 tests, 1728 pass, 0 fail, 2 skipped (pre-existing # TODO in worker-proxy.test.cjs).
+  * wrangler deploy --dry-run --env production: SUCCESS (Total Upload 1703.25 KiB / gzip 344.87 KiB, 0 errors, 0 warnings, exit 0).
+- Diff scope: exactly 5 files (admin.js +48/-6, app.js +12, index.html +2/-2, style.css +18, advertisements-system-test.cjs +329). Backend src/repositories/advertisements.js UNTOUCHED (0/0, mode-bit only). No admin.js ticket code, no app.js non-ad code, no controllers, no KV, no Hyperdrive config, no DB schema, no API contract, no delivery path.
+
+Stage Summary:
+- Both issues root-caused + fixed with proven patterns (Issue 1 mirrors _recentlyDeletedTicketIds; Issue 2 is missing i18n keys + scoped layout).
+- All tests green (269/269 ad, 1730/1728/0/2 full, dry-run clean).
+- Scope: 5 files only, no backend change, no delivery-path change, no visual style change (layout-only).
+- Ready for commit/push/deploy.
