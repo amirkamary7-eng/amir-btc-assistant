@@ -15232,6 +15232,19 @@ export default {
       // No auth required (the report contains only notification IDs + timestamps, no PII).
       // TEMPORARY — will be removed after RCA is closed.
       if (url.pathname === '/api/notif-diag-report') {
+        // H2 FIX: Gate this diagnostic endpoint behind non-production (mirrors
+        // /api/notif-trace-results at line 15199). The RCA this endpoint served
+        // (notification stale-read, Option C, commit 2745906) is closed and
+        // verified in production. The endpoint is no longer needed in production
+        // and was unauthenticated (no auth, no body-size limit, no rate limit).
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse(
+            { status: 'error', message: 'Not available in production' },
+            { status: 404 },
+            env
+          );
+        }
         if (request.method === 'POST') {
           try {
             const body = await request.json();
