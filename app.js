@@ -14562,6 +14562,11 @@ async function submitTicket() {
         if (resp && resp.ticket) {
             const newId = String(resp.ticket.id);
             if (!tickets.some(tk => String(tk.id) === newId)) {
+                // BUG B FIX: Increment the fetch sequence before local mutation
+                // so any in-flight fetchTickets() (from 15s polling or modal open)
+                // sees a stale seq and discards its response — preventing it from
+                // overwriting the locally-inserted ticket with stale API data.
+                ++_ticketsFetchSeq;
                 tickets.unshift(resp.ticket);
             }
         }

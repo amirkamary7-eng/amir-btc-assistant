@@ -325,16 +325,17 @@ test('TR-MSG-02: fetchTicketReplies targets .tk-replies container, not .tk-threa
 });
 
 // BUG 3b: adminReplyTicket calls fetchTicketReplies after loadAdminTickets
-test('TR-REPLY-FIX: adminReplyTicket calls fetchTicketReplies after loadAdminTickets', () => {
+test('TR-REPLY-FIX: adminReplyTicket calls fetchTicketReplies WITHOUT loadAdminTickets', () => {
   const fnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
   assert.ok(fnStart > -1, 'adminReplyTicket must exist');
-  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
-  const loadIdx = fnBlock.indexOf('loadAdminTickets');
-  const fetchIdx = fnBlock.indexOf('fetchTicketReplies(ticketId)');
-  assert.ok(loadIdx > -1, 'adminReplyTicket must call loadAdminTickets');
-  assert.ok(fetchIdx > -1, 'adminReplyTicket must call fetchTicketReplies');
-  assert.ok(loadIdx < fetchIdx,
-    'loadAdminTickets must be called BEFORE fetchTicketReplies (replies container must exist first)');
+  // Find the NEXT function definition to limit the slice to just adminReplyTicket
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 2000);
+  assert.ok(fnBlock.includes('fetchTicketReplies(ticketId)'),
+    'adminReplyTicket must call fetchTicketReplies to refresh replies after POST');
+  // BUG C FIX: loadAdminTickets must NOT be CALLED (check for function-call pattern).
+  assert.ok(!fnBlock.includes('loadAdminTickets('),
+    'adminReplyTicket must NOT call loadAdminTickets() (causes skeleton flicker + DOM race)');
 });
 
 // BUG 4: .tk-replies CSS exists
@@ -356,3 +357,34 @@ test('TR-SCROLL-03: .tk-thread DOM stays stable after fetchTicketReplies (no inn
 });
 
 console.log('✅ Bug 1+2+3+4 stabilization tests loaded.');
+
+// ============================================================================
+// BUG A+B+C Fixes — Admin delete, create race, reply refresh
+// ============================================================================
+
+// BUG A: handleDeleteTicket must destructure admin + use admin?.telegram_id (not auth?.user?.id)
+test('TR-ADMIN-DEL-01: handleDeleteTicket destructures admin from requireAdmin', () => {
+  const ADMIN_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/admin.js'), 'utf8');
+  const fnStart = ADMIN_CTRL_SRC.indexOf('async function handleDeleteTicket');
+  assert.ok(fnStart > -1, 'handleDeleteTicket must exist');
+  const fnBlock = ADMIN_CTRL_SRC.slice(fnStart, fnStart + 600);
+  assert.ok(fnBlock.includes('{ error: authErr, admin }'),
+    'handleDeleteTicket must destructure admin from requireAdmin (not just error)');
+  assert.ok(fnBlock.includes('admin?.telegram_id'),
+    'handleDeleteTicket must use admin?.telegram_id for rate limit');
+  assert.ok(!fnBlock.includes('auth?.user?.id'),
+    'handleDeleteTicket must NOT reference auth?.user?.id (was the ReferenceError bug)');
+});
+
+// BUG B: submitTicket must increment _ticketsFetchSeq before tickets.unshift
+test('TR-CREATE-02: submitTicket increments _ticketsFetchSeq before tickets.unshift', () => {
+  const fnStart = APP_JS.indexOf('async function submitTicket(');
+  assert.ok(fnStart > -1, 'submitTicket must exist');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 3500);
+  const seqIdx = fnBlock.indexOf('++_ticketsFetchSeq');
+  const unshiftIdx = fnBlock.indexOf('tickets.unshift(resp.ticket)');
+  assert.ok(seqIdx > -1, 'submitTicket must increment _ticketsFetchSeq before local mutation');
+  assert.ok(unshiftIdx > -1, 'submitTicket must call tickets.unshift(resp.ticket)');
+  assert.ok(seqIdx < unshiftIdx,
+    '_ticketsFetchSeq must be incremented BEFORE tickets.unshift (invalidates in-flight fetchTickets)');
+});

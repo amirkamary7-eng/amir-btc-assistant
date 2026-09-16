@@ -1007,9 +1007,9 @@ export function createAdminHandlers(deps) {
   // ---------------------------------------------------------------------------
 
   async function handleDeleteTicket(request, env, ticketId) {
-    const { error: authErr } = await requireAdmin(request, env, 'manage_tickets');
+    const { error: authErr, admin } = await requireAdmin(request, env, 'manage_tickets');
     if (authErr) return authErr;
-    const _rlErr = await checkAdminRateLimit(request, env, auth?.user?.id || "unknown"); if (_rlErr) return _rlErr;
+    const _rlErr = await checkAdminRateLimit(request, env, admin?.telegram_id || "unknown"); if (_rlErr) return _rlErr;
 
     if (!isDatabaseConfigured(env)) {
       return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);

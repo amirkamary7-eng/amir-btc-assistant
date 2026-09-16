@@ -1561,10 +1561,14 @@ async function adminReplyTicket(ticketId) {
         });
         showAdminToast(t('adm_tk_reply_sent'), 'success');
         _adminTicketsExpanded[ticketId] = true;
-        loadAdminTickets(_adminTicketsPage);
-        // BUG 3b FIX: After loadAdminTickets re-renders the list (which recreates
-        // the .tk-replies container), re-fetch replies so the conversation thread
-        // shows the original message + all replies including the one just sent.
+        // BUG C FIX: Do NOT call loadAdminTickets here — it replaces the entire
+        // ticket list with a skeleton (synchronous innerHTML), then fetches ALL
+        // tickets (slow). This caused a DOM race: fetchTicketReplies ran while
+        // the skeleton was showing, couldn't find the .tk-replies element, and
+        // returned early without rendering replies.
+        // Instead, only refresh the replies for THIS ticket. The .tk-replies
+        // container already exists in the DOM from the previous render —
+        // fetchTicketReplies targets it directly. No skeleton, no full re-render.
         fetchTicketReplies(ticketId);
     } catch (e) {
         showAdminToast(t('adm_tk_reply_failed'), 'error');
