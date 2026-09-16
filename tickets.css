@@ -348,6 +348,9 @@
 .tk-thread::-webkit-scrollbar { width: 4px; }
 .tk-thread::-webkit-scrollbar-track { background: transparent; }
 .tk-thread::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+/* BUG 3 FIX: .tk-replies is a child of .tk-thread — inherits the flex column
+   layout + gap so replies have the same spacing as the original message. */
+.tk-replies { display: flex; flex-direction: column; gap: 8px; }
 
 /* ── Individual Message ── */
 .tk-msg {

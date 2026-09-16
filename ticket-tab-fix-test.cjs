@@ -165,7 +165,7 @@ const ADMIN_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/ad
 test('TR-REPLY-01: listTicketReplies SQL uses real ticket_replies columns (not user_id/body/is_admin_reply)', () => {
   const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
   assert.ok(fnStart > -1, 'listTicketReplies function must exist');
-  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 2000);
   // Must SELECT the real schema columns
   assert.ok(/SELECT\s+id,\s*ticket_id,\s*sender_id,\s*message,\s*sender_type,\s*created_at/i.test(fnBlock),
     'SQL must SELECT id, ticket_id, sender_id, message, sender_type, created_at (real ticket_replies columns)');
@@ -178,7 +178,7 @@ test('TR-REPLY-01: listTicketReplies SQL uses real ticket_replies columns (not u
 
 test('TR-REPLY-02: listTicketReplies maps sender_id→user_id, message→body, sender_type→is_admin_reply (frontend contract preserved)', () => {
   const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
-  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 2000);
   // Mapping must preserve the frontend contract (user_id/body/is_admin_reply)
   assert.ok(fnBlock.includes('user_id: String(r.sender_id)'),
     'map sender_id → user_id (frontend field name preserved)');
@@ -195,7 +195,7 @@ test('TR-REPLY-02: listTicketReplies maps sender_id→user_id, message→body, s
 
 test('TR-REPLY-03: listTicketReplies must NOT reference the old broken columns in the SELECT', () => {
   const fnStart = ADMIN_REPO_SRC.indexOf('async function listTicketReplies');
-  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 1200);
+  const fnBlock = ADMIN_REPO_SRC.slice(fnStart, fnStart + 2000);
   // The SELECT line specifically must not contain user_id/body/is_admin_reply as selected columns
   const selectLine = fnBlock.match(/SELECT[^\n]*/);
   assert.ok(selectLine, 'must have a SELECT clause');
@@ -216,7 +216,7 @@ const APP_JS = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 test('TR-DEL-01: deleteTicket user path uses optimistic local removal (tickets.filter), not fetchTickets()', () => {
   const fnStart = APP_JS.indexOf('async function deleteTicket(');
   assert.ok(fnStart > -1, 'deleteTicket function must exist');
-  const fnBlock = APP_JS.slice(fnStart, fnStart + 1200);
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 2000);
   assert.ok(fnBlock.includes('tickets = tickets.filter'),
     'User-side delete must use tickets.filter (optimistic local removal)');
   assert.ok(fnBlock.includes('renderTickets()'),
@@ -226,14 +226,14 @@ test('TR-DEL-01: deleteTicket user path uses optimistic local removal (tickets.f
   const elseIdx = fnBlock.indexOf('else {');
   if (elseIdx > -1) {
     const elseBlock = fnBlock.slice(elseIdx);
-    assert.ok(!elseBlock.includes('fetchTickets()'),
+    assert.ok(!elseBlock.includes('await fetchTickets()'),
       'User-side delete must NOT call fetchTickets() (would re-fetch stale Hyperdrive data)');
   }
 });
 
 test('TR-DEL-02: deleteTicket still calls DELETE API before optimistic removal (no premature removal)', () => {
   const fnStart = APP_JS.indexOf('async function deleteTicket(');
-  const fnBlock = APP_JS.slice(fnStart, fnStart + 1200);
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 2000);
   const deleteCallIdx = fnBlock.indexOf("method: 'DELETE'");
   const filterIdx = fnBlock.indexOf('tickets = tickets.filter');
   assert.ok(deleteCallIdx > -1, 'DELETE API call must exist');
@@ -257,3 +257,102 @@ test('TR-SCROLL-01: .tk-thread CSS contains -webkit-overflow-scrolling: touch', 
 });
 
 console.log('✅ Ticket delete + scroll regression tests loaded.');
+
+// ============================================================================
+// BUG 1+2+3+4 Fixes — Stabilize ticket list and admin thread rendering
+// ============================================================================
+
+// BUG 1: _recentlyDeletedTicketIds Set exists + fetchTickets filters them
+test('TR-DEL-03: _recentlyDeletedTicketIds Set tracks deleted IDs + fetchTickets filters them', () => {
+  assert.ok(APP_JS.includes('_recentlyDeletedTicketIds'),
+    '_recentlyDeletedTicketIds must exist to track recently deleted ticket IDs');
+  assert.ok(APP_JS.includes('_recentlyDeletedTicketIds.add(delId)'),
+    'deleteTicket must add the deleted ID to _recentlyDeletedTicketIds');
+  assert.ok(APP_JS.includes('_recentlyDeletedTicketIds.has(String(tk.id))'),
+    'fetchTickets must filter out recently deleted IDs from the API response');
+  assert.ok(/setTimeout.*_recentlyDeletedTicketIds.*delete.*90000/.test(APP_JS),
+    'deleted ID must have a 90s TTL cleanup (setTimeout)');
+});
+
+// BUG 1: fetchTickets has a request-sequence guard
+test('TR-DEL-04: fetchTickets has a request-sequence guard (_ticketsFetchSeq)', () => {
+  assert.ok(APP_JS.includes('_ticketsFetchSeq'),
+    '_ticketsFetchSeq must exist as a request-sequence guard');
+  assert.ok(APP_JS.includes('const seq = ++_ticketsFetchSeq'),
+    'fetchTickets must increment the sequence before the await');
+  assert.ok(APP_JS.includes('if (seq !== _ticketsFetchSeq) return'),
+    'fetchTickets must discard stale responses (seq !== _ticketsFetchSeq)');
+});
+
+// BUG 2: submitTicket uses POST response ticket instead of fetchTickets()
+test('TR-CREATE-01: submitTicket uses POST response resp.ticket instead of fetchTickets()', () => {
+  const fnStart = APP_JS.indexOf('async function submitTicket(');
+  assert.ok(fnStart > -1, 'submitTicket must exist');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 3500);
+  assert.ok(fnBlock.includes('resp.ticket'),
+    'submitTicket must use the POST response ticket object');
+  assert.ok(fnBlock.includes('tickets.unshift(resp.ticket)'),
+    'submitTicket must add the created ticket to the local array');
+  assert.ok(fnBlock.includes("!tickets.some(tk => String(tk.id) === newId)"),
+    'submitTicket must dedup by ID before adding (prevent polling duplicate)');
+  // Must NOT call fetchTickets() in the success path
+  assert.ok(!fnBlock.includes('await fetchTickets()'),
+    'submitTicket must NOT call fetchTickets() after POST (would get stale Hyperdrive data)');
+});
+
+// BUG 3: loadAdminTickets renders .tk-replies container inside .tk-thread
+test('TR-MSG-01: loadAdminTickets renders .tk-replies container inside .tk-thread', () => {
+  assert.ok(ADMIN_JS.includes('class="tk-replies"'),
+    'loadAdminTickets must render a .tk-replies container for replies');
+  assert.ok(ADMIN_JS.includes('adm-ticket-replies-'),
+    '.tk-replies must have an id for fetchTicketReplies to target');
+});
+
+// BUG 3: fetchTicketReplies targets .tk-replies (NOT .tk-thread innerHTML)
+test('TR-MSG-02: fetchTicketReplies targets .tk-replies container, not .tk-thread innerHTML', () => {
+  const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
+  assert.ok(fnStart > -1, 'fetchTicketReplies must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
+  assert.ok(fnBlock.includes("getElementById('adm-ticket-replies-'"),
+    'fetchTicketReplies must target the .tk-replies container by ID');
+  assert.ok(fnBlock.includes('repliesEl.innerHTML = html'),
+    'fetchTicketReplies must set innerHTML on repliesEl (the .tk-replies container)');
+  // Must NOT use threadEl.innerHTML (the old bug that destroyed the original message)
+  assert.ok(!fnBlock.includes('threadEl.innerHTML'),
+    'fetchTicketReplies must NOT set innerHTML on .tk-thread (would destroy the original message)');
+  assert.ok(!fnBlock.includes('querySelector'),
+    'fetchTicketReplies must NOT use querySelector on .adm-ticket-thread (old buggy pattern)');
+});
+
+// BUG 3b: adminReplyTicket calls fetchTicketReplies after loadAdminTickets
+test('TR-REPLY-FIX: adminReplyTicket calls fetchTicketReplies after loadAdminTickets', () => {
+  const fnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
+  assert.ok(fnStart > -1, 'adminReplyTicket must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
+  const loadIdx = fnBlock.indexOf('loadAdminTickets');
+  const fetchIdx = fnBlock.indexOf('fetchTicketReplies(ticketId)');
+  assert.ok(loadIdx > -1, 'adminReplyTicket must call loadAdminTickets');
+  assert.ok(fetchIdx > -1, 'adminReplyTicket must call fetchTicketReplies');
+  assert.ok(loadIdx < fetchIdx,
+    'loadAdminTickets must be called BEFORE fetchTicketReplies (replies container must exist first)');
+});
+
+// BUG 4: .tk-replies CSS exists
+test('TR-SCROLL-02: .tk-replies CSS exists (flex column for reply spacing)', () => {
+  const TICKETS_CSS = fs.readFileSync(path.join(__dirname, 'tickets.css'), 'utf8');
+  assert.ok(TICKETS_CSS.includes('.tk-replies'),
+    '.tk-replies CSS must exist in tickets.css');
+});
+
+// BUG 4: .tk-thread is NOT replaced by fetchTicketReplies (DOM stays stable → scrollTop preserved)
+test('TR-SCROLL-03: .tk-thread DOM stays stable after fetchTicketReplies (no innerHTML replacement)', () => {
+  const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
+  // fetchTicketReplies must NOT set innerHTML on .tk-thread or .adm-ticket-thread
+  assert.ok(!fnBlock.includes('adm-ticket-thread'),
+    'fetchTicketReplies must NOT reference .adm-ticket-thread (the .tk-thread container must stay untouched)');
+  assert.ok(!fnBlock.includes('threadEl'),
+    'fetchTicketReplies must NOT have a threadEl variable (old pattern that replaced .tk-thread innerHTML)');
+});
+
+console.log('✅ Bug 1+2+3+4 stabilization tests loaded.');

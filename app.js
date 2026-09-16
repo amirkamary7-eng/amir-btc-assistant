@@ -432,6 +432,14 @@ let currentLang = 'fa';
 let watchlist = [];
 let analyses = safeJsonParseLocalStorage('analyses', []);
 let tickets = [];
+// BUG 1 FIX: Track recently deleted ticket IDs so the 15s polling interval
+// doesn't re-add them from stale Hyperdrive cached SELECT results.
+// TTL: 90s (~1.5x the Hyperdrive cache TTL). After 90s the server cache
+// should have expired and the deleted ticket will no longer appear.
+let _recentlyDeletedTicketIds = new Set();
+// Request-sequence guard: prevents an older fetchTickets() response from
+// overwriting state after a newer fetchTickets() has already resolved.
+let _ticketsFetchSeq = 0;
 let notifications = []; // DB-backed — loaded from /api/notifications
 let alerts = safeJsonParseLocalStorage('price_alerts', []);
 let currentAlertDirection = 'above';
@@ -14322,12 +14330,23 @@ function closeAdminTicketsModal() { document.getElementById('admin-tickets-modal
  */
 async function fetchTickets() {
     if (!API_BASE) { tickets = []; return; }
+    const seq = ++_ticketsFetchSeq;
     try {
         const data = await apiFetch('/api/tickets');
-        tickets = data.tickets || [];
+        // BUG 1 FIX: If a newer fetchTickets() was issued while we were waiting,
+        // discard this response to avoid overwriting newer state with stale data.
+        if (seq !== _ticketsFetchSeq) return;
+        let fetched = data.tickets || [];
+        // BUG 1 FIX: Filter out recently deleted IDs so the 15s polling doesn't
+        // re-add them from stale Hyperdrive cached SELECT results.
+        if (_recentlyDeletedTicketIds.size > 0) {
+            fetched = fetched.filter(tk => !_recentlyDeletedTicketIds.has(String(tk.id)));
+        }
+        tickets = fetched;
     } catch (e) {
         console.warn('fetchTickets:', e);
-        tickets = [];
+        // Only clear on error if this is still the latest request
+        if (seq === _ticketsFetchSeq) tickets = [];
     }
 }
 
@@ -14523,7 +14542,9 @@ async function submitTicket() {
     try {
         const healthy = await checkBackendHealth();
         if (!healthy) throw new Error('Backend unavailable');
-        await apiFetch('/api/tickets', {
+        // BUG 2 FIX: Use the POST response ticket directly instead of re-fetching
+        // via fetchTickets() which would hit stale Hyperdrive cached SELECT.
+        const resp = await apiFetch('/api/tickets', {
             method: 'POST',
             body: JSON.stringify({ user_id: getUserId(), user_name: getUserName(), title, body })
         });
@@ -14535,8 +14556,15 @@ async function submitTicket() {
         showToast(t('ticket_sent'));
         addNotification(t('support'), t('ticket_sent'), false);
         getTg()?.showPopup?.({ title: t('ticket_sent'), message: title, buttons: [{ type: 'ok' }] });
-        // Refresh list
-        await fetchTickets();
+        // BUG 2 FIX: Add the created ticket from the POST response locally.
+        // The backend returns { status: 'success', ticket: { id, user_id, ... } }.
+        // Dedup by ID so a later polling fetchTickets() won't create a duplicate.
+        if (resp && resp.ticket) {
+            const newId = String(resp.ticket.id);
+            if (!tickets.some(tk => String(tk.id) === newId)) {
+                tickets.unshift(resp.ticket);
+            }
+        }
         renderTickets();
     } catch (e) {
         showToast(t('ticket_error'));
@@ -14586,11 +14614,14 @@ async function deleteTicket(ticketId, isAdminView = false) {
         }
         if (isAdminView) { await fetchAdminTickets(); renderAdminTickets(); }
         else {
-            // FIX: optimistic local removal — avoids re-fetching via Hyperdrive
-            // which can return the deleted ticket for ~60s (stale SELECT cache).
-            // The DELETE already succeeded (await on line 14518), so the DB row
-            // is gone. Remove from local state + render immediately.
+            // BUG 1 FIX: Optimistic local removal + track the deleted ID so the
+            // 15s polling fetchTickets() filters it out from stale Hyperdrive data.
             tickets = tickets.filter(tk => String(tk.id) !== String(ticketId));
+            const delId = String(ticketId);
+            _recentlyDeletedTicketIds.add(delId);
+            // TTL: 90s — after this, the Hyperdrive cache should have expired
+            // and the server will no longer return the deleted ticket.
+            setTimeout(() => { _recentlyDeletedTicketIds.delete(delId); }, 90000);
             renderTickets();
         }
     } catch (e) { console.error(e); }

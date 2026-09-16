@@ -1461,20 +1461,18 @@ async function loadAdminTickets(page) {
                 html += '<div class="tk-detail">';
 
                 // Conversation thread
+                // BUG 3 FIX: Split .tk-thread into original-message (stable, never
+                // replaced by fetchTicketReplies) + .tk-replies container (updated
+                // by fetchTicketReplies). This prevents the original message from
+                // being destroyed and preserves scrollTop on the .tk-thread.
                 html += '<div class="tk-thread adm-ticket-thread">';
-                // Original message
+                // Original message — stays in .tk-thread, never replaced by fetchTicketReplies
                 html += '<div class="tk-msg tk-msg-user">' +
                     '<div class="tk-msg-header"><span class="tk-msg-author">' + adminEscapeHtml(ticket.user_name || t('adm_users_default_name')) + '</span><span class="tk-msg-time">' + adminFormatDate(ticket.created_at) + '</span></div>' +
                     '<div class="tk-msg-body">' + adminEscapeHtml(ticket.message || ticket.body || '') + '</div>' +
                     '</div>';
-                // Replies
-                replies.forEach(function (r) {
-                    var isAdmin = r.from === 'admin' || r.is_admin;
-                    html += '<div class="tk-msg ' + (isAdmin ? 'tk-msg-admin' : 'tk-msg-user') + '">' +
-                        '<div class="tk-msg-header"><span class="tk-msg-author">' + (isAdmin ? t('adm_tk_admin_label') : adminEscapeHtml(ticket.user_name || t('adm_users_default_name'))) + '</span><span class="tk-msg-time">' + adminFormatDate(r.at || r.created_at) + '</span></div>' +
-                        '<div class="tk-msg-body">' + adminEscapeHtml(r.message || r.text || '') + '</div>' +
-                        '</div>';
-                });
+                // Replies container — fetchTicketReplies updates ONLY this element
+                html += '<div class="tk-replies" id="adm-ticket-replies-' + adminEscapeHtml(String(ticket.id)) + '"></div>';
                 html += '</div>';
 
                 // Reply form
@@ -1529,8 +1527,11 @@ async function fetchTicketReplies(ticketId) {
     try {
         const data = await adminApiFetch('/api/admin/tickets/' + ticketId + '/replies');
         if (!data || !data.replies) return;
-        const threadEl = document.querySelector('#adm-ticket-' + ticketId + ' .adm-ticket-thread');
-        if (!threadEl) return; // ticket may have been collapsed
+        // BUG 3 FIX: Update ONLY the .tk-replies container, NOT the entire
+        // .tk-thread. The original message stays in .tk-thread (rendered by
+        // loadAdminTickets) and is never destroyed. This also preserves scrollTop.
+        const repliesEl = document.getElementById('adm-ticket-replies-' + ticketId);
+        if (!repliesEl) return; // ticket may have been collapsed
         let html = '';
         data.replies.forEach(function (r) {
             const isAdmin = r.is_admin_reply;
@@ -1539,7 +1540,7 @@ async function fetchTicketReplies(ticketId) {
                 '<div class="tk-msg-body">' + adminEscapeHtml(r.body || '') + '</div>' +
                 '</div>';
         });
-        threadEl.innerHTML = html;
+        repliesEl.innerHTML = html;
     } catch (e) {
         console.warn('fetchTicketReplies:', e);
     }
@@ -1561,6 +1562,10 @@ async function adminReplyTicket(ticketId) {
         showAdminToast(t('adm_tk_reply_sent'), 'success');
         _adminTicketsExpanded[ticketId] = true;
         loadAdminTickets(_adminTicketsPage);
+        // BUG 3b FIX: After loadAdminTickets re-renders the list (which recreates
+        // the .tk-replies container), re-fetch replies so the conversation thread
+        // shows the original message + all replies including the one just sent.
+        fetchTicketReplies(ticketId);
     } catch (e) {
         showAdminToast(t('adm_tk_reply_failed'), 'error');
         console.error('adminReplyTicket:', e);
