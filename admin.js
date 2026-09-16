@@ -1392,6 +1392,9 @@ function debounceAdminUserSearch() {
 // ─── Tickets ────────────────────────────────────────────────
 
 let _adminTicketsExpanded = {}; // ticket IDs that are expanded to show detail + reply form
+// BUG 2 FIX: Per-ticket reply request sequence guard. Prevents an older
+// fetchTicketReplies() response from overwriting a newer one for the same ticket.
+let _repliesFetchSeq = {};
 
 async function loadAdminTickets(page) {
     const container = document.getElementById('admin-tickets-list');
@@ -1524,8 +1527,15 @@ function toggleAdminTicketDetail(ticketId) {
  * expanded ticket detail view. Called when a ticket is expanded.
  */
 async function fetchTicketReplies(ticketId) {
+    // BUG 2 FIX: Per-ticket sequence guard — prevents an older replies
+    // response from overwriting a newer one for the same ticket.
+    const seq = (_repliesFetchSeq[ticketId] || 0) + 1;
+    _repliesFetchSeq[ticketId] = seq;
     try {
         const data = await adminApiFetch('/api/admin/tickets/' + ticketId + '/replies');
+        // BUG 2 FIX: If a newer fetchTicketReplies() was issued while we were
+        // waiting, discard this response to avoid overwriting newer state.
+        if (seq !== _repliesFetchSeq[ticketId]) return;
         if (!data || !data.replies) return;
         // BUG 3 FIX: Update ONLY the .tk-replies container, NOT the entire
         // .tk-thread. The original message stays in .tk-thread (rendered by
@@ -1561,15 +1571,23 @@ async function adminReplyTicket(ticketId) {
         });
         showAdminToast(t('adm_tk_reply_sent'), 'success');
         _adminTicketsExpanded[ticketId] = true;
-        // BUG C FIX: Do NOT call loadAdminTickets here — it replaces the entire
-        // ticket list with a skeleton (synchronous innerHTML), then fetches ALL
-        // tickets (slow). This caused a DOM race: fetchTicketReplies ran while
-        // the skeleton was showing, couldn't find the .tk-replies element, and
-        // returned early without rendering replies.
-        // Instead, only refresh the replies for THIS ticket. The .tk-replies
-        // container already exists in the DOM from the previous render —
-        // fetchTicketReplies targets it directly. No skeleton, no full re-render.
-        fetchTicketReplies(ticketId);
+        // BUG 2 FIX: Optimistically render the admin reply immediately into
+        // the .tk-replies container, without waiting for the GET. The message
+        // is escaped via adminEscapeHtml (existing helper) to prevent XSS.
+        var repliesEl = document.getElementById('adm-ticket-replies-' + ticketId);
+        if (repliesEl) {
+            var optimisticHtml = '<div class="tk-msg tk-msg-admin">' +
+                '<div class="tk-msg-header"><span class="tk-msg-author">' + t('adm_tk_admin_label') + '</span><span class="tk-msg-time">' + adminFormatDate(new Date().toISOString()) + '</span></div>' +
+                '<div class="tk-msg-body">' + adminEscapeHtml(message) + '</div>' +
+                '</div>';
+            repliesEl.insertAdjacentHTML('beforeend', optimisticHtml);
+        }
+        // BUG 2 FIX: Await reconciliation from the server. The server response
+        // remains authoritative — if it includes the new reply, it replaces
+        // the optimistic one. If it returns stale data (Hyperdrive cache not
+        // yet expired), the optimistic reply stays visible until a later
+        // fetchTicketReplies call returns fresh data.
+        await fetchTicketReplies(ticketId);
     } catch (e) {
         showAdminToast(t('adm_tk_reply_failed'), 'error');
         console.error('adminReplyTicket:', e);

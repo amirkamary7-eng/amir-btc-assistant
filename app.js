@@ -440,6 +440,11 @@ let _recentlyDeletedTicketIds = new Set();
 // Request-sequence guard: prevents an older fetchTickets() response from
 // overwriting state after a newer fetchTickets() has already resolved.
 let _ticketsFetchSeq = 0;
+// BUG 1 FIX: Track recently created tickets so the 15s polling interval
+// doesn't remove them when the stale Hyperdrive cached SELECT omits them.
+// TTL: 90s (~1.5x the Hyperdrive cache TTL). After 90s the server cache
+// should have expired and the created ticket will appear in the API response.
+let _recentlyCreatedTickets = new Map();
 let notifications = []; // DB-backed — loaded from /api/notifications
 let alerts = safeJsonParseLocalStorage('price_alerts', []);
 let currentAlertDirection = 'above';
@@ -14342,6 +14347,19 @@ async function fetchTickets() {
         if (_recentlyDeletedTicketIds.size > 0) {
             fetched = fetched.filter(tk => !_recentlyDeletedTicketIds.has(String(tk.id)));
         }
+        // BUG 1 FIX: Preserve recently created tickets that are absent from the
+        // (potentially stale) API response. This prevents the 15s polling from
+        // removing a just-created ticket when Hyperdrive hasn't refreshed yet.
+        if (_recentlyCreatedTickets.size > 0) {
+            const now = Date.now();
+            for (const [id, entry] of _recentlyCreatedTickets) {
+                if (now > entry.expiresAt) {
+                    _recentlyCreatedTickets.delete(id);
+                } else if (!fetched.some(tk => String(tk.id) === id)) {
+                    fetched.unshift(entry.ticket);
+                }
+            }
+        }
         tickets = fetched;
     } catch (e) {
         console.warn('fetchTickets:', e);
@@ -14567,6 +14585,12 @@ async function submitTicket() {
                 // sees a stale seq and discards its response — preventing it from
                 // overwriting the locally-inserted ticket with stale API data.
                 ++_ticketsFetchSeq;
+                // BUG 1 FIX: Store the created ticket so fetchTickets() can
+                // preserve it when the stale API response omits it.
+                _recentlyCreatedTickets.set(newId, {
+                    ticket: resp.ticket,
+                    expiresAt: Date.now() + 90000
+                });
                 tickets.unshift(resp.ticket);
             }
         }

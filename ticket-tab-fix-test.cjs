@@ -288,7 +288,7 @@ test('TR-DEL-04: fetchTickets has a request-sequence guard (_ticketsFetchSeq)', 
 test('TR-CREATE-01: submitTicket uses POST response resp.ticket instead of fetchTickets()', () => {
   const fnStart = APP_JS.indexOf('async function submitTicket(');
   assert.ok(fnStart > -1, 'submitTicket must exist');
-  const fnBlock = APP_JS.slice(fnStart, fnStart + 3500);
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 4000);
   assert.ok(fnBlock.includes('resp.ticket'),
     'submitTicket must use the POST response ticket object');
   assert.ok(fnBlock.includes('tickets.unshift(resp.ticket)'),
@@ -312,7 +312,7 @@ test('TR-MSG-01: loadAdminTickets renders .tk-replies container inside .tk-threa
 test('TR-MSG-02: fetchTicketReplies targets .tk-replies container, not .tk-thread innerHTML', () => {
   const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
   assert.ok(fnStart > -1, 'fetchTicketReplies must exist');
-  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2000);
   assert.ok(fnBlock.includes("getElementById('adm-ticket-replies-'"),
     'fetchTicketReplies must target the .tk-replies container by ID');
   assert.ok(fnBlock.includes('repliesEl.innerHTML = html'),
@@ -348,7 +348,7 @@ test('TR-SCROLL-02: .tk-replies CSS exists (flex column for reply spacing)', () 
 // BUG 4: .tk-thread is NOT replaced by fetchTicketReplies (DOM stays stable → scrollTop preserved)
 test('TR-SCROLL-03: .tk-thread DOM stays stable after fetchTicketReplies (no innerHTML replacement)', () => {
   const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
-  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 1200);
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2000);
   // fetchTicketReplies must NOT set innerHTML on .tk-thread or .adm-ticket-thread
   assert.ok(!fnBlock.includes('adm-ticket-thread'),
     'fetchTicketReplies must NOT reference .adm-ticket-thread (the .tk-thread container must stay untouched)');
@@ -380,7 +380,7 @@ test('TR-ADMIN-DEL-01: handleDeleteTicket destructures admin from requireAdmin',
 test('TR-CREATE-02: submitTicket increments _ticketsFetchSeq before tickets.unshift', () => {
   const fnStart = APP_JS.indexOf('async function submitTicket(');
   assert.ok(fnStart > -1, 'submitTicket must exist');
-  const fnBlock = APP_JS.slice(fnStart, fnStart + 3500);
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 4000);
   const seqIdx = fnBlock.indexOf('++_ticketsFetchSeq');
   const unshiftIdx = fnBlock.indexOf('tickets.unshift(resp.ticket)');
   assert.ok(seqIdx > -1, 'submitTicket must increment _ticketsFetchSeq before local mutation');
@@ -388,3 +388,108 @@ test('TR-CREATE-02: submitTicket increments _ticketsFetchSeq before tickets.unsh
   assert.ok(seqIdx < unshiftIdx,
     '_ticketsFetchSeq must be incremented BEFORE tickets.unshift (invalidates in-flight fetchTickets)');
 });
+
+// ============================================================================
+// BUG 1 (v2) + BUG 2 (v2) — Created ticket preservation + reply optimistic render
+// ============================================================================
+
+// BUG 1: _recentlyCreatedTickets Map exists
+test('TR-CREATE-03: _recentlyCreatedTickets Map exists in app.js', () => {
+  assert.ok(APP_JS.includes('_recentlyCreatedTickets'),
+    '_recentlyCreatedTickets must exist to preserve locally-created tickets');
+  assert.ok(APP_JS.includes('new Map()'),
+    '_recentlyCreatedTickets must be a Map');
+});
+
+// BUG 1: submitTicket stores created ticket in _recentlyCreatedTickets
+test('TR-CREATE-04: submitTicket stores created ticket in _recentlyCreatedTickets with 90s TTL', () => {
+  const fnStart = APP_JS.indexOf('async function submitTicket(');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 4000);
+  assert.ok(fnBlock.includes('_recentlyCreatedTickets.set('),
+    'submitTicket must store the created ticket in _recentlyCreatedTickets');
+  assert.ok(fnBlock.includes('expiresAt: Date.now() + 90000'),
+    'submitTicket must set 90s TTL for the stored ticket');
+});
+
+// BUG 1: fetchTickets preserves recently-created tickets absent from API response
+test('TR-CREATE-05: fetchTickets preserves recently-created tickets absent from API response', () => {
+  const fnStart = APP_JS.indexOf('async function fetchTickets()');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('_recentlyCreatedTickets.size > 0'),
+    'fetchTickets must check _recentlyCreatedTickets');
+  assert.ok(fnBlock.includes('!fetched.some(tk => String(tk.id) === id)'),
+    'fetchTickets must check if the created ticket is already in fetched (no duplicate)');
+  assert.ok(fnBlock.includes('fetched.unshift(entry.ticket)'),
+    'fetchTickets must add missing recently-created tickets to fetched');
+  assert.ok(fnBlock.includes('_recentlyCreatedTickets.delete(id)'),
+    'fetchTickets must delete expired entries from _recentlyCreatedTickets');
+});
+
+// BUG 1: _ticketsFetchSeq remains intact
+test('TR-CREATE-06: _ticketsFetchSeq remains intact in fetchTickets and submitTicket', () => {
+  assert.ok(APP_JS.includes('const seq = ++_ticketsFetchSeq'),
+    'fetchTickets must still have the seq guard');
+  assert.ok(APP_JS.includes('if (seq !== _ticketsFetchSeq) return'),
+    'fetchTickets must still discard stale responses');
+  assert.ok(APP_JS.includes('++_ticketsFetchSeq;'),
+    'submitTicket must still increment the seq before local mutation');
+});
+
+// BUG 2: _repliesFetchSeq per-ticket sequence guard exists
+test('TR-REPLY-SEQ-01: _repliesFetchSeq per-ticket sequence guard exists in admin.js', () => {
+  assert.ok(ADMIN_JS.includes('_repliesFetchSeq'),
+    '_repliesFetchSeq must exist as a per-ticket reply sequence guard');
+  assert.ok(ADMIN_JS.includes('_repliesFetchSeq = {}'),
+    '_repliesFetchSeq must be an object (per-ticket keyed)');
+});
+
+// BUG 2: fetchTicketReplies has per-ticket seq guard
+test('TR-REPLY-SEQ-02: fetchTicketReplies has per-ticket seq guard that discards stale responses', () => {
+  const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
+  assert.ok(fnStart > -1, 'fetchTicketReplies must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('_repliesFetchSeq[ticketId]'),
+    'fetchTicketReplies must use per-ticket seq (_repliesFetchSeq[ticketId])');
+  assert.ok(fnBlock.includes('if (seq !== _repliesFetchSeq[ticketId]) return'),
+    'fetchTicketReplies must discard stale responses (seq !== current)');
+});
+
+// BUG 2: adminReplyTicket does optimistic rendering after POST
+test('TR-REPLY-OPT-01: adminReplyTicket performs optimistic reply rendering after POST', () => {
+  const fnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
+  assert.ok(fnStart > -1, 'adminReplyTicket must exist');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('insertAdjacentHTML'),
+    'adminReplyTicket must use insertAdjacentHTML for optimistic render');
+  assert.ok(fnBlock.includes('tk-msg-admin'),
+    'optimistic reply must use tk-msg-admin class');
+  assert.ok(fnBlock.includes('adminEscapeHtml(message)'),
+    'optimistic reply message must be escaped via adminEscapeHtml');
+});
+
+// BUG 2: adminReplyTicket awaits fetchTicketReplies
+test('TR-REPLY-OPT-02: adminReplyTicket awaits fetchTicketReplies for reconciliation', () => {
+  const fnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
+  const fnBlock = ADMIN_JS.slice(fnStart, fnStart + 2000);
+  assert.ok(fnBlock.includes('await fetchTicketReplies(ticketId)'),
+    'adminReplyTicket must await fetchTicketReplies for server reconciliation');
+});
+
+// BUG 2: loadAdminTickets NOT reintroduced
+test('TR-REPLY-OPT-03: adminReplyTicket does NOT call loadAdminTickets', () => {
+  const fnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 2000);
+  assert.ok(!fnBlock.includes('loadAdminTickets('),
+    'adminReplyTicket must NOT call loadAdminTickets (causes skeleton + DOM race)');
+});
+
+// BUG 2: .tk-replies DOM structure remains intact
+test('TR-REPLY-OPT-04: .tk-replies container structure remains in loadAdminTickets', () => {
+  assert.ok(ADMIN_JS.includes('class="tk-replies"'),
+    'loadAdminTickets must still render .tk-replies container');
+  assert.ok(ADMIN_JS.includes('adm-ticket-replies-'),
+    '.tk-replies must still have the id for fetchTicketReplies to target');
+});
+
+console.log('✅ BUG 1 (v2) + BUG 2 (v2) regression tests loaded.');
