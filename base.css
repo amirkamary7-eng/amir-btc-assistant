@@ -127,6 +127,7 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* ── Brand (center) ─────────────────────────────────────── */
 .header-brand {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -141,6 +142,7 @@ body.user-loading .profile-loading-target.skeleton-text {
   display: block;
   height: 62px;
   width: auto;
+  max-width: 100%;
   object-fit: contain;
 }
 /* ── OLD TEXT-BASED BRAND (no longer in HTML, kept for reference) ── */
