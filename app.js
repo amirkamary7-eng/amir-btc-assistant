@@ -14585,7 +14585,14 @@ async function deleteTicket(ticketId, isAdminView = false) {
             localStorage.setItem('tickets', JSON.stringify(local));
         }
         if (isAdminView) { await fetchAdminTickets(); renderAdminTickets(); }
-        else { await fetchTickets(); renderTickets(); }
+        else {
+            // FIX: optimistic local removal — avoids re-fetching via Hyperdrive
+            // which can return the deleted ticket for ~60s (stale SELECT cache).
+            // The DELETE already succeeded (await on line 14518), so the DB row
+            // is gone. Remove from local state + render immediately.
+            tickets = tickets.filter(tk => String(tk.id) !== String(ticketId));
+            renderTickets();
+        }
     } catch (e) { console.error(e); }
 }
 //#endregion

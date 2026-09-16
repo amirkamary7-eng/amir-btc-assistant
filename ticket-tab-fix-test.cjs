@@ -206,3 +206,54 @@ test('TR-REPLY-03: listTicketReplies must NOT reference the old broken columns i
 });
 
 console.log('✅ Ticket replies schema-fix tests loaded.');
+
+// ============================================================================
+// Ticket Delete Optimistic Removal + Thread Touch Scroll — Regression Tests
+// ============================================================================
+const APP_JS = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+// FIX 1: User-side deleteTicket must remove locally (not re-fetch stale data)
+test('TR-DEL-01: deleteTicket user path uses optimistic local removal (tickets.filter), not fetchTickets()', () => {
+  const fnStart = APP_JS.indexOf('async function deleteTicket(');
+  assert.ok(fnStart > -1, 'deleteTicket function must exist');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 1200);
+  assert.ok(fnBlock.includes('tickets = tickets.filter'),
+    'User-side delete must use tickets.filter (optimistic local removal)');
+  assert.ok(fnBlock.includes('renderTickets()'),
+    'User-side delete must call renderTickets() after local removal');
+  assert.ok(fnBlock.includes('fetchAdminTickets'),
+    'Admin path (fetchAdminTickets) must be preserved');
+  const elseIdx = fnBlock.indexOf('else {');
+  if (elseIdx > -1) {
+    const elseBlock = fnBlock.slice(elseIdx);
+    assert.ok(!elseBlock.includes('fetchTickets()'),
+      'User-side delete must NOT call fetchTickets() (would re-fetch stale Hyperdrive data)');
+  }
+});
+
+test('TR-DEL-02: deleteTicket still calls DELETE API before optimistic removal (no premature removal)', () => {
+  const fnStart = APP_JS.indexOf('async function deleteTicket(');
+  const fnBlock = APP_JS.slice(fnStart, fnStart + 1200);
+  const deleteCallIdx = fnBlock.indexOf("method: 'DELETE'");
+  const filterIdx = fnBlock.indexOf('tickets = tickets.filter');
+  assert.ok(deleteCallIdx > -1, 'DELETE API call must exist');
+  assert.ok(filterIdx > -1, 'tickets.filter must exist');
+  assert.ok(deleteCallIdx < filterIdx,
+    'DELETE API call must precede the optimistic removal (only remove after success)');
+});
+
+// FIX 2: .tk-thread CSS must have -webkit-overflow-scrolling: touch
+test('TR-SCROLL-01: .tk-thread CSS contains -webkit-overflow-scrolling: touch', () => {
+  const TICKETS_CSS = fs.readFileSync(path.join(__dirname, 'tickets.css'), 'utf8');
+  const ruleStart = TICKETS_CSS.indexOf('.tk-thread {');
+  assert.ok(ruleStart > -1, '.tk-thread rule must exist in tickets.css');
+  const ruleBlock = TICKETS_CSS.slice(ruleStart, ruleStart + 200);
+  assert.ok(ruleBlock.includes('-webkit-overflow-scrolling: touch'),
+    '.tk-thread must have -webkit-overflow-scrolling: touch for iOS WebView touch scrolling');
+  assert.ok(ruleBlock.includes('max-height: 300px'),
+    '.tk-thread max-height: 300px must be preserved');
+  assert.ok(ruleBlock.includes('overflow-y: auto'),
+    '.tk-thread overflow-y: auto must be preserved');
+});
+
+console.log('✅ Ticket delete + scroll regression tests loaded.');
