@@ -9117,24 +9117,115 @@ function canonicalizeUrl(url) {
   }
 }
 
+// ── Telemetry DB tables (Option 1: migrate recordNewsAITick + recordE2ETiming from KV to Postgres) ──
+// WHY: the KV write quota (Free plan 1,000 writes/day) is exhausted by News AI telemetry
+// (recordNewsAITick fires up to 864×/day, recordE2ETiming up to 768×/day — both never deduped
+// because the value always changes on each append). Migrating to Postgres INSERTs eliminates
+// ~1,632 KV writes/day. Precedent: _diag_notif_report (worker-proxy.js:15113) was created for
+// the same reason. Pattern: idempotent ensureTable (mirrors news_articles.ensureTable) + INSERT
+// (no read-modify-write, eliminates the NEWSBE-002 race) + 4-day retention (mirrors cleanupOld).
+let _telemetryTablesEnsured = false;
+
+async function ensureTelemetryTables(env) {
+  if (_telemetryTablesEnsured) return;
+  try {
+    await queryDb(env, `
+      CREATE TABLE IF NOT EXISTS news_ai_tick_log (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        tick_type VARCHAR(16) NOT NULL,
+        stats JSONB NOT NULL
+      )
+    `);
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_news_ai_tick_log_created ON news_ai_tick_log (created_at DESC)`).catch(() => {});
+    await queryDb(env, `
+      CREATE TABLE IF NOT EXISTS news_ai_e2e_log (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        url TEXT,
+        provider VARCHAR(32),
+        timing JSONB NOT NULL
+      )
+    `);
+    await queryDb(env, `CREATE INDEX IF NOT EXISTS idx_news_ai_e2e_log_created ON news_ai_e2e_log (created_at DESC)`).catch(() => {});
+    _telemetryTablesEnsured = true;
+  } catch (e) {
+    // Non-fatal — table creation is best-effort. News AI must NOT fail.
+    // Next isolate cold start resets _telemetryTablesEnsured and retries.
+    console.warn('[TELEMETRY-DB] ensureTelemetryTables failed:', e?.message);
+  }
+}
+
+async function insertNewsAITickLog(env, tickType, stats) {
+  try {
+    await queryDb(env, `
+      INSERT INTO news_ai_tick_log (tick_type, stats)
+      VALUES ($1, $2::jsonb)
+    `, [String(tickType), JSON.stringify(stats)]);
+  } catch (e) {
+    // Non-fatal — telemetry failure must NOT break News AI.
+    console.warn('[TELEMETRY-DB] insertNewsAITickLog failed:', e?.message);
+  }
+}
+
+async function insertNewsAIE2ELog(env, url, provider, timing) {
+  try {
+    await queryDb(env, `
+      INSERT INTO news_ai_e2e_log (url, provider, timing)
+      VALUES ($1, $2, $3::jsonb)
+    `, [String(url || ''), String(provider || ''), JSON.stringify(timing)]);
+  } catch (e) {
+    // Non-fatal — telemetry failure must NOT break News AI.
+    console.warn('[TELEMETRY-DB] insertNewsAIE2ELog failed:', e?.message);
+  }
+}
+
+async function cleanupTickLog(env, days) {
+  if (days === undefined) days = 4;
+  try {
+    const result = await queryDb(env, `
+      DELETE FROM news_ai_tick_log
+      WHERE created_at < NOW() - ($1::text)::interval
+    `, [`${parseInt(days, 10) || 4} days`]);
+    return (result.rows || []).length;
+  } catch (e) {
+    // Non-fatal — cleanup failure must NOT break News AI.
+    console.warn('[TELEMETRY-DB] cleanupTickLog failed:', e?.message);
+    return 0;
+  }
+}
+
+async function cleanupE2ETimingLog(env, days) {
+  if (days === undefined) days = 4;
+  try {
+    const result = await queryDb(env, `
+      DELETE FROM news_ai_e2e_log
+      WHERE created_at < NOW() - ($1::text)::interval
+    `, [`${parseInt(days, 10) || 4} days`]);
+    return (result.rows || []).length;
+  } catch (e) {
+    // Non-fatal — cleanup failure must NOT break News AI.
+    console.warn('[TELEMETRY-DB] cleanupE2ETimingLog failed:', e?.message);
+    return 0;
+  }
+}
+
 /**
- * Record News AI tick stats to KV for monitoring.
+ * Record News AI tick stats to Postgres for monitoring.
  * Called after each processNewsAIBatch / processOneArticleSummary tick.
- * Stores the last 20 ticks (rolling window) at NEWS_AI_MONITOR_KEY.
+ * OPTION 1 MIGRATION: KV (news:ai_monitor read-modify-write) → Postgres INSERT (news_ai_tick_log).
+ * The rolling 20-entry window is enforced by SELECT LIMIT 20 in getNewsAIMonitoring;
+ * 4-day retention by cleanupTickLog (called from processNewsAIBatch STEP 11).
+ * Failure is best-effort (catch + warn) — telemetry must NOT break News AI.
  */
 async function recordNewsAITick(env, stats) {
-  if (!env.APP_CACHE) return;
   try {
-    const raw = await readAppCache(env, NEWS_AI_MONITOR_KEY).catch(() => null);
-    let history = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) history = parsed;
-    }
-    history.push({ ts: Date.now(), ...stats });
-    // Keep last 20 ticks
-    if (history.length > 20) history = history.slice(-20);
-    await writeAppCache(env, NEWS_AI_MONITOR_KEY, JSON.stringify(history), NEWS_AI_MONITOR_TTL);
+    await ensureTelemetryTables(env);
+    const tickType = (stats && stats.type) || 'batch';
+    // Store stats WITHOUT type (it's in the tick_type column) and WITHOUT ts
+    // (created_at is the authoritative timestamp, read back as ts on SELECT).
+    const { type, ts, ...statsPayload } = stats || {};
+    await insertNewsAITickLog(env, tickType, statsPayload);
   } catch (e) {
     console.warn('[NEWS-AI-MONITOR] recordTick failed:', e?.message);
   }
@@ -9145,23 +9236,19 @@ const NEWS_AI_E2E_TIMING_KEY = 'news:ai_e2e_timing';
 const NEWS_AI_E2E_TIMING_TTL = 24 * 60 * 60; // 24h
 
 /**
- * Record E2E timing for a completed summary to a rolling history in KV.
- * Used by /api/news-ai-timing endpoint for final production validation.
- * Keeps last 50 completed summaries.
+ * Record E2E timing for a completed summary to Postgres.
+ * OPTION 1 MIGRATION: KV (news:ai_e2e_timing read-modify-write) → Postgres INSERT (news_ai_e2e_log).
+ * The rolling 50-entry window is enforced by SELECT LIMIT 50 in getE2ETimingStats;
+ * 4-day retention by cleanupE2ETimingLog (called from processNewsAIBatch STEP 11).
+ * Failure is best-effort (catch + warn) — telemetry must NOT break News AI.
  */
 async function recordE2ETiming(env, timing) {
-  if (!env.APP_CACHE) return;
   try {
-    const raw = await readAppCache(env, NEWS_AI_E2E_TIMING_KEY).catch(() => null);
-    let history = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) history = parsed;
-    }
-    history.push({ ts: Date.now(), ...timing });
-    // Keep last 50 completed summaries
-    if (history.length > 50) history = history.slice(-50);
-    await writeAppCache(env, NEWS_AI_E2E_TIMING_KEY, JSON.stringify(history), NEWS_AI_E2E_TIMING_TTL);
+    await ensureTelemetryTables(env);
+    // Store url + provider in dedicated columns (for the by_provider breakdown);
+    // the rest of the timing fields go in the JSONB. ts comes from created_at on read.
+    const { ts, url, provider, ...timingPayload } = timing || {};
+    await insertNewsAIE2ELog(env, url, provider, timingPayload);
   } catch (e) {
     console.warn('[NEWS-AI-E2E] recordE2ETiming failed:', e?.message);
   }
@@ -9175,12 +9262,28 @@ async function recordE2ETiming(env, timing) {
 async function getE2ETimingStats(env) {
   let history = [];
   try {
-    const raw = await readAppCache(env, NEWS_AI_E2E_TIMING_KEY).catch(() => null);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) history = parsed;
+    await ensureTelemetryTables(env);
+    const result = await queryDb(env, `
+      SELECT url, provider, timing,
+             EXTRACT(EPOCH FROM created_at) * 1000 AS ts
+      FROM news_ai_e2e_log
+      ORDER BY created_at DESC
+      LIMIT 50
+    `);
+    if (result.rows && result.rows.length > 0) {
+      // DB returns newest-first (DESC); reverse to oldest→newest to match the prior KV array order.
+      history = result.rows.reverse().map(function (r) {
+        return {
+          ts: Math.round(Number(r.ts)),
+          url: r.url,
+          provider: r.provider,
+          ...((r.timing && typeof r.timing === 'object') ? r.timing : {}),
+        };
+      });
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[NEWS-AI-TIMING] E2E history DB read failed:', e?.message);
+  }
 
   if (history.length === 0) {
     return { history: [], stats: null, count: 0 };
@@ -9250,15 +9353,30 @@ async function getNewsAIMonitoring(env) {
     }
   }
 
-  // Read tick history
+  // Read tick history from Postgres (Option 1: migrated from KV news:ai_monitor).
+  // SELECT newest 20, then reverse to oldest→newest (to match the prior KV array order).
   let history = [];
   try {
-    const raw = await readAppCache(env, NEWS_AI_MONITOR_KEY).catch(() => null);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) history = parsed;
+    await ensureTelemetryTables(env);
+    const result = await queryDb(env, `
+      SELECT tick_type, stats,
+             EXTRACT(EPOCH FROM created_at) * 1000 AS ts
+      FROM news_ai_tick_log
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+    if (result.rows && result.rows.length > 0) {
+      history = result.rows.reverse().map(function (r) {
+        return {
+          ts: Math.round(Number(r.ts)),
+          type: r.tick_type,
+          ...((r.stats && typeof r.stats === 'object') ? r.stats : {}),
+        };
+      });
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[NEWS-AI-MONITOR] tick history DB read failed:', e?.message);
+  }
 
   const lastTick = history.length > 0 ? history[history.length - 1] : null;
 
@@ -10183,6 +10301,17 @@ async function processNewsAIBatch(env, pool = null) {
       } catch (cleanupErr) {
         console.warn('[NEWS-AI-CRON] DB retention cleanup failed (non-fatal):', cleanupErr?.message);
       }
+    }
+    // OPTION 1: Telemetry table retention (4-day, best-effort, mirrors cleanupOld pattern).
+    // Runs alongside news_articles cleanup on every */15 tick. Failures are non-fatal.
+    try {
+      const tickDeleted = await cleanupTickLog(env, 4);
+      const e2eDeleted = await cleanupE2ETimingLog(env, 4);
+      if (tickDeleted > 0 || e2eDeleted > 0) {
+        stepLog('TELEMETRY_RETENTION_cleanup', { tick_deleted: tickDeleted, e2e_deleted: e2eDeleted, retention_days: 4 });
+      }
+    } catch (cleanupErr) {
+      console.warn('[NEWS-AI-CRON] telemetry retention cleanup failed (non-fatal):', cleanupErr?.message);
     }
 
     // ── FINISH ──
