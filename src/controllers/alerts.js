@@ -225,6 +225,52 @@ export function createAlertHandlers(deps) {
         // give the claimed slot back (net zero, same as the old behavior of
         // never incrementing for reactivations).
         await alertEconomyRepo.releaseFreeSlot(env, payload.user_id, 'price_alert').catch(() => {});
+      } else if (alert.reactivated && !claimedFree && debitAmount > 0 && economyService) {
+        // H1 FIX: Concurrent (or sequential) paid request reactivated an existing
+        // active alert — THIS request debited tokens but did NOT create a new
+        // alert (the alert already existed, ON CONFLICT DO UPDATE reactivated it).
+        // Refund the debit so the user is not double-charged for 1 alert.
+        // Uses the SAME refId-based idempotency as the catch-block refund below
+        // (grantReward → creditTokens → ON CONFLICT DO NOTHING + fast-path check).
+        // On refund failure, persists to pending_refunds for cron retry (same
+        // pattern as lines 259-275).
+        try {
+          await economyService.grantReward({
+            userId: payload.user_id,
+            amount: debitAmount,
+            rewardType: 'marketplace_refund',
+            description: `Refund: alert reactivated — concurrent paid request (${rawSymbol} ${rawDirection} ${rawPrice})`,
+            refId: `${alertRefId}_refund`,
+            metadata: { reason: 'alert_reactivated_concurrent', symbol: rawSymbol, price: rawPrice, direction: rawDirection, debited_amount: debitAmount },
+            auditInfo: { actor: 'system' },
+            env,
+          });
+        } catch (refundErr) {
+          console.error(JSON.stringify({
+            scope: 'alert-reactivation-refund-failed',
+            user_id: payload.user_id,
+            refund_ref_id: `${alertRefId}_refund`,
+            amount: debitAmount,
+            error: String(refundErr?.message || refundErr).slice(0, 200),
+          }));
+          try {
+            await queryDb(env,
+              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+               VALUES ($1, $2, $3, $4, 'alert', $5, $6, 'pending')
+               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+              [
+                String(payload.user_id),
+                Number(debitAmount),
+                `${alertRefId}_refund`,
+                alertRefId,
+                `Refund: alert reactivated — concurrent paid request (${rawSymbol} ${rawDirection} ${rawPrice})`,
+                JSON.stringify({ reason: 'alert_reactivated_concurrent', symbol: rawSymbol, price: rawPrice, direction: rawDirection, debited_amount: debitAmount }),
+              ],
+            );
+          } catch (persistErr) {
+            console.error('[alerts] Failed to persist pending reactivation refund:', persistErr?.message);
+          }
+        }
       }
 
       return jsonResponse({ status: 'success', alert }, {}, env);
