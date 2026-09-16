@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createAdminRepository(deps) {
-  const { queryDb, normalizeOptionalString } = deps;
+  const { queryDb, queryDbDirect, normalizeOptionalString } = deps;
 
   let _schemaVerified = false;
 
@@ -576,7 +576,14 @@ export function createAdminRepository(deps) {
    * didn't include them → empty conversation thread.
    */
   async function listTicketReplies(env, ticketId) {
-    const result = await queryDb(
+    // RCA FIX (Option A, 2026-09-16): routes through queryDbDirect (direct
+    // pg.Pool bypassing Hyperdrive's edge SELECT cache) so GET replies after
+    // a POST reply returns fresh data. Mirrors notificationRepo.list (commit
+    // 2745906). Hyperdrive's default 60s cache_ttl would otherwise return the
+    // pre-reply cached SELECT, causing fetchTicketReplies (admin.js) to
+    // overwrite the optimistic reply with stale data. See worker-proxy.js
+    // queryDbDirect. Mapping + API response contract unchanged below.
+    const result = await queryDbDirect(
       env,
       `
         SELECT id, ticket_id, sender_id, message, sender_type, created_at

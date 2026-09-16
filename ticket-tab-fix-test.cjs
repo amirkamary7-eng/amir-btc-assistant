@@ -493,3 +493,253 @@ test('TR-REPLY-OPT-04: .tk-replies container structure remains in loadAdminTicke
 });
 
 console.log('✅ BUG 1 (v2) + BUG 2 (v2) regression tests loaded.');
+
+// ============================================================================
+// RCA FIX (Option A, 2026-09-16) — Hyperdrive stale SELECT bypass for
+// listTicketReplies (ticket_replies read-after-write consistency).
+//
+// Root cause (proven 2026-09-10 for the notification path, identical pattern
+// here): listTicketReplies issued a deterministic SELECT via queryDb, which
+// Hyperdrive caches at the edge (default cache_ttl = 60s, binding
+// f4b69c06c1e84d98b7c4b5720efe4b41, caching.disabled=false). After a POST
+// reply (INSERT via queryDb — bypasses cache, hits origin), the awaited
+// fetchTicketReplies GET returns the pre-reply cached result for up to 60s,
+// and admin.js:1553 `repliesEl.innerHTML = html` destroys the optimistic
+// reply. The reply reappears ~30s later when cache expires and a later GET
+// queries origin.
+//
+// Fix (Option A — mirrors notificationRepo.list, commit 2745906): route
+// listTicketReplies through queryDbDirect (direct pg.Pool bound to
+// env.DIRECT_URL, bypassing Hyperdrive's edge cache). Mapping + API response
+// contract unchanged.
+//
+// These tests prove:
+//   - The SELECT in listTicketReplies now uses queryDbDirect (source-text)
+//   - createAdminRepository destructures queryDbDirect from deps (source-text)
+//   - worker-proxy.js injects queryDbDirect into createAdminRepository (source-text)
+//   - INSERT reply via queryDb bypasses cache (hits origin) — POST works
+//   - GET replies via queryDbDirect returns the new reply IMMEDIATELY
+//     (no 60s stale window) — the FIX
+//   - GET replies via queryDb (old path) would STILL return stale data —
+//     sanity: the fix bypasses the cache, it does NOT invalidate it
+// ============================================================================
+
+const ADMIN_REPO_JS = fs.readFileSync(path.join(__dirname, 'src/repositories/admin.js'), 'utf8');
+const WORKER_PROXY_JS = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+
+// ── Source-text assertions: the fix is wired in the 3 required places ──────
+
+test('TR-HYPERDRIVE-01: listTicketReplies uses queryDbDirect (NOT queryDb) for the ticket_replies SELECT', () => {
+  const fnStart = ADMIN_REPO_JS.indexOf('async function listTicketReplies');
+  assert.ok(fnStart > -1, 'listTicketReplies function must exist');
+  const nextFn = ADMIN_REPO_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_REPO_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1200);
+  assert.ok(fnBlock.includes('await queryDbDirect('),
+    'listTicketReplies must call queryDbDirect (bypasses Hyperdrive cache)');
+  assert.ok(!/\bawait queryDb\(/.test(fnBlock),
+    'listTicketReplies must NOT call queryDb for the SELECT (would hit Hyperdrive cache)');
+});
+
+test('TR-HYPERDRIVE-02: createAdminRepository destructures queryDbDirect from deps', () => {
+  const factoryStart = ADMIN_REPO_JS.indexOf('export function createAdminRepository(deps)');
+  const factoryBlock = ADMIN_REPO_JS.slice(factoryStart, factoryStart + 200);
+  assert.ok(factoryBlock.includes('queryDbDirect'),
+    'createAdminRepository must destructure queryDbDirect from deps so it is in scope for listTicketReplies');
+});
+
+test('TR-HYPERDRIVE-03: worker-proxy.js injects queryDbDirect into createAdminRepository', () => {
+  const callIdx = WORKER_PROXY_JS.indexOf('createAdminRepository({');
+  assert.ok(callIdx > -1, 'createAdminRepository call must exist in worker-proxy.js');
+  const callBlock = WORKER_PROXY_JS.slice(callIdx, callIdx + 120);
+  assert.ok(callBlock.includes('queryDbDirect'),
+    'worker-proxy.js must pass queryDbDirect in the createAdminRepository deps');
+});
+
+test('TR-HYPERDRIVE-04: listTicketReplies mapping + API response contract unchanged', () => {
+  const fnStart = ADMIN_REPO_JS.indexOf('async function listTicketReplies');
+  const nextFn = ADMIN_REPO_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_REPO_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1200);
+  // The exact SELECT columns + ORDER BY must be preserved (read-after-write fix
+  // changes only the connection path, NOT the query semantics).
+  assert.ok(fnBlock.includes('SELECT id, ticket_id, sender_id, message, sender_type, created_at'),
+    'SELECT columns must be unchanged');
+  assert.ok(fnBlock.includes('FROM ticket_replies'),
+    'FROM clause must be unchanged');
+  assert.ok(fnBlock.includes('WHERE ticket_id = $1'),
+    'WHERE clause must be unchanged');
+  assert.ok(fnBlock.includes('ORDER BY created_at ASC'),
+    'ORDER BY must be unchanged (oldest first, newest last)');
+  // The response contract mapping (user_id/body/is_admin_reply/created_at)
+  // must be preserved so fetchTicketReplies (admin.js) needs no change.
+  assert.ok(fnBlock.includes('user_id: String(r.sender_id)'),
+    'user_id mapping must be preserved');
+  assert.ok(fnBlock.includes('body: normalizeOptionalString(r.message)'),
+    'body mapping must be preserved');
+  assert.ok(fnBlock.includes('is_admin_reply: r.sender_type === \'admin\''),
+    'is_admin_reply mapping must be preserved');
+  assert.ok(fnBlock.includes('created_at: isoDate(r.created_at)'),
+    'created_at mapping must be preserved');
+});
+
+// ── Behavioral simulation: read-after-write via queryDbDirect ───────────────
+// Mirrors notif-hyperdrive-cache-rca-test.cjs REGRESSION (Option C) test,
+// adapted for ticket_replies: INSERT reply (mutation, bypasses cache) then
+// GET replies via queryDbDirect returns the new reply immediately.
+
+test('TR-HYPERDRIVE-05 (REGRESSION Option A): queryDbDirect bypasses Hyperdrive cache — GET replies after POST reply returns the new reply immediately', async () => {
+  // Simulate Hyperdrive-cached queryDb (60s TTL) + origin + a queryDbDirect
+  // path that bypasses the cache (mirrors worker-proxy.js queryDbDirect).
+  const origin = new Map(); // ticketId -> [{ reply_id, message, sender_type, created_at }]
+  const cache = new Map(); // sqlKey -> { result, cachedAt }
+  let clock = 0;
+  const CACHE_TTL_MS = 60000;
+
+  origin.set('T1', []);
+
+  function cacheKey(sql, params) {
+    return String(sql).replace(/\s+/g, ' ').trim() + '|' + JSON.stringify(params);
+  }
+  function originExecuteListReplies(ticketId) {
+    const rows = (origin.get(String(ticketId)) || []).map((r) => ({
+      id: r.reply_id, ticket_id: String(ticketId), sender_id: r.sender_id,
+      message: r.message, sender_type: r.sender_type, created_at: r.created_at,
+    }));
+    return { rows, rowCount: rows.length, fields: [], command: 'SELECT' };
+  }
+
+  // queryDb — Hyperdrive path: the listTicketReplies SELECT is cached for 60s.
+  // Mutations (INSERT) bypass the cache and hit origin (per Hyperdrive docs).
+  async function queryDb(env, sqlText, params = []) {
+    const sql = String(sqlText).replace(/\s+/g, ' ').trim();
+    const isListReplies = /^SELECT id, ticket_id, sender_id, message, sender_type, created_at FROM ticket_replies WHERE ticket_id = \$1 ORDER BY created_at ASC$/i.test(sql);
+    if (isListReplies) {
+      const key = cacheKey(sql, params);
+      const entry = cache.get(key);
+      if (entry && (clock - entry.cachedAt) < CACHE_TTL_MS) {
+        return { ...entry.result, _fromCache: true };
+      }
+      const result = originExecuteListReplies(String(params[0]));
+      cache.set(key, { result, cachedAt: clock });
+      return { ...result, _fromCache: false };
+    }
+    // INSERT reply — bypasses cache, hits origin.
+    const isInsertReply = /^INSERT INTO ticket_replies \(ticket_id, sender_type, sender_id, message, created_at\) VALUES \(\$1, 'admin', \$2, \$3, NOW\(\)\)$/i.test(sql);
+    if (isInsertReply) {
+      const ticketId = String(params[0]);
+      const senderId = String(params[1]);
+      const message = String(params[2]);
+      const list = origin.get(ticketId) || [];
+      const replyId = 'R' + (list.length + 1);
+      list.push({ reply_id: replyId, sender_id: senderId, message, sender_type: 'admin', created_at: clock });
+      origin.set(ticketId, list);
+      return { rows: [], rowCount: 1, fields: [], command: 'INSERT' };
+    }
+    return { rows: [], rowCount: 0, fields: [], command: 'NOOP' };
+  }
+
+  // queryDbDirect — bypasses Hyperdrive cache: queries origin directly,
+  // never checks cache, never populates cache. (Simulates a fresh pg.Pool
+  // bound to env.DIRECT_URL — see worker-proxy.js queryDbDirect.)
+  async function queryDbDirect(env, sqlText, params = []) {
+    const sql = String(sqlText).replace(/\s+/g, ' ').trim();
+    const isListReplies = /^SELECT id, ticket_id, sender_id, message, sender_type, created_at FROM ticket_replies WHERE ticket_id = \$1 ORDER BY created_at ASC$/i.test(sql);
+    if (isListReplies) {
+      return { ...originExecuteListReplies(String(params[0])), _fromCache: false, _directBypass: true };
+    }
+    throw new Error('[sim] queryDbDirect received unsupported query: ' + sql.slice(0, 80));
+  }
+
+  // t=1000 — admin expands ticket T1 → fetchTicketReplies GET #1 via queryDb
+  // (Hyperdrive). Cache MISS → origin returns [] → cache populated with [].
+  clock = 1000;
+  const list1 = await queryDb({}, `
+    SELECT id, ticket_id, sender_id, message, sender_type, created_at
+    FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC
+  `, ['T1']);
+  assert.equal(list1.rows.length, 0, 'initial GET (cache MISS) returns 0 replies');
+  assert.equal(list1._fromCache, false, 'first GET is a cache MISS');
+  assert.equal(cache.size, 1, 'cache populated after first GET');
+
+  // t=1100 — admin clicks Send → POST reply. handleReplyTicket calls
+  // insertTicketReply via queryDb (INSERT bypasses cache, hits origin).
+  clock = 1100;
+  const post = await queryDb({}, `
+    INSERT INTO ticket_replies (ticket_id, sender_type, sender_id, message, created_at)
+    VALUES ($1, 'admin', $2, $3, NOW())
+  `, ['T1', 'admin-42', 'Hello from admin']);
+  assert.equal(post.rowCount, 1, 'POST reply INSERT succeeds on origin (INSERT bypasses cache)');
+  assert.equal(cache.size, 1, 'cache NOT invalidated by INSERT (Hyperdrive does not invalidate on mutation)');
+
+  // t=1200 — WITHOUT the fix: GET replies via queryDb (Hyperdrive) within 60s
+  // TTL → cache HIT → returns stale [] (WITHOUT the new reply). BUG REPRODUCED.
+  clock = 1200;
+  const listStale = await queryDb({}, `
+    SELECT id, ticket_id, sender_id, message, sender_type, created_at
+    FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC
+  `, ['T1']);
+  assert.equal(listStale.rows.length, 0, 'WITHOUT fix: Hyperdrive GET within 60s TTL returns stale [] (no new reply) — bug reproduces');
+  assert.equal(listStale._fromCache, true, 'WITHOUT fix: Hyperdrive GET is a cache HIT (stale)');
+  assert.equal(listStale.rows.find((r) => r.message === 'Hello from admin'), undefined,
+    'WITHOUT fix: the new admin reply is NOT returned by the cached queryDb path');
+
+  // t=1200 — WITH the fix: GET replies via queryDbDirect → bypasses cache →
+  // returns fresh result (WITH the new reply). FIX VERIFIED.
+  const listFixed = await queryDbDirect({}, `
+    SELECT id, ticket_id, sender_id, message, sender_type, created_at
+    FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC
+  `, ['T1']);
+  assert.equal(listFixed.rows.length, 1, 'FIX: queryDbDirect returns the new reply immediately');
+  assert.equal(listFixed._fromCache, false, 'FIX: queryDbDirect is never a cache hit');
+  assert.equal(listFixed._directBypass, true, 'FIX: queryDbDirect uses the direct-bypass path');
+  assert.equal(listFixed.rows[0].message, 'Hello from admin', 'FIX: the new admin reply is visible in the GET result');
+  assert.equal(listFixed.rows[0].sender_type, 'admin', 'FIX: reply is mapped as admin sender_type');
+  assert.equal(listFixed.rows[0].ticket_id, 'T1', 'FIX: reply is associated with the correct ticket');
+
+  // Sanity: the Hyperdrive cache is STILL stale (queryDb would still return []).
+  // This proves the fix bypasses the cache — it does NOT invalidate it.
+  const listStaleStill = await queryDb({}, `
+    SELECT id, ticket_id, sender_id, message, sender_type, created_at
+    FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC
+  `, ['T1']);
+  assert.equal(listStaleStill._fromCache, true, 'sanity: Hyperdrive cache is still stale — fix bypasses it, does NOT invalidate it');
+  assert.equal(listStaleStill.rows.length, 0, 'sanity: Hyperdrive would still return [] (cache untouched)');
+
+  // t=62100 — 60s+ after GET #1 → Hyperdrive cache expires. Now queryDb would
+  // also return fresh data (the "self-correction" the user observed at ~30s).
+  // This confirms the ~30-60s window matches the cache TTL, not a poll.
+  clock = 62100;
+  const listAfterExpiry = await queryDb({}, `
+    SELECT id, ticket_id, sender_id, message, sender_type, created_at
+    FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC
+  `, ['T1']);
+  assert.equal(listAfterExpiry._fromCache, false, 'after 60s: Hyperdrive cache expired, queryDb queries origin');
+  assert.equal(listAfterExpiry.rows.length, 1, 'after 60s: even the cached path returns the new reply (cache expired)');
+});
+
+test('TR-HYPERDRIVE-06: the awaited GET after POST (admin.js:1590) is the path that was stale — seq guard does NOT prevent it', () => {
+  // This is a documentation test: the per-ticket _repliesFetchSeq guard in
+  // fetchTicketReplies (admin.js) only prevents an OLDER in-flight GET from
+  // overwriting a NEWER one. In the reply flow there is exactly ONE GET
+  // (the awaited one at adminReplyTicket line 1590), it is the newest, its
+  // seq matches, so it is APPLIED — and it returns stale data. The seq guard
+  // is therefore orthogonal to this bug; the real fix is the backend cache
+  // bypass (queryDbDirect), proven in TR-HYPERDRIVE-05.
+  const fnStart = ADMIN_JS.indexOf('async function fetchTicketReplies');
+  assert.ok(fnStart > -1, 'fetchTicketReplies must exist');
+  const nextFn = ADMIN_JS.indexOf('async function', fnStart + 30);
+  const fnBlock = ADMIN_JS.slice(fnStart, nextFn > -1 ? nextFn : fnStart + 1500);
+  assert.ok(fnBlock.includes('_repliesFetchSeq'),
+    'fetchTicketReplies has the per-ticket seq guard');
+  assert.ok(fnBlock.includes('repliesEl.innerHTML = html'),
+    'fetchTicketReplies replaces .tk-replies contents via innerHTML (the destroy line)');
+  // The awaited reconciliation call in adminReplyTicket
+  const replyFnStart = ADMIN_JS.indexOf('async function adminReplyTicket');
+  const replyNext = ADMIN_JS.indexOf('async function', replyFnStart + 30);
+  const replyBlock = ADMIN_JS.slice(replyFnStart, replyNext > -1 ? replyNext : replyFnStart + 1500);
+  assert.ok(replyBlock.includes('insertAdjacentHTML(\'beforeend\''),
+    'adminReplyTicket appends the optimistic reply (visible momentarily)');
+  assert.ok(replyBlock.includes('await fetchTicketReplies(ticketId)'),
+    'adminReplyTicket awaits fetchTicketReplies (the GET that returns stale cached data without the fix)');
+});
+
+console.log('✅ RCA Option A (ticket_replies Hyperdrive cache bypass) regression tests loaded.');
