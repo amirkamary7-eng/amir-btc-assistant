@@ -11537,7 +11537,7 @@ async function handleCalendarEvents(env) {
 // meaning the market data was NEVER cached in KV — every request hit the
 // upstream API. Now 60s (the minimum allowed by KV). writeAppCache also
 // clamps any sub-60 TTL up to 60 as a safety net.
-const MARKET_CACHE_TTL = 300; // 5 minutes — ROOT-CAUSE FIX: was 60s, caused 1,440+ KV writes/day. 5 min is acceptable for price data.
+const MARKET_CACHE_TTL = 120; // 2 minutes — H6 FIX: was 300s (5 min), caused user-visible price staleness. 120s balances freshness with KV write budget (~720 writes/day, well under the 1,000/day Free limit after telemetry migration).
 const MARKET_GLOBAL_CACHE_TTL = 900; // 15 minutes — global stats change less frequently
 const MARKET_FETCH_LIMIT = 200;
 const SEARCH_FETCH_LIMIT = 1500; // Extended list for search — not displayed in market list
@@ -13187,7 +13187,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     const symbolSourceMap = new Map();
     const uniqueSymbols = [...new Set(
       alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-    )];
+    )].slice(0, 14); // H6 FIX: Cap at 14 unique symbols per cron tick to stay within Cloudflare Workers Free 50-subrequest/Request limit. 14 symbols × 1-3 subrequests (exchange cache hit/miss) + 5 processQueue + 1 bulk UPDATE = max ~48 (2 subrequest safety margin), typically ~20 with cache hits. Remaining symbols are picked up on the next 1-min tick.
 
     const fetchOhlcWithTimeout = async (symbol) => {
       const tFetch = Date.now();
