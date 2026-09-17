@@ -87,13 +87,15 @@ test('MISSION-RETRY-05: query bounded to today + yesterday + day before (timezon
     'query must bound to today + yesterday + day before (CURRENT_DATE - 2) for timezone safety');
 });
 
-test('MISSION-RETRY-06: query has LIMIT 20', () => {
+test('MISSION-RETRY-06: query has LIMIT 3 (H5-CRITICAL fix — batch size reduced from 20 to 3 to stay within 50-subrequest Free Plan limit at minute=0 hourly retry invocation)', () => {
   const retryBlock = WORKER_SRC.slice(
     WORKER_SRC.indexOf('async function retryFailedMissionRewards'),
     WORKER_SRC.indexOf('async function retryFailedMissionRewards') + 6500
   );
-  assert.ok(retryBlock.includes('LIMIT 20'),
-    'query must have LIMIT 20 for bounded batch');
+  assert.ok(retryBlock.includes('LIMIT 3'),
+    'query must have LIMIT 3 for bounded batch (H5-CRITICAL fix — was 20)');
+  assert.ok(!retryBlock.includes('LIMIT 20'),
+    'query must NOT have LIMIT 20 (H5-CRITICAL fix — reduced to 3)');
 });
 
 test('MISSION-RETRY-07: reward amount from DB (not hardcoded)', () => {

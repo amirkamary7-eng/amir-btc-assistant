@@ -3348,7 +3348,7 @@ async function retryFailedReferralRewards(env) {
       `SELECT DISTINCT invitee_id FROM referrals
        WHERE rewarded = FALSE AND channel_verified = TRUE
        ORDER BY invitee_id ASC
-       LIMIT 20`,
+       LIMIT 3`,
     );
     if (result.rows.length === 0) return;
 
@@ -3403,7 +3403,7 @@ async function retryFailedWheelRewards(env) {
          AND tt.status = 'completed'
        )
        ORDER BY wh.created_at ASC
-       LIMIT 20`,
+       LIMIT 3`,
     );
     if (result.rows.length === 0) return;
 
@@ -3518,7 +3518,7 @@ async function retryFailedMissionRewards(env) {
              )
          )
        ORDER BY mp.daily_date ASC, mp.user_id ASC
-       LIMIT 20`,
+       LIMIT 3`,
     );
     if (result.rows.length === 0) return;
 
@@ -3619,7 +3619,7 @@ async function retryFailedRefunds(env) {
        FROM pending_refunds
        WHERE status = 'pending' AND retry_count < 10
        ORDER BY created_at ASC
-       LIMIT 20`,
+       LIMIT 3`,
     );
     if (result.rows.length === 0) return;
 
