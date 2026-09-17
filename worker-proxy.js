@@ -13335,173 +13335,323 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         resultPayload.immediate_triggers += 1;
       }
 
-      // ── ATOMIC TRIGGER MARK (prevents duplicate triggers) ──
-      // markTriggered only succeeds if status is still 'active'. If another cron
-      // run already triggered this alert, this returns false and we skip.
-      // OHLC FIX: Use candleClose as the trigger price (price at end of candle).
-      let triggered = false;
-      if (typeof alertRepo?.markTriggered === 'function') {
+      // ── H5-HIGH FIX: COLLECT FOR BULK PROCESSING ──
+      // Previously: per-alert markTriggered (1 DB CAS + 2 KV deletes) + per-alert
+      // notificationService.create (1 pref + 1 notif INSERT + 1 queue INSERT +
+      // 1 processQueue(3) = up to 7 subrequests) = ~10-13 subrequests PER ALERT.
+      // With 5 triggers + 14 OHLC fetches: ~75 subrequests → exceededResources.
+      //
+      // Now: collect triggered alerts and process them in BULK after the eval loop:
+      //   1. markTriggeredBulk (1 DB CAS UPDATE for all alerts)
+      //   2. Batch preference lookup (1 DB SELECT for all triggered users)
+      //   3. Bulk INSERT notifications (1 DB INSERT via unnest() for mini_app alerts)
+      //   4. Bulk INSERT queue (1 DB INSERT via unnest() for telegram alerts)
+      //   5. Single KV delete at end (was 2 × N per-alert deletes before)
+      //   6. processQueue(5) at end of 1-min cron drains queue (already exists)
+      //
+      // CAS preserved: WHERE id IN (...) AND status='active' RETURNING id — only
+      // alerts still active are claimed. Alerts already triggered by another cron
+      // return claimed=false → no notification created → no duplicates.
+      //
+      // Idempotency preserved:
+      //   - dedupKey `price_alert_${alertId}_${userId}` → notificationId `notif_price_alert_...`
+      //   - notifications ON CONFLICT (id) DO NOTHING
+      //   - notification_queue ON CONFLICT (notification_id, user_id) DO NOTHING
+      //   - processQueue uses FOR UPDATE SKIP LOCKED + telegram_message_id check
+      //
+      // NO trigger cap: all triggered alerts in same tick are enqueued. Backlog
+      // drains via processQueue cron infrastructure (1-min cron's processQueue(5)
+      // + 5-min cron's processQueue(15) = ~8 items/min sustained throughput).
+      _triggeredAlerts.push({
+        alertId,
+        userId,
+        symbol,
+        targetPrice,
+        direction,
+        triggerReason,
+        candleClose,
+        alert,
+      });
+    }
+
+    // ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──
+    // Replaces per-alert markTriggered + notificationService.create to stay
+    // within Cloudflare Workers Free Plan 50-subrequest limit.
+    //
+    // All existing semantics preserved (verified):
+    //   - CAS atomicity (WHERE status='active')
+    //   - Idempotency (dedupKey + ON CONFLICT DO NOTHING)
+    //   - No duplicate Telegram sends (FOR UPDATE SKIP LOCKED in processQueue)
+    //   - No per-alert processQueue(3) — alerts now use bulk INSERT + queue cron
+    //   - processQueue(5) at end of 1-min cron handles first 5 sends (existing)
+    //   - 'none' preference alerts are skipped (skipped_pref_disabled++)
+    //   - Failed INSERTs are tracked as delivery_failures + dispatch_errors
+    //
+    // Subrequest budget (worst case, 14 triggers, OHLC cache hit):
+    //   14 × 2 (OHLC) + 1 (bulk markTriggeredBulk) + 1 (batch pref) +
+    //   1 (bulk notif INSERT) + 1 (bulk queue INSERT) + 1 (bulk last_price UPDATE) +
+    //   2 (KV deletes) + 11 (processQueue(5) at end of 1-min cron)
+    //   = 28 + 4 + 1 + 2 + 11 = 46 ≤ 50 ✅ (4 subrequest safety margin)
+    //
+    // Scales to any alert count (5, 14, 50, 100, 500 — all use same 4 bulk DB ops).
+    if (_triggeredAlerts.length > 0) {
+      const triggers = _triggeredAlerts.map(t => ({
+        alertId: t.alertId,
+        triggerPrice: t.candleClose,
+      }));
+
+      // ── STEP 1: Bulk CAS markTriggered ──
+      // Returns array of { alertId, claimed, triggerPrice }. Only alerts with
+      // claimed=true (i.e. UPDATE...WHERE status='active' RETURNING returned
+      // their id) should produce notifications. This is the duplicate-trigger
+      // prevention — if another cron already triggered this alert, claimed=false.
+      let claimedResults = [];
+      if (typeof alertRepo?.markTriggeredBulk === 'function') {
         try {
-          triggered = await alertRepo.markTriggered(env, alertId, candleClose, pool);
+          claimedResults = await alertRepo.markTriggeredBulk(env, triggers, pool);
         } catch (e) {
-          console.warn('markTriggered failed:', { alert_id: alertId, error: e?.message });
+          // Non-fatal — all alerts remain 'active' in DB. Next cron tick retries.
+          // No notifications created → no duplicate sends possible.
+          console.warn('[ALERTS] markTriggeredBulk failed (non-fatal — alerts remain active, next tick retries):', e?.message);
+          claimedResults = triggers.map(t => ({
+            alertId: t.alertId, claimed: false, triggerPrice: t.triggerPrice,
+          }));
         }
       } else {
-        // Fallback: legacy UPDATE without atomic guard
-        await queryDb(env, `
-          UPDATE price_alerts
-          SET status = 'triggered', triggered_at = NOW(), last_trigger_price = $2
-          WHERE id = $1
-        `, [alertId, candleClose], 1, pool);
-        triggered = true;
+        // alerts.js out of sync with worker-proxy.js — should not happen in a
+        // coordinated deploy, but defensive: skip processing this tick.
+        console.error('[ALERTS] alertRepo.markTriggeredBulk is not a function — alerts.js may be out of sync. Skipping trigger processing this tick (alerts remain active, next tick retries).');
+        claimedResults = triggers.map(t => ({
+          alertId: t.alertId, claimed: false, triggerPrice: t.triggerPrice,
+        }));
       }
 
-      if (!triggered) {
-        resultPayload.duplicate_triggers_prevented += 1;
-                continue;
-      }
+      const claimedIds = new Set(
+        claimedResults.filter(r => r.claimed).map(r => String(r.alertId))
+      );
+      resultPayload.duplicate_triggers_prevented +=
+        _triggeredAlerts.length - claimedIds.size;
 
-      // ── SEND NOTIFICATIONS ──
-      try {
-        // Clean, short, professional notification text.
-        // Only shows: alert fired + symbol + current price.
-        // No target price, no direction, no extra text.
-        const priceFmt = candleClose >= 1
-          ? Number(candleClose).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : Number(candleClose).toFixed(6);
+      const claimedAlerts = _triggeredAlerts.filter(t => claimedIds.has(String(t.alertId)));
 
-        const text = `🔔 هشدار قیمت فعال شد\nقیمت ${symbol} به ${priceFmt} USDT رسید.`;
+      if (claimedAlerts.length > 0) {
+        // ── STEP 2: Batch preference lookup (1 DB SELECT for all triggered users) ──
+        // Mirrors processBroadcastFull pattern (notification_platform.js:1351-1359).
+        // Eliminates N+1 queries — was N individual getUserChannelPreference calls
+        // (each 1 DB query) before, now 1 batch query.
+        // Default preference is 'both' (per alerts.js:544 / notification_platform.js:544).
+        const userIds = [...new Set(claimedAlerts.map(a => String(a.userId)))];
+        const prefMap = new Map();
+        if (userIds.length > 0) {
+          const placeholders = userIds.map((_, i) => `$${i + 1}`).join(',');
+          const prefResult = await queryDb(env,
+            `SELECT user_id, ch_price_alert AS pref FROM notification_settings WHERE user_id IN (${placeholders})`,
+            userIds, 1, pool
+          ).catch(() => ({ rows: [] }));
+          for (const row of prefResult.rows || []) {
+            prefMap.set(String(row.user_id), String(row.pref));
+          }
+        }
+
+        // ── STEP 3: Partition claimed alerts by delivery channel ──
+        // Match original sendNotification logic (notification_platform.js:1174):
+        //   - 'none' → skip delivery entirely (skipped_pref_disabled++)
+        //   - 'mini_app' → deliver to mini_app only (notif INSERT, channel='mini_app')
+        //   - 'telegram' → deliver to telegram only (queue INSERT, no notif INSERT)
+        //   - 'both' → deliver to both (notif INSERT channel='both', AND queue INSERT)
+        //   - Default (no settings row) → 'both'
+        const miniAppAlerts = [];
+        const telegramAlerts = [];
+        for (const t of claimedAlerts) {
+          const userChannel = prefMap.get(t.userId) || 'both';
+          t._userChannel = userChannel;
+          if (userChannel === 'none') continue;
+          if (userChannel === 'mini_app' || userChannel === 'both') miniAppAlerts.push(t);
+          if (userChannel === 'telegram' || userChannel === 'both') telegramAlerts.push(t);
+        }
+
+        // Pre-compute webAppUrl ONCE (was per-alert in original — wasteful).
+        // Same env → same URL for all alerts in this tick.
         const webAppUrl = resolveWebAppUrl(env, { cacheBust: true });
 
-        // ── TIMING LOG: track each stage for delay root-cause analysis ──
-        const timing = {
-          trigger_at: new Date().toISOString(),
-          price_received_ms: Date.now() - t0,
-          // t0 is the cron start time; candleClose was fetched in Phase 1
+        // Helper: build telegramExtra (was inline per-alert in original).
+        const buildTelegramExtra = () => {
+          const telegramExtra = { disable_web_page_preview: true };
+          if (webAppUrl) {
+            telegramExtra.reply_markup = {
+              inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
+            };
+          }
+          return telegramExtra;
         };
 
-        // ── PREFERENCE CHECK (corrected) ──
-        // OLD BUG: isPreferenceEnabled(env, userId, 'price_alert') returned false for ALL
-        // users who never saved preferences (because default in DB schema is FALSE).
-        // This silently blocked ~100% of price alert deliveries.
-        //
-        // NEW LOGIC:
-        //   1. Check notificationPlatformRepo.getUserChannelPreference(userId, 'price_alert')
-        //      → returns 'none' | 'mini_app' | 'telegram' | 'both'
-        //      → default is 'both' if user has no settings row
-        //   2. If 'none' → skip delivery entirely (user opted out)
-        //   3. Otherwise → deliver via the user's preferred channel(s)
-        //
-        // REMOVED: legacy boolean price_alert check. The old `price_alert` column
-        // PHASE 2 FIX (BYPASS-2): Removed pre-check via _prefCache + forceChannel.
-        // Previously, getUserChannelPreference read from a 60s per-isolate cache,
-        // then forceChannel:true made sendNotification skip the fresh DB query.
-        // This created a 60s stale-cache window where opt-out was ignored.
-        //
-        // Now: pass channel:'both' WITHOUT forceChannel. sendNotification will
-        // do a fresh DB query for ch_price_alert on every dispatch. The pre-check
-        // for 'none' is still done here for the skip optimization (avoids
-        // unnecessary dispatch overhead), but the final authoritative check
-        // is in sendNotification's DB query.
-        let userChannel = 'both'; // fail-open: deliver if checks fail
-        if (notificationPlatformRepo) {
+        // Helper: build notification message text (was inline per-alert in original).
+        const buildMessage = (t) => {
+          const priceFmt = t.candleClose >= 1
+            ? Number(t.candleClose).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : Number(t.candleClose).toFixed(6);
+          return `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به ${priceFmt} USDT رسید.`;
+        };
+
+        // Helper: build notificationId (preserves dedupKey → notif_id pattern).
+        // Original: `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`
+        // dedupKey for alerts: `price_alert_${alertId}_${userId}`
+        const buildNotifId = (t) => `notif_price_alert_${t.alertId}_${t.userId}`
+          .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+
+        // ── STEP 4: Bulk INSERT in-app notifications (mini_app channel) ──
+        // Mirrors processBroadcastFull pattern (notification_platform.js:1390-1434).
+        // Uses unnest() for multi-row INSERT with parameterized arrays.
+        // ON CONFLICT (id) DO NOTHING preserves idempotency (dedupKey → notif_id).
+        let notifInsertOk = true;
+        if (miniAppAlerts.length > 0) {
           try {
-            userChannel = await notificationPlatformRepo.getUserChannelPreference(env, userId, 'price_alert');
-          } catch (e) {
-            console.warn('getUserChannelPreference failed, defaulting to both:', {
-              alert_id: alertId, user_id: userId, error: e?.message,
+            const notifIds = miniAppAlerts.map(buildNotifId);
+            const userIdsArr = miniAppAlerts.map(t => String(t.userId));
+            const typesArr = miniAppAlerts.map(() => 'price_alert');
+            const titlesArr = miniAppAlerts.map(t => `🔔 هشدار قیمت ${t.symbol}`);
+            const messagesArr = miniAppAlerts.map(buildMessage);
+            const metadataArr = miniAppAlerts.map(t => JSON.stringify({
+              symbol: t.symbol,
+              price: String(t.candleClose),
+              alert_id: t.alertId,
+              target_price: String(t.targetPrice),
+              direction: t.direction,
+              trigger_reason: t.triggerReason,
+            }));
+            const readStatusArr = miniAppAlerts.map(() => false);
+            const prioritiesArr = miniAppAlerts.map(() => 'high');
+            const categoriesArr = miniAppAlerts.map(() => 'price_alert');
+            // channel column: 'both' if user wanted both channels, else 'mini_app'
+            // (matches original sendNotification INSERT at notification_platform.js:1193)
+            const channelsArr = miniAppAlerts.map(t => t._userChannel === 'both' ? 'both' : 'mini_app');
+            const statusArr = miniAppAlerts.map(() => 'delivered');
+
+            await queryDb(env, `
+              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status)
+              SELECT * FROM unnest(
+                $1::text[],
+                $2::text[],
+                $3::text[],
+                $4::text[],
+                $5::text[],
+                $6::jsonb[],
+                $7::boolean[],
+                $8::text[],
+                $9::text[],
+                $10::text[],
+                $11::text[]
+              )
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              notifIds, userIdsArr, typesArr, titlesArr, messagesArr,
+              metadataArr, readStatusArr, prioritiesArr, categoriesArr, channelsArr, statusArr,
+            ], 1, pool).catch((e) => {
+              console.warn('[ALERTS] Bulk INSERT notifications failed:', e?.message);
+              notifInsertOk = false;
             });
+          } catch (e) {
+            console.warn('[ALERTS] Mini-app notification bulk failed:', e?.message);
+            notifInsertOk = false;
           }
         }
 
-        const shouldDeliver = (userChannel !== 'none');
-
-        if (!shouldDeliver) {
-          resultPayload.skipped_pref_disabled += 1;
-                    resultPayload.triggered_count += 1;
-          continue;
-        }
-
-        let inAppDelivered = false;
-        let telegramDelivered = false;
-
-        // Determine effective delivery channel based on user preference
-        const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
-        const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
-
-        // ── Phase 2: Unified delivery via NotificationService.create() ──
-        // Per Phase 2: ALL Telegram delivery goes through the queue.
-        // No direct sendTelegramMessage — the queue processor (cron) is the
-        // single authorized sender and handles retry via max_attempts.
-        //
-        // Rich message (web_app button) is passed via telegramExtra.
-        const alertTitle = `🔔 هشدار قیمت ${symbol}`;
-        const telegramExtra = {
-          disable_web_page_preview: true,
-        };
-        if (webAppUrl) {
-          telegramExtra.reply_markup = {
-            inline_keyboard: [[{ text: 'Open Amir BTC Assistant 🚀', web_app: { url: webAppUrl } }]],
-          };
-        }
-
-        try {
-          const tDispatchStart = Date.now();
-          if (notificationService) {
-            const result = await notificationService.create(env, {
-              userId: String(userId),
-              title: alertTitle,
-              message: text,
-              category: 'price_alert',
-              priority: 'high',
-              channel: 'both', // let sendNotification do fresh DB query
-              // forceChannel NOT set — sendNotification will query ch_price_alert from DB
-              metadata: {
-                symbol,
-                price: String(candleClose),
-                alert_id: alertId,
-                target_price: String(targetPrice),
-                direction,
-                trigger_reason: triggerReason,
-              },
-              dedupKey: `price_alert_${alertId}_${userId}`,
+        // ── STEP 5: Bulk INSERT Telegram queue items (telegram channel) ──
+        // Mirrors processBroadcastFull pattern (notification_platform.js:1437-1471).
+        // ON CONFLICT (notification_id, user_id) DO NOTHING preserves idempotency.
+        // processQueue(5) at end of 1-min cron (already exists, worker-proxy.js:16217)
+        // drains queue with first 5 sends; remaining items drain on subsequent ticks.
+        let queueInsertOk = true;
+        if (telegramAlerts.length > 0) {
+          try {
+            const queueNotifIds = telegramAlerts.map(buildNotifId);
+            const userIdsArr = telegramAlerts.map(t => String(t.userId));
+            const channelsArr = telegramAlerts.map(() => 'telegram');
+            const prioritiesArr = telegramAlerts.map(() => 'high');
+            const statusArr = telegramAlerts.map(() => 'pending');
+            const telegramExtra = buildTelegramExtra();
+            const payloadsArr = telegramAlerts.map(t => JSON.stringify({
+              title: `🔔 هشدار قیمت ${t.symbol}`,
+              message: buildMessage(t),
               telegramExtra,
-            }, pool);
-            if (result.status === 'delivered') {
-              inAppDelivered = deliverToMiniApp;
-              telegramDelivered = deliverToTelegram;
-            }
+            }));
+
+            await queryDb(env, `
+              INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload)
+              SELECT * FROM unnest(
+                $1::text[],
+                $2::text[],
+                $3::text[],
+                $4::text[],
+                $5::text[],
+                $6::jsonb[]
+              )
+              ON CONFLICT (notification_id, user_id) DO NOTHING
+            `, [
+              queueNotifIds, userIdsArr, channelsArr, prioritiesArr, statusArr, payloadsArr,
+            ], 1, pool).catch((e) => {
+              console.warn('[ALERTS] Bulk INSERT queue failed:', e?.message);
+              queueInsertOk = false;
+            });
+          } catch (e) {
+            console.warn('[ALERTS] Telegram queue bulk failed:', e?.message);
+            queueInsertOk = false;
           }
-          timing.dispatch_ms = Date.now() - tDispatchStart;
-        } catch (notifErr) {
-          console.warn('NotificationService.create failed for price alert:', notifErr?.message || notifErr);
+        }
+
+        // ── STEP 6: Count delivery outcomes + triggered_count ──
+        // Mirror original logic (worker-proxy.js:13485-13489):
+        //   - 'none' pref alerts: skipped_pref_disabled++ + triggered_count++
+        //     (markTriggeredBulk succeeded, but delivery skipped by user preference)
+        //   - All claimed alerts: triggered_count++ (markTriggeredBulk succeeded)
+        //   - Failed delivery (no channel succeeded): delivery_failures++
+        for (const t of claimedAlerts) {
+          const userChannel = t._userChannel || 'both';
+          if (userChannel === 'none') {
+            resultPayload.skipped_pref_disabled += 1;
+            resultPayload.triggered_count += 1;
+            continue;
+          }
+
+          const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+          const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+          const inAppDelivered = deliverToMiniApp && notifInsertOk;
+          const telegramDelivered = deliverToTelegram && queueInsertOk;
+
+          if (!inAppDelivered && !telegramDelivered) {
+            resultPayload.delivery_failures += 1;
+          }
+          resultPayload.triggered_count += 1;
+        }
+
+        // Track dispatch errors if bulk INSERTs failed (mirror original dispatch_errors.push)
+        if (!notifInsertOk && miniAppAlerts.length > 0) {
           resultPayload.dispatch_errors.push({
-            alert_id: alertId,
-            error: notifErr?.message || String(notifErr),
-            stack: notifErr?.stack?.slice(0, 200),
+            scope: 'bulk_insert_notifications',
+            alert_ids: miniAppAlerts.map(t => t.alertId),
+            error: 'Bulk INSERT into notifications table failed (queue cron will not retry — alerts remain triggered in DB)',
+          });
+        }
+        if (!queueInsertOk && telegramAlerts.length > 0) {
+          resultPayload.dispatch_errors.push({
+            scope: 'bulk_insert_queue',
+            alert_ids: telegramAlerts.map(t => t.alertId),
+            error: 'Bulk INSERT into notification_queue table failed (no Telegram delivery for these alerts)',
           });
         }
 
-        if (!inAppDelivered && !telegramDelivered) {
-          resultPayload.delivery_failures += 1;
-        }
-
-        resultPayload.triggered_count += 1;
-
-        // ── DETAILED TIMING LOG for delay root-cause analysis ──
-        // Logs the full pipeline timing so we can pinpoint where delay occurs:
-        //   price_received_ms: time from cron start to price being available
-        //   dispatch_ms: time to insert in-app notification into DB
-        //   telegram_ms: time to send Telegram message (including retry)
-        //   total_ms: time from cron start to delivery complete
-              } catch (error) {
-        resultPayload.delivery_failures += 1;
-        console.warn('scheduled alert delivery failed:', {
-          alert_id: alertId,
-          user_id: userId,
-          symbol,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        // ── STEP 7: KV invalidation (single delete at end of bulk processing) ──
+        // Was 2 × N per-alert KV deletes in original markTriggered (alerts.js:313-314).
+        // Now: 2 single deletes (one for each key) at end of bulk processing.
+        // Safe because CAS in DB already prevents duplicate triggers; the staleness
+        // only means cached alerts:active-list may include triggered alerts for
+        // ≤60s (until TTL expiry or next-tick refresh). The next cron tick's
+        // markTriggeredBulk will return claimed=false for already-triggered alerts.
+        // Note: alerts:active-exists has no readers (verified at worker-proxy.js:13156
+        // comment), but we delete it anyway to preserve existing behavior — not
+        // removing the delete avoids scope creep per user's instruction.
+        try { env.APP_CACHE?.delete?.('alerts:active-list'); } catch {}
+        try { env.APP_CACHE?.delete?.('alerts:active-exists'); } catch {}
       }
     }
 

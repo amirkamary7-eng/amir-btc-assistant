@@ -318,6 +318,84 @@ export function createAlertRepository(deps) {
   }
 
   /**
+   * H5-HIGH FIX: Bulk CAS markTriggered — claim multiple alerts in a SINGLE
+   * DB UPDATE, preserving all per-alert semantics of markTriggered:
+   *   - status = 'triggered' (atomic transition)
+   *   - triggered_at = NOW()
+   *   - last_trigger_price = per-alert (preserved via CASE WHEN)
+   *   - last_price = per-alert (preserved via CASE WHEN, same as last_trigger_price)
+   *   - CAS: WHERE id IN (...) AND status = 'active' (only alerts still active
+   *     are claimed; alerts already triggered by another cron are NOT claimed)
+   *
+   * RETURNS: array of { alertId, claimed, triggerPrice }
+   *   - claimed: true if this invocation's UPDATE returned the alert's id
+   *     (i.e. it was still 'active' and we won the CAS race)
+   *   - claimed: false if the alert was already triggered by another invocation
+   *     (caller must skip notification creation for this alert to prevent duplicates)
+   *
+   * NO per-alert KV deletes (consolidated to a single delete at end of cron by
+   * the caller — see runScheduledAlertsBaseline). The original markTriggered's
+   * 2 KV deletes per alert would amplify to 2N KV ops for N triggers; this bulk
+   * version eliminates that, with the trade-off that the alerts:active-list KV
+   * cache may be stale by ~60s (until next tick's TTL expiry or caller's
+   * explicit delete). This is safe — CAS in DB still prevents duplicate
+   * triggers; the staleness only means cached alerts:active-list may include
+   * the triggered alert for ≤60s, but the next cron tick's markTriggeredBulk
+   * will return claimed=false for it (CAS guard).
+   *
+   * Mirrors the bulk UPDATE pattern at worker-proxy.js:13531 (CASE WHEN for
+   * per-row last_price), adapted for triggered_at + last_trigger_price +
+   * last_price + status in a single UPDATE.
+   */
+  async function markTriggeredBulk(env, triggers, pool = null) {
+    if (!triggers || triggers.length === 0) return [];
+
+    try {
+      // Build CASE WHEN for last_trigger_price (and last_price, which mirrors it)
+      // Pattern matches worker-proxy.js:13521-13531 bulk last_price UPDATE.
+      const caseParts = [];
+      const params = [];
+      const idPlaceholders = [];
+      for (const { alertId, triggerPrice } of triggers) {
+        const idIdx = params.length + 1;
+        const priceIdx = params.length + 2;
+        caseParts.push(`WHEN $${idIdx} THEN $${priceIdx}::numeric`);
+        params.push(String(alertId), Number(triggerPrice));
+        idPlaceholders.push(`$${idIdx}`);
+      }
+      const caseWhen = `CASE id ${caseParts.join(' ')} END`;
+      const bulkSql = `
+        UPDATE price_alerts
+        SET status = 'triggered',
+            triggered_at = NOW(),
+            last_trigger_price = ${caseWhen},
+            last_price = ${caseWhen}
+        WHERE id IN (${idPlaceholders.join(',')}) AND status = 'active'
+        RETURNING id
+      `;
+      const result = await queryDb(env, bulkSql, params, 1, pool);
+
+      // Build claimed set from RETURNING ids
+      const claimedIds = new Set((result.rows || []).map(r => String(r.id)));
+      return triggers.map(t => ({
+        alertId: t.alertId,
+        claimed: claimedIds.has(String(t.alertId)),
+        triggerPrice: t.triggerPrice,
+      }));
+    } catch (e) {
+      console.warn('[ALERTS] markTriggeredBulk failed:', e?.message);
+      // On failure, return ALL as not-claimed so caller skips notification creation.
+      // This is fail-safe: no duplicate notifications, no notifications on a failed
+      // CAS. The alerts remain 'active' in DB; the next cron tick will retry.
+      return triggers.map(t => ({
+        alertId: t.alertId,
+        claimed: false,
+        triggerPrice: t.triggerPrice,
+      }));
+    }
+  }
+
+  /**
    * Bulk fetch active alerts for cron processing.
    * Selects ONLY the columns the cron needs (no user PII).
    * Returns rows ordered by created_at DESC so newer alerts are checked first.
@@ -338,6 +416,6 @@ export function createAlertRepository(deps) {
 
   return Object.freeze({
     create, list, findById, remove, serializeRow, ensureTable,
-    updateLastChecked, markTriggered, listActiveForCron,
+    updateLastChecked, markTriggered, markTriggeredBulk, listActiveForCron,
   });
 }
