@@ -12736,7 +12736,7 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
       //   - The dedup key is a SECONDARY optimization (skip the event detection
       //     loop), not the primary dedup mechanism (per-user idempotency is).
 
-      // Fetch joined users
+      // Fetch joined users (same query — no cap, no LIMIT)
       const usersResult = await queryDb(
         env,
         `SELECT telegram_id FROM users WHERE channel_joined = TRUE`,
@@ -12747,54 +12747,180 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
 
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
       const message = `${event.country} ${event.flag} — ${event.time || ''}`;
+      const metadataJson = JSON.stringify({
+        event_title: event.title,
+        event_date: event.date,
+        event_time: event.time,
+        event_country: event.country,
+      });
 
-      // ROOT CAUSE FIX (RC-4): the old code called
-      // `notificationRepo.filterUsersByPreference(env, allUserIds, 'calendar')`
-      // which reads the LEGACY boolean `calendar` column (default FALSE).
-      // Most users never visit settings → no row → defaults to FALSE →
-      // zero users receive calendar alerts. This was already fixed for
-      // price alerts (using notificationPlatformRepo.getUserChannelPreference
-      // which reads the NEW ch_calendar column defaulting to 'both').
-      // Now we apply the same fail-open pattern: iterate all joined users
-      // and call getUserChannelPreference per-user inside the dispatch loop.
-      // notificationPlatformRepo.dispatch already calls getUserChannelPreference
-      // internally (src/repositories/notification_platform.js:239), so we
-      // can pass all joined users directly — users with ch_calendar='none'
-      // will be filtered out inside dispatch.
-
-      let sentForThisEvent = 0;
-      for (const uid of allUserIds) {
-        try {
-          const dispatchResult = await notificationService.create(env, {
-            userId: uid,
-            title, message,
-            category: 'calendar',
-            priority: 'medium',
-            channel: 'both',
-            metadata: { event_title: event.title, event_date: event.date, event_time: event.time, event_country: event.country },
-            dedupKey: `cal_event_${eventKey}_${uid}`,
-            // FIX 1: enqueueOnly = true. Skip per-user processQueue(3) inside
-            // sendNotification. For 100 users this would create up to 300
-            // Telegram fetches in ONE invocation — exceeding the 50 subrequest
-            // Free Plan limit. Instead, all items are enqueued, then ONE
-            // processQueue call after ALL events completes sends them in a
-            // controlled batch.
-            enqueueOnly: true,
-          }, pool);
-          // dispatch returns {status: 'filtered'} if user opted out
-          if (dispatchResult && dispatchResult.status !== 'filtered') {
-            sentForThisEvent++;
-          }
-        } catch (_) {
-          // Per-user dispatch failure — don't abort the whole event
+      // ── BULK FIX: Batch preference lookup (1 DB SELECT, replaces N per-user getUserChannelPreference calls) ──
+      // Mirrors processBroadcastFull pattern (notification_platform.js:1351-1359).
+      // Default preference is 'both' if user has no settings row
+      // (matches sendNotification default at notification_platform.js:544).
+      const prefMap = new Map();
+      if (allUserIds.length > 0) {
+        const placeholders = allUserIds.map((_, i) => `$${i + 1}`).join(',');
+        const prefResult = await queryDb(env,
+          `SELECT user_id, ch_calendar AS pref FROM notification_settings WHERE user_id IN (${placeholders})`,
+          allUserIds, 1, pool
+        ).catch(() => ({ rows: [] }));
+        for (const row of prefResult.rows || []) {
+          prefMap.set(String(row.user_id), String(row.pref));
         }
       }
 
-      // NOTIF-FIX: Write dedup key AFTER the user loop (not before).
-      // This ensures crash recovery: if Worker dies mid-loop, the event
-      // is re-detected on the next cron tick and remaining users get notified.
-      // Per-user idempotency (dedupKey + ON CONFLICT) prevents duplicates.
+      // ── BULK FIX: Partition users by delivery channel ──
+      // Match sendNotification logic (notification_platform.js:1174):
+      //   - 'none' → skip delivery entirely (no INSERT)
+      //   - 'mini_app' → deliver to mini_app only (notif INSERT, channel='mini_app')
+      //   - 'telegram' → deliver to telegram only (queue INSERT, no notif INSERT)
+      //   - 'both' → deliver to both (notif INSERT channel='both', AND queue INSERT)
+      //   - Default (no settings row) → 'both'
+      const miniAppUsers = [];
+      const telegramUsers = [];
+      for (const uid of allUserIds) {
+        const userChannel = prefMap.get(uid) || 'both';
+        if (userChannel === 'none') continue;
+        if (userChannel === 'mini_app' || userChannel === 'both') miniAppUsers.push(uid);
+        if (userChannel === 'telegram' || userChannel === 'both') telegramUsers.push(uid);
+      }
+
+      // Helper: build notificationId (preserves dedupKey → notif_id transformation
+      // from sendNotification at notification_platform.js:1178-1180).
+      // sendNotification: `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`
+      // Calendar dedupKey: `cal_event_${eventKey}_${uid}`
+      // → notificationId = `notif_cal_event_${eventKey}_${uid}` (sanitized + sliced)
+      const buildNotifId = (uid) => `notif_cal_event_${eventKey}_${uid}`
+        .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+
+      // ── BULK FIX: Bulk INSERT in-app notifications (mini_app channel) ──
+      // Mirrors processBroadcastFull pattern (notification_platform.js:1390-1434).
+      // ON CONFLICT (id) DO NOTHING preserves idempotency (dedupKey → notif_id).
+      // If Worker crashes before dedup write, next tick's INSERT is no-op
+      // (rows already exist) → no duplicates.
+      // created_at omitted → relies on DB DEFAULT NOW() (same as processBroadcastFull).
+      let notifInsertOk = true;
+      if (miniAppUsers.length > 0) {
+        try {
+          const notifIds = miniAppUsers.map(buildNotifId);
+          const userIdsArr = miniAppUsers.map(String);
+          const typesArr = miniAppUsers.map(() => 'calendar');
+          const titlesArr = miniAppUsers.map(() => title);
+          const messagesArr = miniAppUsers.map(() => message);
+          const metadataArr = miniAppUsers.map(() => metadataJson);
+          const readStatusArr = miniAppUsers.map(() => false);
+          const prioritiesArr = miniAppUsers.map(() => 'medium');
+          const categoriesArr = miniAppUsers.map(() => 'calendar');
+          // channel column: 'both' if user is also in telegramUsers (i.e., has
+          // 'both' preference), else 'mini_app'.
+          // Matches sendNotification INSERT at notification_platform.js:1193:
+          //   deliverToTelegram ? 'both' : 'mini_app'
+          const channelsArr = miniAppUsers.map(uid =>
+            telegramUsers.includes(uid) ? 'both' : 'mini_app'
+          );
+          const statusArr = miniAppUsers.map(() => 'delivered');
+
+          await queryDb(env, `
+            INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status)
+            SELECT * FROM unnest(
+              $1::text[],
+              $2::text[],
+              $3::text[],
+              $4::text[],
+              $5::text[],
+              $6::jsonb[],
+              $7::boolean[],
+              $8::text[],
+              $9::text[],
+              $10::text[],
+              $11::text[]
+            )
+            ON CONFLICT (id) DO NOTHING
+          `, [
+            notifIds, userIdsArr, typesArr, titlesArr, messagesArr,
+            metadataArr, readStatusArr, prioritiesArr, categoriesArr, channelsArr, statusArr,
+          ], 1, pool).catch((e) => {
+            console.warn('[CALENDAR] Bulk INSERT notifications failed:', e?.message);
+            notifInsertOk = false;
+          });
+        } catch (e) {
+          console.warn('[CALENDAR] Mini-app notification bulk failed:', e?.message);
+          notifInsertOk = false;
+        }
+      }
+
+      // ── BULK FIX: Bulk INSERT Telegram queue items (telegram channel) ──
+      // Mirrors processBroadcastFull pattern (notification_platform.js:1437-1471).
+      // ON CONFLICT (notification_id, user_id) DO NOTHING preserves idempotency.
+      // processQueue(10) at end of calendar path drains queue with first 10 sends.
+      // Queue payload matches sendNotification's enqueue call
+      // (notification_platform.js:1209): { title, message, telegramExtra }.
+      // Calendar path does NOT set telegramExtra (undefined → omitted by JSON.stringify),
+      // so payload is { title, message } — same as processBroadcastFull.
+      // created_at omitted → relies on DB DEFAULT NOW() (same as processBroadcastFull).
+      let queueInsertOk = true;
+      if (telegramUsers.length > 0) {
+        try {
+          const queueNotifIds = telegramUsers.map(buildNotifId);
+          const userIdsArr = telegramUsers.map(String);
+          const channelsArr = telegramUsers.map(() => 'telegram');
+          const prioritiesArr = telegramUsers.map(() => 'medium');
+          const statusArr = telegramUsers.map(() => 'pending');
+          const payloadsArr = telegramUsers.map(() => JSON.stringify({
+            title,
+            message,
+          }));
+
+          await queryDb(env, `
+            INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload)
+            SELECT * FROM unnest(
+              $1::text[],
+              $2::text[],
+              $3::text[],
+              $4::text[],
+              $5::text[],
+              $6::jsonb[]
+            )
+            ON CONFLICT (notification_id, user_id) DO NOTHING
+          `, [
+            queueNotifIds, userIdsArr, channelsArr, prioritiesArr, statusArr, payloadsArr,
+          ], 1, pool).catch((e) => {
+            console.warn('[CALENDAR] Bulk INSERT queue failed:', e?.message);
+            queueInsertOk = false;
+          });
+        } catch (e) {
+          console.warn('[CALENDAR] Telegram queue bulk failed:', e?.message);
+          queueInsertOk = false;
+        }
+      }
+
+      // ── Dedup key write AFTER bulk INSERTs (crash recovery preserved) ──
+      // NOTIF-FIX: Write dedup key AFTER bulk INSERTs (not before).
+      // If Worker crashes mid-bulk: dedup key NOT written → next cron tick
+      // re-detects the event and retries. ON CONFLICT DO NOTHING on both
+      // INSERTs prevents duplicates on retry.
       // TTL = 4h to cover the 1-hour window + event duration + propagation delay.
+      //
+      // sentForThisEvent computation (accurate, mirrors processBroadcastFull P2 FIX):
+      // A user is "dispatched" if at least one of their channels' INSERT succeeded.
+      //   - 'mini_app' user: dispatched if notifInsertOk
+      //   - 'telegram' user: dispatched if queueInsertOk
+      //   - 'both' user: dispatched if notifInsertOk OR queueInsertOk
+      //   - 'none' user: NOT dispatched (skipped in partition)
+      // If ALL users' INSERTs failed: sentForThisEvent = 0 → dedup NOT written → retry.
+      // If ANY user's INSERT succeeded: sentForThisEvent > 0 → dedup written → event not retried.
+      let sentForThisEvent = 0;
+      for (const uid of allUserIds) {
+        const userChannel = prefMap.get(uid) || 'both';
+        if (userChannel === 'none') continue;
+        const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+        const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+        const inAppOk = deliverToMiniApp && notifInsertOk;
+        const telegramOk = deliverToTelegram && queueInsertOk;
+        if (inAppOk || telegramOk) sentForThisEvent++;
+      }
+
       if (sentForThisEvent > 0) {
         alertedCount.sent++;
         try { await writeAppCache(env, dedupKey, '1', 4 * 3600); } catch {}
