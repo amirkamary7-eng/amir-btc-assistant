@@ -183,6 +183,38 @@ export function createCalendarReminderRepository(deps) {
     return result.rows.length > 0;
   }
 
+  /**
+   * H5-HIGH FIX: Bulk markFired — claim multiple reminders in a SINGLE
+   * DB UPDATE, preserving CAS semantics of markFired:
+   *   - WHERE id IN (...) AND fired_at IS NULL (only unfired reminders claimed)
+   *   - RETURNING id (caller knows which were claimed)
+   *
+   * RETURNS: array of { id, claimed }
+   *   - claimed: true if this invocation's UPDATE returned the reminder's id
+   *   - claimed: false if the reminder was already fired by another invocation
+   *
+   * Mirrors markTriggeredBulk pattern (src/repositories/alerts.js).
+   */
+  async function markFiredBulk(env, reminderIds, pool = null) {
+    if (!reminderIds || reminderIds.length === 0) return [];
+    try {
+      const placeholders = reminderIds.map((_, i) => `$${i + 1}`).join(',');
+      const result = await queryDb(
+        env,
+        `UPDATE calendar_reminders SET fired_at = NOW() WHERE id IN (${placeholders}) AND fired_at IS NULL RETURNING id`,
+        reminderIds.map(Number), 1, pool,
+      );
+      const claimedIds = new Set((result.rows || []).map(r => Number(r.id)));
+      return reminderIds.map(id => ({
+        id: Number(id),
+        claimed: claimedIds.has(Number(id)),
+      }));
+    } catch (e) {
+      console.warn('Calendar reminder markFiredBulk error:', e.message);
+      return reminderIds.map(id => ({ id: Number(id), claimed: false }));
+    }
+  }
+
   function serializeRow(row) {
     return {
       id: Number(row?.id || 0),
@@ -204,6 +236,7 @@ export function createCalendarReminderRepository(deps) {
     listByUser,
     listPending,
     markFired,
+    markFiredBulk,
     cleanupOld,
     serializeRow,
   });

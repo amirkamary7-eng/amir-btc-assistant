@@ -3300,36 +3300,66 @@ test('NOTIF-003 (source): 1-min cron still runs runScheduledAlertsBaseline', () 
 
 test('NOTIF-004 (source): markFired is called AFTER dispatch, not before', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  // Find the calendar reminder dispatch section using brace-counting
-  const loopStart = src.indexOf('for (const reminder of pendingReminders)');
-  assert.ok(loopStart > -1, 'calendar reminder loop must exist');
+  // H5-HIGH FIX: PATH 2 now uses bulk INSERT + markFiredBulk (not per-reminder loop).
+  // Verify the ordering: bulk INSERTs BEFORE markFiredBulk call.
+  const path2Start = src.indexOf('SECOND PATH: Per-user calendar reminders');
+  assert.ok(path2Start > -1, 'PATH 2 must exist');
+  const path2End = src.indexOf('if (alertedCount.sent > 0 || alertedCount.skipped', path2Start);
+  const path2 = src.slice(path2Start, path2End === -1 ? src.length : path2End);
 
-  // Find the closing brace of the for loop (brace counting)
-  let depth = 0;
-  let loopEnd = src.indexOf('{', loopStart);
-  for (let i = loopEnd; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') { depth--; if (depth === 0) { loopEnd = i; break; } }
+  const notifInsertPos = path2.indexOf('INSERT INTO notifications');
+  const queueInsertPos = path2.indexOf('INSERT INTO notification_queue');
+  const markFiredBulkPos = path2.indexOf('calendarReminderRepo.markFiredBulk(env,');
+
+  // If the old per-reminder loop still exists, check its ordering
+  const oldLoopStart = src.indexOf('for (const reminder of pendingReminders)');
+  if (oldLoopStart > -1 && markFiredBulkPos === -1) {
+    // Old per-reminder path — check dispatch before markFired
+    let depth = 0;
+    let loopEnd = src.indexOf('{', oldLoopStart);
+    for (let i = loopEnd; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') { depth--; if (depth === 0) { loopEnd = i; break; } }
+    }
+    const body = src.slice(oldLoopStart, loopEnd);
+    const dispatchPos = body.indexOf('notificationService.create(env');
+    const markFiredPos = body.indexOf('calendarReminderRepo.markFired(env');
+    assert.ok(dispatchPos > -1, 'dispatch must exist in old reminder loop');
+    assert.ok(markFiredPos > -1, 'markFired must exist in old reminder loop');
+    assert.ok(dispatchPos < markFiredPos, 'dispatch must come BEFORE markFired');
+  } else {
+    // New bulk path — check INSERTs before markFiredBulk
+    assert.ok(notifInsertPos > -1, 'bulk notif INSERT must exist in PATH 2');
+    assert.ok(markFiredBulkPos > -1, 'markFiredBulk call must exist in PATH 2');
+    assert.ok(markFiredBulkPos > notifInsertPos, 'markFiredBulk must be AFTER notif INSERT');
+    if (queueInsertPos > -1) {
+      assert.ok(markFiredBulkPos > queueInsertPos, 'markFiredBulk must be AFTER queue INSERT');
+    }
   }
-  const body = src.slice(loopStart, loopEnd);
-
-  // Find positions of dispatch and markFired
-  const dispatchPos = body.indexOf('notificationService.create(env');
-  const markFiredPos = body.indexOf('calendarReminderRepo.markFired(env');
-
-  assert.ok(dispatchPos > -1, 'dispatch (notificationService.create) must exist in reminder loop');
-  assert.ok(markFiredPos > -1, 'markFired must exist in reminder loop');
-  assert.ok(dispatchPos < markFiredPos,
-    'dispatch must come BEFORE markFired (markFired moved to after dispatch)');
 });
 
 test('NOTIF-005 (source): markFired only called on dispatch success', () => {
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
-  // Verify dispatchSuccess flag controls markFired
-  assert.ok(/let dispatchSuccess = false/.test(src),
-    'dispatchSuccess flag must exist');
-  assert.ok(/if \(dispatchSuccess\)\s*\{[\s\S]*?markFired/.test(src),
-    'markFired must only be called when dispatchSuccess is true');
+  // H5-HIGH FIX: PATH 2 now uses bulk pattern. The "dispatch success" check
+  // is done via reminderIdsToMark (only includes reminders where INSERT succeeded
+  // or 'none' pref). markFiredBulk is called with reminderIdsToMark.
+  const path2Start = src.indexOf('SECOND PATH: Per-user calendar reminders');
+  const path2End = src.indexOf('if (alertedCount.sent > 0 || alertedCount.skipped', path2Start);
+  const path2 = src.slice(path2Start, path2End === -1 ? src.length : path2End);
+
+  if (path2.includes('markFiredBulk')) {
+    // New bulk path — verify reminderIdsToMark filters based on INSERT success
+    assert.ok(path2.includes('reminderIdsToMark'),
+      'reminderIdsToMark must exist (filtered list for markFiredBulk)');
+    assert.ok(path2.includes('reminderNotifInsertOk') || path2.includes('notifInsertOk'),
+      'notif INSERT success flag must control which reminders are marked');
+  } else {
+    // Old per-reminder path — check dispatchSuccess flag
+    assert.ok(/let dispatchSuccess = false/.test(src),
+      'dispatchSuccess flag must exist');
+    assert.ok(/if \(dispatchSuccess\)\s*\{[\s\S]*?markFired/.test(src),
+      'markFired must only be called when dispatchSuccess is true');
+  }
 });
 
 test('NOTIF-006 (source): broadcast dedup key written AFTER user loop, not before', () => {
@@ -3378,8 +3408,14 @@ test('NOTIF-009 (source): calendar_reminders calls in worker-proxy pass pool', (
   const src = fs.readFileSync(WORKER_PATH, 'utf8');
   assert.ok(/calendarReminderRepo\.listPending\(env, new Date\(\), pool\)/.test(src),
     'listPending must be called with pool');
-  assert.ok(/calendarReminderRepo\.markFired\(env, reminder\.id, pool\)/.test(src),
-    'markFired must be called with pool');
+  // H5-HIGH FIX: markFired is now markFiredBulk (bulk path). Check either the
+  // old per-reminder markFired(env, reminder.id, pool) or the new bulk
+  // markFiredBulk(env, reminderIdsToMark, pool) — both pass pool.
+  assert.ok(
+    /calendarReminderRepo\.markFired\(env, reminder\.id, pool\)/.test(src) ||
+    /calendarReminderRepo\.markFiredBulk\(env, reminderIdsToMark, pool\)/.test(src),
+    'markFired or markFiredBulk must be called with pool'
+  );
   assert.ok(/calendarReminderRepo\.cleanupOld\(env, pool\)/.test(src),
     'cleanupOld must be called with pool');
 });

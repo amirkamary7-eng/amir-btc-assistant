@@ -12973,83 +12973,204 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
         const pendingReminders = await calendarReminderRepo.listPending(env, new Date(), pool);
         let reminderStats = { dispatched: 0, skipped: 0, failed: 0 };
 
-        for (const reminder of pendingReminders) {
-          // NOTIF-FIX: Dispatch BEFORE markFired to prevent lost reminders on crash.
+        if (pendingReminders.length > 0) {
+          // ── H5-HIGH FIX: Bulk PATH 2 — replaces per-reminder notificationService.create ──
+          // Same pattern as Calendar Broadcast PATH 1 (commit 4e02940) and
+          // Price Alert H5-HIGH (commit 8ecf7f2).
           //
-          // Previous order: markFired → dispatch
-          //   - If Worker crashed between markFired and dispatch, the reminder
-          //     was permanently lost (fired_at set, no notification sent).
+          // Per-reminder cost was: pref SELECT(1 DB) + notif INSERT(1 DB) +
+          // queue INSERT(1 DB) + processQueue(3)(1-7) + markFired(1 DB) = 5-11.
+          // With 200 reminders (listPending LIMIT): 1 + 200×11 = 2201 subrequests ❌.
+          // After bulk: 1 + 1 + 1 + 1 + 1 + 21 = 26 subrequests (constant) ✅.
           //
-          // New order: dispatch → markFired
-          //   - If Worker crashes before dispatch: reminder stays pending → retried
-          //   - If Worker crashes after dispatch but before markFired:
-          //     * notification_queue already has the item (idempotent via UNIQUE)
-          //     * Next cron tick re-lists the reminder → re-dispatches
-          //     * enqueue: ON CONFLICT DO NOTHING → no duplicate queue row
-          //     * processQueue: telegram_message_id check → skip if already sent
-          //     * markFired: CAS (WHERE fired_at IS NULL) → first success claims it
-          //   - If dispatch fails (error): markFired is NOT called → retried next tick
-          //
-          // Duplicate safety (verified):
-          //   - dedupKey = `cal_reminder_${reminder.id}_${reminder.user_id}` (deterministic)
-          //   - notifications INSERT: ON CONFLICT (id) DO NOTHING
-          //   - notification_queue INSERT: ON CONFLICT (notification_id, user_id) DO NOTHING
-          //   - UNIQUE constraint uq_notification_queue_dedup at DB level
-          //   - markFired CAS: WHERE fired_at IS NULL (only one tick can claim)
+          // Order (crash recovery preserved):
+          //   1. Batch pref lookup → 2. Partition → 3. Bulk notif INSERT →
+          //   4. Bulk queue INSERT → 5. markFiredBulk → 6. processQueue(10)
+          // If INSERT fails: reminders NOT marked → retried next tick.
+          // If INSERT succeeds + Worker killed before markFiredBulk:
+          //   Next tick re-dispatches → ON CONFLICT DO NOTHING (no-op) → markFiredBulk claims.
 
-          const title = `🔔 یادآوری رویداد: ${reminder.event_title || 'تقویم اقتصادی'}`;
-          const message = `${reminder.event_country || ''} ${reminder.event_timestamp ? '— ' + new Date(reminder.event_timestamp).toLocaleString('en-GB') : ''}`;
+          // 1. Collect all user IDs from pending reminders
+          const allReminderUserIds = [...new Set(pendingReminders.map(r => String(r.user_id)))];
 
-          let dispatchSuccess = false;
-          try {
-            const dispatchResult = await notificationService.create(env, {
-              userId: String(reminder.user_id),
-              title, message,
-              category: 'calendar',
-              priority: 'medium',
-              channel: 'both',
-              metadata: {
-                event_title: reminder.event_title,
-                event_timestamp: reminder.event_timestamp,
-                event_country: reminder.event_country,
-                lead_minutes: reminder.lead_minutes,
-                reminder_id: reminder.id,
-              },
-              dedupKey: `cal_reminder_${reminder.id}_${reminder.user_id}`,
-            }, pool);
-            if (dispatchResult && dispatchResult.status !== 'filtered') {
-              dispatchSuccess = true;
-              reminderStats.dispatched++;
-            } else {
-              reminderStats.skipped++;
-              // User filtered out — still mark as fired (no retry needed)
-              dispatchSuccess = true;
+          // 2. Batch preference lookup (1 DB SELECT, replaces N per-reminder getUserChannelPreference)
+          const reminderPrefMap = new Map();
+          if (allReminderUserIds.length > 0) {
+            const remPlaceholders = allReminderUserIds.map((_, i) => `$${i + 1}`).join(',');
+            const remPrefResult = await queryDb(env,
+              `SELECT user_id, ch_calendar AS pref FROM notification_settings WHERE user_id IN (${remPlaceholders})`,
+              allReminderUserIds, 1, pool
+            ).catch(() => ({ rows: [] }));
+            for (const row of remPrefResult.rows || []) {
+              reminderPrefMap.set(String(row.user_id), String(row.pref));
             }
-          } catch (dispatchErr) {
-            // Per-user dispatch failure — don't abort the batch
-            console.warn(safeError('calendar-reminder-dispatch', dispatchErr));
-            reminderStats.failed++;
-            // dispatchSuccess stays false → markFired NOT called → retried next tick
           }
 
-          // Only mark as fired AFTER successful dispatch (or user filtered out).
-          // If dispatch failed, leave fired_at NULL so next cron tick retries.
-          // markFired is idempotent (CAS: WHERE fired_at IS NULL) — safe even
-          // if a previous retry already marked it.
-          if (dispatchSuccess) {
+          // 3. Partition reminders by delivery channel (same semantics as PATH 1)
+          const miniAppReminders = [];
+          const telegramReminders = [];
+          for (const reminder of pendingReminders) {
+            const userChannel = reminderPrefMap.get(String(reminder.user_id)) || 'both';
+            reminder._userChannel = userChannel;
+            if (userChannel === 'none') continue;
+            if (userChannel === 'mini_app' || userChannel === 'both') miniAppReminders.push(reminder);
+            if (userChannel === 'telegram' || userChannel === 'both') telegramReminders.push(reminder);
+          }
+
+          // Helpers (preserve exact title/message/metadata/dedupKey from per-reminder path)
+          const buildReminderTitle = (r) => `🔔 یادآوری رویداد: ${r.event_title || 'تقویم اقتصادی'}`;
+          const buildReminderMessage = (r) => `${r.event_country || ''} ${r.event_timestamp ? '— ' + new Date(r.event_timestamp).toLocaleString('en-GB') : ''}`;
+          const buildReminderMetadata = (r) => JSON.stringify({
+            event_title: r.event_title,
+            event_timestamp: r.event_timestamp,
+            event_country: r.event_country,
+            lead_minutes: r.lead_minutes,
+            reminder_id: r.id,
+          });
+          // Notification ID: same transformation as sendNotification
+          // dedupKey: `cal_reminder_${reminder.id}_${reminder.user_id}`
+          // → notif_id: `notif_cal_reminder_${reminder.id}_${reminder.user_id}` (sanitized + sliced)
+          const buildReminderNotifId = (r) => `notif_cal_reminder_${r.id}_${r.user_id}`
+            .replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+
+          // 4. Bulk INSERT in-app notifications (mini_app channel)
+          let reminderNotifInsertOk = true;
+          if (miniAppReminders.length > 0) {
             try {
-              await calendarReminderRepo.markFired(env, reminder.id, pool);
-            } catch (markFiredErr) {
-              // markFired failed (e.g., transient DB error) — the notification
-              // was already dispatched, so this is not critical. Next tick will
-              // re-dispatch (idempotent no-op) and retry markFired.
-              console.warn(safeError('calendar-reminder-markFired', markFiredErr));
+              const rNotifIds = miniAppReminders.map(buildReminderNotifId);
+              const rUserIds = miniAppReminders.map(r => String(r.user_id));
+              const rTypes = miniAppReminders.map(() => 'calendar');
+              const rTitles = miniAppReminders.map(buildReminderTitle);
+              const rMessages = miniAppReminders.map(buildReminderMessage);
+              const rMetadata = miniAppReminders.map(buildReminderMetadata);
+              const rReadStatus = miniAppReminders.map(() => false);
+              const rPriorities = miniAppReminders.map(() => 'medium');
+              const rCategories = miniAppReminders.map(() => 'calendar');
+              const rChannels = miniAppReminders.map(r =>
+                r._userChannel === 'both' ? 'both' : 'mini_app'
+              );
+              const rStatus = miniAppReminders.map(() => 'delivered');
+
+              await queryDb(env, `
+                INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status)
+                SELECT * FROM unnest(
+                  $1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
+                  $6::jsonb[], $7::boolean[], $8::text[], $9::text[], $10::text[], $11::text[]
+                )
+                ON CONFLICT (id) DO NOTHING
+              `, [
+                rNotifIds, rUserIds, rTypes, rTitles, rMessages,
+                rMetadata, rReadStatus, rPriorities, rCategories, rChannels, rStatus,
+              ], 1, pool).catch((e) => {
+                console.warn('[CALENDAR-REMINDER] Bulk INSERT notifications failed:', e?.message);
+                reminderNotifInsertOk = false;
+              });
+            } catch (e) {
+              console.warn('[CALENDAR-REMINDER] Notification bulk failed:', e?.message);
+              reminderNotifInsertOk = false;
+            }
+          }
+
+          // 5. Bulk INSERT Telegram queue items (telegram channel)
+          let reminderQueueInsertOk = true;
+          if (telegramReminders.length > 0) {
+            try {
+              const rQueueNotifIds = telegramReminders.map(buildReminderNotifId);
+              const rQueueUserIds = telegramReminders.map(r => String(r.user_id));
+              const rQueueChannels = telegramReminders.map(() => 'telegram');
+              const rQueuePriorities = telegramReminders.map(() => 'medium');
+              const rQueueStatus = telegramReminders.map(() => 'pending');
+              const rQueuePayloads = telegramReminders.map(r => JSON.stringify({
+                title: buildReminderTitle(r),
+                message: buildReminderMessage(r),
+              }));
+
+              await queryDb(env, `
+                INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload)
+                SELECT * FROM unnest(
+                  $1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::jsonb[]
+                )
+                ON CONFLICT (notification_id, user_id) DO NOTHING
+              `, [
+                rQueueNotifIds, rQueueUserIds, rQueueChannels, rQueuePriorities, rQueueStatus, rQueuePayloads,
+              ], 1, pool).catch((e) => {
+                console.warn('[CALENDAR-REMINDER] Bulk INSERT queue failed:', e?.message);
+                reminderQueueInsertOk = false;
+              });
+            } catch (e) {
+              console.warn('[CALENDAR-REMINDER] Queue bulk failed:', e?.message);
+              reminderQueueInsertOk = false;
+            }
+          }
+
+          // 6. markFiredBulk — AFTER INSERTs (crash recovery preserved)
+          // Only mark reminders where dispatch "succeeded" (INSERT succeeded OR 'none' pref).
+          // If INSERT failed: reminder NOT marked → stays pending → retried next tick.
+          // 'none' pref reminders: no INSERT needed, but mark as fired (user opted out).
+          const reminderIdsToMark = [];
+          for (const reminder of pendingReminders) {
+            const userChannel = reminder._userChannel || 'both';
+            if (userChannel === 'none') {
+              // User opted out — mark as fired (no retry needed)
+              reminderIdsToMark.push(reminder.id);
+              continue;
+            }
+            const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+            const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+            const inAppOk = deliverToMiniApp && reminderNotifInsertOk;
+            const telegramOk = deliverToTelegram && reminderQueueInsertOk;
+            if (inAppOk || telegramOk) {
+              reminderIdsToMark.push(reminder.id);
+            }
+            // If both INSERTs failed: don't mark → retried next tick
+          }
+
+          let reminderClaimedIds = new Set();
+          if (reminderIdsToMark.length > 0 && typeof calendarReminderRepo.markFiredBulk === 'function') {
+            try {
+              const markResults = await calendarReminderRepo.markFiredBulk(env, reminderIdsToMark, pool);
+              reminderClaimedIds = new Set(
+                markResults.filter(r => r.claimed).map(r => Number(r.id))
+              );
+            } catch (e) {
+              console.warn(safeError('calendar-reminder-markFiredBulk', e));
+            }
+          }
+
+          // 7. Count delivery outcomes + triggered_count
+          for (const reminder of pendingReminders) {
+            const userChannel = reminder._userChannel || 'both';
+            const wasMarked = reminderClaimedIds.has(Number(reminder.id));
+
+            if (userChannel === 'none') {
+              if (wasMarked) reminderStats.skipped++;
+              else reminderStats.failed++;
+              continue;
+            }
+
+            const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
+            const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+            const inAppOk = deliverToMiniApp && reminderNotifInsertOk;
+            const telegramOk = deliverToTelegram && reminderQueueInsertOk;
+
+            if (inAppOk || telegramOk) {
+              if (wasMarked) reminderStats.dispatched++;
+              else reminderStats.failed++; // markFired failed — notification sent but mark failed
+            } else {
+              reminderStats.failed++; // INSERT failed — not marked, will retry
+            }
+          }
+
+          // 8. processQueue(10) at end of PATH 2 (drains enqueued Telegram items)
+          // Same pattern as PATH 1's processQueue(10) — bounded, controlled batch.
+          if (reminderStats.dispatched > 0 && notificationPlatformRepo?.processQueue) {
+            try {
+              await notificationPlatformRepo.processQueue(env, sendTelegramMessage, pool, 10);
+            } catch (_) {
+              // Non-fatal — cron will pick up enqueued items on the next tick
             }
           }
         }
-
-        if (pendingReminders.length > 0) {
-                  }
 
         // Cleanup old reminders (fired + event passed >24h) on 15-min ticks
         // to prevent the table from growing indefinitely.
