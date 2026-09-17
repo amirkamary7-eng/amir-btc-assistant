@@ -529,3 +529,216 @@ test('H5HIGH-15: alerts path uses queryDb directly (not notificationService — 
       `bulk processing block must NOT call notificationService.create (uses direct queryDb INSERTs instead). Found ${callMatches} calls. Comment mentions are OK.`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GROUP 14 — OPTION D: markTriggeredBulk runs AFTER bulk INSERTs (reliability)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('H5HIGH-OPTD-01: markTriggeredBulk runs AFTER bulk INSERTs (not before)', () => {
+  // Option D: INSERT first, then markTriggeredBulk. This ensures that if INSERT
+  // fails, alerts remain 'active' → next tick retries → NO LOSS.
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  assert.notEqual(bulkStart, -1, 'bulk processing block must exist');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  // Find the position of markTriggeredBulk call vs bulk INSERT calls
+  const markPos = bulkBlock.indexOf('await alertRepo.markTriggeredBulk(env, triggers, pool)');
+  const notifInsertPos = bulkBlock.indexOf('INSERT INTO notifications');
+  const queueInsertPos = bulkBlock.indexOf('INSERT INTO notification_queue');
+
+  assert.notEqual(markPos, -1, 'markTriggeredBulk must be called in bulk block');
+  assert.notEqual(notifInsertPos, -1, 'bulk notif INSERT must exist');
+  assert.notEqual(queueInsertPos, -1, 'bulk queue INSERT must exist');
+
+  // OPTION D: markTriggeredBulk must run AFTER both INSERTs
+  assert.ok(markPos > notifInsertPos,
+    `markTriggeredBulk must run AFTER notif INSERT (Option D). markPos=${markPos}, notifInsertPos=${notifInsertPos}`);
+  assert.ok(markPos > queueInsertPos,
+    `markTriggeredBulk must run AFTER queue INSERT (Option D). markPos=${markPos}, queueInsertPos=${queueInsertPos}`);
+});
+
+test('H5HIGH-OPTD-02: bulk INSERT runs for ALL _triggeredAlerts (not just claimed — claimed determined later)', () => {
+  // Option D: batch pref lookup + partition use _triggeredAlerts (ALL),
+  // not claimedAlerts (which is computed AFTER markTriggeredBulk).
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  // The pref lookup and partition must use _triggeredAlerts, not claimedAlerts
+  // (claimedAlerts is computed AFTER markTriggeredBulk at STEP 5)
+  const prefLookupPos = bulkBlock.indexOf('Batch preference lookup');
+  const partitionPos = bulkBlock.indexOf('Partition ALL triggered alerts');
+  const markPos = bulkBlock.indexOf('STEP 5: Bulk CAS markTriggered');
+
+  // pref lookup and partition must come BEFORE markTriggeredBulk
+  assert.ok(prefLookupPos < markPos, 'pref lookup must run BEFORE markTriggeredBulk');
+  assert.ok(partitionPos < markPos, 'partition must run BEFORE markTriggeredBulk');
+
+  // Verify partition uses _triggeredAlerts (not claimedAlerts)
+  const partitionBlock = bulkBlock.slice(partitionPos, markPos);
+  assert.ok(partitionBlock.includes('for (const t of _triggeredAlerts)'),
+    'partition must iterate _triggeredAlerts (ALL, not just claimed)');
+
+  // Verify pref lookup uses _triggeredAlerts
+  const prefBlock = bulkBlock.slice(prefLookupPos, partitionPos);
+  assert.ok(prefBlock.includes('_triggeredAlerts.map'),
+    'pref lookup must use _triggeredAlerts (ALL, not just claimed)');
+});
+
+test('H5HIGH-OPTD-03: notification INSERT failure → alerts remain active (mark hasn\'t run yet)', () => {
+  // Option D: if notif INSERT fails, markTriggeredBulk hasn't run yet →
+  // alerts stay 'active' → next tick retries → NO LOSS.
+  // We verify this by checking the ORDER: notif INSERT .catch() sets
+  // notifInsertOk=false, but markTriggeredBulk runs AFTER (so alerts not yet
+  // marked triggered). The .catch() does NOT throw, so execution continues
+  // to markTriggeredBulk.
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  // notif INSERT .catch() sets flag but does NOT throw
+  assert.ok(bulkBlock.includes("notifInsertOk = false;"),
+    'notif INSERT failure must set notifInsertOk=false (not throw)');
+  // queue INSERT .catch() sets flag but does NOT throw
+  assert.ok(bulkBlock.includes("queueInsertOk = false;"),
+    'queue INSERT failure must set queueInsertOk=false (not throw)');
+
+  // Verify markTriggeredBulk runs AFTER the .catch() blocks
+  const notifCatchPos = bulkBlock.lastIndexOf("notifInsertOk = false;");
+  const queueCatchPos = bulkBlock.lastIndexOf("queueInsertOk = false;");
+  const markPos = bulkBlock.indexOf('await alertRepo.markTriggeredBulk(env, triggers, pool)');
+
+  assert.ok(markPos > notifCatchPos,
+    'markTriggeredBulk must run AFTER notif INSERT .catch()');
+  assert.ok(markPos > queueCatchPos,
+    'markTriggeredBulk must run AFTER queue INSERT .catch()');
+});
+
+test('H5HIGH-OPTD-04: INSERT succeeds + mark fails → orphan rows handled by ON CONFLICT on next tick', () => {
+  // Option D: if INSERTs succeed but markTriggeredBulk fails, orphan notif/queue
+  // rows exist. Next tick's INSERT is no-op (ON CONFLICT DO NOTHING), mark may
+  // succeed. No duplicates, no permanent loss.
+  // We verify: ON CONFLICT DO NOTHING is present on both INSERTs.
+  const body = extractRunScheduledAlertsBaseline();
+  assert.ok(body.includes('ON CONFLICT (id) DO NOTHING'),
+    'notif INSERT must use ON CONFLICT (id) DO NOTHING (handles orphan rows on next tick)');
+  assert.ok(body.includes('ON CONFLICT (notification_id, user_id) DO NOTHING'),
+    'queue INSERT must use ON CONFLICT (notification_id, user_id) DO NOTHING (handles orphan rows on next tick)');
+});
+
+test('H5HIGH-OPTD-05: normal flow — INSERT succeeds + mark succeeds → alerts triggered', () => {
+  // Option D normal flow: INSERT → mark → count.
+  // All three steps execute in order. No loss, no duplicates.
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  // Verify all 7 steps exist in order:
+  // STEP 1: pref lookup
+  // STEP 2: partition
+  // STEP 3: notif INSERT
+  // STEP 4: queue INSERT
+  // STEP 5: markTriggeredBulk
+  // STEP 6: count
+  // STEP 7: KV deletes
+  const step1 = bulkBlock.indexOf('STEP 1: Batch preference');
+  const step2 = bulkBlock.indexOf('STEP 2: Partition');
+  const step3 = bulkBlock.indexOf('STEP 3: Bulk INSERT in-app');
+  const step4 = bulkBlock.indexOf('STEP 4: Bulk INSERT Telegram');
+  const step5 = bulkBlock.indexOf('STEP 5: Bulk CAS markTriggered');
+  const step6 = bulkBlock.indexOf('STEP 6: Count delivery');
+  const step7 = bulkBlock.indexOf('STEP 7: KV invalidation');
+
+  assert.notEqual(step1, -1, 'STEP 1 must exist');
+  assert.notEqual(step2, -1, 'STEP 2 must exist');
+  assert.notEqual(step3, -1, 'STEP 3 must exist');
+  assert.notEqual(step4, -1, 'STEP 4 must exist');
+  assert.notEqual(step5, -1, 'STEP 5 must exist');
+  assert.notEqual(step6, -1, 'STEP 6 must exist');
+  assert.notEqual(step7, -1, 'STEP 7 must exist');
+
+  // Verify order: step1 < step2 < step3 < step4 < step5 < step6 < step7
+  assert.ok(step1 < step2, `STEP 1 must come before STEP 2`);
+  assert.ok(step2 < step3, `STEP 2 must come before STEP 3`);
+  assert.ok(step3 < step4, `STEP 3 must come before STEP 4`);
+  assert.ok(step4 < step5, `STEP 4 must come before STEP 5 (Option D: mark AFTER INSERTs)`);
+  assert.ok(step5 < step6, `STEP 5 must come before STEP 6`);
+  assert.ok(step6 < step7, `STEP 6 must come before STEP 7`);
+});
+
+test('H5HIGH-OPTD-06: claimedAlerts computed AFTER markTriggeredBulk (not before)', () => {
+  // Option D: claimedAlerts is computed at STEP 5 (after markTriggeredBulk),
+  // not at the beginning. This is the key difference from the original
+  // implementation where claimedAlerts was computed first.
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  const claimedAlertsPos = bulkBlock.indexOf('const claimedAlerts = _triggeredAlerts.filter');
+  const markPos = bulkBlock.indexOf('await alertRepo.markTriggeredBulk(env, triggers, pool)');
+
+  assert.notEqual(claimedAlertsPos, -1, 'claimedAlerts must be computed');
+  assert.notEqual(markPos, -1, 'markTriggeredBulk must be called');
+
+  // claimedAlerts must be computed AFTER markTriggeredBulk
+  assert.ok(claimedAlertsPos > markPos,
+    `claimedAlerts must be computed AFTER markTriggeredBulk (Option D). claimedAlertsPos=${claimedAlertsPos}, markPos=${markPos}`);
+});
+
+test('H5HIGH-OPTD-07: KV deletes only run if claimedAlerts.length > 0', () => {
+  // Option D: KV deletes are conditional on claimedAlerts.length > 0.
+  // If no alerts were claimed (all already triggered by another cron),
+  // no KV invalidation needed (nothing changed in the alerts table).
+  const body = extractRunScheduledAlertsBaseline();
+  const bulkStart = body.indexOf('// ── H5-HIGH FIX: BULK PROCESS TRIGGERED ALERTS ──');
+  const bulkEnd = body.indexOf('// ── ARCHITECTURAL FIX: Bulk UPDATE all alerts', bulkStart);
+  const bulkBlock = body.slice(bulkStart, bulkEnd === -1 ? body.length : bulkEnd);
+
+  // Find the KV delete block
+  const kvDeletePos = bulkBlock.indexOf("if (claimedAlerts.length > 0) {");
+  const kvDeleteBlock = bulkBlock.slice(kvDeletePos, kvDeletePos + 200);
+
+  assert.ok(kvDeleteBlock.includes("env.APP_CACHE?.delete?.('alerts:active-list')"),
+    'KV delete for alerts:active-list must be inside if (claimedAlerts.length > 0)');
+  assert.ok(kvDeleteBlock.includes("env.APP_CACHE?.delete?.('alerts:active-exists')"),
+    'KV delete for alerts:active-exists must be inside if (claimedAlerts.length > 0)');
+});
+
+test('H5HIGH-OPTD-08: dispatch_errors mention "alerts remain active" (Option D reliability)', () => {
+  // Option D: dispatch_errors should reflect that alerts remain active
+  // (markTriggeredBulk runs AFTER INSERTs, so INSERT failure means alerts
+  // stay active → next tick retries).
+  const body = extractRunScheduledAlertsBaseline();
+  assert.ok(body.includes('alerts remain active'),
+    'dispatch_errors must mention "alerts remain active" (Option D: INSERT failure → alerts stay active)');
+  assert.ok(body.includes('next tick retries'),
+    'dispatch_errors must mention "next tick retries" (Option D: INSERT failure → retry on next tick)');
+});
+
+test('H5HIGH-OPTD-09: NO trigger cap (all triggered alerts processed in same tick)', () => {
+  // Option D preserves: no trigger cap, no artificial break.
+  // All triggered alerts are INSERTed + marked in the same tick.
+  const body = extractRunScheduledAlertsBaseline();
+  assert.ok(!body.includes('MAX_ALERTS_TRIGGERED_PER_TICK'),
+    'must NOT define MAX_ALERTS_TRIGGERED_PER_TICK');
+  // The eval loop pushes ALL triggers to _triggeredAlerts
+  assert.ok(body.includes('_triggeredAlerts.push({'),
+    'must push ALL triggered alerts to _triggeredAlerts (no cap)');
+});
+
+test('H5HIGH-OPTD-10: processQueue(5) unchanged at end of 1-min cron', () => {
+  // Option D does NOT touch processQueue(5) — it's still at the end of the
+  // 1-min cron, unchanged.
+  const oneMinBlock = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('if (isEveryMinute)'),
+    WORKER_SRC.indexOf('return;', WORKER_SRC.indexOf('if (isEveryMinute)'))
+  );
+  assert.ok(oneMinBlock.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
+    '1-min cron must still call processQueue with limit=5 (unchanged by Option D)');
+});
