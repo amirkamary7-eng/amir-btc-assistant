@@ -35,10 +35,16 @@ test('DO-MONITOR-01: getNewsAIMonitoring tries DO getStates before KV', () => {
   assert.ok(doPathIdx < kvFallbackIdx, 'DO path must come BEFORE KV fallback');
 });
 
-test('DO-MONITOR-02: DO path is gated on env.GROQ_ROUTER_DO availability', () => {
+test('DO-MONITOR-02: DO path is gated on env.GROQ_ROUTER_DO.idFromName availability', () => {
+  // FIX: DurableObjectNamespace does NOT have .fetch() — that's on the stub.
+  // Must check .idFromName (a method on the namespace itself).
   assert.ok(
-    WORKER_SRC.includes("env.GROQ_ROUTER_DO && typeof env.GROQ_ROUTER_DO.fetch === 'function'"),
-    'DO path must check GROQ_ROUTER_DO binding availability'
+    WORKER_SRC.includes("typeof env.GROQ_ROUTER_DO.idFromName === 'function'"),
+    'DO path must check GROQ_ROUTER_DO.idFromName (NOT .fetch — .fetch is on the stub, not the namespace)'
+  );
+  assert.ok(
+    !WORKER_SRC.includes("typeof env.GROQ_ROUTER_DO.fetch === 'function'"),
+    'Must NOT use old .fetch check (always false on DurableObjectNamespace in ES Module API)'
   );
 });
 
@@ -191,18 +197,36 @@ test('DO-MONITOR-15: DO getStates sends correct keyIndices', () => {
 });
 
 test('DO-MONITOR-16: DO response ok-status is checked before json() parse', () => {
-  // If the DO returns a non-OK HTTP status (4xx/5xx), the code must NOT
-  // attempt to parse the response body as JSON. It must throw and fall
-  // through to the catch → KV fallback.
   const doPathSection = WORKER_SRC.slice(
     WORKER_SRC.indexOf('// Try DO path first'),
     WORKER_SRC.indexOf('// KV fallback')
   );
-  // The !statesRes.ok check must appear BEFORE statesRes.json()
   const okIdx = doPathSection.indexOf('!statesRes.ok');
   const jsonIdx = doPathSection.indexOf('statesRes.json()');
   assert.ok(okIdx > 0, 'Must have !statesRes.ok guard');
   assert.ok(jsonIdx > 0, 'Must call statesRes.json()');
   assert.ok(okIdx < jsonIdx, '!statesRes.ok guard must come BEFORE statesRes.json()');
   assert.ok(doPathSection.includes('throw new Error'), 'Non-OK response must throw (caught by catch → KV fallback)');
+});
+
+test('DO-MONITOR-17: No diagnostic [DO-DIAG] logs remain in source', () => {
+  assert.ok(!WORKER_SRC.includes('DO-DIAG'), 'Diagnostic logs must be removed');
+  assert.ok(!WORKER_SRC.includes('_doCond'), 'Temporary _doCond variable must be removed');
+  assert.ok(!WORKER_SRC.includes('_diagStates'), 'Temporary _diagStates variable must be removed');
+});
+
+test('DO-MONITOR-18: groqRouterExecute uses .idFromName check (not .fetch)', () => {
+  // The routing code must also use the correct check
+  const routerSection = WORKER_SRC.slice(
+    WORKER_SRC.indexOf('async function groqRouterExecute'),
+    WORKER_SRC.indexOf('async function groqRouterExecute') + 2000
+  );
+  assert.ok(
+    routerSection.includes("typeof env.GROQ_ROUTER_DO.idFromName === 'function'"),
+    'groqRouterExecute must use .idFromName check (NOT .fetch)'
+  );
+  assert.ok(
+    !routerSection.includes("typeof env.GROQ_ROUTER_DO.fetch === 'function'"),
+    'groqRouterExecute must NOT use old .fetch check'
+  );
 });
