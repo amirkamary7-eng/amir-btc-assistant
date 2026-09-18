@@ -9462,26 +9462,76 @@ async function getNewsAIMonitoring(env) {
   // ── GROQ-ROUTER-4KEY: Per-key router state (groq:router:key{0..3}) ──
   // Surface all 4 potential key slots so operators can see which key is
   // OPEN/cooldown and which is healthy.
-  const groqRouterKeys = [];
-  for (let i = 0; i < 4; i++) {
-    const s = await _groqRouterGetKeyState(env, i);
-    const cooldownRemainingS = s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0;
-    groqRouterKeys.push({
-      index: i,
-      configured: i === 0 ? Boolean(env.GROQ_API_KEY)
-        : i === 1 ? Boolean(env.GROQ_API_KEY_1)
-        : i === 2 ? Boolean(env.GROQ_API_KEY_2)
-        : Boolean(env.GROQ_API_KEY_3),
-      state: s.state,
-      consecutive_failures: s.consecutive_failures || 0,
-      retry_after: s.retry_after,
-      cooldown_remaining_s: cooldownRemainingS,
-      probe_failures: s.probe_failures || 0,
-      quota_type: s.quota_type || null,
-      last_failure_reason: s.last_failure_reason || null,
-      window_requests_count: (s.window_requests || []).length,
-      window_max: GROQ_ROUTER_MAX_PER_WINDOW,
-    });
+  //
+  // MONITORING FIX: When GROQ_ROUTER_DO is available, read key states from
+  // the DO (authoritative — the DO maintains its own SQLite state that the
+  // KV path does NOT update when the DO path is active). Falls back to KV
+  // when DO is unavailable or the getStates call fails.
+  let groq_router_source = 'kv_fallback';
+  let groqRouterKeys = [];
+
+  // Try DO path first (authoritative when DO binding is active in production)
+  if (env.GROQ_ROUTER_DO && typeof env.GROQ_ROUTER_DO.fetch === 'function') {
+    try {
+      const keyIndices = [0, 1, 2, 3];
+      const doId = env.GROQ_ROUTER_DO.idFromName('groq-router');
+      const doStub = env.GROQ_ROUTER_DO.get(doId);
+      const statesRes = await doStub.fetch('https://do/?action=getStates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyIndices }),
+      });
+      if (!statesRes.ok) throw new Error(`DO getStates HTTP ${statesRes.status}`);
+      const statesData = await statesRes.json();
+      if (statesData.states && Array.isArray(statesData.states) && statesData.states.length > 0) {
+        groq_router_source = 'durable_object';
+        for (const s of statesData.states) {
+          const cooldownRemainingS = s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0;
+          groqRouterKeys.push({
+            index: s.index,
+            configured: s.index === 0 ? Boolean(env.GROQ_API_KEY)
+              : s.index === 1 ? Boolean(env.GROQ_API_KEY_1)
+              : s.index === 2 ? Boolean(env.GROQ_API_KEY_2)
+              : Boolean(env.GROQ_API_KEY_3),
+            state: s.state,
+            consecutive_failures: s.consecutive_failures || 0,
+            retry_after: s.retry_after,
+            cooldown_remaining_s: cooldownRemainingS,
+            probe_failures: s.probe_failures || 0,
+            quota_type: s.quota_type || null,
+            last_failure_reason: s.last_failure_reason || null,
+            window_requests_count: s.window_requests || 0,
+            window_max: GROQ_ROUTER_MAX_PER_WINDOW,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[NEWS-AI-MONITOR] DO getStates failed, falling back to KV:', e?.message);
+    }
+  }
+
+  // KV fallback: if DO path failed, was unavailable, or returned empty results
+  if (groqRouterKeys.length === 0) {
+    for (let i = 0; i < 4; i++) {
+      const s = await _groqRouterGetKeyState(env, i);
+      const cooldownRemainingS = s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0;
+      groqRouterKeys.push({
+        index: i,
+        configured: i === 0 ? Boolean(env.GROQ_API_KEY)
+          : i === 1 ? Boolean(env.GROQ_API_KEY_1)
+          : i === 2 ? Boolean(env.GROQ_API_KEY_2)
+          : Boolean(env.GROQ_API_KEY_3),
+        state: s.state,
+        consecutive_failures: s.consecutive_failures || 0,
+        retry_after: s.retry_after,
+        cooldown_remaining_s: cooldownRemainingS,
+        probe_failures: s.probe_failures || 0,
+        quota_type: s.quota_type || null,
+        last_failure_reason: s.last_failure_reason || null,
+        window_requests_count: (s.window_requests || []).length,
+        window_max: GROQ_ROUTER_MAX_PER_WINDOW,
+      });
+    }
   }
 
   // ── H4 FIX: Cache stats from Postgres (news_ai_tick_log) instead of KV RMW ──
@@ -9568,6 +9618,9 @@ async function getNewsAIMonitoring(env) {
     circuit_breaker_open_count: circuitOpenCount,
     // GROQ-ROUTER-4KEY: Per-key Groq router state (replaces old groq-key0/groq-key1 circuits)
     groq_router_keys: groqRouterKeys,
+    // MONITORING FIX: Source of groq_router_keys — 'durable_object' (authoritative)
+    // or 'kv_fallback' (may be stale when DO path is active in production).
+    groq_router_source: groq_router_source,
     // Phase 10.5: Summary Cache stats
     summary_cache_hits: cacheHits,
     summary_cache_misses: cacheMisses,
@@ -14394,6 +14447,7 @@ class GroqRouterDO {
         states.push({
           index: idx, state: s.state,
           consecutive_failures: s.consecutive_failures,
+          probe_failures: s.probe_failures || 0,
           window_requests: s.window_requests.length,
           retry_after: s.retry_after,
           quota_type: s.quota_type,
