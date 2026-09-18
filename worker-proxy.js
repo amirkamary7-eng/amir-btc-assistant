@@ -7527,21 +7527,10 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
 // ── Cache stats (Phase 10.5) ──
 const NEWS_AI_CACHE_STATS_KEY = 'news:ai_cache_stats';
 
+// H4 FIX: recordCacheStat KV RMW removed — telemetry now in recordNewsAITick (Postgres).
+// Function kept as no-op for backward compat (defensive: in case any code path still calls it).
 async function recordCacheStat(env, hit) {
-  if (!env.APP_CACHE) return;
-  try {
-    const raw = await readAppCache(env, NEWS_AI_CACHE_STATS_KEY).catch(() => null);
-    let stats = { hits: 0, misses: 0, updated_at: null };
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') stats = { ...stats, ...parsed };
-    }
-    if (hit) stats.hits++; else stats.misses++;
-    stats.updated_at = Date.now();
-    await writeAppCache(env, NEWS_AI_CACHE_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
-  } catch (e) {
-    console.warn('[CACHE-STATS] recordCacheStat failed:', e?.message);
-  }
+  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
 }
 
 /**
@@ -7750,66 +7739,19 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
  * success/failure counts for the monitoring dashboard. The 'groq' bucket here
  * aggregates ALL router successes/failures (regardless of which key was used).
  */
+// H4 FIX: recordProviderAttempt KV RMW removed — telemetry now in recordNewsAITick (Postgres).
+// Function kept as no-op for backward compat.
 async function recordProviderAttempt(env, provider, success, durationMs) {
-  if (!env.APP_CACHE) return;
-  try {
-    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
-    let stats = {
-      groq: { success: 0, failed: 0, total_ms: 0 },
-      'workers-ai': { success: 0, failed: 0, total_ms: 0 },
-      'openrouter': { success: 0, failed: 0, total_ms: 0 },
-      'openai': { success: 0, failed: 0, total_ms: 0 },
-      fallback_count: 0,
-      fallback_to: {},
-      total_summaries: 0,
-      total_duration_ms: 0,
-      updated_at: null,
-    };
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        stats = { ...stats, ...parsed };
-        // Ensure nested provider objects exist (GROQ-ROUTER-4KEY: groq-key0/groq-key1
-        // and gemini removed — router state lives in groq:router:key{N})
-        for (const k of ['groq', 'workers-ai', 'openrouter', 'openai']) {
-          if (!stats[k]) stats[k] = { success: 0, failed: 0, total_ms: 0 };
-        }
-        if (!stats.fallback_to) stats.fallback_to = {};
-      }
-    }
-    if (success) {
-      stats[provider].success++;
-      stats[provider].total_ms += durationMs || 0;
-      stats.total_summaries++;
-      stats.total_duration_ms += durationMs || 0;
-    } else {
-      stats[provider].failed++;
-    }
-    stats.updated_at = Date.now();
-    await writeAppCache(env, NEWS_AI_PROVIDER_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
-  } catch (e) {
-    console.warn('[NEWS-AI-STATS] recordProviderAttempt failed:', e?.message);
-  }
+  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
 }
 
 /**
  * Record a fallback event (success on a non-primary provider).
- * Increments fallback_count + fallback_to.{provider}.
+ * H4 FIX: KV RMW removed — telemetry now in recordNewsAITick (Postgres).
+ * Function kept as no-op for backward compat.
  */
 async function recordFallbackEvent(env, finalProvider) {
-  if (!env.APP_CACHE) return;
-  try {
-    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
-    let stats = {};
-    if (raw) stats = JSON.parse(raw) || {};
-    stats.fallback_count = (stats.fallback_count || 0) + 1;
-    stats.fallback_to = stats.fallback_to || {};
-    stats.fallback_to[finalProvider] = (stats.fallback_to[finalProvider] || 0) + 1;
-    stats.updated_at = Date.now();
-    await writeAppCache(env, NEWS_AI_PROVIDER_STATS_KEY, JSON.stringify(stats), NEWS_AI_MONITOR_TTL);
-  } catch (e) {
-    console.warn('[NEWS-AI-STATS] recordFallbackEvent failed:', e?.message);
-  }
+  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
 }
 
 /**
@@ -8390,17 +8332,19 @@ async function processOneArticleSummary(env, pool = null) {
 
   if (existingSummary) {
     // CACHE HIT — valid summary exists (KV or DB), skip AI entirely
-    try { await recordCacheStat(env, true); } catch {}
+    // H4 FIX: recordCacheStat KV RMW removed — telemetry now in recordNewsAITick (Postgres)
     queue.splice(idx, 1);
     await saveSummaryQueue(env, queue);
     return {
       processed: true, success: true, reason: 'cache_hit',
       url: article.url, provider: existingProvider, cache_hit: true,
       duration_ms: Date.now() - t0,
+      provider_attempts: [],
+      fallback_used: false,
     };
   }
   // CACHE MISS — no valid summary in KV or DB, proceed to AI generation
-  try { await recordCacheStat(env, false); } catch {}
+  // H4 FIX: recordCacheStat KV RMW removed — telemetry now in recordNewsAITick (Postgres)
 
   // Helper: requeue with retry state (mutates queue in place + persists)
   // PHASE 2 FIX: Added retryAfterSeconds parameter — if publisher returns
@@ -8488,6 +8432,12 @@ async function processOneArticleSummary(env, pool = null) {
       next_retry: article.next_retry,
       status: article.status,
       duration_ms: Date.now() - t0,
+      cache_hit: false,
+      provider_attempts: (attempts || []).map(a => ({
+        provider: a.provider,
+        success: !!a.success,
+        duration_ms: Number(a.duration_ms) || 0,
+      })),
     };
   }
 
@@ -8617,7 +8567,13 @@ async function processOneArticleSummary(env, pool = null) {
       provider,
       retry_count: article.retry_count || 0,
       duration_ms: Date.now() - t0,
+      cache_hit: false,
       fallback_used: attempts.length > 1,
+      provider_attempts: attempts.map(a => ({
+        provider: a.provider,
+        success: !!a.success,
+        duration_ms: Number(a.duration_ms) || 0,
+      })),
       e2e_total_ms: (article.rss_fetched_at) ? (completedAt - article.rss_fetched_at) : null,
       // PUBLICATION GATE (Commit 1): track discovery → publish latency
       published: publishResult?.published || false,
@@ -8670,7 +8626,7 @@ async function processOneArticleSummary(env, pool = null) {
       queue.splice(idx, 1);
       queue.push(article);
       await saveSummaryQueue(env, queue);
-      return { processed: true, success: false, reason: 'degraded_publisher_rss_too_short', url: article.url, duration_ms: Date.now() - t0 };
+      return { processed: true, success: false, reason: 'degraded_publisher_rss_too_short', url: article.url, duration_ms: Date.now() - t0, cache_hit: false, provider_attempts: [] };
     }
   } else {
   // ── STEP 1: Fetch article HTML ──
@@ -8938,16 +8894,9 @@ async function processOneArticleSummary(env, pool = null) {
   // messages and receive JOURNALIST_USER_PROMPT as the user content.
   const fallbackResult = await generateSummaryWithFallback(env, JOURNALIST_USER_PROMPT, JOURNALIST_SYSTEM);
 
-  // Record per-provider stats for monitoring (non-blocking, best-effort)
-  for (const attempt of fallbackResult.attempts) {
-    try {
-      await recordProviderAttempt(env, attempt.provider, attempt.success, attempt.duration_ms || 0);
-    } catch {}
-  }
-  // Record fallback event if success came from a non-primary provider
-  if (fallbackResult.fallbackUsed && fallbackResult.usedProvider) {
-    try { await recordFallbackEvent(env, fallbackResult.usedProvider); } catch {}
-  }
+  // H4 FIX: recordProviderAttempt + recordFallbackEvent KV RMW removed.
+  // Telemetry now flows through succeedWithSummary/requeueWithRetry return →
+  // recordNewsAITick → news_ai_tick_log (Postgres). No KV writes for telemetry.
 
   // ── STEP 4: Save to KV (7 days) or requeue ──
   // P2-P2-2: Use 200-char threshold (matches validator default, was 50)
@@ -9380,12 +9329,91 @@ async function getNewsAIMonitoring(env) {
 
   const lastTick = history.length > 0 ? history[history.length - 1] : null;
 
-  // ── Phase 10: Provider stats (per-provider success/failed, fallback count, avg time) ──
+  // ── H4 FIX: Provider stats from Postgres (news_ai_tick_log) instead of KV RMW ──
   let providerStats = null;
   try {
-    const raw = await readAppCache(env, NEWS_AI_PROVIDER_STATS_KEY).catch(() => null);
-    if (raw) providerStats = JSON.parse(raw);
-  } catch {}
+    await ensureTelemetryTables(env);
+    // Query per-provider stats from provider_attempts JSONB array
+    const providerResult = await queryDb(env, `
+      SELECT
+        attempt->>'provider' AS provider,
+        COUNT(*) FILTER (WHERE (attempt->>'success')::boolean) AS success,
+        COUNT(*) FILTER (WHERE NOT (attempt->>'success')::boolean) AS failed,
+        COALESCE(SUM((attempt->>'duration_ms')::int), 0) AS total_ms
+      FROM news_ai_tick_log,
+        jsonb_array_elements(stats->'provider_attempts') AS attempt
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+        AND tick_type = 'tick_5min'
+        AND stats ? 'provider_attempts'
+      GROUP BY attempt->>'provider'
+    `).catch(() => ({ rows: [] }));
+
+    // Query fallback stats
+    const fallbackResult = await queryDb(env, `
+      SELECT
+        COUNT(*) AS fallback_count,
+        stats->>'final_provider' AS provider
+      FROM news_ai_tick_log
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+        AND tick_type = 'tick_5min'
+        AND (stats->>'fallback_used')::boolean = true
+        AND stats->>'final_provider' IS NOT NULL
+      GROUP BY stats->>'final_provider'
+    `).catch(() => ({ rows: [] }));
+
+    // Query total summaries + avg time + updated_at
+    const summaryResult = await queryDb(env, `
+      SELECT
+        COUNT(*) AS total_summaries,
+        COALESCE(AVG((stats->>'summary_duration_ms')::int), 0) AS avg_duration_ms,
+        EXTRACT(EPOCH FROM MAX(created_at)) * 1000 AS updated_at
+      FROM news_ai_tick_log
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+        AND tick_type = 'tick_5min'
+        AND (stats->>'summary_success')::boolean = true
+    `).catch(() => ({ rows: [] }));
+
+    // Build providerStats object matching the OLD KV shape for backward compat
+    providerStats = {
+      groq: { success: 0, failed: 0, total_ms: 0 },
+      'workers-ai': { success: 0, failed: 0, total_ms: 0 },
+      'openrouter': { success: 0, failed: 0, total_ms: 0 },
+      openai: { success: 0, failed: 0, total_ms: 0 },
+      fallback_count: 0,
+      fallback_to: {},
+      total_summaries: 0,
+      total_duration_ms: 0,
+      updated_at: null,
+    };
+
+    for (const row of providerResult.rows || []) {
+      const p = row.provider;
+      if (providerStats[p]) {
+        providerStats[p].success = Number(row.success) || 0;
+        providerStats[p].failed = Number(row.failed) || 0;
+        providerStats[p].total_ms = Number(row.total_ms) || 0;
+      }
+    }
+
+    let totalFallback = 0;
+    for (const row of fallbackResult.rows || []) {
+      const p = row.provider;
+      const count = Number(row.fallback_count) || 0;
+      totalFallback += count;
+      if (p) providerStats.fallback_to[p] = count;
+    }
+    providerStats.fallback_count = totalFallback;
+
+    const summaryRow = summaryResult.rows?.[0];
+    if (summaryRow) {
+      providerStats.total_summaries = Number(summaryRow.total_summaries) || 0;
+      // Reconstruct total_duration_ms from avg * count (for backward compat with avgSummaryTimeMs calculation)
+      providerStats.total_duration_ms = Math.round(Number(summaryRow.avg_duration_ms) || 0) * providerStats.total_summaries;
+      providerStats.updated_at = Number(summaryRow.updated_at) || null;
+    }
+  } catch (e) {
+    console.warn('[NEWS-AI-MONITOR] provider stats DB query failed:', e?.message);
+  }
 
   // Calculate "Average Provider" = the provider used most often for SUCCESSFUL summaries
   let avgProvider = null;
@@ -9456,18 +9484,34 @@ async function getNewsAIMonitoring(env) {
     });
   }
 
-  // ── Phase 10.5: Summary Cache stats ──
+  // ── H4 FIX: Cache stats from Postgres (news_ai_tick_log) instead of KV RMW ──
   let cacheHits = 0, cacheMisses = 0, cacheHitRate = 0;
   try {
-    const raw = await readAppCache(env, NEWS_AI_CACHE_STATS_KEY).catch(() => null);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      cacheHits = parsed.hits || 0;
-      cacheMisses = parsed.misses || 0;
+    await ensureTelemetryTables(env);
+    const cacheResult = await queryDb(env, `
+      SELECT
+        COUNT(*) FILTER (WHERE
+          (stats ? 'cache_hit' AND (stats->>'cache_hit')::boolean = true)
+          OR (NOT stats ? 'cache_hit' AND stats->>'summary_reason' = 'cache_hit')
+        ) AS hits,
+        COUNT(*) FILTER (WHERE
+          (stats ? 'cache_hit' AND (stats->>'cache_hit')::boolean = false)
+          OR (NOT stats ? 'cache_hit' AND stats->>'summary_reason' IS NOT NULL AND stats->>'summary_reason' != 'cache_hit' AND (stats->>'summary_processed')::boolean = true)
+        ) AS misses
+      FROM news_ai_tick_log
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
+        AND tick_type = 'tick_5min'
+    `).catch(() => ({ rows: [] }));
+    const cacheRow = cacheResult.rows?.[0];
+    if (cacheRow) {
+      cacheHits = Number(cacheRow.hits) || 0;
+      cacheMisses = Number(cacheRow.misses) || 0;
       const total = cacheHits + cacheMisses;
-      cacheHitRate = total > 0 ? Math.round((cacheHits / total) * 1000) / 10 : 0; // % with 1 decimal
+      cacheHitRate = total > 0 ? Math.round((cacheHits / total) * 1000) / 10 : 0;
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[NEWS-AI-MONITOR] cache stats DB query failed:', e?.message);
+  }
 
   return {
     ts: now,
@@ -16877,6 +16921,11 @@ export default {
                 summary_duration_ms: summaryResult.duration_ms || 0,
                 queue_length: summaryResult.queueLength || null,
                 tick_article_index: i + 1,
+                // H4 FIX: telemetry fields (previously KV RMW via recordCacheStat/recordProviderAttempt/recordFallbackEvent)
+                cache_hit: summaryResult.cache_hit || false,
+                provider_attempts: summaryResult.provider_attempts || [],
+                fallback_used: summaryResult.fallback_used || false,
+                final_provider: summaryResult.provider || null,
               });
             } catch {}
             _logPhase('phase1d-news-summary', 'ok', summaryResult);

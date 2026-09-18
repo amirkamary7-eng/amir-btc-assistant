@@ -251,11 +251,10 @@ test('MON-04: getNewsAIMonitoring last_tick is the newest (last element after re
 
 test('MON-05: getNewsAIMonitoring still reads OTHER KV data (not migrated)', () => {
   const body = fnBody('getNewsAIMonitoring');
-  // These must STILL be read from KV (NOT migrated by Option 1):
+  // These must STILL be read from KV (NOT migrated):
   assert.ok(body.includes('getSummaryQueue'),
     'must still read the summary queue from KV');
-  assert.ok(body.includes('NEWS_AI_PROVIDER_STATS_KEY'),
-    'must still read provider stats from KV');
+  // H4 FIX: NEWS_AI_PROVIDER_STATS_KEY is NO LONGER read from KV — migrated to Postgres
   // Circuit state + groq router are read via helper functions (not direct KV key references
   // in the function body), but their calls should still be present:
   assert.ok(body.includes('getCircuitState'),
