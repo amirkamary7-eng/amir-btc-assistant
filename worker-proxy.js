@@ -16899,7 +16899,7 @@ export default {
       const _phase1dCurrentMinute = new Date().getUTCMinutes();
       const _phase1dIsOverlapWith15Min = _phase1dCurrentMinute % 15 === 0;
       if (isEvery5Min && !_phase1dIsOverlapWith15Min) {
-        const MAX_SUMMARIES_PER_TICK = 4;
+        const MAX_SUMMARIES_PER_TICK = 2; // H5-5min FIX: was 4, reduced to stay within 50-subrequest Free Plan limit (4×14=56 over 50, 2×14=28 safe with ~22 margin for other phases)
         for (let i = 0; i < MAX_SUMMARIES_PER_TICK; i++) {
           try {
             const summaryResult = await processOneArticleSummary(env, pool);

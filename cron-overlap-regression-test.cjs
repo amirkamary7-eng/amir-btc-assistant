@@ -106,9 +106,10 @@ test('CRON-OVERLAP-004: wrangler.jsonc production crons must be unchanged (every
   assert.ok(prodSection.includes('"*/15 * * * *"'), 'Production must have every-15-min cron');
 });
 
-// ── Test 5: No change to MAX_SUMMARIES_PER_TICK value ──
-test('CRON-OVERLAP-005: MAX_SUMMARIES_PER_TICK must remain 4 (no change to job count)', () => {
+// ── Test 5: MAX_SUMMARIES_PER_TICK value ──
+// H5-5min FIX: reduced from 4 to 2 to stay within 50-subrequest Free Plan limit
+test('CRON-OVERLAP-005: MAX_SUMMARIES_PER_TICK must be 2 (H5-5min fix: was 4, reduced for subrequest safety)', () => {
   const maxMatch = workerSrc.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
   assert.ok(maxMatch, 'MAX_SUMMARIES_PER_TICK must exist');
-  assert.equal(maxMatch[1], '4', 'MAX_SUMMARIES_PER_TICK must remain 4');
+  assert.equal(maxMatch[1], '2', 'MAX_SUMMARIES_PER_TICK must be 2 (H5-5min fix — was 4)');
 });
