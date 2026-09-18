@@ -8834,7 +8834,7 @@ async function processOneArticleSummary(env, pool = null) {
   // call entirely). Instead, mark as failed with a clear reason so the queue
   // monitoring reflects the true state. This preserves the "do NOT make up
   // data" principle at the source.
-  if (articleText.length < 200) {
+  if (articleText.length < 150) {
     article.retry_count = (article.retry_count || 0) + 1;
     article.last_attempt = now;
     article.status = 'failed';

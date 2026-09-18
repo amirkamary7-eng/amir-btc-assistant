@@ -206,9 +206,9 @@ test('C-FIX-2: Arabic-only text rejected, Persian accepted (functional test)', (
 
 // ─── D. Source integrity ───────────────────────────────────────────────────
 
-test('D1: source_insufficient_length rejection (50-200 chars → fail, no AI)', () => {
+test('D1: source_insufficient_length rejection (50-150 chars → fail, no AI)', () => {
   assert.ok(/source_insufficient_length/.test(WORKER_SRC), 'source_insufficient_length reason exists');
-  assert.ok(WORKER_SRC.includes("articleText.length < 200"), 'checks length < 200');
+  assert.ok(WORKER_SRC.includes("articleText.length < 150"), 'checks length < 150 (H5 source threshold fix: was 200, reduced to allow NYT/CoinDesk RSS-description-only articles)');
 });
 
 test('D2: source_insufficient_length in PERMANENT_FAIL_REASONS (no retry)', () => {
