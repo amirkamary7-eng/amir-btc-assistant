@@ -9471,7 +9471,8 @@ async function getNewsAIMonitoring(env) {
   let groqRouterKeys = [];
 
   // Try DO path first (authoritative when DO binding is active in production)
-  if (env.GROQ_ROUTER_DO && typeof env.GROQ_ROUTER_DO.fetch === 'function') {
+  const _doCond = !!(env.GROQ_ROUTER_DO && typeof env.GROQ_ROUTER_DO.fetch === 'function');
+  if (_doCond) {
     try {
       const keyIndices = [0, 1, 2, 3];
       const doId = env.GROQ_ROUTER_DO.idFromName('groq-router');
@@ -9481,10 +9482,14 @@ async function getNewsAIMonitoring(env) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyIndices }),
       });
+      console.log('[DO-DIAG] fetch returned: status=' + statesRes.status + ' ok=' + statesRes.ok);
       if (!statesRes.ok) throw new Error(`DO getStates HTTP ${statesRes.status}`);
       const statesData = await statesRes.json();
+      console.log('[DO-DIAG] parsed: typeof=' + typeof statesData + ' hasStates=' + !!statesData?.states + ' isArray=' + Array.isArray(statesData?.states) + ' length=' + (statesData?.states?.length ?? 'N/A'));
       if (statesData.states && Array.isArray(statesData.states) && statesData.states.length > 0) {
         groq_router_source = 'durable_object';
+        const _diagStates = statesData.states.map(s => String(s.index) + ':' + String(s.state));
+        console.log('[DO-DIAG] using DO states: ' + _diagStates.join(', '));
         for (const s of statesData.states) {
           const cooldownRemainingS = s.retry_after ? Math.max(0, Math.ceil((s.retry_after - now) / 1000)) : 0;
           groqRouterKeys.push({
@@ -9508,6 +9513,8 @@ async function getNewsAIMonitoring(env) {
     } catch (e) {
       console.warn('[NEWS-AI-MONITOR] DO getStates failed, falling back to KV:', e?.message);
     }
+  } else {
+    console.log('[DO-DIAG] condition FALSE — env.GROQ_ROUTER_DO=' + !!env.GROQ_ROUTER_DO);
   }
 
   // KV fallback: if DO path failed, was unavailable, or returned empty results
