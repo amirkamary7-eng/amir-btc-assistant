@@ -7517,12 +7517,6 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
 // ── Cache stats (Phase 10.5) ──
 const NEWS_AI_CACHE_STATS_KEY = 'news:ai_cache_stats';
 
-// H4 FIX: recordCacheStat KV RMW removed — telemetry now in recordNewsAITick (Postgres).
-// Function kept as no-op for backward compat (defensive: in case any code path still calls it).
-async function recordCacheStat(env, hit) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
-}
-
 /**
  * Multi-provider fallback coordinator.
  * Tries providers in priority order (Gemini → Workers AI → OpenAI).
@@ -7718,30 +7712,6 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     fallbackUsed,
     circuitSkippedAny,
   };
-}
-
-/**
- * Record a per-provider attempt to the aggregate stats in KV.
- * Used by /api/news-ai-monitor for provider success/failure counts.
- *
- * GROQ-ROUTER-4KEY: Per-key router state lives in `groq:router:key{N}` and is
- * managed by the router itself. This function tracks aggregate per-provider
- * success/failure counts for the monitoring dashboard. The 'groq' bucket here
- * aggregates ALL router successes/failures (regardless of which key was used).
- */
-// H4 FIX: recordProviderAttempt KV RMW removed — telemetry now in recordNewsAITick (Postgres).
-// Function kept as no-op for backward compat.
-async function recordProviderAttempt(env, provider, success, durationMs) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
-}
-
-/**
- * Record a fallback event (success on a non-primary provider).
- * H4 FIX: KV RMW removed — telemetry now in recordNewsAITick (Postgres).
- * Function kept as no-op for backward compat.
- */
-async function recordFallbackEvent(env, finalProvider) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
 }
 
 /**

@@ -25,7 +25,6 @@
  *   GS-013: callGroqSecondaryChat exists with correct signature
  *   GS-014: Independent circuit breaker keys (groq vs groq-secondary)
  *   GS-015: translateToFarsi uses 'translation-groq-secondary' circuit key
- *   GS-016: recordProviderAttempt includes 'groq-secondary' in stats
  *   GS-017: news-ai-monitor includes GROQ_API_KEY_1_CONFIGURED flag
  *   GS-018: NEWS_PROVIDER_GROQ gates both primary AND secondary
  *   GS-019: API key value NEVER appears in any console.log or response
@@ -296,16 +295,6 @@ test('GS-015: translateToFarsi uses translation-groq-secondary circuit key', () 
 // ============================================================================
 // Phase 8 — Stats and monitoring
 // ============================================================================
-
-test('GS-016: recordProviderAttempt includes groq-secondary in stats', () => {
-  const fnMatch = WORKER.match(/async function recordProviderAttempt\(env, provider, success, durationMs\)\s*\{([\s\S]*?)\n  \}/);
-  assert.ok(fnMatch, 'recordProviderAttempt not found');
-  const body = fnMatch[1];
-  assert.ok(body.includes("'groq-secondary': { success: 0, failed: 0, total_ms: 0 }"),
-    "must initialize 'groq-secondary' in stats");
-  assert.ok(body.includes("'groq-secondary', 'gemini'") || body.includes("'groq-secondary'"),
-    'must include groq-secondary in the nested provider check loop');
-});
 
 test('GS-017: news-ai-monitor includes GROQ_API_KEY_1_CONFIGURED flag', () => {
   assert.ok(WORKER.includes('GROQ_API_KEY_1_CONFIGURED'),
