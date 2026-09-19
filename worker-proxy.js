@@ -888,14 +888,6 @@ function _getTodayISOString() {
   return sharedGetTehranDateString();
 }
 
-function _generateMissionToken() {
-  // 32-char random hex string — cryptographically secure
-  // KEPT for backward-compat KV token fallback path (old format tokens).
-  const buf = new Uint8Array(16);
-  crypto.getRandomValues(buf);
-  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
-}
-
 // ── Signed Mission Token (Phase 2D — KV decoupling) ─────────────────────
 // Generates a stateless signed token that does NOT require KV storage.
 // The token encodes {userId, missionId, targetId, expiresAt, nonce} and is
@@ -6421,15 +6413,6 @@ function parseGroq429Info(statusCode, responseBody) {
     retry_after_seconds: retry_after_seconds || fallbackSeconds[quota_type] || (10 * 60),
     parsed_from_body: retry_after_seconds !== null,
   };
-}
-
-// ── GROQ 429 → CIRCUIT ERROR TYPE MAPPING (P1 FIX) ──
-// Maps quota_type to a circuit-breaker errorType that recordCircuitResult understands.
-// These are still 'retryable' variants but carry the quota info via errorMessage.
-function groq429ErrorType(quota_type) {
-  // All 429 variants are retryable (circuit should trip), but we encode the type
-  // in the errorMessage so recordCircuitResult can extract retry_after.
-  return 'retryable';
 }
 
 /**

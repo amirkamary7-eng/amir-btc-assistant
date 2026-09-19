@@ -275,20 +275,6 @@ export function createAlertRepository(deps) {
   }
 
   /**
-   * Update last_price + last_checked_at for an alert (called by cron every cycle).
-   * Used by cross-detection logic to know what price was seen on the previous run.
-   *
-   * Atomic UPDATE — no race conditions even with overlapping cron runs.
-   */
-  async function updateLastChecked(env, alertId, lastPrice) {
-    await queryDb(env, `
-      UPDATE price_alerts
-      SET last_price = $2, last_checked_at = NOW()
-      WHERE id = $1
-    `, [String(alertId), Number(lastPrice)]);
-  }
-
-  /**
    * Mark an alert as triggered (atomic). Sets status, triggered_at, last_trigger_price.
    * This is the "duplicate trigger prevention" — once status='triggered',
    * the cron query (WHERE status='active') will no longer return this alert.
@@ -416,6 +402,6 @@ export function createAlertRepository(deps) {
 
   return Object.freeze({
     create, list, findById, remove, serializeRow, ensureTable,
-    updateLastChecked, markTriggered, markTriggeredBulk, listActiveForCron,
+    markTriggered, markTriggeredBulk, listActiveForCron,
   });
 }

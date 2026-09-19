@@ -554,11 +554,6 @@ export function createNotificationPlatformRepository(deps) {
     } catch { return 'mini_app'; }
   }
 
-  async function isCategoryDisabled(env, userId, category) {
-    const pref = await getUserChannelPreference(env, userId, category);
-    return pref === 'none';
-  }
-
   // ═══════════════════════════════════════════════════════════
   // TEMPLATES
   // ═══════════════════════════════════════════════════════════
@@ -1569,7 +1564,6 @@ export function createNotificationPlatformRepository(deps) {
     getSettings,
     updateSettings,
     getUserChannelPreference,
-    isCategoryDisabled,
     listTemplates,
     getTemplate,
     createTemplate,

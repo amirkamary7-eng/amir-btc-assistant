@@ -630,23 +630,6 @@ export function createWalletRepository(deps) {
   }
 
   /**
-   * Get referral stats for the wallet page (reuses referral data).
-   */
-  async function getReferralStats(env, userId) {
-    const result = await queryDb(
-      env,
-      'SELECT channel_verified, rewarded FROM referrals WHERE inviter_id = $1',
-      [String(userId)],
-    );
-    const referrals = result.rows;
-    return {
-      invited: referrals.length,
-      active: referrals.filter(r => Boolean(r.channel_verified)).length,
-      earned: referrals.filter(r => Boolean(r.rewarded)).length,
-    };
-  }
-
-  /**
    * CENTRAL TOKEN SERVICE — creditTokens
    * ALL balance increases in the app MUST go through this function.
    * This ensures: atomic balance update + transaction record in a single DB transaction.
@@ -1046,7 +1029,6 @@ export function createWalletRepository(deps) {
     claimDailyRewardWithStreak, // PHASE 4: streak-enabled claim
     getStreakStatus, // PHASE 4: read streak state for UI
     STREAK_REWARDS, // PHASE 4: exported for controller to look up reward amounts
-    getReferralStats,
     creditTokens,
     debitTokens,
     getTierForBalance,
