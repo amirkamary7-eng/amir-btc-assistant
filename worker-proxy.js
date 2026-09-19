@@ -7257,6 +7257,7 @@ async function tryOpenRouter(env, prompt, systemPrompt) {
         ],
         max_tokens: 1536,
         temperature: 0.4,
+        reasoning: { enabled: false },
       }),
       signal: controller.signal,
     });
