@@ -7266,6 +7266,7 @@ async function tryOpenRouter(env, prompt, systemPrompt) {
       const errorType = classifyHttpError(res.status);
       let errorBody = '';
       try { errorBody = (await res.text()).substring(0, 200); } catch {}
+      console.warn('[OR-DIAG] error= http_error status=' + res.status + ' duration=' + (Date.now() - t0) + 'ms');
       return { provider: 'openrouter', success: false, error: `http_${res.status}`, errorType, error_detail: errorBody, duration_ms: Date.now() - t0 };
     }
 
@@ -7273,16 +7274,21 @@ async function tryOpenRouter(env, prompt, systemPrompt) {
     try {
       data = await res.json();
     } catch (e) {
+      console.warn('[OR-DIAG] error=invalid_json status=200 duration=' + (Date.now() - t0) + 'ms');
       return { provider: 'openrouter', success: false, error: 'invalid_json', errorType: 'retryable', duration_ms: Date.now() - t0 };
     }
 
     const text = data?.choices?.[0]?.message?.content;
+    const _contentLen = text ? text.trim().length : 0;
     if (text && text.trim().length >= 50) {
+      console.log('[OR-DIAG] status=200 content_len=' + _contentLen + ' duration=' + (Date.now() - t0) + 'ms');
       return { provider: 'openrouter', success: true, summary: text.trim(), duration_ms: Date.now() - t0 };
     }
+    console.warn('[OR-DIAG] error=empty_response status=200 content_len=' + _contentLen + ' text_null=' + (text == null) + ' duration=' + (Date.now() - t0) + 'ms');
     return { provider: 'openrouter', success: false, error: 'empty_response', errorType: 'retryable', duration_ms: Date.now() - t0 };
   } catch (e) {
     const isAbort = e?.name === 'AbortError';
+    console.warn('[OR-DIAG] error=' + (isAbort ? 'timeout' : 'network_error') + ' duration=' + (Date.now() - t0) + 'ms threshold_exceeded=' + ((Date.now() - t0) > 15000));
     return {
       provider: 'openrouter',
       success: false,
