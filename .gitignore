@@ -19,3 +19,7 @@ data/
 /generated/prisma
 node_modules/
 webapp/pages-dist/
+
+# QA/debug screenshots — dev-only artifacts, not committed to repo
+qa-screenshots/
+debug-screenshots/

@@ -35,10 +35,6 @@
  *   per-user preference (premium-gated, default 'none' for free users).
  */
 
-// Module-level env accessors (set in fetch handler, used by processAdBroadcast)
-let _env_sendTelegramMessage = null;
-export function setAdSendTelegramMessage(fn) { _env_sendTelegramMessage = fn; }
-
 // Module-level cache for active campaigns. Campaigns change rarely (admin-only)
 // and are read on EVERY Mini App open + EVERY /start. Cache for 60s to eliminate
 // per-render queries. Invalidated on every admin mutation.

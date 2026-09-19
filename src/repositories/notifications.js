@@ -176,31 +176,6 @@ export function createNotificationRepository(deps) {
   }
 
   /**
-   * Check if a user has a specific notification type enabled.
-   * Used by triggers to skip notifications for users who opted out.
-   */
-  async function isPreferenceEnabled(env, userId, prefKey) {
-    const prefs = await getSettings(env, userId);
-    return Boolean(prefs[prefKey]);
-  }
-
-  /**
-   * Filter user IDs by notification preference.
-   * Returns only users who have the given preference enabled.
-   */
-  async function filterUsersByPreference(env, userIds, prefKey) {
-    if (!userIds || !userIds.length) return [];
-    await ensureTable(env);
-    // For small user lists, check individually (avoids complex SQL)
-    const enabled = [];
-    for (const uid of userIds) {
-      const prefs = await getSettings(env, uid);
-      if (Boolean(prefs[prefKey])) enabled.push(uid);
-    }
-    return enabled;
-  }
-
-  /**
    * Serialize a raw DB row into the API response shape.
    */
   function serializeRow(row) {
@@ -416,5 +391,5 @@ export function createNotificationRepository(deps) {
     return result.rowCount || 0;
   }
 
-  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, deleteNotification, deleteAll, serializeRow, ensureTable, getSettings, saveSettings, isPreferenceEnabled, filterUsersByPreference });
+  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, deleteNotification, deleteAll, serializeRow, ensureTable, getSettings, saveSettings });
 }

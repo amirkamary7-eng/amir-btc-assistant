@@ -140,19 +140,6 @@ export function createMarketOverviewService(deps) {
   }
 
   /**
-   * Get current month's usage log.
-   */
-  async function getUsageLog(env) {
-    try {
-      const monthKey = new Date().toISOString().slice(0, 7);
-      const logKey = `${USAGE_LOG_KEY}:${monthKey}`;
-      const raw = await readAppCache(env, logKey);
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return { calls: 0, credits_used: 0, last_updated: null };
-  }
-
-  /**
    * Refresh market overview data from CMC.
    * Called by cron job every 15 minutes.
    * Only overwrites cache if new data is valid.
@@ -198,7 +185,6 @@ export function createMarketOverviewService(deps) {
 
   return Object.freeze({
     getCachedOverview,
-    getUsageLog,
     refreshOverview,
     fetchCMCKeyInfo,
   });

@@ -863,11 +863,6 @@ export function createAssistantHandlers(deps) {
     try { return await response.json(); } catch { return null; }
   }
 
-  function getProviderErrorDetail(prefix, responseText, fallbackMessage = 'Request failed') {
-    const detail = String(responseText || '').trim();
-    return detail ? `${prefix}: ${detail}` : prefix ? `${prefix}: ${fallbackMessage}` : fallbackMessage;
-  }
-
   function sanitizeText(text) {
     let result = text;
     for (const pattern of INJECTION_PATTERNS) {

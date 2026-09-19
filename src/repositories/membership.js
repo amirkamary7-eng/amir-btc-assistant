@@ -95,14 +95,6 @@ export function createMembershipRepository(deps) {
 
   // ─── Membership Requests ─────────────────────────────────────────────────
 
-  function createRequest(env, input) {
-    return queryDb(env,
-      `INSERT INTO membership_requests (telegram_id, exchange_name, exchange_uid, note)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [String(input.telegramId), input.exchangeName, input.exchangeUid, input.note || null]
-    ).then(r => r.rows[0]);
-  }
-
   function findRequestById(env, id) {
     return queryDb(env, 'SELECT * FROM membership_requests WHERE id = $1 LIMIT 1', [id])
       .then(r => r.rows[0] || null);
@@ -126,22 +118,6 @@ export function createMembershipRepository(deps) {
     return queryDb(env,
       'SELECT * FROM membership_requests WHERE telegram_id = $1 AND status = $2 LIMIT 1',
       [String(telegramId), 'PENDING']
-    ).then(r => r.rows[0] || null);
-  }
-
-  function updateRequest(env, id, data) {
-    const sets = [];
-    const params = [id];
-    let idx = 2;
-    if (data.status !== undefined) { sets.push(`status = $${idx++}`); params.push(data.status); }
-    if (data.adminNote !== undefined) { sets.push(`admin_note = $${idx++}`); params.push(data.adminNote); }
-    if (data.reviewedAt !== undefined) { sets.push(`reviewed_at = $${idx++}`); params.push(data.reviewedAt); }
-    if (data.reviewedBy !== undefined) { sets.push(`reviewed_by = $${idx++}`); params.push(data.reviewedBy); }
-    if (sets.length === 0) return Promise.resolve(null);
-    sets.push('updated_at = NOW()');
-    return queryDb(env,
-      `UPDATE membership_requests SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
-      params
     ).then(r => r.rows[0] || null);
   }
 
@@ -258,13 +234,6 @@ export function createMembershipRepository(deps) {
   }
 
   // ─── Admin Users ─────────────────────────────────────────────────────────
-
-  function findAdminByTelegramId(env, telegramId) {
-    return queryDb(env,
-      'SELECT * FROM membership_admins WHERE telegram_id = $1 AND active = TRUE LIMIT 1',
-      [String(telegramId)]
-    ).then(r => r.rows[0] || null);
-  }
 
   /** Paginated, filtered list of membership users with denormalized request stats. */
   async function listUsers(env, params) {
@@ -676,17 +645,14 @@ export function createMembershipRepository(deps) {
     findByTelegramId,
     upsertByTelegramId,
     update,
-    createRequest,
     findRequestById,
     findRequestsByTelegramId,
     findRequestByExchangeUid,
     findPendingRequestByTelegramId,
-    updateRequest,
     findManyByIds,
     listRequestsWithUser,
     createAuditLog,
     listAuditLogs,
-    findAdminByTelegramId,
     listUsers,
     getUserDetail,
     counts,
@@ -711,7 +677,5 @@ export function createMembershipRepository(deps) {
     activateRequirement,
     createRequirement,
     isExchangeMatchingActive,
-    // expose transaction helper for service layer
-    _queryDbTransaction: queryDbTransaction,
   };
 };

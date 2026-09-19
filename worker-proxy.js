@@ -888,14 +888,6 @@ function _getTodayISOString() {
   return sharedGetTehranDateString();
 }
 
-function _generateMissionToken() {
-  // 32-char random hex string — cryptographically secure
-  // KEPT for backward-compat KV token fallback path (old format tokens).
-  const buf = new Uint8Array(16);
-  crypto.getRandomValues(buf);
-  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
-}
-
 // ── Signed Mission Token (Phase 2D — KV decoupling) ─────────────────────
 // Generates a stateless signed token that does NOT require KV storage.
 // The token encodes {userId, missionId, targetId, expiresAt, nonce} and is
@@ -6423,15 +6415,6 @@ function parseGroq429Info(statusCode, responseBody) {
   };
 }
 
-// ── GROQ 429 → CIRCUIT ERROR TYPE MAPPING (P1 FIX) ──
-// Maps quota_type to a circuit-breaker errorType that recordCircuitResult understands.
-// These are still 'retryable' variants but carry the quota info via errorMessage.
-function groq429ErrorType(quota_type) {
-  // All 429 variants are retryable (circuit should trip), but we encode the type
-  // in the errorMessage so recordCircuitResult can extract retry_after.
-  return 'retryable';
-}
-
 /**
  * Groq Primary chat helper — DEPRECATED compatibility shim.
  *
@@ -7534,12 +7517,6 @@ async function recordCircuitResult(env, provider, success, errorType, errorMessa
 // ── Cache stats (Phase 10.5) ──
 const NEWS_AI_CACHE_STATS_KEY = 'news:ai_cache_stats';
 
-// H4 FIX: recordCacheStat KV RMW removed — telemetry now in recordNewsAITick (Postgres).
-// Function kept as no-op for backward compat (defensive: in case any code path still calls it).
-async function recordCacheStat(env, hit) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
-}
-
 /**
  * Multi-provider fallback coordinator.
  * Tries providers in priority order (Gemini → Workers AI → OpenAI).
@@ -7735,30 +7712,6 @@ async function generateSummaryWithFallback(env, prompt, systemPrompt) {
     fallbackUsed,
     circuitSkippedAny,
   };
-}
-
-/**
- * Record a per-provider attempt to the aggregate stats in KV.
- * Used by /api/news-ai-monitor for provider success/failure counts.
- *
- * GROQ-ROUTER-4KEY: Per-key router state lives in `groq:router:key{N}` and is
- * managed by the router itself. This function tracks aggregate per-provider
- * success/failure counts for the monitoring dashboard. The 'groq' bucket here
- * aggregates ALL router successes/failures (regardless of which key was used).
- */
-// H4 FIX: recordProviderAttempt KV RMW removed — telemetry now in recordNewsAITick (Postgres).
-// Function kept as no-op for backward compat.
-async function recordProviderAttempt(env, provider, success, durationMs) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
-}
-
-/**
- * Record a fallback event (success on a non-primary provider).
- * H4 FIX: KV RMW removed — telemetry now in recordNewsAITick (Postgres).
- * Function kept as no-op for backward compat.
- */
-async function recordFallbackEvent(env, finalProvider) {
-  // No-op — telemetry migrated to news_ai_tick_log (Postgres) via recordNewsAITick
 }
 
 /**

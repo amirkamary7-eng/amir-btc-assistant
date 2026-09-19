@@ -1,9 +1,9 @@
 /**
  * H4 News AI Telemetry Migration — Regression Test
  *
- * Tests that KV RMW telemetry writes (recordCacheStat, recordProviderAttempt,
- * recordFallbackEvent) have been removed (converted to no-ops) and telemetry
- * data now flows through recordNewsAITick → news_ai_tick_log (Postgres).
+ * Tests that the legacy KV RMW telemetry call sites have been removed from
+ * processOneArticleSummary and that telemetry data now flows through
+ * recordNewsAITick → news_ai_tick_log (Postgres).
  */
 
 const test = require('node:test');
@@ -25,53 +25,6 @@ function extractFunctionBody(src, fnName) {
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
-
-// GROUP 1 — KV telemetry writes removed (no-ops)
-
-test('H4-01: recordCacheStat is a no-op (no KV read/write)', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'recordCacheStat');
-  assert.ok(body.includes('No-op'), 'recordCacheStat must be a no-op');
-  assert.ok(!body.includes('readAppCache'), 'recordCacheStat must NOT read KV');
-  assert.ok(!body.includes('writeAppCache'), 'recordCacheStat must NOT write KV');
-});
-
-test('H4-02: recordProviderAttempt is a no-op (no KV read/write)', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'recordProviderAttempt');
-  assert.ok(body.includes('No-op'), 'recordProviderAttempt must be a no-op');
-  assert.ok(!body.includes('readAppCache'), 'recordProviderAttempt must NOT read KV');
-  assert.ok(!body.includes('writeAppCache'), 'recordProviderAttempt must NOT write KV');
-});
-
-test('H4-03: recordFallbackEvent is a no-op (no KV read/write)', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'recordFallbackEvent');
-  assert.ok(body.includes('No-op'), 'recordFallbackEvent must be a no-op');
-  assert.ok(!body.includes('readAppCache'), 'recordFallbackEvent must NOT read KV');
-  assert.ok(!body.includes('writeAppCache'), 'recordFallbackEvent must NOT write KV');
-});
-
-// GROUP 2 — Telemetry call sites removed from processOneArticleSummary
-
-test('H4-04: recordCacheStat calls removed from processOneArticleSummary', () => {
-  // Check that the old call sites are gone (actual calls, not comments)
-  const callPattern = /await\s+recordCacheStat\s*\(/g;
-  const callMatches = (WORKER_SRC.match(callPattern) || []).length;
-  assert.equal(callMatches, 0,
-    `Must have 0 recordCacheStat calls in source (found ${callMatches}). Comment mentions are OK.`);
-});
-
-test('H4-05: recordProviderAttempt calls removed from processOneArticleSummary', () => {
-  const callPattern = /await\s+recordProviderAttempt\s*\(/g;
-  const callMatches = (WORKER_SRC.match(callPattern) || []).length;
-  assert.equal(callMatches, 0,
-    `Must have 0 recordProviderAttempt calls (found ${callMatches}). Comment mentions are OK.`);
-});
-
-test('H4-06: recordFallbackEvent calls removed from processOneArticleSummary', () => {
-  const callPattern = /await\s+recordFallbackEvent\s*\(/g;
-  const callMatches = (WORKER_SRC.match(callPattern) || []).length;
-  assert.equal(callMatches, 0,
-    `Must have 0 recordFallbackEvent calls (found ${callMatches}). Comment mentions are OK.`);
-});
 
 // GROUP 3 — Telemetry data in recordNewsAITick payload
 

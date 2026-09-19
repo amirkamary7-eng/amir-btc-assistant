@@ -61,21 +61,6 @@ test('HOTFIX25-C: NEWS_CACHE_TTL is 86400 in wrangler.jsonc (not 1800)', () => {
   }
 });
 
-// Test D: recordProviderAttempt initializes groq
-test('HOTFIX25-D: recordProviderAttempt initializes groq in stats', () => {
-  const fnStart = source.indexOf('async function recordProviderAttempt');
-  assert.ok(fnStart > -1, 'recordProviderAttempt must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 1500);
-
-  // Must have groq in the initial stats object
-  assert.ok(/groq:\s*\{\s*success:\s*0,\s*failed:\s*0,\s*total_ms:\s*0\s*\}/.test(fnBlock),
-    'Must initialize groq in stats object');
-
-  // Must have groq in the nested initialization loop
-  assert.ok(/\['groq',\s*'gemini',\s*'workers-ai',\s*'openai'\]/.test(fnBlock),
-    'Must include groq in nested initialization loop');
-});
-
 // Test E: Publication gate remains intact
 test('HOTFIX25-E: Publication gate remains intact', () => {
   assert.ok(source.includes('async function publishArticleToFarsiNews'),

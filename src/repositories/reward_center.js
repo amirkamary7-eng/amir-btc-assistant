@@ -952,13 +952,6 @@ export function createRewardCenterRepository(deps) {
     return result.rows.map(_mapCampaign);
   }
 
-  async function getCampaign(env, id) {
-    await ensureSchema(env);
-    if (!isDatabaseConfigured(env)) return null;
-    const result = await queryDb(env, `SELECT * FROM campaigns WHERE id = $1 LIMIT 1`, [String(id)]);
-    return result.rows[0] ? _mapCampaign(result.rows[0]) : null;
-  }
-
   async function createCampaign(env, data) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
@@ -1106,7 +1099,6 @@ export function createRewardCenterRepository(deps) {
     getTodayMissionProgress,
     markMissionRewarded,
     listCampaigns,
-    getCampaign,
     createCampaign,
     updateCampaign,
     deleteCampaign,

@@ -237,20 +237,6 @@ export function createRewardPurchaseRepository(deps) {
   }
 
   /**
-   * Mark a purchase as failed (used when the debit needs to be refunded).
-   * Failed purchases do NOT lock the 30-day limit.
-   */
-  async function failPurchase(env, purchaseId) {
-    await ensureSchema(env).catch(() => {});
-    const result = await queryDb(env,
-      `UPDATE reward_purchases SET status = 'failed', updated_at = NOW()
-       WHERE id = $1 AND status = 'pending' RETURNING id`,
-      [Number(purchaseId)],
-    );
-    return result.rows.length > 0;
-  }
-
-  /**
    * FIX 3+11: Fulfill a purchase with a VPN link.
    * Records WHO fulfilled it, WHEN, and the VPN link.
    * Only pending → fulfilled (state machine, no double-fulfillment).
@@ -382,7 +368,6 @@ export function createRewardPurchaseRepository(deps) {
     checkPurchaseLimit,
     createVpnPurchase,
     cancelPurchase,
-    failPurchase,
     fulfillPurchase,
     getPurchaseById,
     listPurchases,

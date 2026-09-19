@@ -404,21 +404,11 @@ export function createAppContentRepository(deps) {
     return cacheData;
   }
 
-  /**
-   * Get app version (separate from content).
-   * Reads from 'about' content's version field, or returns '1.0.0' as fallback.
-   */
-  async function getVersion(env) {
-    const about = await getContent(env, 'about', 'fa');
-    return about?.version || '1.0.0';
-  }
-
   return Object.freeze({
     ensureTable,
     seedIfEmpty,
     getContent,
     updateContent,
-    getVersion,
     SEED_DATA,
   });
 }
