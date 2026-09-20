@@ -30,11 +30,9 @@ const WALLET_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/wa
 
 // ── P1: target_id binding ──────────────────────────────────────────────────
 
-// Extract the real issueMissionEventToken + consumeMissionEventToken
-// (same pattern as mission-event-token-test.cjs)
-const startIdx = WORKER_SRC.indexOf('// MISSION EVENT TOKEN SERVICE');
-const endIdx = WORKER_SRC.indexOf('function buildFastApiValidationError', startIdx);
-const TOKEN_SERVICE_SRC = WORKER_SRC.slice(startIdx, endIdx);
+// Load the mission token service from the extracted module (src/auth/mission-tokens.js)
+// The functions were extracted via factory pattern (createMissionTokenService).
+const MISSION_TOKENS_SRC = fs.readFileSync(path.join(__dirname, 'src/auth/mission-tokens.js'), 'utf8');
 
 function createMemoryKv(initial = {}) {
   const store = new Map(Object.entries(initial));
@@ -64,11 +62,14 @@ function loadTokenService() {
     });
     return fmt.format(new Date());
   };
-  const wrapped = `${TOKEN_SERVICE_SRC}\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };`;
+  // Strip `export ` so createMissionTokenService becomes a plain function declaration
+  const factorySrc = MISSION_TOKENS_SRC.replace('export function createMissionTokenService', 'function createMissionTokenService');
+  const wrapped = `${factorySrc}\nmodule.exports = { createMissionTokenService };\n`;
   const mod = { exports: {} };
   const { createHmac, timingSafeEqual } = require('node:crypto');
   new Function('module', 'exports', 'sharedGetTehranDateString', 'createHmac', 'timingSafeEqual', wrapped)(mod, mod.exports, sharedGetTehranDateString, createHmac, timingSafeEqual);
-  return mod.exports;
+  // Call the factory to get the token service functions
+  return mod.exports.createMissionTokenService({ sharedGetTehranDateString });
 }
 
 // ── P1 Tests ───────────────────────────────────────────────────────────────
