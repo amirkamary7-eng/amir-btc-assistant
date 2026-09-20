@@ -32,6 +32,9 @@ const path = require('node:path');
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const SESSIONS_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/sessions.js'), 'utf8');
 const WRANGLER_SRC = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
+// DO EXTRACTION: PresenceDO class moved to src/durable-objects/presence.js
+// (re-exported from worker-proxy.js via `export { PresenceDO };`).
+const DO_PRESENCE_SRC = fs.readFileSync(path.join(__dirname, 'src/durable-objects/presence.js'), 'utf8');
 
 /** Strip JSONC comments (line + block) WITHOUT touching `//` inside strings. */
 function parseJsonc(text) {
@@ -68,23 +71,23 @@ function parseJsonc(text) {
 
 /** Extract the PresenceDO class body from worker-proxy.js. */
 function extractPresenceDOClass() {
-  const start = WORKER_SRC.indexOf('class PresenceDO {');
-  assert.ok(start !== -1, 'PresenceDO class must exist in worker-proxy.js');
+  const start = DO_PRESENCE_SRC.indexOf('class PresenceDO {');
+  assert.ok(start !== -1, 'PresenceDO class must exist in src/durable-objects/presence.js');
   // Find matching closing brace at depth 0, skipping strings AND comments.
   let depth = 0, end = -1, inStr = null;
   let i = start;
-  while (i < WORKER_SRC.length) {
-    const ch = WORKER_SRC[i];
-    const prev = WORKER_SRC[i - 1];
+  while (i < DO_PRESENCE_SRC.length) {
+    const ch = DO_PRESENCE_SRC[i];
+    const prev = DO_PRESENCE_SRC[i - 1];
     // skip line comment
-    if (!inStr && ch === '/' && WORKER_SRC[i + 1] === '/') {
-      while (i < WORKER_SRC.length && WORKER_SRC[i] !== '\n') i++;
+    if (!inStr && ch === '/' && DO_PRESENCE_SRC[i + 1] === '/') {
+      while (i < DO_PRESENCE_SRC.length && DO_PRESENCE_SRC[i] !== '\n') i++;
       continue;
     }
     // skip block comment
-    if (!inStr && ch === '/' && WORKER_SRC[i + 1] === '*') {
+    if (!inStr && ch === '/' && DO_PRESENCE_SRC[i + 1] === '*') {
       i += 2;
-      while (i < WORKER_SRC.length && !(WORKER_SRC[i] === '*' && WORKER_SRC[i + 1] === '/')) i++;
+      while (i < DO_PRESENCE_SRC.length && !(DO_PRESENCE_SRC[i] === '*' && DO_PRESENCE_SRC[i + 1] === '/')) i++;
       i += 2;
       continue;
     }
@@ -103,7 +106,7 @@ function extractPresenceDOClass() {
     i++;
   }
   assert.ok(end !== -1, 'PresenceDO class must have a closing brace');
-  return WORKER_SRC.slice(start, end);
+  return DO_PRESENCE_SRC.slice(start, end);
 }
 
 const PRESENCE_DO_CLASS_SRC = extractPresenceDOClass();

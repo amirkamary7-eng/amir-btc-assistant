@@ -20,6 +20,9 @@ const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
+// DO EXTRACTION: GroqRouterDO class moved to src/durable-objects/groq-router.js
+// (re-exported from worker-proxy.js via `export { GroqRouterDO };`).
+const DO_GROQ_ROUTER_SRC = fs.readFileSync(path.join(__dirname, 'src/durable-objects/groq-router.js'), 'utf8');
 
 // ════════════════════════════════════════════════════════════════════════════
 // 1. Router exists + discovers 1-4 keys
@@ -454,25 +457,25 @@ test('AMPLIFY-038: tryGroqSecondary removed (dead code, no dual-key retry)', () 
 // ════════════════════════════════════════════════════════════════════════════
 test('DO-039: GroqRouterDO class exists and is exported', () => {
   assert.ok(
-    workerSrc.includes('class GroqRouterDO'),
-    'GroqRouterDO class must exist'
+    DO_GROQ_ROUTER_SRC.includes('class GroqRouterDO'),
+    'GroqRouterDO class must exist (in src/durable-objects/groq-router.js)'
   );
   assert.ok(
-    workerSrc.includes('export { GroqRouterDO }'),
+    DO_GROQ_ROUTER_SRC.includes('export { GroqRouterDO }'),
     'GroqRouterDO must be exported (required by wrangler)'
   );
 });
 
 test('DO-040: GroqRouterDO has reserve action (serialized key selection)', () => {
-  const classStart = workerSrc.indexOf('class GroqRouterDO');
-  const classBody = workerSrc.substring(classStart, classStart + 5000);
+  const classStart = DO_GROQ_ROUTER_SRC.indexOf('class GroqRouterDO');
+  const classBody = DO_GROQ_ROUTER_SRC.substring(classStart, classStart + 5000);
   assert.ok(classBody.includes("action === 'reserve'"), 'DO must have reserve action');
   assert.ok(classBody.includes('_selectBestKey'), 'DO must call _selectBestKey (serialized)');
 });
 
 test('DO-041: GroqRouterDO has record action (serialized state update)', () => {
-  const classStart = workerSrc.indexOf('class GroqRouterDO');
-  const classBody = workerSrc.substring(classStart, classStart + 5000);
+  const classStart = DO_GROQ_ROUTER_SRC.indexOf('class GroqRouterDO');
+  const classBody = DO_GROQ_ROUTER_SRC.substring(classStart, classStart + 5000);
   assert.ok(classBody.includes("action === 'record'"), 'DO must have record action');
   assert.ok(classBody.includes('groq_429_info'), 'DO must handle groq_429_info in record');
 });
@@ -510,8 +513,8 @@ test('DO-044: wrangler.jsonc has GROQ_ROUTER_DO binding in production', () => {
 });
 
 test('DO-045: DO uses state.storage (transactional, not KV)', () => {
-  const classStart = workerSrc.indexOf('class GroqRouterDO');
-  const classBody = workerSrc.substring(classStart, classStart + 2000);
+  const classStart = DO_GROQ_ROUTER_SRC.indexOf('class GroqRouterDO');
+  const classBody = DO_GROQ_ROUTER_SRC.substring(classStart, classStart + 2000);
   assert.ok(
     classBody.includes('this.state.storage.get') && classBody.includes('this.state.storage.put'),
     'GroqRouterDO must use state.storage (DO transactional storage, not KV)'

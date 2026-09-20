@@ -22,6 +22,9 @@ const WORKER_SRC = fs.readFileSync(path.join(ROOT, 'worker-proxy.js'), 'utf8');
 const SESSIONS_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/sessions.js'), 'utf8');
 const ADMIN_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/admin.js'), 'utf8');
 const ASSISTANT_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/assistant.js'), 'utf8');
+// DO EXTRACTION: DO classes moved to src/durable-objects/*.js
+const DO_PRESENCE_SRC = fs.readFileSync(path.join(ROOT, 'src/durable-objects/presence.js'), 'utf8');
+const DO_GROQ_ROUTER_SRC = fs.readFileSync(path.join(ROOT, 'src/durable-objects/groq-router.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // KVO-1: Fear & Greed — fetchFearGreed routes through writeAppCache
@@ -327,10 +330,10 @@ test('KVO-7: no economic/credit-path code changed', () => {
 });
 
 test('KVO-7b: PresenceDO + heartbeat path unchanged (only dead code removed)', () => {
-  // PresenceDO storage puts still present (not KV)
-  assert.ok(WORKER_SRC.includes("this.state.storage.put('sessions_snapshot'"),
+  // PresenceDO storage puts still present (not KV) — now in src/durable-objects/presence.js
+  assert.ok(DO_PRESENCE_SRC.includes("this.state.storage.put('sessions_snapshot'"),
     'PresenceDO snapshot storage intact');
-  assert.ok(WORKER_SRC.includes('this.state.storage.put(`key${keyIndex}`'),
+  assert.ok(DO_GROQ_ROUTER_SRC.includes('this.state.storage.put(`key${keyIndex}`'),
     'GroqRouterDO storage intact');
 
   // Heartbeat handler in the SESSIONS CONTROLLER still uses DO primary path
