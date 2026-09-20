@@ -80,6 +80,7 @@ import { createCosmeticsHandlers } from './src/controllers/cosmetics.js';
 import { createNewsArticleRepository } from './src/repositories/news_articles.js';
 import { createAppContentRepository } from './src/repositories/app_content.js';
 import { runScheduled } from './src/cron/scheduler.js';
+import { getCalendarIsolateCache, getCalendarIsolateCacheAt, setCalendarIsolateCache } from './src/cron/calendar-cache.js';
 
 /**
  * Cloudflare Worker Shell
@@ -10652,8 +10653,12 @@ async function fetchCalendarFeed() {
 // net beyond the 10-minute KV TTL.
 // `_calendarIsolateCache` is set ONLY on successful fetch (events.length > 0)
 // and is returned when both KV cache and upstream fail.
-let _calendarIsolateCache = null;
-let _calendarIsolateCacheAt = 0; // timestamp of last successful fetch
+// Calendar isolate cache state has been extracted to `./src/cron/calendar-cache.js`
+// to allow safe sharing between worker-proxy.js and src/cron/scheduler.js
+// (ES modules have isolated scopes; module-level `let` here was previously
+// invisible to scheduler.js, causing silent ReferenceError in Phase 1c).
+// Access via getCalendarIsolateCache(), getCalendarIsolateCacheAt(),
+// setCalendarIsolateCache(events, ts?).
 
 async function fetchCalendarEvents(env) {
   // ROOT CAUSE FIX (RC-1): the previous "stale cache fallback" used
@@ -10674,10 +10679,11 @@ async function fetchCalendarEvents(env) {
     // change daily (new events appear, old events expire). A 30-min TTL
     // meant the Worker could serve stale data for up to 30 minutes after
     // the provider updated. With 5 min, the data is at most 5 min old.
-    const _isolateAge = _calendarIsolateCacheAt ? Date.now() - _calendarIsolateCacheAt : Infinity;
-    if (_calendarIsolateCache && _calendarIsolateCache.length > 0 && _isolateAge < 300000) {
+    const _isolateAge = getCalendarIsolateCacheAt() ? Date.now() - getCalendarIsolateCacheAt() : Infinity;
+    const _isolateCache = getCalendarIsolateCache();
+    if (_isolateCache && _isolateCache.length > 0 && _isolateAge < 300000) {
       // Isolate cache is fresh (< 5 min) — serve immediately
-      return _calendarIsolateCache;
+      return _isolateCache;
     }
 
     // 1. Try fresh KV cache (TTL-enforced by KV itself)
@@ -10688,8 +10694,7 @@ async function fetchCalendarEvents(env) {
         const parsed = JSON.parse(cachedEvents);
         if (Array.isArray(parsed) && parsed.length > 0) {
           // Update isolate cache so it stays fresh
-          _calendarIsolateCache = parsed;
-          _calendarIsolateCacheAt = Date.now();
+          setCalendarIsolateCache(parsed);
           return parsed;
         }
       } catch {
@@ -10753,8 +10758,7 @@ async function fetchCalendarEvents(env) {
       } catch (kvErr) {
         console.warn('[CALENDAR] KV write FAILED: ' + (kvErr?.message || kvErr));
       }
-      _calendarIsolateCache = events;
-      _calendarIsolateCacheAt = Date.now();
+      setCalendarIsolateCache(events);
       console.log('[CALENDAR] isolate cache updated: ' + events.length + ' events');
       return events;
     }
@@ -10765,13 +10769,14 @@ async function fetchCalendarEvents(env) {
     // even during extended upstream outages.
 
     // 3a. Try isolate cache (in-memory, instant)
-    if (_calendarIsolateCache && _calendarIsolateCache.length > 0) {
-      console.log('[CALENDAR] upstream empty — serving isolate cache: ' + _calendarIsolateCache.length + ' events (age=' + Math.round((Date.now() - _calendarIsolateCacheAt) / 1000) + 's)');
+    const _fallbackCache = getCalendarIsolateCache();
+    if (_fallbackCache && _fallbackCache.length > 0) {
+      console.log('[CALENDAR] upstream empty — serving isolate cache: ' + _fallbackCache.length + ' events (age=' + Math.round((Date.now() - getCalendarIsolateCacheAt()) / 1000) + 's)');
       // Try to refresh KV with isolate cache (in case KV expired)
       try {
-        await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(_calendarIsolateCache), 300);
+        await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(_fallbackCache), 300);
       } catch {}
-      return _calendarIsolateCache;
+      return _fallbackCache;
     }
 
     // 3b. Try KV cache (may still have data even if isolate cache is empty)
@@ -10782,8 +10787,7 @@ async function fetchCalendarEvents(env) {
         if (Array.isArray(parsed) && parsed.length > 0) {
           console.log('[CALENDAR] upstream empty — serving KV cache: ' + parsed.length + ' events');
           // Populate isolate cache so subsequent requests are instant
-          _calendarIsolateCache = parsed;
-          _calendarIsolateCacheAt = Date.now();
+          setCalendarIsolateCache(parsed);
           return parsed;
         }
       }
@@ -10796,8 +10800,7 @@ async function fetchCalendarEvents(env) {
         const stale = JSON.parse(rawCached);
         if (Array.isArray(stale) && stale.length > 0) {
           console.log('[CALENDAR] upstream empty — serving stale KV cache: ' + stale.length + ' events');
-          _calendarIsolateCache = stale;
-          _calendarIsolateCacheAt = Date.now();
+          setCalendarIsolateCache(stale);
           return stale;
         }
       }
@@ -11584,9 +11587,9 @@ async function handleCalendarEvents(env) {
     // refreshed and where it came from. This helps debug "stale data"
     // issues — the user can see if the data is live or from cache.
     server_time: new Date().toISOString(),
-    last_updated: _calendarIsolateCacheAt ? new Date(_calendarIsolateCacheAt).toISOString() : null,
-    isolate_cache_age_seconds: _calendarIsolateCacheAt ? Math.round((Date.now() - _calendarIsolateCacheAt) / 1000) : null,
-    isolate_cache_count: _calendarIsolateCache?.length || 0,
+    last_updated: getCalendarIsolateCacheAt() ? new Date(getCalendarIsolateCacheAt()).toISOString() : null,
+    isolate_cache_age_seconds: getCalendarIsolateCacheAt() ? Math.round((Date.now() - getCalendarIsolateCacheAt()) / 1000) : null,
+    isolate_cache_count: getCalendarIsolateCache()?.length || 0,
   }, {}, env);
 }
 
@@ -16593,6 +16596,7 @@ export default {
       mapCalendarEvent,
       notificationPlatformRepo,
       marketOverviewSvc,
+      setCalendarIsolateCache,
     });
   },
 };
