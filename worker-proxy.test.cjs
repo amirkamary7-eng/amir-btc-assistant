@@ -162,7 +162,7 @@ function loadWorker(pgOverride) {
     const resolvedPath = path.resolve(path.dirname(WORKER_PATH), importPath);
     let modSource = fs.readFileSync(resolvedPath, 'utf8');
     modSource = modSource
-      .replace(/export\s+function\s+(\w+)/g, 'module.exports.$1 = function $1')
+      .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'module.exports.$1 = function $1')
       .replace(/export\s+default\s+/g, 'module.exports.default = ')
       // PHASE 3: Support export const and export { ... } patterns
       .replace(/export\s+const\s+(\w+)\s*=/g, 'module.exports.$1 =')
