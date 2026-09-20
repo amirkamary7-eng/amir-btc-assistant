@@ -38,20 +38,16 @@ function createMemoryKv(initial = {}) {
   };
 }
 
-// ── Extract mission token functions from worker-proxy.js source ────────
-// The functions are top-level in worker-proxy.js. We load them by creating
-// an isolated module with the needed functions and a mock crypto.
-const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+// ── Load mission token service from extracted module ───────────────────
+// The mission token functions were extracted to src/auth/mission-tokens.js
+// (behavior-preserving move). We load the factory, strip the `export `
+// keyword, evaluate in an isolated scope with mock crypto, then call the
+// factory to get the token service functions.
+const missionTokensSrc = fs.readFileSync(path.join(__dirname, 'src/auth/mission-tokens.js'), 'utf8');
 
-// Find the mission token function block
-const startIdx = workerSrc.indexOf('// MISSION EVENT TOKEN SERVICE');
-const endIdx = workerSrc.indexOf('function buildFastApiValidationError', startIdx);
-if (startIdx < 0 || endIdx < 0) {
-  throw new Error('Could not locate mission token service block in worker-proxy.js');
-}
-const tokenServiceSrc = workerSrc.slice(startIdx, endIdx);
+// Strip `export ` so createMissionTokenService becomes a plain function declaration
+const factorySrc = missionTokensSrc.replace('export function createMissionTokenService', 'function createMissionTokenService');
 
-// Build an isolated module with the token service functions
 // FA-7: _getTodayISOString now delegates to sharedGetTehranDateString (Tehran
 // timezone). We must provide this helper in the eval context.
 const sharedGetTehranDateString = function() {
@@ -65,25 +61,22 @@ const sharedGetTehranDateString = function() {
 };
 
 const wrappedSrc = `
-${tokenServiceSrc}
-module.exports = {
-  issueMissionEventToken,
-  consumeMissionEventToken,
-  isMissionEventTokenConsumed,
-  MISSION_TOKEN_PREFIX,
-  MISSION_TOKEN_TTL_SECONDS,
-};
+${factorySrc}
+module.exports = { createMissionTokenService };
 `;
 
-const tokenModule = { exports: {} };
+const tokenFactoryModule = { exports: {} };
 const { createHmac, timingSafeEqual } = require('node:crypto');
 const evaluator = new Function('require', 'module', 'exports', 'crypto', 'createHmac', 'timingSafeEqual', 'sharedGetTehranDateString', wrappedSrc);
-evaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, createHmac, timingSafeEqual, sharedGetTehranDateString);
+evaluator(require, tokenFactoryModule, tokenFactoryModule.exports, globalThis.crypto, createHmac, timingSafeEqual, sharedGetTehranDateString);
+
+// Call the factory to get the token service functions
+const tokenService = tokenFactoryModule.exports.createMissionTokenService({ sharedGetTehranDateString });
 const {
   issueMissionEventToken,
   consumeMissionEventToken,
   isMissionEventTokenConsumed,
-} = tokenModule.exports;
+} = tokenService;
 
 // ── Tests ──────────────────────────────────────────────────────────────
 

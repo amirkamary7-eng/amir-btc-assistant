@@ -142,12 +142,14 @@ function createDbSimulator() {
   return { queryDb, queryDbTransaction, _state: state };
 }
 
-// ── Mission event token (real functions from worker-proxy.js) ──────────
-const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-const startIdx = workerSrc.indexOf('// MISSION EVENT TOKEN SERVICE');
-const endIdx = workerSrc.indexOf('function buildFastApiValidationError', startIdx);
-const tokenServiceSrc = workerSrc.slice(startIdx, endIdx);
-const tokenModule = { exports: {} };
+// ── Mission event token (real functions from extracted module) ────────
+// The mission token functions were extracted to src/auth/mission-tokens.js
+// (behavior-preserving move via factory pattern: createMissionTokenService).
+// We load the factory, strip the `export ` keyword, evaluate in an isolated
+// scope with mock crypto + real sharedGetTehranDateString, then call the
+// factory to get the token service functions.
+const missionTokensSrc = fs.readFileSync(path.join(__dirname, 'src/auth/mission-tokens.js'), 'utf8');
+const factorySrc = missionTokensSrc.replace('export function createMissionTokenService', 'function createMissionTokenService');
 
 // FIX (broken test): worker-proxy.js imports `getTehranDateString` from
 // ./src/services/timezone.js and aliases it as `sharedGetTehranDateString`
@@ -167,13 +169,16 @@ const _tzModule = { exports: {} };
 new Function('module', 'exports', _tzBody + '\nmodule.exports = { getTehranDateString };')(_tzModule, _tzModule.exports);
 const _sharedGetTehranDateString = _tzModule.exports.getTehranDateString;
 
+const tokenModule = { exports: {} };
 const { createHmac: _ch, timingSafeEqual: _tse } = require('node:crypto');
 const tokenEvaluator = new Function(
   'require', 'module', 'exports', 'crypto', 'createHmac', 'timingSafeEqual', 'sharedGetTehranDateString',
-  tokenServiceSrc + '\nmodule.exports = { issueMissionEventToken, consumeMissionEventToken };'
+  factorySrc + '\nmodule.exports = { createMissionTokenService };'
 );
 tokenEvaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, _ch, _tse, _sharedGetTehranDateString);
-const { issueMissionEventToken, consumeMissionEventToken } = tokenModule.exports;
+// Call the factory to get the token service functions
+const _tokenService = tokenModule.exports.createMissionTokenService({ sharedGetTehranDateString: _sharedGetTehranDateString });
+const { issueMissionEventToken, consumeMissionEventToken } = _tokenService;
 
 // In-memory KV
 function createMemoryKv() {

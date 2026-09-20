@@ -23,6 +23,7 @@ const REWARD_PURCHASES_SRC = fs.readFileSync(path.join(__dirname, 'src/controlle
 const REWARD_PURCHASES_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_purchases.js'), 'utf8');
 const WALLET_FRONTEND_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
 const WORKER_PROXY_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const MISSION_TOKENS_SRC = fs.readFileSync(path.join(__dirname, 'src/auth/mission-tokens.js'), 'utf8');
 
 // Helper: strip comments to avoid false-positive matches on comment text
 function stripComments(src) {
@@ -880,11 +881,11 @@ test('N6: duplicate event does not trigger duplicate reward (backend guard)', ()
   assert.ok(CONTROLLER_SRC.includes('refId'),
     'backend uses deterministic refId for idempotent credit');
 
-  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-  assert.ok(WORKER_SRC.includes('consumedMarkerKey'),
-    'event token uses consumed marker (prevents double-reward)');
-  assert.ok(WORKER_SRC.includes('token.length !== 32'),
-    'event token validates length');
+  // Mission token service moved to src/auth/mission-tokens.js
+  assert.ok(MISSION_TOKENS_SRC.includes('consumedMarkerKey'),
+    'event token uses consumed marker (prevents double-reward) (in src/auth/mission-tokens.js)');
+  assert.ok(MISSION_TOKENS_SRC.includes('token.length !== 32'),
+    'event token validates length (in src/auth/mission-tokens.js)');
 });
 
 test('N7: All 4 mission triggers fire correctly in app.js', () => {
@@ -1553,9 +1554,9 @@ test('T3: creditTokens idempotency — INSERT ON CONFLICT DO NOTHING (no double-
 });
 
 test('T4: Event token one-time use — consumedMarkerKey prevents double-consume', () => {
-  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-  const idx = WORKER_SRC.indexOf('async function consumeMissionEventToken');
-  const block = WORKER_SRC.substring(idx, idx + 2500);
+  // Mission token service moved to src/auth/mission-tokens.js
+  const idx = MISSION_TOKENS_SRC.indexOf('async function consumeMissionEventToken');
+  const block = MISSION_TOKENS_SRC.substring(idx, idx + 2500);
   // Check the consumed marker
   assert.ok(block.includes('consumedMarkerKey'),
     'consumeMissionEventToken uses a consumed marker key');

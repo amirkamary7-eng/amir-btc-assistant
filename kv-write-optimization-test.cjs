@@ -25,6 +25,8 @@ const ASSISTANT_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/assistant
 // DO EXTRACTION: DO classes moved to src/durable-objects/*.js
 const DO_PRESENCE_SRC = fs.readFileSync(path.join(ROOT, 'src/durable-objects/presence.js'), 'utf8');
 const DO_GROQ_ROUTER_SRC = fs.readFileSync(path.join(ROOT, 'src/durable-objects/groq-router.js'), 'utf8');
+// MISSION TOKEN EXTRACTION: token service moved to src/auth/mission-tokens.js
+const MISSION_TOKENS_SRC = fs.readFileSync(path.join(ROOT, 'src/auth/mission-tokens.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // KVO-1: Fear & Greed — fetchFearGreed routes through writeAppCache
@@ -322,11 +324,11 @@ test('KVO-7: no economic/credit-path code changed', () => {
   assert.ok(WALLET_REPO.includes('STREAK_REWARDS'),
     'streak rewards logic intact');
 
-  // Mission token issuance still uses Phase 2D (no KV)
-  assert.ok(WORKER_SRC.includes('PHASE 2D'),
-    'Phase 2D signed tokens intact');
-  assert.ok(WORKER_SRC.includes('_signMissionToken'),
-    'mission token signing intact');
+  // Mission token issuance still uses Phase 2D (no KV) — now in src/auth/mission-tokens.js
+  assert.ok(MISSION_TOKENS_SRC.includes('PHASE 2D'),
+    'Phase 2D signed tokens intact (in src/auth/mission-tokens.js)');
+  assert.ok(MISSION_TOKENS_SRC.includes('_signMissionToken'),
+    'mission token signing intact (in src/auth/mission-tokens.js)');
 });
 
 test('KVO-7b: PresenceDO + heartbeat path unchanged (only dead code removed)', () => {
