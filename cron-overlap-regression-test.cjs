@@ -34,12 +34,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const workerSrc = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 
 // ── Locate the Phase 1d block ──
 const phase1dMarker = 'MAX_SUMMARIES_PER_TICK';
 const phase1dIdx = workerSrc.indexOf(phase1dMarker);
-assert.ok(phase1dIdx !== -1, 'Phase 1d block (MAX_SUMMARIES_PER_TICK) must exist in worker-proxy.js');
+assert.ok(phase1dIdx !== -1, 'Phase 1d block (MAX_SUMMARIES_PER_TICK) must exist in src/cron/scheduler.js');
 
 // Find the `if` condition that guards the Phase 1d block (search backwards from MAX_SUMMARIES_PER_TICK)
 const searchStart = Math.max(0, phase1dIdx - 500);

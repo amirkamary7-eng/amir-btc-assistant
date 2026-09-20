@@ -15,31 +15,32 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test('H5-5MIN-01: MAX_SUMMARIES_PER_TICK === 2 (was 4, reduced for subrequest safety)', () => {
-  const maxMatch = WORKER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
+  const maxMatch = SCHEDULER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
   assert.ok(maxMatch, 'MAX_SUMMARIES_PER_TICK must exist');
   assert.equal(maxMatch[1], '2', 'MAX_SUMMARIES_PER_TICK must be 2 (H5-5min fix)');
 });
 
 test('H5-5MIN-02: MAX_SUMMARIES_PER_TICK NOT 4 (old value removed)', () => {
-  assert.ok(!WORKER_SRC.includes('MAX_SUMMARIES_PER_TICK = 4'),
+  assert.ok(!SCHEDULER_SRC.includes('MAX_SUMMARIES_PER_TICK = 4'),
     'Old value MAX_SUMMARIES_PER_TICK = 4 must NOT exist');
 });
 
 test('H5-5MIN-03: Phase 1d loop uses MAX_SUMMARIES_PER_TICK as iteration limit', () => {
-  const loopMatch = WORKER_SRC.match(/for\s*\(let\s+i\s*=\s*0;\s*i\s*<\s*MAX_SUMMARIES_PER_TICK;\s*i\+\+\)/);
+  const loopMatch = SCHEDULER_SRC.match(/for\s*\(let\s+i\s*=\s*0;\s*i\s*<\s*MAX_SUMMARIES_PER_TICK;\s*i\+\+\)/);
   assert.ok(loopMatch, 'Phase 1d must use MAX_SUMMARIES_PER_TICK in for loop');
 });
 
 test('H5-5MIN-04: overlap skip on :00/:15/:30/:45 still exists', () => {
-  assert.ok(WORKER_SRC.includes('_phase1dIsOverlapWith15Min'),
+  assert.ok(SCHEDULER_SRC.includes('_phase1dIsOverlapWith15Min'),
     'Phase 1d overlap check must exist');
-  assert.ok(WORKER_SRC.includes('_phase1dCurrentMinute % 15 === 0'),
+  assert.ok(SCHEDULER_SRC.includes('_phase1dCurrentMinute % 15 === 0'),
     'Overlap detection (% 15 === 0) must exist');
-  assert.ok(WORKER_SRC.includes('isEvery5Min && !_phase1dIsOverlapWith15Min'),
+  assert.ok(SCHEDULER_SRC.includes('isEvery5Min && !_phase1dIsOverlapWith15Min'),
     'Phase 1d must be gated by both isEvery5Min AND !overlap');
 });
 
@@ -64,9 +65,9 @@ test('H5-5MIN-06: AI provider chain unchanged (generateSummaryWithFallback)', ()
 });
 
 test('H5-5MIN-07: no other changes to Phase 1d structure (break + recordNewsAITick preserved)', () => {
-  const phase1dIdx = WORKER_SRC.indexOf('if (isEvery5Min && !_phase1dIsOverlapWith15Min)');
+  const phase1dIdx = SCHEDULER_SRC.indexOf('if (isEvery5Min && !_phase1dIsOverlapWith15Min)');
   assert.notEqual(phase1dIdx, -1, 'Phase 1d block must exist');
-  const phase1dBlock = WORKER_SRC.slice(phase1dIdx, phase1dIdx + 2000);
+  const phase1dBlock = SCHEDULER_SRC.slice(phase1dIdx, phase1dIdx + 2000);
   assert.ok(phase1dBlock.includes('processOneArticleSummary'),
     'Phase 1d must call processOneArticleSummary');
   assert.ok(phase1dBlock.includes('recordNewsAITick'),
@@ -77,7 +78,7 @@ test('H5-5MIN-07: no other changes to Phase 1d structure (break + recordNewsAITi
 
 test('H5-5MIN-08: subrequest budget safe (2 × 14 = 28, under 50 with margin)', () => {
   // Verify MAX_SUMMARIES_PER_TICK is 2
-  const maxMatch = WORKER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
+  const maxMatch = SCHEDULER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
   const maxVal = Number(maxMatch[1]);
   assert.equal(maxVal, 2);
   // 2 iterations × 14 subrequests/iteration = 28 subrequests for Phase 1d
@@ -93,8 +94,8 @@ test('H5-5MIN-09: Price Alert / Calendar / processQueue untouched', () => {
     'Price Alert must still exist');
   assert.ok(WORKER_SRC.includes('async function runCalendarAlertsCheck'),
     'Calendar must still exist');
-  assert.ok(WORKER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
-    '1-min cron processQueue(5) must still exist');
-  assert.ok(WORKER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 15)'),
-    '5-min cron processQueue(15) must still exist');
+  assert.ok(SCHEDULER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
+    '1-min cron processQueue(5) must still exist (now in src/cron/scheduler.js)');
+  assert.ok(SCHEDULER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 15)'),
+    '5-min cron processQueue(15) must still exist (now in src/cron/scheduler.js)');
 });

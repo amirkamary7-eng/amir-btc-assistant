@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -29,30 +30,30 @@ function extractFunctionBody(src, fnName) {
 // GROUP 3 — Telemetry data in recordNewsAITick payload
 
 test('H4-07: recordNewsAITick call site includes cache_hit field', () => {
-  const callSiteIdx = WORKER_SRC.indexOf("type: 'tick_5min'");
+  const callSiteIdx = SCHEDULER_SRC.indexOf("type: 'tick_5min'");
   assert.notEqual(callSiteIdx, -1, 'tick_5min call site must exist');
-  const callSiteBlock = WORKER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
+  const callSiteBlock = SCHEDULER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
   assert.ok(callSiteBlock.includes('cache_hit:'),
     'recordNewsAITick tick_5min call must include cache_hit field');
 });
 
 test('H4-08: recordNewsAITick call site includes provider_attempts field', () => {
-  const callSiteIdx = WORKER_SRC.indexOf("type: 'tick_5min'");
-  const callSiteBlock = WORKER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
+  const callSiteIdx = SCHEDULER_SRC.indexOf("type: 'tick_5min'");
+  const callSiteBlock = SCHEDULER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
   assert.ok(callSiteBlock.includes('provider_attempts:'),
     'recordNewsAITick tick_5min call must include provider_attempts field');
 });
 
 test('H4-09: recordNewsAITick call site includes fallback_used field', () => {
-  const callSiteIdx = WORKER_SRC.indexOf("type: 'tick_5min'");
-  const callSiteBlock = WORKER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
+  const callSiteIdx = SCHEDULER_SRC.indexOf("type: 'tick_5min'");
+  const callSiteBlock = SCHEDULER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
   assert.ok(callSiteBlock.includes('fallback_used:'),
     'recordNewsAITick tick_5min call must include fallback_used field');
 });
 
 test('H4-10: recordNewsAITick call site includes final_provider field', () => {
-  const callSiteIdx = WORKER_SRC.indexOf("type: 'tick_5min'");
-  const callSiteBlock = WORKER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
+  const callSiteIdx = SCHEDULER_SRC.indexOf("type: 'tick_5min'");
+  const callSiteBlock = SCHEDULER_SRC.slice(callSiteIdx, callSiteIdx + 1200);
   assert.ok(callSiteBlock.includes('final_provider:'),
     'recordNewsAITick tick_5min call must include final_provider field');
 });
@@ -179,8 +180,8 @@ test('H4-21: Calendar untouched (PATH 1 + PATH 2)', () => {
 });
 
 test('H4-22: processQueue + scheduled unchanged', () => {
-  assert.ok(WORKER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
-    '1-min cron processQueue(5) must still exist');
+  assert.ok(SCHEDULER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
+    '1-min cron processQueue(5) must still exist (now in src/cron/scheduler.js)');
   assert.ok(WORKER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 10)'),
     'calendar processQueue(10) must still exist');
   assert.ok(WORKER_SRC.includes('async scheduled('),

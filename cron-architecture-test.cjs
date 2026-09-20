@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 const WRANGLER_SRC = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -77,24 +78,24 @@ test('T9: retryFailedMissionRewards is NOT called inside the isEvery15Min block'
 
 test('T10: all three retryFailed* jobs are called inside the 1-min block, gated by UTC minute 0', () => {
   // Verify isHourly is GONE (no 4th cron trigger on Free Plan)
-  assert.ok(!WORKER_SRC.includes('isHourly'),
+  assert.ok(!WORKER_SRC.includes('isHourly') && !SCHEDULER_SRC.includes('isHourly'),
     'isHourly variable must NOT exist (Free Plan 3-trigger limit)');
 
   // Verify the UTC minute guard exists
-  assert.ok(WORKER_SRC.includes('getUTCMinutes()'),
+  assert.ok(SCHEDULER_SRC.includes('getUTCMinutes()'),
     'Must use getUTCMinutes() for hourly guard');
-  assert.ok(WORKER_SRC.includes('_hourlyMinute === 0'),
+  assert.ok(SCHEDULER_SRC.includes('_hourlyMinute === 0'),
     'Must guard with _hourlyMinute === 0');
 
   // Find the 1-min block (isEveryMinute) and verify retryFailed* are inside it
-  const minuteStart = WORKER_SRC.indexOf('if (isEveryMinute)');
+  const minuteStart = SCHEDULER_SRC.indexOf('if (isEveryMinute)');
   assert.ok(minuteStart > 0, 'isEveryMinute block must exist');
 
   // Find the 'return;' that ends the 1-min block
-  const returnIdx = WORKER_SRC.indexOf('Return early', minuteStart);
+  const returnIdx = SCHEDULER_SRC.indexOf('Return early', minuteStart);
   assert.ok(returnIdx > 0, 'Must find the return early marker');
 
-  const block = WORKER_SRC.slice(minuteStart, returnIdx);
+  const block = SCHEDULER_SRC.slice(minuteStart, returnIdx);
   assert.ok(block.includes('await retryFailedReferralRewards'),
     'retryFailedReferralRewards must be called inside 1-min block (gated by UTC minute 0)');
   assert.ok(block.includes('await retryFailedWheelRewards'),
@@ -131,11 +132,11 @@ test('T11: processOneArticleSummary is NOT called inside processNewsAIBatch', ()
 
 test('T12: processOneArticleSummary IS called in the */5 Phase 1d path', () => {
   // The */5 Phase 1d path has MAX_SUMMARIES_PER_TICK
-  const phase1dIdx = WORKER_SRC.indexOf('MAX_SUMMARIES_PER_TICK');
+  const phase1dIdx = SCHEDULER_SRC.indexOf('MAX_SUMMARIES_PER_TICK');
   assert.ok(phase1dIdx > 0, 'MAX_SUMMARIES_PER_TICK must exist (Phase 1d)');
 
   // Check that processOneArticleSummary is called near that location (within 500 chars)
-  const nearby = WORKER_SRC.slice(phase1dIdx, phase1dIdx + 500);
+  const nearby = SCHEDULER_SRC.slice(phase1dIdx, phase1dIdx + 500);
   assert.ok(nearby.includes('processOneArticleSummary'),
     'processOneArticleSummary must be called in the Phase 1d path');
 });
@@ -174,7 +175,7 @@ test('T13: queue circuit breaker exists in processNewsAIBatch with threshold 40'
 test('T14: circuit breaker is inside processNewsAIBatch (*/15 only), NOT inside Phase 1d', () => {
   // The circuit breaker should be in processNewsAIBatch (called from */15)
   // and NOT in the Phase 1d path (called from */5)
-  const phase1dIdx = WORKER_SRC.indexOf('MAX_SUMMARIES_PER_TICK');
+  const phase1dIdx = SCHEDULER_SRC.indexOf('MAX_SUMMARIES_PER_TICK');
   const nearby = WORKER_SRC.slice(phase1dIdx, phase1dIdx + 1000);
   assert.ok(!nearby.includes('CIRCUIT_BREAKER'),
     'Circuit breaker must NOT be in the Phase 1d (*/5) path — only in processNewsAIBatch (*/15)');
@@ -204,13 +205,13 @@ test('T15: exactly 3 cron triggers in wrangler.jsonc, no 0 * * * *', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 test('T16: exactly 3 cron routes exist in scheduled() handler (no isHourly)', () => {
-  assert.ok(WORKER_SRC.includes("const isEveryMinute = cronExpr === '* * * * *'"),
+  assert.ok(SCHEDULER_SRC.includes("const isEveryMinute = cronExpr === '* * * * *'"),
     'isEveryMinute route must exist');
-  assert.ok(WORKER_SRC.includes("const isEvery5Min = cronExpr === '*/5 * * * *'"),
+  assert.ok(SCHEDULER_SRC.includes("const isEvery5Min = cronExpr === '*/5 * * * *'"),
     'isEvery5Min route must exist');
-  assert.ok(WORKER_SRC.includes("const isEvery15Min = cronExpr === '*/15 * * * *'"),
+  assert.ok(SCHEDULER_SRC.includes("const isEvery15Min = cronExpr === '*/15 * * * *'"),
     'isEvery15Min route must exist');
-  assert.ok(!WORKER_SRC.includes('isHourly'),
+  assert.ok(!WORKER_SRC.includes('isHourly') && !SCHEDULER_SRC.includes('isHourly'),
     'isHourly must NOT exist (Free Plan 3-trigger limit — hourly retry runs inside 1-min cron)');
 });
 
@@ -231,19 +232,19 @@ test('T17: 15-min branch still runs calendar cache + market overview + processNe
 
   // Find all isEvery15Min blocks after scheduled()
   const blocks = [];
-  let searchFrom = scheduledStart;
+  let searchFrom = 0;
   while (true) {
-    const idx = WORKER_SRC.indexOf('if (isEvery15Min) {', searchFrom);
+    const idx = SCHEDULER_SRC.indexOf('if (isEvery15Min) {', searchFrom);
     if (idx === -1) break;
     // Find closing brace
     let depth = 0;
     let end = -1;
-    for (let i = idx; i < WORKER_SRC.length; i++) {
-      if (WORKER_SRC[i] === '{') depth++;
-      if (WORKER_SRC[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    for (let i = idx; i < SCHEDULER_SRC.length; i++) {
+      if (SCHEDULER_SRC[i] === '{') depth++;
+      if (SCHEDULER_SRC[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
     }
     if (end > 0) {
-      blocks.push({ start: idx, end: end, content: WORKER_SRC.slice(idx, end) });
+      blocks.push({ start: idx, end: end, content: SCHEDULER_SRC.slice(idx, end) });
       searchFrom = end + 1;
     } else break;
   }
