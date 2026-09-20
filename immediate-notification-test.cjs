@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const NOTIF_REPO = fs.readFileSync(path.join(__dirname, 'src/repositories/notification_platform.js'), 'utf8');
 const WORKER = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 
 // ============================================================================
 // 1. processQueue(LIMIT=1) after enqueue in sendNotification
@@ -89,13 +90,13 @@ test('IMM-010: processQueue catch falls back to 60s when no retry_after', () => 
 // ============================================================================
 
 test('IMM-011: 1-min cron processQueue LIMIT 5 (FIX 3: was 3)', () => {
-  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
-    '1-min cron processQueue must be LIMIT 5 (FIX 3: increased from 3)');
+  assert.ok(SCHEDULER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
+    '1-min cron processQueue must be LIMIT 5 (FIX 3: increased from 3) (now in src/cron/scheduler.js)');
 });
 
 test('IMM-012: 5-min cron processQueue LIMIT 15 (FIX 2: was 10)', () => {
-  assert.ok(WORKER.includes('processQueue(env, sendTelegramMessage, pool, 15)'),
-    '5-min cron processQueue must be LIMIT 15 (FIX 2: increased from 10, reduced from 20 after subrequest re-analysis)');
+  assert.ok(SCHEDULER_SRC.includes('processQueue(env, sendTelegramMessage, pool, 15)'),
+    '5-min cron processQueue must be LIMIT 15 (FIX 2: increased from 10, reduced from 20 after subrequest re-analysis) (now in src/cron/scheduler.js)');
 });
 
 // ============================================================================
