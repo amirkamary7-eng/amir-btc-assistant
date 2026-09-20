@@ -167,7 +167,11 @@ function loadWorker(pgOverride) {
       // PHASE 3: Support export const and export { ... } patterns
       .replace(/export\s+const\s+(\w+)\s*=/g, 'module.exports.$1 =')
       .replace(/export\s+let\s+(\w+)\s*=/g, 'module.exports.$1 =')
-      .replace(/export\s+var\s+(\w+)\s*=/g, 'module.exports.$1 =');
+      .replace(/export\s+var\s+(\w+)\s*=/g, 'module.exports.$1 =')
+      // DO EXTRACTION: Support `export { ClassName };` pattern (named export of
+      // already-declared identifier). Needed for src/durable-objects/*.js modules
+      // whose DO classes are re-exported via `export { PresenceDO };`.
+      .replace(/export\s+\{\s*(\w+)\s*\};?/g, 'module.exports.$1 = $1;');
     const mod = { exports: {} };
     new Function('require', 'module', 'exports',
       'console.log = () => {}; console.warn = () => {}; console.error = () => {};\n' + modSource
