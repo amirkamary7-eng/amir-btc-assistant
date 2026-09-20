@@ -24,6 +24,7 @@ export async function runScheduled(controller, env, ctx, deps) {
     mapCalendarEvent,
     notificationPlatformRepo,
     marketOverviewSvc,
+    setCalendarIsolateCache,
   } = deps;
 
     const _cronTickId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -414,8 +415,7 @@ export async function runScheduled(controller, env, ctx, deps) {
               .filter((item) => item !== null)
               .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
             if (events.length > 0) {
-              _calendarIsolateCache = events;
-              _calendarIsolateCacheAt = Date.now();
+              setCalendarIsolateCache(events);
               try { await writeAppCache(env, CALENDAR_CACHE_KEY, JSON.stringify(events), 600); } catch {}
               console.log('[CRON] calendar cache refreshed: ' + events.length + ' events');
               _logPhase('phase1c-calendar-cache', 'ok', { events: events.length });
