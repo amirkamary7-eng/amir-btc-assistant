@@ -3285,14 +3285,14 @@ test('NOTIF-001 (source): processQueue accepts limit parameter for CPU-safe batc
 });
 
 test('NOTIF-002 (source): 1-min cron runs processQueue with limit=5', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
   // FIX 3: limit increased from 3 to 5 (subrequest budget: 15 price + 15 alert + 5 PQ = 35 ≤ 50)
   assert.ok(/notificationPlatformRepo\.processQueue\(env, sendTelegramMessage, pool, 5\)/.test(src),
     '1-min cron must call processQueue with limit=5 (FIX 3: was 3, now 5 — 35 ≤ 50 subrequests)');
 });
 
 test('NOTIF-003 (source): 1-min cron still runs runScheduledAlertsBaseline', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
   // Verify 1-min cron still runs alerts (unchanged)
   assert.ok(/await runScheduledAlertsBaseline\(controller, env, pool\)/.test(src),
     '1-min cron must still run runScheduledAlertsBaseline (unchanged)');
@@ -3435,7 +3435,7 @@ test('NOTIF-011 (source): requeueStaleQueueItems preserved', () => {
 });
 
 test('NOTIF-012 (source): */5 cron processQueue uses limit=15 (FIX 2: was 10)', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
   // FIX 2: limit increased from 10 (default) to 15.
   // Subrequest budget: 15 PQ + 10 broadcast PQ + 15 calendar + 8 news = 48 ≤ 50
   const phase4Start = src.indexOf('PHASE 4: SEQUENTIAL EXECUTION');

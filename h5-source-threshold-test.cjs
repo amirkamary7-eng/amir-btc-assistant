@@ -30,6 +30,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
 
 // Helper: find the threshold value associated with a specific fail_reason.
 // Matches: if (articleText.length < N) { ... fail_reason = 'REASON' ...
@@ -143,7 +144,7 @@ test('SOURCE-THRESHOLD-13: news:failed_urls tracking logic unchanged', () => {
 
 test('SOURCE-THRESHOLD-14: MAX_SUMMARIES_PER_TICK unchanged at 2 (H5-5min fix preserved)', () => {
   // H5-5min fix (commit e2ede82) must remain intact
-  const m = WORKER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
+  const m = SCHEDULER_SRC.match(/MAX_SUMMARIES_PER_TICK\s*=\s*(\d+)/);
   assert.ok(m, 'MAX_SUMMARIES_PER_TICK must exist');
   assert.equal(m[1], '2', 'MAX_SUMMARIES_PER_TICK must remain 2 (H5-5min fix preserved)');
 });
