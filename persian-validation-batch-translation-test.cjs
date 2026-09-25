@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
+const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, "src/news/shared.js"), "utf8");
 
 // ═════════════════════════════════════════════════════════════════════
 // Standalone implementation for testing (mirrors worker-proxy.js logic)
@@ -261,16 +262,16 @@ test('EDGE-04: Provider error → FAIL', () => {
 // ═════════════════════════════════════════════════════════════════════
 
 test('SRC-01: CJK zero-tolerance (cjkChars > 0)', () => {
-  assert.match(WORKER_SRC, /cjkChars\s*>\s*0/);
+  assert.match(NEWS_SHARED_SRC, /cjkChars\s*>\s*0/);
 });
 
 test('SRC-02: Segment-based English check', () => {
-  assert.match(WORKER_SRC, /english_contamination_in_segment/);
+  assert.match(NEWS_SHARED_SRC, /english_contamination_in_segment/);
 });
 
-test('SRC-03: Whitelist has BTC', () => assert.match(WORKER_SRC, /'BTC'/));
-test('SRC-04: Whitelist has ETH', () => assert.match(WORKER_SRC, /'ETH'/));
-test('SRC-05: Whitelist has USDT', () => assert.match(WORKER_SRC, /'USDT'/));
+test('SRC-03: Whitelist has BTC', () => assert.match(NEWS_SHARED_SRC, /'BTC'/));
+test('SRC-04: Whitelist has ETH', () => assert.match(NEWS_SHARED_SRC, /'ETH'/));
+test('SRC-05: Whitelist has USDT', () => assert.match(NEWS_SHARED_SRC, /'USDT'/));
 test('SRC-06: JOURNALIST_SYSTEM prohibits CJK', () => assert.match(WORKER_SRC, /هیچ کاراکتر چینی/));
 test('SRC-07: JOURNALIST_SYSTEM prohibits English', () => assert.match(WORKER_SRC, /هیچ کلمه یا عبارت انگلیسی معمولی مجاز نیست/));
 test('SRC-08: JOURNALIST_SYSTEM has transliteration', () => {

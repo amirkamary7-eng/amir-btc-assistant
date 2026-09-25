@@ -31,6 +31,7 @@ const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, 'src/cron/scheduler.js'), 'utf8');
+const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 
 // Helper: find the threshold value associated with a specific fail_reason.
 // Matches: if (articleText.length < N) { ... fail_reason = 'REASON' ...
@@ -161,8 +162,8 @@ test('SOURCE-THRESHOLD-15: provider fallback chain unchanged', () => {
 
 test('SOURCE-THRESHOLD-16: validatePersianOutput validator unchanged', () => {
   // Persian validator must still exist (AI quality bar preserved)
-  assert.ok(WORKER_SRC.includes('function validatePersianOutput'),
-    'validatePersianOutput must still exist (unchanged — AI quality bar)');
+  assert.ok(NEWS_SHARED_SRC.includes('function validatePersianOutput'),
+    'validatePersianOutput must still exist in src/news/shared.js (unchanged — AI quality bar)');
 });
 
 test('SOURCE-THRESHOLD-17: comment above threshold line still references original rationale', () => {
