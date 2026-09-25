@@ -7,7 +7,7 @@
 //            hashUrl, canonicalizeUrl, enrichNewsWithAISummaries,
 //            batchAnalyzeNews, processNewsAIBatch }
 //
-// DI dependencies (32):
+// DI dependencies (39):
 //   - readAppCache, writeAppCache, getNumericEnv: KV/env helpers (from worker-proxy.js core)
 //   - fetchAllNewsRss: RSS feed fetcher (from worker-proxy.js core — RSS/Feed section)
 //   - newsArticleRepo: News articles repository (from worker-proxy.js core, src/repositories/news_articles.js)
@@ -37,6 +37,13 @@
 //     module scope). Same TDZ-cycle reason as getSummaryQueue — these constants are passed
 //     as DI deps to BOTH createNewsTelemetry AND createNewsSummary, so they must stay in
 //     worker-proxy.js module scope (initialized before composition root).
+//
+//   - parseRelativeTime, filterAndScoreNews, parseRssItems, validatePersianOutput,
+//     sanitizeNewsTitle, sanitizeNewsSummary, classifySentiment: shared helpers
+//     (from src/news/shared.js). These are imported in worker-proxy.js (line 87) but
+//     are NOT accessible from summary.js's lexical scope. Without these DI deps,
+//     the bare references inside summary.js throw ReferenceError at runtime
+//     (confirmed in production wrangler tail at 12:45:06 UTC */15 cron fire).
 //
 // NOT extracted (stay in worker-proxy.js):
 //   - getSummaryQueue function (cycle-breaker, see above)
@@ -101,6 +108,28 @@ export function createNewsSummary({
   NEWS_SUMMARY_QUEUE_KEY,
   NEWS_SUMMARY_MAX_RETRIES,
   NEWS_SUMMARY_BACKOFF_MINUTES,
+
+  // ─── From src/news/shared.js (7) — imported in worker-proxy.js, passed as DI ───
+  // These are shared helpers used inside Summary section code:
+  //   - parseRelativeTime: used in processNewsAIBatch STEP 2 (article time_ago field)
+  //   - filterAndScoreNews: used in processNewsAIBatch STEP 3 (pre-filter engine)
+  //   - parseRssItems: used in processNewsAIBatch STEP 2 (parse RSS items from sources)
+  //   - validatePersianOutput: used in processOneArticleSummary (enriched summary validation)
+  //     and processNewsAIBatch (batch analysis output validation)
+  //   - sanitizeNewsTitle: used in processNewsAIBatch STEP 4 (sanitize translated titles)
+  //   - sanitizeNewsSummary: used in processOneArticleSummary (sanitize generated summary)
+  //   - classifySentiment: used in processNewsAIBatch STEP 4 (article sentiment field)
+  // Without these DI deps, the bare references inside summary.js would throw ReferenceError
+  // at runtime (confirmed via production wrangler tail at 12:45:06 UTC */15 cron fire:
+  //   parseRssItems is not defined
+  //   filterAndScoreNews is not defined)
+  parseRelativeTime,
+  filterAndScoreNews,
+  parseRssItems,
+  validatePersianOutput,
+  sanitizeNewsTitle,
+  sanitizeNewsSummary,
+  classifySentiment,
 }) {
 
 // ────────────────────────────────────────────────────────────────────────────
