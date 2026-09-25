@@ -9500,6 +9500,9 @@ const { ensureTelemetryTables, recordNewsAITick, recordE2ETiming, getE2ETimingSt
   NEWS_SUMMARY_BACKOFF_MINUTES,
   NEWS_SUMMARY_MAX_RETRIES,
   OPENAI_MODEL,
+  getSummaryQueue,
+  getCircuitState,
+  _groqRouterGetKeyState,
 });
 
 const walletHandlers = createWalletHandlers({

@@ -33,6 +33,9 @@ export function createNewsTelemetry({
   NEWS_SUMMARY_BACKOFF_MINUTES,
   NEWS_SUMMARY_MAX_RETRIES,
   OPENAI_MODEL,
+  getSummaryQueue,
+  getCircuitState,
+  _groqRouterGetKeyState,
 }) {
 
 let _telemetryTablesEnsured = false;
