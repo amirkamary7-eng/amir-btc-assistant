@@ -20,6 +20,7 @@ const path = require('node:path');
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const summarySrc = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
+const feedSrc = fs.readFileSync(path.join(__dirname, 'src/news/feed.js'), 'utf8');
 const repoSrc = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
 const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
 
@@ -75,9 +76,9 @@ test('NEWS-P0-003: publishArticleToFarsiNews must read existing + merge (not ove
 // P1: fetchFarsiNews must have DB fallback when KV is empty/missing
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWS-P1-004: fetchFarsiNews must fall back to DB (listForFeed) when KV is empty/missing', () => {
-  const fnStart = workerSrc.indexOf('async function fetchFarsiNews(');
+  const fnStart = feedSrc.indexOf('async function fetchFarsiNews(');
   assert.ok(fnStart !== -1, 'fetchFarsiNews must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnBody = feedSrc.substring(fnStart, fnStart + 6500);
   assert.ok(
     fnBody.includes('P1 FIX: DB FALLBACK'),
     'fetchFarsiNews must have DB fallback section'
@@ -93,8 +94,8 @@ test('NEWS-P1-004: fetchFarsiNews must fall back to DB (listForFeed) when KV is 
 });
 
 test('NEWS-P1-005: fetchFarsiNews must re-cache DB result to KV', () => {
-  const fnStart = workerSrc.indexOf('async function fetchFarsiNews(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = feedSrc.indexOf('async function fetchFarsiNews(');
+  const fnBody = feedSrc.substring(fnStart, fnStart + 6500);
   // Find the DB fallback section and verify it re-caches
   const dbFallbackIdx = fnBody.indexOf('P1 FIX: DB FALLBACK');
   const dbFallbackBody = fnBody.substring(dbFallbackIdx, dbFallbackIdx + 1600);
@@ -250,8 +251,8 @@ test('NEWS-SCOPE-016: Old groq-key0/groq-key1 circuits replaced by router per-ke
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWS-ARCH-017: KV is only a cache (DB is source of truth)', () => {
   // fetchFarsiNews must have both KV fast-path AND DB fallback
-  const fnStart = workerSrc.indexOf('async function fetchFarsiNews(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = feedSrc.indexOf('async function fetchFarsiNews(');
+  const fnBody = feedSrc.substring(fnStart, fnStart + 6500);
   assert.ok(fnBody.includes("source: 'cache'"), 'KV fast-path returns source:cache');
   assert.ok(fnBody.includes("source: 'db'"), 'DB fallback returns source:db');
   assert.ok(fnBody.includes("source: 'rss_unavailable'"), 'Empty fallback returns source:rss_unavailable');

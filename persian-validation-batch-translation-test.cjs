@@ -19,6 +19,7 @@ const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
 const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, "src/news/shared.js"), "utf8");
 const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, "src/news/translate.js"), "utf8");
+const FEED_SRC = fs.readFileSync(path.join(__dirname, "src/news/feed.js"), "utf8");
 
 // ═════════════════════════════════════════════════════════════════════
 // Standalone implementation for testing (mirrors worker-proxy.js logic)
@@ -284,7 +285,7 @@ test('SRC-09: batchTranslateToFarsi exists', () => assert.match(TRANSLATE_SRC, /
 test('SRC-10: Batch uses JSON parsing + count check', () => assert.match(TRANSLATE_SRC, /translations\.length === batchTexts\.length/));
 test('SRC-11: Batch validates translations', () => assert.match(TRANSLATE_SRC, /validatePersianOutput\(translated, \{[\s\S]*?minLength:\s*3/m));
 test('SRC-12: Batch has fallback', () => assert.match(TRANSLATE_SRC, /Falling back to individual translation/));
-test('SRC-13: buildFarsiNewsArticles uses batch', () => assert.match(WORKER_SRC, /batchTranslateToFarsi\(titlesToTranslate/));
+test('SRC-13: buildFarsiNewsArticles uses batch', () => assert.match(FEED_SRC, /batchTranslateToFarsi\(titlesToTranslate/));
 test('SRC-14: BATCH_TRANSLATION_MAX_BATCH defined', () => assert.match(TRANSLATE_SRC, /BATCH_TRANSLATION_MAX_BATCH\s*=/));
 test('SRC-15: Translation prompt prohibits CJK', () => assert.match(TRANSLATE_SRC, /no Chinese\/Japanese\/Korean.*CJK/));
 

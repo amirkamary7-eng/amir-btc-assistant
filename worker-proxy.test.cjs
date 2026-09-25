@@ -12,6 +12,8 @@ const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
 const SUMMARY_PATH = path.join(__dirname, 'src/news/summary.js');
 const SUMMARY_SRC = fs.readFileSync(SUMMARY_PATH, 'utf8');
+const FEED_PATH = path.join(__dirname, 'src/news/feed.js');
+const FEED_SRC = fs.readFileSync(FEED_PATH, 'utf8');
 
 /** Cache the worker source to avoid repeated disk reads. */
 let _workerSourceCache = null;
@@ -1430,10 +1432,10 @@ test('P1-07 (source): loadNews captures token at start and checks before applyin
 // ── P1-08 (NEWSBE-001): fetchFarsiNews reads from base cache key (not category-specific) ──
 
 test('P1-08 (source): fetchFarsiNews reads from FARSI_NEWS_CACHE_KEY (base), not category key', () => {
-  const src = fs.readFileSync(fs.existsSync(path.join(__dirname, 'worker-proxy.js')) ? path.join(__dirname, 'worker-proxy.js') : APP_JS_PATH, 'utf8');
+  const src = fs.readFileSync(FEED_PATH, 'utf8');
   // Find fetchFarsiNews function
   const fnStart = src.indexOf('async function fetchFarsiNews(');
-  assert.ok(fnStart > -1, 'fetchFarsiNews must exist in worker-proxy.js');
+  assert.ok(fnStart > -1, 'fetchFarsiNews must exist in src/news/feed.js');
   // Find the readAppCache call within the first 40 lines of the function
   const fnBody = src.slice(fnStart, fnStart + 2000);
   const readCall = fnBody.match(/readAppCache\(env,\s*([^)]+)\)/);
@@ -1836,7 +1838,7 @@ test('NEWSBE-004 (source): hashUrl uses canonicalizeUrl', () => {
 });
 
 test('NEWSBE-004 (source): fetchFarsiNews dedup uses canonicalizeUrl', () => {
-  const src = fs.readFileSync(WORKER_PATH, 'utf8');
+  const src = fs.readFileSync(FEED_PATH, 'utf8');
   // P0-B FIX: dedup logic moved to _runNewsLiveFetchPipeline (called by fetchFarsiNews).
   // Search both fetchFarsiNews and _runNewsLiveFetchPipeline for the dedup block.
   const fnStart = src.indexOf('async function _runNewsLiveFetchPipeline');
