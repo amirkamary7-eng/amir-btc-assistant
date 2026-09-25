@@ -17,6 +17,7 @@ const path = require('node:path');
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, "src/news/shared.js"), "utf8");
+const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, "src/news/translate.js"), "utf8");
 
 // ═════════════════════════════════════════════════════════════════════
 // Standalone implementation for testing (mirrors worker-proxy.js logic)
@@ -278,13 +279,13 @@ test('SRC-08: JOURNALIST_SYSTEM has transliteration', () => {
   assert.match(WORKER_SRC, /بایننس/);
   assert.match(WORKER_SRC, /گوگل/);
 });
-test('SRC-09: batchTranslateToFarsi exists', () => assert.match(WORKER_SRC, /async function batchTranslateToFarsi/));
-test('SRC-10: Batch uses JSON parsing + count check', () => assert.match(WORKER_SRC, /translations\.length === batchTexts\.length/));
-test('SRC-11: Batch validates translations', () => assert.match(WORKER_SRC, /validatePersianOutput\(translated, \{[\s\S]*?minLength:\s*3/m));
-test('SRC-12: Batch has fallback', () => assert.match(WORKER_SRC, /Falling back to individual translation/));
+test('SRC-09: batchTranslateToFarsi exists', () => assert.match(TRANSLATE_SRC, /async function batchTranslateToFarsi/));
+test('SRC-10: Batch uses JSON parsing + count check', () => assert.match(TRANSLATE_SRC, /translations\.length === batchTexts\.length/));
+test('SRC-11: Batch validates translations', () => assert.match(TRANSLATE_SRC, /validatePersianOutput\(translated, \{[\s\S]*?minLength:\s*3/m));
+test('SRC-12: Batch has fallback', () => assert.match(TRANSLATE_SRC, /Falling back to individual translation/));
 test('SRC-13: buildFarsiNewsArticles uses batch', () => assert.match(WORKER_SRC, /batchTranslateToFarsi\(titlesToTranslate/));
-test('SRC-14: BATCH_TRANSLATION_MAX_BATCH defined', () => assert.match(WORKER_SRC, /BATCH_TRANSLATION_MAX_BATCH\s*=/));
-test('SRC-15: Translation prompt prohibits CJK', () => assert.match(WORKER_SRC, /no Chinese\/Japanese\/Korean.*CJK/));
+test('SRC-14: BATCH_TRANSLATION_MAX_BATCH defined', () => assert.match(TRANSLATE_SRC, /BATCH_TRANSLATION_MAX_BATCH\s*=/));
+test('SRC-15: Translation prompt prohibits CJK', () => assert.match(TRANSLATE_SRC, /no Chinese\/Japanese\/Korean.*CJK/));
 
 // ═════════════════════════════════════════════════════════════════════
 // 6. PERSISTENCE SAFETY

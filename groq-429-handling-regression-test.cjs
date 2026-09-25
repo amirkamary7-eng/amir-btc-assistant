@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const translateSrc = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -269,9 +270,9 @@ test('P1-022: recordCircuitResult clears probe lock on HALF_OPEN completion', ()
 // P0: Batch→individual amplification fix
 // ════════════════════════════════════════════════════════════════════════════
 test('P0-023: batchTranslateToFarsi skips individual Groq fallback on 429', () => {
-  const fnStart = workerSrc.indexOf('async function batchTranslateToFarsi(');
+  const fnStart = translateSrc.indexOf('async function batchTranslateToFarsi(');
   assert.ok(fnStart !== -1, 'batchTranslateToFarsi must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnBody = translateSrc.substring(fnStart, fnStart + 6500);
   assert.ok(
     fnBody.includes('batchGroq429') && fnBody.includes('groq_429_info'),
     'batchTranslateToFarsi must check groq_429_info on batch result'
@@ -283,8 +284,8 @@ test('P0-023: batchTranslateToFarsi skips individual Groq fallback on 429', () =
 })
 
 test('P0-024: batchTranslateToFarsi preserves individual fallback for non-429 failures', () => {
-  const fnStart = workerSrc.indexOf('async function batchTranslateToFarsi(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = translateSrc.indexOf('async function batchTranslateToFarsi(');
+  const fnBody = translateSrc.substring(fnStart, fnStart + 6500);
   // Must still have the non-429 individual fallback path
   assert.ok(
     fnBody.includes('Non-429 batch failure') && fnBody.includes('existing individual fallback'),

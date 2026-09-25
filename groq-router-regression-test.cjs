@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const translateSrc = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 // DO EXTRACTION: GroqRouterDO class moved to src/durable-objects/groq-router.js
 // (re-exported from worker-proxy.js via `export { GroqRouterDO };`).
@@ -172,8 +173,8 @@ test('ROUTER-013: Probe 429 reopens with FRESH retry_after', () => {
 // 6. Batch 429 amplification fix
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-014: Batch 429 → zero individual Groq requests (skipping individual)', () => {
-  const fnStart = workerSrc.indexOf('async function batchTranslateToFarsi(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = translateSrc.indexOf('async function batchTranslateToFarsi(');
+  const fnBody = translateSrc.substring(fnStart, fnStart + 6500);
   assert.ok(
     fnBody.includes('batchGroq429') && fnBody.includes('groq_429_info'),
     'batchTranslateToFarsi must check groq_429_info on batch result'
@@ -185,8 +186,8 @@ test('ROUTER-014: Batch 429 → zero individual Groq requests (skipping individu
 });
 
 test('ROUTER-015: Non-429 batch failure still permits individual fallback', () => {
-  const fnStart = workerSrc.indexOf('async function batchTranslateToFarsi(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = translateSrc.indexOf('async function batchTranslateToFarsi(');
+  const fnBody = translateSrc.substring(fnStart, fnStart + 6500);
   assert.ok(
     fnBody.includes('Non-429 batch failure') && fnBody.includes('existing individual fallback'),
     'batchTranslateToFarsi must preserve individual fallback for non-429 failures'
