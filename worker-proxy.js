@@ -6048,6 +6048,19 @@ const {
   NEWS_SUMMARY_QUEUE_KEY,
   NEWS_SUMMARY_MAX_RETRIES,
   NEWS_SUMMARY_BACKOFF_MINUTES,
+  // ─── From src/news/shared.js (7) — imported in worker-proxy.js line 87, passed as DI ───
+  // These are shared helpers used inside Summary section code (parseRssItems,
+  // filterAndScoreNews, validatePersianOutput, sanitizeNewsTitle, sanitizeNewsSummary,
+  // classifySentiment, parseRelativeTime). Without these DI deps, the bare references
+  // inside summary.js throw ReferenceError at runtime (confirmed in production
+  // wrangler tail at 12:45:06 UTC */15 cron fire).
+  parseRelativeTime,
+  filterAndScoreNews,
+  parseRssItems,
+  validatePersianOutput,
+  sanitizeNewsTitle,
+  sanitizeNewsSummary,
+  classifySentiment,
 });
 
 // appContentRepo moved before assistantHandlers (line ~10593) for TDZ-safe injection.
