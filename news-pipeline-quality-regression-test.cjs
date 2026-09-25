@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 const NEWS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
 const APP_JS_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const MIGRATE_SRC = fs.readFileSync(path.join(__dirname, 'scripts/00-migrate.sql'), 'utf8');
@@ -97,10 +98,10 @@ test('B4: JOURNALIST_USER_PROMPT mentions truncation awareness', () => {
 // ─── C. validatePersianOutput extensions ────────────────────────────────────
 
 test('C1: validatePersianOutput has Persian refusal patterns', () => {
-  assert.ok(/refusalPatternsFa/.test(WORKER_SRC), 'refusalPatternsFa array exists');
-  const faPatternsStart = WORKER_SRC.indexOf('const refusalPatternsFa = [');
-  const faPatternsEnd = WORKER_SRC.indexOf('];', faPatternsStart + 10);
-  const faPatterns = WORKER_SRC.substring(faPatternsStart, faPatternsEnd);
+  assert.ok(/refusalPatternsFa/.test(NEWS_SHARED_SRC), 'refusalPatternsFa array exists');
+  const faPatternsStart = NEWS_SHARED_SRC.indexOf('const refusalPatternsFa = [');
+  const faPatternsEnd = NEWS_SHARED_SRC.indexOf('];', faPatternsStart + 10);
+  const faPatterns = NEWS_SHARED_SRC.substring(faPatternsStart, faPatternsEnd);
   assert.ok(faPatterns.includes('متن ناقص'), 'detects "متن ناقص"');
   assert.ok(faPatterns.includes('متن کامل را ارسال'), 'detects "متن کامل را ارسال"');
   assert.ok(faPatterns.includes('اطلاعات کافی نیست'), 'detects "اطلاعات کافی نیست"');
@@ -111,10 +112,10 @@ test('C1: validatePersianOutput has Persian refusal patterns', () => {
 });
 
 test('C2: validatePersianOutput has English refusal patterns', () => {
-  assert.ok(/refusalPatternsEn/.test(WORKER_SRC), 'refusalPatternsEn array exists');
-  const enPatternsStart = WORKER_SRC.indexOf('const refusalPatternsEn = [');
-  const enPatternsEnd = WORKER_SRC.indexOf('];', enPatternsStart + 10);
-  const enPatterns = WORKER_SRC.substring(enPatternsStart, enPatternsEnd);
+  assert.ok(/refusalPatternsEn/.test(NEWS_SHARED_SRC), 'refusalPatternsEn array exists');
+  const enPatternsStart = NEWS_SHARED_SRC.indexOf('const refusalPatternsEn = [');
+  const enPatternsEnd = NEWS_SHARED_SRC.indexOf('];', enPatternsStart + 10);
+  const enPatterns = NEWS_SHARED_SRC.substring(enPatternsStart, enPatternsEnd);
   assert.ok(enPatterns.includes('as an ai language model'), 'detects "as an AI language model"');
   assert.ok(enPatterns.includes('please provide the complete article'), 'detects "please provide the complete article"');
   assert.ok(enPatterns.includes('i cannot analyze'), 'detects "I cannot analyze"');
@@ -124,48 +125,48 @@ test('C2: validatePersianOutput has English refusal patterns', () => {
 test('C3: refusal patterns use substring (includes), not just startsWith', () => {
   // The old errorPatterns used startsWith; the new refusal patterns must use includes
   // so they catch refusals in the middle of the response.
-  const faBlock = WORKER_SRC.indexOf('for (const pattern of refusalPatternsFa)');
+  const faBlock = NEWS_SHARED_SRC.indexOf('for (const pattern of refusalPatternsFa)');
   assert.ok(faBlock > -1, 'refusalPatternsFa loop found');
-  const loopBlock = WORKER_SRC.substring(faBlock, faBlock + 200);
+  const loopBlock = NEWS_SHARED_SRC.substring(faBlock, faBlock + 200);
   assert.ok(loopBlock.includes('.includes(pattern)'), 'uses .includes(pattern) not startsWith');
 });
 
 test('C4: validatePersianOutput has truncation detection', () => {
-  assert.ok(/truncated_mid_sentence/.test(WORKER_SRC), 'truncated_mid_sentence reason exists');
-  assert.ok(/endsWithComplete/.test(WORKER_SRC), 'endsWithComplete stat exists');
+  assert.ok(/truncated_mid_sentence/.test(NEWS_SHARED_SRC), 'truncated_mid_sentence reason exists');
+  assert.ok(/endsWithComplete/.test(NEWS_SHARED_SRC), 'endsWithComplete stat exists');
   // Must check the last character against sentence enders
-  assert.ok(/isCompleteSentence/.test(WORKER_SRC), 'isCompleteSentence check exists');
+  assert.ok(/isCompleteSentence/.test(NEWS_SHARED_SRC), 'isCompleteSentence check exists');
 });
 
 test('C5: isWhitelistedToken restricts ticker heuristic (no common English words)', () => {
   // The new heuristic should have a COMMON_ENGLISH_3 blocklist
-  assert.ok(/COMMON_ENGLISH_3/.test(WORKER_SRC), 'COMMON_ENGLISH_3 blocklist exists');
+  assert.ok(/COMMON_ENGLISH_3/.test(NEWS_SHARED_SRC), 'COMMON_ENGLISH_3 blocklist exists');
   // Should reject vowel-only tokens
-  assert.ok(/\^\[AEIOU\]\+\$/.test(WORKER_SRC), 'rejects vowel-only tokens');
+  assert.ok(/\^\[AEIOU\]\+\$/.test(NEWS_SHARED_SRC), 'rejects vowel-only tokens');
   // Should be 2-5 chars (not 2-6 as before)
-  const heuristicBlock = WORKER_SRC.indexOf('cleaned.length >= 2 && cleaned.length <= 5');
+  const heuristicBlock = NEWS_SHARED_SRC.indexOf('cleaned.length >= 2 && cleaned.length <= 5');
   assert.ok(heuristicBlock > -1, 'ticker heuristic restricted to 2-5 chars');
 });
 
 // ─── C-fix. Arabic-only rejection (Issue 2 fix) ─────────────────────────────
 
 test('C-FIX-1: validatePersianOutput has arabic_only rejection', () => {
-  assert.ok(/arabic_only/.test(WORKER_SRC), 'arabic_only reason exists');
-  assert.ok(/arabicOnlyDetected/.test(WORKER_SRC), 'arabicOnlyDetected stat exists');
+  assert.ok(/arabic_only/.test(NEWS_SHARED_SRC), 'arabic_only reason exists');
+  assert.ok(/arabicOnlyDetected/.test(NEWS_SHARED_SRC), 'arabicOnlyDetected stat exists');
   // Must check for Persian-specific letters
-  assert.ok(WORKER_SRC.includes('0x067E'), 'checks Persian پ (U+067E)');
-  assert.ok(WORKER_SRC.includes('0x0686'), 'checks Persian چ (U+0686)');
-  assert.ok(WORKER_SRC.includes('0x0698'), 'checks Persian ژ (U+0698)');
-  assert.ok(WORKER_SRC.includes('0x06AF'), 'checks Persian گ (U+06AF)');
-  assert.ok(WORKER_SRC.includes('0x06CC'), 'checks Persian ی (U+06CC)');
-  assert.ok(WORKER_SRC.includes('0x06A9'), 'checks Persian ک (U+06A9)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x067E'), 'checks Persian پ (U+067E)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x0686'), 'checks Persian چ (U+0686)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x0698'), 'checks Persian ژ (U+0698)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x06AF'), 'checks Persian گ (U+06AF)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x06CC'), 'checks Persian ی (U+06CC)');
+  assert.ok(NEWS_SHARED_SRC.includes('0x06A9'), 'checks Persian ک (U+06A9)');
 });
 
 test('C-FIX-2: Arabic-only text rejected, Persian accepted (functional test)', () => {
   // Extract validatePersianOutput for functional testing
-  const start = WORKER_SRC.indexOf('const PERSIAN_WHITELIST_TOKENS = new Set([');
-  const end = WORKER_SRC.indexOf('// In-memory translation cache');
-  const block = WORKER_SRC.substring(start, end);
+  const start = NEWS_SHARED_SRC.indexOf('const PERSIAN_WHITELIST_TOKENS = new Set([');
+  const end = NEWS_SHARED_SRC.indexOf('function sanitizeNewsTitle');
+  const block = NEWS_SHARED_SRC.substring(start, end).replace(/export\s+/g, '');
   const evaluator = new Function(block + '; return { validatePersianOutput };');
   const { validatePersianOutput } = evaluator();
 

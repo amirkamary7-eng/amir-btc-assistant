@@ -27,6 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 
 // ============================================================================
 // PHASE 1 — User-Agent + Headers
@@ -128,15 +129,15 @@ test('NEWS-RL-006: no article content + no RSS description → clean skip (text_
 
 test('NEWS-RL-007: content:encoded support in parseRssItems', () => {
   // parseRssItems must extract content:encoded
-  const parseStart = WORKER_SRC.indexOf('function parseRssItems');
+  const parseStart = NEWS_SHARED_SRC.indexOf('function parseRssItems');
   // Find the full function body (matching braces)
   let depth = 0, end = parseStart;
-  while (WORKER_SRC[end] !== '{') end++;
-  for (; end < WORKER_SRC.length; end++) {
-    if (WORKER_SRC[end] === '{') depth++;
-    else if (WORKER_SRC[end] === '}') { depth--; if (depth === 0) break; }
+  while (NEWS_SHARED_SRC[end] !== '{') end++;
+  for (; end < NEWS_SHARED_SRC.length; end++) {
+    if (NEWS_SHARED_SRC[end] === '{') depth++;
+    else if (NEWS_SHARED_SRC[end] === '}') { depth--; if (depth === 0) break; }
   }
-  const parseBlock = WORKER_SRC.slice(parseStart, end + 1);
+  const parseBlock = NEWS_SHARED_SRC.slice(parseStart, end + 1);
   assert.ok(parseBlock.includes('content:encoded'),
     'parseRssItems must parse <content:encoded> tag');
   assert.ok(parseBlock.includes('contentEncoded'),
