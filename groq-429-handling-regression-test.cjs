@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const summarySrc = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const translateSrc = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
 const providersSrc = fs.readFileSync(path.join(__dirname, "src/news/providers.js"), "utf8");
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -42,22 +43,22 @@ test('P0-001: processNewsAIBatch must NOT reference undefined newsJson variable'
   // where newsJson was no longer declared (removed in P0 merge fix).
   // The fix: newsJsonLength: JSON.stringify(trimmed).length,
   assert.ok(
-    workerSrc.includes('newsJsonLength: JSON.stringify(trimmed).length'),
+    summarySrc.includes('newsJsonLength: JSON.stringify(trimmed).length'),
     'newsJsonLength must use JSON.stringify(trimmed).length (not undefined newsJson)'
   );
   assert.ok(
-    !workerSrc.includes('newsJsonLength: newsJson.length'),
+    !summarySrc.includes('newsJsonLength: newsJson.length'),
     'must NOT reference undefined newsJson variable'
   );
 });
 
 test('P0-002: No bare newsJson variable reference remains in processNewsAIBatch (excluding comments)', () => {
   // Find processNewsAIBatch function body
-  const fnStart = workerSrc.indexOf('async function processNewsAIBatch(');
+  const fnStart = summarySrc.indexOf('async function processNewsAIBatch(');
   assert.ok(fnStart !== -1, 'processNewsAIBatch must exist');
   // Find the end (next 'async function' at same indent level)
-  const fnEnd = workerSrc.indexOf('\nasync function', fnStart + 1);
-  const fnBody = workerSrc.substring(fnStart, fnEnd > 0 ? fnEnd : fnStart + 5000);
+  const fnEnd = summarySrc.indexOf('\nasync function', fnStart + 1);
+  const fnBody = summarySrc.substring(fnStart, fnEnd > 0 ? fnEnd : fnStart + 5000);
   // Strip comments before checking (bare newsJson in comments is OK)
   const stripped = fnBody.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   // Check no bare newsJson reference in actual code (only newsJsonLength is allowed)

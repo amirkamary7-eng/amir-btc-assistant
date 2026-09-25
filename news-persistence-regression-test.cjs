@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const summarySrc = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const repoSrc = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
 const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
@@ -28,9 +29,9 @@ const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf
 test('NEWS-P0-001: processNewsAIBatch STEP 6 must NOT use writeAppCache directly on FARSI_NEWS_CACHE_KEY', () => {
   // The destructive pattern was: writeAppCache(env, FARSI_NEWS_CACHE_KEY, JSON.stringify(trimmed), ...)
   // Find STEP 6 region and verify it uses publishArticleToFarsiNews instead.
-  const step6Idx = workerSrc.indexOf('STEP 6: PUBLISH (MERGE-AWARE)');
+  const step6Idx = summarySrc.indexOf('STEP 6: PUBLISH (MERGE-AWARE)');
   assert.ok(step6Idx !== -1, 'STEP 6 merge-aware comment must exist');
-  const step6Body = workerSrc.substring(step6Idx, step6Idx + 1200);
+  const step6Body = summarySrc.substring(step6Idx, step6Idx + 1200);
   assert.ok(
     step6Body.includes('publishArticleToFarsiNews'),
     'STEP 6 must use publishArticleToFarsiNews (merge) instead of hard overwrite'
@@ -44,9 +45,9 @@ test('NEWS-P0-001: processNewsAIBatch STEP 6 must NOT use writeAppCache directly
 
 test('NEWS-P0-002: STEP 7 must also use merge (not hard overwrite)', () => {
   // STEP 7 re-caches with enriched sentiment. Must use merge too.
-  const step7Idx = workerSrc.indexOf('STEP 7: BATCH AI ANALYSIS');
+  const step7Idx = summarySrc.indexOf('STEP 7: BATCH AI ANALYSIS');
   assert.ok(step7Idx !== -1, 'STEP 7 must exist');
-  const step7Body = workerSrc.substring(step7Idx, step7Idx + 2000);
+  const step7Body = summarySrc.substring(step7Idx, step7Idx + 2000);
   // Find the re-cache section after batch analysis
   const reCacheIdx = step7Body.indexOf('Articles are already in news:farsi from STEP 6');
   assert.ok(reCacheIdx !== -1, 'STEP 7 re-cache section must exist');
@@ -61,9 +62,9 @@ test('NEWS-P0-002: STEP 7 must also use merge (not hard overwrite)', () => {
 // P0: publishArticleToFarsiNews must be merge-aware (unchanged — verify it still is)
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWS-P0-003: publishArticleToFarsiNews must read existing + merge (not overwrite)', () => {
-  const fnStart = workerSrc.indexOf('async function publishArticleToFarsiNews(');
+  const fnStart = summarySrc.indexOf('async function publishArticleToFarsiNews(');
   assert.ok(fnStart !== -1, 'publishArticleToFarsiNews must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2000);
+  const fnBody = summarySrc.substring(fnStart, fnStart + 2000);
   assert.ok(fnBody.includes('readAppCache'), 'publishArticleToFarsiNews must read existing KV');
   assert.ok(fnBody.includes('findIndex'), 'publishArticleToFarsiNews must dedup by URL (findIndex)');
   assert.ok(fnBody.includes('unshift'), 'publishArticleToFarsiNews must prepend new articles');
@@ -160,9 +161,9 @@ test('NEWS-P2-009: cleanupOld must DELETE articles older than retention window',
 });
 
 test('NEWS-P2-010: processNewsAIBatch must call cleanupOld (4-day retention)', () => {
-  const step11Idx = workerSrc.indexOf('STEP 11: DB RETENTION CLEANUP');
+  const step11Idx = summarySrc.indexOf('STEP 11: DB RETENTION CLEANUP');
   assert.ok(step11Idx !== -1, 'processNewsAIBatch must have STEP 11 (DB retention cleanup)');
-  const step11Body = workerSrc.substring(step11Idx, step11Idx + 500);
+  const step11Body = summarySrc.substring(step11Idx, step11Idx + 500);
   assert.ok(
     step11Body.includes('cleanupOld'),
     'STEP 11 must call newsArticleRepo.cleanupOld'
@@ -192,9 +193,9 @@ test('NEWS-P3-011: production wrangler.jsonc must have NEWS_CACHE_TTL = 1800', (
 // P4: Partial failure guard — must not destroy previous feed
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWS-P4-012: processNewsAIBatch must log partial batch (P4 guard)', () => {
-  const guardIdx = workerSrc.indexOf('P4 GUARD: Log if batch was partial');
+  const guardIdx = summarySrc.indexOf('P4 GUARD: Log if batch was partial');
   assert.ok(guardIdx !== -1, 'P4 guard comment must exist');
-  const guardBody = workerSrc.substring(guardIdx, guardIdx + 700);
+  const guardBody = summarySrc.substring(guardIdx, guardIdx + 700);
   assert.ok(
     guardBody.includes('Partial batch'),
     'P4 guard must log partial batch warning'
@@ -208,9 +209,9 @@ test('NEWS-P4-012: processNewsAIBatch must log partial batch (P4 guard)', () => 
 test('NEWS-P4-013: STEP 5 early-return on 0 survivors must be preserved (total failure)', () => {
   // When deduped.length === 0, the function returns early WITHOUT writing to KV.
   // This preserves the previous feed on total AI failure.
-  const earlyReturnIdx = workerSrc.indexOf("deduped.length === 0");
+  const earlyReturnIdx = summarySrc.indexOf("deduped.length === 0");
   assert.ok(earlyReturnIdx !== -1, 'STEP 5 must have deduped.length === 0 early-return guard');
-  const earlyReturnBody = workerSrc.substring(earlyReturnIdx - 50, earlyReturnIdx + 300);
+  const earlyReturnBody = summarySrc.substring(earlyReturnIdx - 50, earlyReturnIdx + 300);
   assert.ok(
     earlyReturnBody.includes('return') && earlyReturnBody.includes('no_articles'),
     'STEP 5 must return early (no_articles) when 0 survivors — preserves previous feed'
@@ -222,7 +223,7 @@ test('NEWS-P4-013: STEP 5 early-return on 0 survivors must be preserved (total f
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWS-SCOPE-014: Fallback chain: Groq Router → OpenRouter → Workers AI → OpenAI (Gemini removed)', () => {
   // Check active code (strip comments) for Gemini in fallback chain
-  const active = workerSrc.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const active = summarySrc.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!active.includes("attemptProvider('gemini'"), 'Gemini must NOT be in active fallback chain');
   assert.ok(active.includes("attemptProvider('openrouter'"), 'OpenRouter must be in fallback chain');
   assert.ok(active.includes("attemptProvider('workers-ai'"), 'Workers AI must be in fallback chain');
@@ -230,11 +231,11 @@ test('NEWS-SCOPE-014: Fallback chain: Groq Router → OpenRouter → Workers AI 
 
 test('NEWS-SCOPE-015: Gemini provider flag removed (NEWS_PROVIDER_GEMINI deleted)', () => {
   // All 5 providers must still be gated by their NEWS_PROVIDER_* flags
-  assert.ok(workerSrc.includes("NEWS_PROVIDER_GROQ"), 'Groq provider flag must exist');
-  assert.ok(!workerSrc.includes("NEWS_PROVIDER_GEMINI"), 'NEWS_PROVIDER_GEMINI must be REMOVED');
-  assert.ok(workerSrc.includes("NEWS_PROVIDER_OPENROUTER"), 'OpenRouter provider flag must exist');
-  assert.ok(workerSrc.includes("NEWS_PROVIDER_WORKERS_AI"), 'Workers AI provider flag must exist');
-  assert.ok(workerSrc.includes("NEWS_PROVIDER_OPENAI"), 'OpenAI provider flag must exist');
+  assert.ok(summarySrc.includes("NEWS_PROVIDER_GROQ"), 'Groq provider flag must exist');
+  assert.ok(!summarySrc.includes("NEWS_PROVIDER_GEMINI"), 'NEWS_PROVIDER_GEMINI must be REMOVED');
+  assert.ok(summarySrc.includes("NEWS_PROVIDER_OPENROUTER"), 'OpenRouter provider flag must exist');
+  assert.ok(summarySrc.includes("NEWS_PROVIDER_WORKERS_AI"), 'Workers AI provider flag must exist');
+  assert.ok(summarySrc.includes("NEWS_PROVIDER_OPENAI"), 'OpenAI provider flag must exist');
 });
 
 test('NEWS-SCOPE-016: Old groq-key0/groq-key1 circuits replaced by router per-key state', () => {

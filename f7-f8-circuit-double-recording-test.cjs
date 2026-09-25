@@ -37,14 +37,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const summarySrc = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
-// ── Locate attemptProvider function body (in worker-proxy.js) ──
-const attemptProviderStart = workerSrc.indexOf('async function attemptProvider(');
+// ── Locate attemptProvider function body (moved to src/news/summary.js in Step 5) ──
+const attemptProviderStart = summarySrc.indexOf('async function attemptProvider(');
 assert.ok(attemptProviderStart !== -1, 'attemptProvider function must exist');
 // Get ~800 chars of the function body (enough to cover the recordCircuitResult call)
-const attemptProviderBody = workerSrc.substring(attemptProviderStart, attemptProviderStart + 5000);
+const attemptProviderBody = summarySrc.substring(attemptProviderStart, attemptProviderStart + 5000);
 
 // ── Locate _groqRoutedFetch function body (in src/news/providers.js) ──
 const routedFetchStart = providersSrc.indexOf('async function _groqRoutedFetch(');

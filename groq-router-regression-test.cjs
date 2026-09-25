@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const summarySrc = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const translateSrc = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -322,11 +323,11 @@ test('COORDINATOR-026: Old Global Groq Coordinator removed (checkGroqCapacity/re
 // ════════════════════════════════════════════════════════════════════════════
 test('NEWSJSON-027: newsJson ReferenceError fixed (uses JSON.stringify(trimmed).length)', () => {
   assert.ok(
-    workerSrc.includes('newsJsonLength: JSON.stringify(trimmed).length'),
+    summarySrc.includes('newsJsonLength: JSON.stringify(trimmed).length'),
     'newsJsonLength must use JSON.stringify(trimmed).length (not undefined newsJson)'
   );
   assert.ok(
-    !workerSrc.includes('newsJsonLength: newsJson.length'),
+    !summarySrc.includes('newsJsonLength: newsJson.length'),
     'must NOT reference undefined newsJson variable'
   );
 });
@@ -360,9 +361,9 @@ test('CLASSIFY-030: Router returns groq_429_info field', () => {
 // 12. Fallback chain order (no Gemini, no groq-secondary)
 // ════════════════════════════════════════════════════════════════════════════
 test('FALLBACK-031: News AI summary fallback: Groq → OpenRouter → Workers AI → OpenAI', () => {
-  const fnStart = workerSrc.indexOf('FALLBACK CHAIN (GROQ-ROUTER-4KEY');
+  const fnStart = summarySrc.indexOf('FALLBACK CHAIN (GROQ-ROUTER-4KEY');
   assert.ok(fnStart !== -1, 'Fallback chain comment must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 1500);
+  const fnBody = summarySrc.substring(fnStart, fnStart + 1500);
   // Order: Groq first, then OpenRouter, then Workers AI, then OpenAI
   const groqIdx = fnBody.indexOf("attemptProvider('groq'");
   const openrouterIdx = fnBody.indexOf("attemptProvider('openrouter'");

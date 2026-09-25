@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, "src/news/shared.js"), "utf8");
 const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, "src/news/translate.js"), "utf8");
 
@@ -273,11 +274,11 @@ test('SRC-02: Segment-based English check', () => {
 test('SRC-03: Whitelist has BTC', () => assert.match(NEWS_SHARED_SRC, /'BTC'/));
 test('SRC-04: Whitelist has ETH', () => assert.match(NEWS_SHARED_SRC, /'ETH'/));
 test('SRC-05: Whitelist has USDT', () => assert.match(NEWS_SHARED_SRC, /'USDT'/));
-test('SRC-06: JOURNALIST_SYSTEM prohibits CJK', () => assert.match(WORKER_SRC, /هیچ کاراکتر چینی/));
-test('SRC-07: JOURNALIST_SYSTEM prohibits English', () => assert.match(WORKER_SRC, /هیچ کلمه یا عبارت انگلیسی معمولی مجاز نیست/));
+test('SRC-06: JOURNALIST_SYSTEM prohibits CJK', () => assert.match(SUMMARY_SRC, /هیچ کاراکتر چینی/));
+test('SRC-07: JOURNALIST_SYSTEM prohibits English', () => assert.match(SUMMARY_SRC, /هیچ کلمه یا عبارت انگلیسی معمولی مجاز نیست/));
 test('SRC-08: JOURNALIST_SYSTEM has transliteration', () => {
-  assert.match(WORKER_SRC, /بایننس/);
-  assert.match(WORKER_SRC, /گوگل/);
+  assert.match(SUMMARY_SRC, /بایننس/);
+  assert.match(SUMMARY_SRC, /گوگل/);
 });
 test('SRC-09: batchTranslateToFarsi exists', () => assert.match(TRANSLATE_SRC, /async function batchTranslateToFarsi/));
 test('SRC-10: Batch uses JSON parsing + count check', () => assert.match(TRANSLATE_SRC, /translations\.length === batchTexts\.length/));
@@ -292,7 +293,7 @@ test('SRC-15: Translation prompt prohibits CJK', () => assert.match(TRANSLATE_SR
 // ═════════════════════════════════════════════════════════════════════
 
 test('PERSIST-01: Validator runs BEFORE recordCircuitResult', () => {
-  const section = WORKER_SRC.slice(WORKER_SRC.indexOf('async function attemptProvider'), WORKER_SRC.indexOf('async function attemptProvider') + 2000);
+  const section = SUMMARY_SRC.slice(SUMMARY_SRC.indexOf('async function attemptProvider'), SUMMARY_SRC.indexOf('async function attemptProvider') + 2000);
   const vIdx = section.indexOf('validator');
   const rIdx = section.indexOf('recordCircuitResult');
   assert.ok(vIdx > -1 && rIdx > -1 && vIdx < rIdx, 'Validator must run BEFORE recordCircuitResult');
@@ -301,20 +302,20 @@ test('PERSIST-01: Validator runs BEFORE recordCircuitResult', () => {
 test('PERSIST-02: saveAnalysis is inside succeedWithSummary (not before validation)', () => {
   // saveAnalysis must be INSIDE succeedWithSummary function, which is called
   // AFTER generateSummaryWithFallback returns a valid result.
-  const succeedIdx = WORKER_SRC.indexOf('async function succeedWithSummary');
-  const saveIdx = WORKER_SRC.indexOf('newsArticleRepo.saveAnalysis');
+  const succeedIdx = SUMMARY_SRC.indexOf('async function succeedWithSummary');
+  const saveIdx = SUMMARY_SRC.indexOf('newsArticleRepo.saveAnalysis');
   assert.ok(succeedIdx > -1 && saveIdx > -1, 'Both must exist');
   assert.ok(saveIdx > succeedIdx, 'saveAnalysis must be inside succeedWithSummary');
   // Also verify generateSummaryWithFallback is called before succeedWithSummary call
-  const generateCallIdx = WORKER_SRC.indexOf('generateSummaryWithFallback(env, JOURNALIST_USER_PROMPT');
-  const succeedCallIdx = WORKER_SRC.indexOf('return succeedWithSummary(');
+  const generateCallIdx = SUMMARY_SRC.indexOf('generateSummaryWithFallback(env, JOURNALIST_USER_PROMPT');
+  const succeedCallIdx = SUMMARY_SRC.indexOf('return succeedWithSummary(');
   assert.ok(generateCallIdx > -1 && succeedCallIdx > -1, 'Both calls must exist');
   assert.ok(generateCallIdx < succeedCallIdx, 'generateSummaryWithFallback must be called before succeedWithSummary');
 });
 
 test('PERSIST-03: succeedWithSummary call is after generateSummaryWithFallback call', () => {
-  const generateCallIdx = WORKER_SRC.indexOf('generateSummaryWithFallback(env, JOURNALIST_USER_PROMPT');
-  const succeedCallIdx = WORKER_SRC.indexOf('return succeedWithSummary(');
+  const generateCallIdx = SUMMARY_SRC.indexOf('generateSummaryWithFallback(env, JOURNALIST_USER_PROMPT');
+  const succeedCallIdx = SUMMARY_SRC.indexOf('return succeedWithSummary(');
   assert.ok(generateCallIdx > -1 && succeedCallIdx > -1, 'Both calls must exist');
   assert.ok(generateCallIdx < succeedCallIdx, 'generateSummaryWithFallback must be called before succeedWithSummary');
 });

@@ -23,13 +23,18 @@ const path = require('node:path');
 
 const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/telemetry.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 
 // Helper: extract a function body from source text
 function fnBody(name) {
   const marker = 'async function ' + name + '(';
-  // Try telemetry module first, then fall back to worker-proxy.js for non-telemetry functions
+  // Try telemetry module first, then summary.js (Step 5 extraction), then fall back to worker-proxy.js
   let start = TELEMETRY_SRC.indexOf(marker);
   let sourceText = TELEMETRY_SRC;
+  if (start === -1) {
+    start = SUMMARY_SRC.indexOf(marker);
+    sourceText = SUMMARY_SRC;
+  }
   if (start === -1) {
     start = SRC.indexOf(marker);
     sourceText = SRC;

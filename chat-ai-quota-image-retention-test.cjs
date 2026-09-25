@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 function getWorkerSource() { return fs.readFileSync(WORKER_PATH, 'utf8'); }
 const WORKER_SRC = getWorkerSource();
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
 function loadWorker(pgOverride) {
@@ -1806,7 +1807,7 @@ test('CB-ISOLATION-02: Chat AI does NOT use bare provider name for circuit break
 
 test('CB-ISOLATION-03: News AI uses bare circuit keys (no chat- prefix, no gemini)', () => {
   // News AI circuit keys: 'openrouter', 'workers-ai', 'openai' (no 'gemini', no 'groq-key0')
-  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  const active = SUMMARY_SRC.replace(/\/\/[^\n]*/g, '');
   assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI has openrouter circuit');
   assert.ok(active.includes("attemptProvider('workers-ai'"), 'News AI has workers-ai circuit');
   assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have gemini circuit');
@@ -1917,14 +1918,15 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
 
 test('NEWS-REGRESSION-05: News pipeline functions intact', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
   const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
   // All key News AI functions must exist
   assert.ok(SRC.includes('async function fetchAllNewsRss'), 'fetchAllNewsRss intact');
   assert.ok(TRANSLATE_SRC.includes('async function translateToFarsi'), 'translateToFarsi intact (in src/news/translate.js)');
-  assert.ok(SRC.includes('async function generateSummaryWithFallback'), 'generateSummaryWithFallback intact');
-  assert.ok(SRC.includes('async function processOneArticleSummary'), 'processOneArticleSummary intact');
-  assert.ok(SRC.includes('async function processNewsAIBatch'), 'processNewsAIBatch intact');
-  assert.ok(SRC.includes('function publishArticleToFarsiNews'), 'publishArticleToFarsiNews intact');
+  assert.ok(SUMMARY_SRC.includes('async function generateSummaryWithFallback'), 'generateSummaryWithFallback intact (in src/news/summary.js)');
+  assert.ok(SUMMARY_SRC.includes('async function processOneArticleSummary'), 'processOneArticleSummary intact (in src/news/summary.js)');
+  assert.ok(SUMMARY_SRC.includes('async function processNewsAIBatch'), 'processNewsAIBatch intact (in src/news/summary.js)');
+  assert.ok(SUMMARY_SRC.includes('function publishArticleToFarsiNews'), 'publishArticleToFarsiNews intact (in src/news/summary.js)');
 });
 
 test('NEWS-REGRESSION-06: News cache keys unchanged', () => {

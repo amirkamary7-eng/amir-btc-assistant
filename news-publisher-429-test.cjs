@@ -27,6 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 
@@ -36,22 +37,22 @@ const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js
 
 test('NEWS-RL-011: User-Agent updated to Chrome/131 (not Chrome/120)', () => {
   // The article fetch must use Chrome/131 or later
-  assert.ok(WORKER_SRC.includes('Chrome/131.0.0.0'),
+  assert.ok(SUMMARY_SRC.includes('Chrome/131.0.0.0'),
     'Article fetch User-Agent must be Chrome/131 (was Chrome/120)');
   // Must NOT have the old Chrome/120 in the article fetch path
   // (it may still exist in other fetch paths like RSS fetch)
-  const articleFetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url'),
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url') + 1000
+  const articleFetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url'),
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url') + 1000
   );
   assert.ok(!articleFetchSection.includes('Chrome/120'),
     'Article fetch must NOT use Chrome/120 UA');
 });
 
 test('NEWS-RL-012: Sec-Fetch headers present in article fetch', () => {
-  const articleFetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url'),
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url') + 1500
+  const articleFetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url'),
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url') + 1500
   );
   assert.ok(articleFetchSection.includes('Sec-Fetch-Dest'),
     'Article fetch must include Sec-Fetch-Dest header');
@@ -62,9 +63,9 @@ test('NEWS-RL-012: Sec-Fetch headers present in article fetch', () => {
 });
 
 test('NEWS-RL-013: hostname diagnostic logging in article fetch', () => {
-  assert.ok(WORKER_SRC.includes('articleHostname'),
+  assert.ok(SUMMARY_SRC.includes('articleHostname'),
     'Article fetch must extract hostname for diagnostics');
-  assert.ok(/console\.warn.*host=/.test(WORKER_SRC),
+  assert.ok(/console\.warn.*host=/.test(SUMMARY_SRC),
     'Article fetch must log hostname in console.warn');
 });
 
@@ -74,25 +75,25 @@ test('NEWS-RL-013: hostname diagnostic logging in article fetch', () => {
 
 test('NEWS-RL-002: publisher 429 without Retry-After → bounded backoff (default)', () => {
   // requeueWithRetry must accept retryAfterSeconds parameter
-  assert.ok(WORKER_SRC.includes('retryAfterSeconds'),
+  assert.ok(SUMMARY_SRC.includes('retryAfterSeconds'),
     'requeueWithRetry must accept retryAfterSeconds parameter');
   // When retryAfterSeconds is null/0, default backoff is used
-  assert.ok(WORKER_SRC.includes('effectiveBackoffMin'),
+  assert.ok(SUMMARY_SRC.includes('effectiveBackoffMin'),
     'requeueWithRetry must have effectiveBackoffMin logic');
 });
 
 test('NEWS-RL-003: publisher 429 with Retry-After → exact retry_after respected', () => {
   // The article fetch must parse Retry-After header
-  const articleFetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('if (articleRes.status === 429)'),
-    WORKER_SRC.indexOf('if (articleRes.status === 429)') + 500
+  const articleFetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('if (articleRes.status === 429)'),
+    SUMMARY_SRC.indexOf('if (articleRes.status === 429)') + 500
   );
   assert.ok(articleFetchSection.includes('Retry-After') || articleFetchSection.includes('retry-after'),
     'Article fetch must parse Retry-After header on 429');
   assert.ok(articleFetchSection.includes('retryAfterSeconds'),
     '429 handling must store retryAfterSeconds');
   // requeueWithRetry must use retryAfterSeconds when available
-  assert.ok(WORKER_SRC.includes('Math.min(Math.ceil(retryAfterSeconds / 60), 60)'),
+  assert.ok(SUMMARY_SRC.includes('Math.min(Math.ceil(retryAfterSeconds / 60), 60)'),
     'retryAfterSeconds must be capped at 60 min');
 });
 
@@ -101,26 +102,26 @@ test('NEWS-RL-003: publisher 429 with Retry-After → exact retry_after respecte
 // ============================================================================
 
 test('NEWS-RL-004: publisher 403 → permanent failure (in PERMANENT_FAIL_REASONS)', () => {
-  assert.ok(WORKER_SRC.includes("'fetch_403'"),
+  assert.ok(SUMMARY_SRC.includes("'fetch_403'"),
     'fetch_403 must be in PERMANENT_FAIL_REASONS');
 });
 
 test('NEWS-RL-005: 403 + RSS description → fallback content (rss_description_fallback)', () => {
   // The article fetch must have 403 fallback to RSS description
-  assert.ok(WORKER_SRC.includes('rss_description_fallback'),
+  assert.ok(SUMMARY_SRC.includes('rss_description_fallback'),
     '403 handling must have rss_description_fallback contentSource');
-  assert.ok(WORKER_SRC.includes("articleRes.status === 403"),
+  assert.ok(SUMMARY_SRC.includes("articleRes.status === 403"),
     '403 status must trigger fallback logic');
   // Must check RSS description length before using as fallback
-  assert.ok(WORKER_SRC.includes('rssContent.length >= 50'),
+  assert.ok(SUMMARY_SRC.includes('rssContent.length >= 50'),
     'Must check RSS content length before fallback');
 });
 
 test('NEWS-RL-006: no article content + no RSS description → clean skip (text_too_short)', () => {
   // The pipeline must handle the case where neither article nor RSS has enough content
-  assert.ok(WORKER_SRC.includes('text_too_short'),
+  assert.ok(SUMMARY_SRC.includes('text_too_short'),
     'Pipeline must mark articles with insufficient content as text_too_short');
-  assert.ok(WORKER_SRC.includes("articleText.length < 50"),
+  assert.ok(SUMMARY_SRC.includes("articleText.length < 50"),
     'Must check articleText.length < 50');
 });
 
@@ -151,7 +152,7 @@ test('NEWS-RL-007: content:encoded support in parseRssItems', () => {
 
 test('NEWS-RL-008: Gemini 429 → circuit breaker handles retryable failure', () => {
   // classifyHttpError must classify 429 as retryable
-  assert.ok(WORKER_SRC.includes("status === 429") && WORKER_SRC.includes("'retryable'"),
+  assert.ok(SUMMARY_SRC.includes("status === 429") && SUMMARY_SRC.includes("'retryable'"),
     '429 must be classified as retryable');
 });
 
@@ -171,7 +172,7 @@ test('NEWS-RL-009: Gemini prolonged OPEN → no infinite probe loop', () => {
 });
 
 test('NEWS-RL-010: News AI fallback has NO Gemini (Groq Router → OpenRouter → Workers AI)', () => {
-  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  const active = SUMMARY_SRC.replace(/\/\/[^\n]*/g, '');
   assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have Gemini');
   assert.ok(active.includes('circuit_open'), 'Circuit breaker must return reason=circuit_open when OPEN');
   assert.ok(active.includes('tryGroq') && active.includes('tryWorkersAI'), 'Pipeline must have Groq → Workers AI fallback');
@@ -183,21 +184,21 @@ test('NEWS-RL-010: News AI fallback has NO Gemini (Groq Router → OpenRouter �
 
 test('NEWS-RL-014: publisher fetch failure does not break unrelated news items', () => {
   // requeueWithRetry must splice + push the failed item, not abort the whole queue
-  assert.ok(WORKER_SRC.includes('queue.splice(idx, 1)'),
+  assert.ok(SUMMARY_SRC.includes('queue.splice(idx, 1)'),
     'requeueWithRetry must remove failed item from current position');
-  assert.ok(WORKER_SRC.includes('queue.push(article)'),
+  assert.ok(SUMMARY_SRC.includes('queue.push(article)'),
     'requeueWithRetry must push failed item to end of queue');
 });
 
 test('NEWS-RL-015: multiple publisher failures do not create retry storm', () => {
-  // NEWS_SUMMARY_MAX_RETRIES must be 3 (bounded)
+  // NEWS_SUMMARY_MAX_RETRIES must be 3 (bounded) — declared in worker-proxy.js (Step 5 cycle-breaker)
   assert.ok(WORKER_SRC.includes('NEWS_SUMMARY_MAX_RETRIES = 3'),
     'Max retries must be 3 (bounded)');
-  // NEWS_SUMMARY_BACKOFF_MINUTES must be [5, 15, 30] (increasing)
+  // NEWS_SUMMARY_BACKOFF_MINUTES must be [5, 15, 30] (increasing) — declared in worker-proxy.js
   assert.ok(WORKER_SRC.includes('NEWS_SUMMARY_BACKOFF_MINUTES = [5, 15, 30]'),
     'Backoff must be [5, 15, 30] minutes (increasing)');
-  // Jitter must exist to prevent thundering herd
-  assert.ok(WORKER_SRC.includes('jitterMultiplier'),
+  // Jitter must exist to prevent thundering herd — used inside requeueWithRetry (summary.js)
+  assert.ok(SUMMARY_SRC.includes('jitterMultiplier'),
     'Backoff must have jitter to prevent thundering herd');
 });
 
@@ -207,17 +208,17 @@ test('NEWS-RL-015: multiple publisher failures do not create retry storm', () =>
 
 test('SUMMARY: all news-ai publisher fixes verified', () => {
   // Final assertion: all key patterns exist
-  // Worker-proxy.js patterns (processOneArticleSummary + processNewsAIBatch)
-  const workerPatterns = [
+  // Summary.js patterns (processOneArticleSummary + requeueWithRetry, moved in Step 5)
+  const summaryPatterns = [
     'Chrome/131.0.0.0',           // updated UA
     'Sec-Fetch-Dest',             // browser headers
     'Retry-After',                // 429 retry-after parsing
     'retryAfterSeconds',          // passed to requeueWithRetry
     'rss_description_fallback',   // 403 fallback
-    'content:encoded',            // RSS content support
+    'content:encoded',            // RSS content support (STEP 0)
   ];
-  for (const p of workerPatterns) {
-    assert.ok(WORKER_SRC.includes(p), `Pattern "${p}" must exist in worker-proxy.js`);
+  for (const p of summaryPatterns) {
+    assert.ok(SUMMARY_SRC.includes(p), `Pattern "${p}" must exist in src/news/summary.js`);
   }
   // Providers.js patterns (circuit breaker — extracted to src/news/providers.js)
   const providerPatterns = [
