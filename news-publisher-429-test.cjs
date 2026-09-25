@@ -27,6 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 
 // ============================================================================
@@ -156,16 +157,16 @@ test('NEWS-RL-008: Gemini 429 → circuit breaker handles retryable failure', ()
 
 test('NEWS-RL-009: Gemini prolonged OPEN → no infinite probe loop', () => {
   // Prolonged-open constants must exist
-  assert.ok(WORKER_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD'),
+  assert.ok(PROVIDERS_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD'),
     'CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD must exist');
-  assert.ok(WORKER_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS'),
+  assert.ok(PROVIDERS_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS'),
     'CIRCUIT_BREAKER_PROLONGED_OPEN_MS must exist');
-  assert.ok(WORKER_SRC.includes('probe_failures'),
+  assert.ok(PROVIDERS_SRC.includes('probe_failures'),
     'Circuit breaker must track probe_failures');
-  assert.ok(WORKER_SRC.includes('isProlonged'),
+  assert.ok(PROVIDERS_SRC.includes('isProlonged'),
     'Circuit breaker must have isProlonged logic');
   // Prolonged backoff must be longer than normal
-  assert.ok(WORKER_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS = 60 * 60 * 1000'),
+  assert.ok(PROVIDERS_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS = 60 * 60 * 1000'),
     'Prolonged open must be 1 hour (60 min)');
 });
 
@@ -206,17 +207,24 @@ test('NEWS-RL-015: multiple publisher failures do not create retry storm', () =>
 
 test('SUMMARY: all news-ai publisher fixes verified', () => {
   // Final assertion: all key patterns exist
-  const patterns = [
+  // Worker-proxy.js patterns (processOneArticleSummary + processNewsAIBatch)
+  const workerPatterns = [
     'Chrome/131.0.0.0',           // updated UA
     'Sec-Fetch-Dest',             // browser headers
     'Retry-After',                // 429 retry-after parsing
     'retryAfterSeconds',          // passed to requeueWithRetry
     'rss_description_fallback',   // 403 fallback
     'content:encoded',            // RSS content support
+  ];
+  for (const p of workerPatterns) {
+    assert.ok(WORKER_SRC.includes(p), `Pattern "${p}" must exist in worker-proxy.js`);
+  }
+  // Providers.js patterns (circuit breaker — extracted to src/news/providers.js)
+  const providerPatterns = [
     'CIRCUIT_BREAKER_PROLONGED_OPEN_MS', // prolonged open
     'probe_failures',             // probe tracking
   ];
-  for (const p of patterns) {
-    assert.ok(WORKER_SRC.includes(p), `Pattern "${p}" must exist in source`);
+  for (const p of providerPatterns) {
+    assert.ok(PROVIDERS_SRC.includes(p), `Pattern "${p}" must exist in src/news/providers.js`);
   }
 });

@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const translateSrc = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 // DO EXTRACTION: GroqRouterDO class moved to src/durable-objects/groq-router.js
@@ -30,15 +31,15 @@ const DO_GROQ_ROUTER_SRC = fs.readFileSync(path.join(__dirname, 'src/durable-obj
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-001: groqRouterExecute function exists', () => {
   assert.ok(
-    workerSrc.includes('async function groqRouterExecute('),
+    providersSrc.includes('async function groqRouterExecute('),
     'groqRouterExecute function must exist'
   );
 });
 
 test('ROUTER-002: Router discovers all 4 key slots from env', () => {
-  const fnStart = workerSrc.indexOf('function _groqRouterDiscoverKeys(');
+  const fnStart = providersSrc.indexOf('function _groqRouterDiscoverKeys(');
   assert.ok(fnStart !== -1, '_groqRouterDiscoverKeys must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 600);
+  const fnBody = providersSrc.substring(fnStart, fnStart + 600);
   assert.ok(fnBody.includes('env.GROQ_API_KEY'), 'must check GROQ_API_KEY');
   assert.ok(fnBody.includes('env.GROQ_API_KEY_1'), 'must check GROQ_API_KEY_1');
   assert.ok(fnBody.includes('env.GROQ_API_KEY_2'), 'must check GROQ_API_KEY_2');
@@ -46,8 +47,8 @@ test('ROUTER-002: Router discovers all 4 key slots from env', () => {
 });
 
 test('ROUTER-003: Router handles 0 keys gracefully (returns 503)', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2000);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2000);
   assert.ok(
     fnBody.includes("no_groq_keys_configured") && fnBody.includes('503'),
     'Router must return 503 with no_groq_keys_configured when 0 keys'
@@ -59,14 +60,14 @@ test('ROUTER-003: Router handles 0 keys gracefully (returns 503)', () => {
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-004: selectBestKey function exists', () => {
   assert.ok(
-    workerSrc.includes('async function _groqRouterSelectBestKey('),
+    providersSrc.includes('async function _groqRouterSelectBestKey('),
     '_groqRouterSelectBestKey must exist'
   );
 });
 
 test('ROUTER-005: Key selection picks least-used healthy key', () => {
-  const fnStart = workerSrc.indexOf('async function _groqRouterSelectBestKey(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2700);
+  const fnStart = providersSrc.indexOf('async function _groqRouterSelectBestKey(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2700);
   // Must sort by window_requests.length (least-used) and tie-break by index
   assert.ok(fnBody.includes('window_requests.length'), 'must use window_requests for selection');
   assert.ok(fnBody.includes('candidates.sort('), 'must sort candidates');
@@ -78,18 +79,18 @@ test('ROUTER-005: Key selection picks least-used healthy key', () => {
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-006: 3/10min budget enforced (GROQ_ROUTER_MAX_PER_WINDOW=3)', () => {
   assert.ok(
-    workerSrc.includes('GROQ_ROUTER_MAX_PER_WINDOW = 3'),
+    providersSrc.includes('GROQ_ROUTER_MAX_PER_WINDOW = 3'),
     'GROQ_ROUTER_MAX_PER_WINDOW must be 3'
   );
   assert.ok(
-    workerSrc.includes('GROQ_ROUTER_WINDOW_MS = 10 * 60 * 1000'),
+    providersSrc.includes('GROQ_ROUTER_WINDOW_MS = 10 * 60 * 1000'),
     'GROQ_ROUTER_WINDOW_MS must be 10 minutes'
   );
 });
 
 test('ROUTER-007: Key at 3/3 is excluded (window_limit)', () => {
-  const fnStart = workerSrc.indexOf('async function _groqRouterSelectBestKey(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2500);
+  const fnStart = providersSrc.indexOf('async function _groqRouterSelectBestKey(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2500);
   assert.ok(
     fnBody.includes('window_limit') && fnBody.includes('GROQ_ROUTER_MAX_PER_WINDOW'),
     'selectBestKey must exclude keys at window_limit (3/3)'
@@ -99,8 +100,8 @@ test('ROUTER-007: Key at 3/3 is excluded (window_limit)', () => {
 test('ROUTER-008: Key at 3/3 does NOT block other keys', () => {
   // The selection loop iterates ALL keys and collects candidates.
   // A key at 3/3 is skipped (eligible=false) but others remain eligible.
-  const fnStart = workerSrc.indexOf('async function _groqRouterSelectBestKey(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2500);
+  const fnStart = providersSrc.indexOf('async function _groqRouterSelectBestKey(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2500);
   assert.ok(
     fnBody.includes('candidates.push') && fnBody.includes('eligible'),
     'selectBestKey must collect ALL eligible candidates (not stop at first unavailable)'
@@ -111,8 +112,8 @@ test('ROUTER-008: Key at 3/3 does NOT block other keys', () => {
 // 4. Per-key 429 handling (only affected key opens)
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-009: 429 opens ONLY the affected key (per-key state)', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6000);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 6000);
   // Must call _groqRouterRecord429 with the specific keyIndex (not all keys)
   assert.ok(
     fnBody.includes('_groqRouterRecord429(env, keyIndex,'),
@@ -122,7 +123,7 @@ test('ROUTER-009: 429 opens ONLY the affected key (per-key state)', () => {
 
 test('ROUTER-010: Per-key state stored separately (groq:router:key{N})', () => {
   assert.ok(
-    workerSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
+    providersSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
     'Per-key state must use groq:router:key{N} prefix'
   );
 });
@@ -132,11 +133,11 @@ test('ROUTER-010: Per-key state stored separately (groq:router:key{N})', () => {
 // ════════════════════════════════════════════════════════════════════════════
 test('ROUTER-011: HALF_OPEN has one probe per key (in-memory lock)', () => {
   assert.ok(
-    workerSrc.includes('_groqRouterProbeLockInMemory'),
+    providersSrc.includes('_groqRouterProbeLockInMemory'),
     'Router must have _groqRouterProbeLockInMemory for single-probe enforcement'
   );
-  const fnStart = workerSrc.indexOf('async function _groqRouterSelectBestKey(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2500);
+  const fnStart = providersSrc.indexOf('async function _groqRouterSelectBestKey(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2500);
   assert.ok(
     fnBody.includes('probe_in_progress') && fnBody.includes('GROQ_ROUTER_PROBE_LOCK_MS'),
     'selectBestKey must defer concurrent callers with probe_in_progress'
@@ -144,8 +145,8 @@ test('ROUTER-011: HALF_OPEN has one probe per key (in-memory lock)', () => {
 });
 
 test('ROUTER-012: Probe success restores key (recordSuccess clears lock)', () => {
-  const fnStart = workerSrc.indexOf('async function _groqRouterRecordSuccess(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 800);
+  const fnStart = providersSrc.indexOf('async function _groqRouterRecordSuccess(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 800);
   assert.ok(
     fnBody.includes('_groqRouterProbeLockInMemory.delete(keyIndex)'),
     'recordSuccess must clear probe lock'
@@ -157,8 +158,8 @@ test('ROUTER-012: Probe success restores key (recordSuccess clears lock)', () =>
 });
 
 test('ROUTER-013: Probe 429 reopens with FRESH retry_after', () => {
-  const fnStart = workerSrc.indexOf('async function _groqRouterRecord429(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 800);
+  const fnStart = providersSrc.indexOf('async function _groqRouterRecord429(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 800);
   assert.ok(
     fnBody.includes('_groqRouterProbeLockInMemory.delete(keyIndex)'),
     'record429 must clear probe lock'
@@ -334,21 +335,21 @@ test('NEWSJSON-027: newsJson ReferenceError fixed (uses JSON.stringify(trimmed).
 // 11. 429 classification + retry_after preserved
 // ════════════════════════════════════════════════════════════════════════════
 test('CLASSIFY-028: classifyGroq429 still works (TPD/RPD/RPM/TPM/generic)', () => {
-  assert.ok(workerSrc.includes('function classifyGroq429('), 'classifyGroq429 must exist');
-  assert.ok(workerSrc.includes('daily_quota_tpd'), 'must classify TPD');
-  assert.ok(workerSrc.includes('daily_quota_rpd'), 'must classify RPD');
-  assert.ok(workerSrc.includes('rate_limit_rpm'), 'must classify RPM');
-  assert.ok(workerSrc.includes('rate_limit_tpm'), 'must classify TPM');
-  assert.ok(workerSrc.includes('rate_limit_generic'), 'must classify generic');
+  assert.ok(providersSrc.includes('function classifyGroq429('), 'classifyGroq429 must exist');
+  assert.ok(providersSrc.includes('daily_quota_tpd'), 'must classify TPD');
+  assert.ok(providersSrc.includes('daily_quota_rpd'), 'must classify RPD');
+  assert.ok(providersSrc.includes('rate_limit_rpm'), 'must classify RPM');
+  assert.ok(providersSrc.includes('rate_limit_tpm'), 'must classify TPM');
+  assert.ok(providersSrc.includes('rate_limit_generic'), 'must classify generic');
 });
 
 test('CLASSIFY-029: parseGroqRetryAfter still works (15m32.688s)', () => {
-  assert.ok(workerSrc.includes('function parseGroqRetryAfter('), 'parseGroqRetryAfter must exist');
+  assert.ok(providersSrc.includes('function parseGroqRetryAfter('), 'parseGroqRetryAfter must exist');
 });
 
 test('CLASSIFY-030: Router returns groq_429_info field', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 3000);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 3000);
   assert.ok(
     fnBody.includes('groq_429_info') && fnBody.includes('parseGroq429Info'),
     'Router must return groq_429_info (from parseGroq429Info)'
@@ -390,8 +391,8 @@ test('FALLBACK-032: Chat fallback: Groq → OpenRouter → Workers AI → OpenAI
 // 13. Observability (no API key in logs)
 // ════════════════════════════════════════════════════════════════════════════
 test('OBSERVE-033: Router logs [GROQ-ROUTER] with key index (not key value)', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 4500);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 4500);
   assert.ok(
     fnBody.includes('[GROQ-ROUTER] key='),
     'Router must log [GROQ-ROUTER] with key index'
@@ -404,8 +405,8 @@ test('OBSERVE-033: Router logs [GROQ-ROUTER] with key index (not key value)', ()
 });
 
 test('OBSERVE-034: Router logs usage, quota_type, cooldown, reason', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 6500);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 6500);
   assert.ok(fnBody.includes('usage='), 'must log usage');
   assert.ok(fnBody.includes('quota_type='), 'must log quota_type');
   assert.ok(fnBody.includes('cooldown_remaining='), 'must log cooldown_remaining');
@@ -422,9 +423,9 @@ test('SCOPE-035: Non-Groq circuits unchanged (openrouter, workers-ai, openai)', 
 });
 
 test('SCOPE-036: classifyHttpError unchanged for non-429', () => {
-  const fnStart = workerSrc.indexOf('function classifyHttpError(');
+  const fnStart = providersSrc.indexOf('function classifyHttpError(');
   const fnEnd = workerSrc.indexOf('\n}', fnStart);
-  const fnBody = workerSrc.substring(fnStart, fnEnd + 2);
+  const fnBody = providersSrc.substring(fnStart, fnEnd + 2);
   assert.ok(fnBody.includes("status === 429"), '429 still retryable');
   assert.ok(fnBody.includes("status === 400"), '400 non-retryable');
   assert.ok(fnBody.includes("status === 401"), '401 non-retryable');
@@ -438,8 +439,8 @@ test('SCOPE-036: classifyHttpError unchanged for non-429', () => {
 test('AMPLIFY-037: No dual-key retry loop (router selects ONE key per request)', () => {
   // The old _groqRoutedFetch tried preferred key then other key (2 requests).
   // The new router selects ONE best key per request (1 request).
-  const fnStart = workerSrc.indexOf('async function _groqRoutedFetch(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 800);
+  const fnStart = providersSrc.indexOf('async function _groqRoutedFetch(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 800);
   assert.ok(
     fnBody.includes('groqRouterExecute') && !fnBody.includes('preferredKey') && !fnBody.includes('otherKey'),
     '_groqRoutedFetch must delegate to router (no preferred/other key dual-key loop)'
@@ -448,7 +449,7 @@ test('AMPLIFY-037: No dual-key retry loop (router selects ONE key per request)',
 
 test('AMPLIFY-038: tryGroqSecondary removed (dead code, no dual-key retry)', () => {
   assert.ok(
-    !workerSrc.includes('async function tryGroqSecondary('),
+    !providersSrc.includes('async function tryGroqSecondary('),
     'tryGroqSecondary must be REMOVED (router replaces dual-key routing)'
   );
 });
@@ -482,8 +483,8 @@ test('DO-041: GroqRouterDO has record action (serialized state update)', () => {
 });
 
 test('DO-042: groqRouterExecute uses DO when available (strict enforcement)', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 1000);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 1000);
   assert.ok(
     fnBody.includes('env.GROQ_ROUTER_DO') && fnBody.includes('idFromName'),
     'groqRouterExecute must use GROQ_ROUTER_DO when available'
@@ -491,8 +492,8 @@ test('DO-042: groqRouterExecute uses DO when available (strict enforcement)', ()
 });
 
 test('DO-043: groqRouterExecute falls back to KV when DO not available', () => {
-  const fnStart = workerSrc.indexOf('async function groqRouterExecute(');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 5000);
+  const fnStart = providersSrc.indexOf('async function groqRouterExecute(');
+  const fnBody = providersSrc.substring(fnStart, fnStart + 5000);
   assert.ok(
     fnBody.includes('KV FALLBACK') || fnBody.includes('_groqRouterSelectBestKey'),
     'groqRouterExecute must fall back to KV when DO not available'

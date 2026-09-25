@@ -19,15 +19,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
 // ════════════════════════════════════════════════════════════════════════════
 // TEST 1: _groqFetchWithKey (News AI) must use DB gateway, NOT direct fetch
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-001: _groqRouterCallGateway must call groq_generate_with_key DB function (not direct fetch)', () => {
-  const fnStart = workerSrc.indexOf('async function _groqRouterCallGateway(');
+  const fnStart = providersSrc.indexOf('async function _groqRouterCallGateway(');
   assert.ok(fnStart !== -1, '_groqRouterCallGateway must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 2000);
+  const fnBody = providersSrc.substring(fnStart, fnStart + 2000);
   assert.ok(
     fnBody.includes('groq_generate_with_key'),
     '_groqRouterCallGateway must call public.groq_generate_with_key DB function (DB gateway migration)'
@@ -42,9 +43,9 @@ test('GROQ-GW-001: _groqRouterCallGateway must call groq_generate_with_key DB fu
 // TEST 2: groqPrimaryGenerate (Chat Key0) must use DB gateway
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-002: groqPrimaryGenerate must call groq_generate_with_key DB function (not direct fetch)', () => {
-  const fnStart = workerSrc.indexOf('async function groqPrimaryGenerate(');
+  const fnStart = providersSrc.indexOf('async function groqPrimaryGenerate(');
   assert.ok(fnStart !== -1, 'groqPrimaryGenerate must exist');
-  const fnBody = workerSrc.substring(fnStart, fnStart + 1500);
+  const fnBody = providersSrc.substring(fnStart, fnStart + 1500);
   assert.ok(
     fnBody.includes('groqRouterExecute'),
     'groqPrimaryGenerate must use groqRouterExecute (which uses DB gateway)'
@@ -70,9 +71,9 @@ test('GROQ-GW-003: callGroqSecondaryChat removed (router handles all keys)', () 
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-004: _groqRouterCallGateway must pass API key as 3rd parameter ($3::text)', () => {
   // _groqRouterCallGateway (the single DB gateway call site)
-  const gwStart = workerSrc.indexOf('async function _groqRouterCallGateway(');
+  const gwStart = providersSrc.indexOf('async function _groqRouterCallGateway(');
   assert.ok(gwStart !== -1, '_groqRouterCallGateway must exist');
-  const gwBody = workerSrc.substring(gwStart, gwStart + 1000);
+  const gwBody = providersSrc.substring(gwStart, gwStart + 1000);
   assert.ok(
     gwBody.includes('$3::text') && gwBody.includes('apiKey'),
     '_groqRouterCallGateway must pass apiKey as $3::text parameter to groq_generate_with_key'
@@ -83,9 +84,9 @@ test('GROQ-GW-004: _groqRouterCallGateway must pass API key as 3rd parameter ($3
 // TEST 5: Keys still read from env.GROQ_API_KEY / env.GROQ_API_KEY_1 (unchanged)
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-005: Router discovers all 4 Groq keys from env (Cloudflare secrets preserved)', () => {
-  const discoverStart = workerSrc.indexOf('function _groqRouterDiscoverKeys(');
+  const discoverStart = providersSrc.indexOf('function _groqRouterDiscoverKeys(');
   assert.ok(discoverStart !== -1, '_groqRouterDiscoverKeys must exist');
-  const discoverBody = workerSrc.substring(discoverStart, discoverStart + 500);
+  const discoverBody = providersSrc.substring(discoverStart, discoverStart + 500);
   assert.ok(discoverBody.includes('env.GROQ_API_KEY'), 'must read Key0 from env.GROQ_API_KEY');
   assert.ok(discoverBody.includes('env.GROQ_API_KEY_1'), 'must read Key1 from env.GROQ_API_KEY_1');
   assert.ok(discoverBody.includes('env.GROQ_API_KEY_2'), 'must read Key2 from env.GROQ_API_KEY_2');
@@ -141,7 +142,7 @@ test('GROQ-GW-007: groq_generate_with_key must NOT read from vault.decrypted_sec
 // ════════════════════════════════════════════════════════════════════════════
 test('GROQ-GW-008: No direct fetch to api.groq.com remains (all via DB gateway)', () => {
   // Check worker-proxy.js — the only allowed reference is in comments
-  const workerFetchGroq = workerSrc.match(/fetch\(['"]https:\/\/api\.groq\.com/g) || [];
+  const workerFetchGroq = providersSrc.match(/fetch\(['"]https:\/\/api\.groq\.com/g) || [];
   assert.equal(
     workerFetchGroq.length, 0,
     `worker-proxy.js must have 0 direct fetch() calls to api.groq.com (found ${workerFetchGroq.length}). All Groq calls must go through DB gateway.`
@@ -161,7 +162,7 @@ test('GROQ-GW-008: No direct fetch to api.groq.com remains (all via DB gateway)'
 test('GROQ-GW-009: Old groq-key0/groq-key1 circuits replaced by router per-key state', () => {
   // The old groq-key0/groq-key1 circuit keys are replaced by groq:router:key{N}
   assert.ok(
-    workerSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
+    providersSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
     'Router must use groq:router:key{N} prefix (replaces old groq-key0/groq-key1)'
   );
 });

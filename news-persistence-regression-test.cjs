@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const repoSrc = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
 const wranglerSrc = fs.readFileSync(path.join(__dirname, 'wrangler.jsonc'), 'utf8');
 
@@ -238,7 +239,7 @@ test('NEWS-SCOPE-015: Gemini provider flag removed (NEWS_PROVIDER_GEMINI deleted
 
 test('NEWS-SCOPE-016: Old groq-key0/groq-key1 circuits replaced by router per-key state', () => {
   assert.ok(
-    workerSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
+    providersSrc.includes("GROQ_ROUTER_KEY_PREFIX = 'groq:router:key'"),
     'Router must use groq:router:key{N} (replaces old groq-key0/groq-key1)'
   );
 });

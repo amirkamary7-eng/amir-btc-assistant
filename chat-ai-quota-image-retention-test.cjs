@@ -2022,7 +2022,7 @@ test('GEMINI-429-04: Text-only chat has Groq + Gemini fallback (restored)', () =
 
 test('GEMINI-ERROR-01: Gemini 400 handled as non_retryable', () => {
   // classifyHttpError(400) = non_retryable — verified in worker-proxy.js
-  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
   assert.ok(SRC.includes('status === 400'),
     'classifyHttpError must handle 400');
 });
@@ -2034,7 +2034,7 @@ test('GEMINI-ERROR-02: Gemini 500 handled as retryable', () => {
 });
 
 test('GEMINI-ERROR-03: Gemini timeout handled as retryable', () => {
-  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
   assert.ok(SRC.includes('status === 408'),
     'classifyHttpError must handle 408 timeout as retryable');
 });
