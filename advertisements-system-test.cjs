@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, "src/news/telemetry.js"), "utf8");
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
@@ -1754,36 +1755,36 @@ console.log('✅ All FULL AUDIT regression tests loaded.');
 
 // OR-01: OPENROUTER_MODEL constant exists with correct model
 test('OR-01: OPENROUTER_MODEL constant uses nvidia/nemotron-3-super-120b-a12b:free', () => {
-  assert.ok(WORKER_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+  assert.ok(PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
     'OPENROUTER_MODEL must be nvidia/nemotron-3-super-120b-a12b:free');
 });
 
 // OR-02: tryOpenRouter function exists
 test('OR-02: tryOpenRouter function exists', () => {
-  assert.ok(WORKER_SRC.includes('async function tryOpenRouter'),
+  assert.ok(PROVIDERS_SRC.includes('async function tryOpenRouter'),
     'tryOpenRouter function must exist');
 });
 
 // OR-03: Uses env.OPENROUTER_API_KEY
 test('OR-03: tryOpenRouter uses env.OPENROUTER_API_KEY', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 1000);
   assert.ok(fnBlock.includes('env.OPENROUTER_API_KEY'),
     'tryOpenRouter must use env.OPENROUTER_API_KEY');
 });
 
 // OR-04: Uses correct OpenRouter endpoint
 test('OR-04: tryOpenRouter uses openrouter.ai endpoint', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 1000);
   assert.ok(fnBlock.includes('https://openrouter.ai/api/v1/chat/completions'),
     'tryOpenRouter must use https://openrouter.ai/api/v1/chat/completions');
 });
 
 // OR-05: Has HTTP-Referer and X-Title headers
 test('OR-05: tryOpenRouter includes HTTP-Referer and X-Title headers', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1500);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 1500);
   assert.ok(fnBlock.includes('HTTP-Referer'),
     'tryOpenRouter must include HTTP-Referer header');
   assert.ok(fnBlock.includes('X-Title'),
@@ -1792,24 +1793,24 @@ test('OR-05: tryOpenRouter includes HTTP-Referer and X-Title headers', () => {
 
 // OR-06: Returns provider: 'openrouter'
 test('OR-06: tryOpenRouter returns provider: openrouter', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 2000);
   assert.ok(fnBlock.includes("provider: 'openrouter'"),
     'tryOpenRouter must return {provider: \'openrouter\', ...}');
 });
 
 // OR-07: Uses OpenAI-compatible response parsing (choices[0].message.content)
 test('OR-07: tryOpenRouter parses choices[0].message.content', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 3000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 3000);
   assert.ok(fnBlock.includes('choices?.[0]?.message?.content'),
     'tryOpenRouter must parse data?.choices?.[0]?.message?.content');
 });
 
 // OR-08: Uses classifyHttpError for error classification
 test('OR-08: tryOpenRouter uses classifyHttpError', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 2000);
   assert.ok(fnBlock.includes('classifyHttpError'),
     'tryOpenRouter must use classifyHttpError for error classification');
 });
@@ -1871,27 +1872,27 @@ test('OR-15: providers_priority array does NOT include Gemini', () => {
 
 // OR-16: tryOpenRouter has 15s timeout (same as tryOpenAI)
 test('OR-16: tryOpenRouter has 15s timeout', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 1000);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 1000);
   assert.ok(fnBlock.includes('15000'),
     'tryOpenRouter must have 15000ms (15s) timeout');
 });
 
 // OR-17: tryOpenRouter has no_api_key guard
 test('OR-17: tryOpenRouter returns no_api_key when key missing', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenRouter');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 500);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenRouter');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 500);
   assert.ok(fnBlock.includes("error: 'no_api_key'"),
     'tryOpenRouter must return error: no_api_key when OPENROUTER_API_KEY not set');
 });
 
 // OR-18: Does NOT modify tryOpenAI
 test('OR-18: tryOpenAI function unchanged (not modified)', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryOpenAI');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 200);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryOpenAI');
+  const fnBlock = PROVIDERS_SRC.slice(fnStart, fnStart + 200);
   assert.ok(fnBlock.includes("env.OPENAI_API_KEY"),
     'tryOpenAI must still use env.OPENAI_API_KEY (unchanged)');
-  assert.ok(fnBlock.includes("'gpt-4o-mini'") || WORKER_SRC.includes("OPENAI_MODEL = 'gpt-4o-mini'"),
+  assert.ok(fnBlock.includes("'gpt-4o-mini'") || PROVIDERS_SRC.includes("OPENAI_MODEL = 'gpt-4o-mini'"),
     'tryOpenAI must still use gpt-4o-mini (unchanged)');
 });
 

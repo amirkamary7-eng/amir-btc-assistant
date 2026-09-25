@@ -37,18 +37,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const workerSrc = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const providersSrc = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const assistantSrc = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 
-// ── Locate attemptProvider function body ──
+// ── Locate attemptProvider function body (in worker-proxy.js) ──
 const attemptProviderStart = workerSrc.indexOf('async function attemptProvider(');
 assert.ok(attemptProviderStart !== -1, 'attemptProvider function must exist');
 // Get ~800 chars of the function body (enough to cover the recordCircuitResult call)
 const attemptProviderBody = workerSrc.substring(attemptProviderStart, attemptProviderStart + 5000);
 
-// ── Locate _groqRoutedFetch function body ──
-const routedFetchStart = workerSrc.indexOf('async function _groqRoutedFetch(');
+// ── Locate _groqRoutedFetch function body (in src/news/providers.js) ──
+const routedFetchStart = providersSrc.indexOf('async function _groqRoutedFetch(');
 assert.ok(routedFetchStart !== -1, '_groqRoutedFetch function must exist');
-const routedFetchBody = workerSrc.substring(routedFetchStart, routedFetchStart + 2500);
+const routedFetchBody = providersSrc.substring(routedFetchStart, routedFetchStart + 2500);
 
 // ════════════════════════════════════════════════════════════════════════════
 // TEST 1: attemptProvider must check key_slot before recording (F7/F8 fix)

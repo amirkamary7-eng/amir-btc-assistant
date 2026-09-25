@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 const NEWS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
 const APP_JS_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
@@ -40,8 +41,8 @@ test('A1: article text truncation uses sentence boundary (not character)', () =>
 test('A2: max_tokens increased from 1024 to 1536 for all 4 providers', () => {
   // Groq uses _groqRoutedFetch with maxTokens as a positional parameter.
   // Workers AI, OpenAI, OpenRouter use max_tokens: 1536 in the JSON body.
-  const groqCount = (WORKER_SRC.match(/_groqRoutedFetch\(env,\s*[^)]*,\s*1536,\s*0\.4\)/g) || []).length;
-  const otherCount = (WORKER_SRC.match(/max_tokens:\s*1536/g) || []).length;
+  const groqCount = (PROVIDERS_SRC.match(/_groqRoutedFetch\(env,\s*[^)]*,\s*1536,\s*0\.4\)/g) || []).length;
+  const otherCount = (PROVIDERS_SRC.match(/max_tokens:\s*1536/g) || []).length;
   const total1536 = groqCount + otherCount;
   assert.ok(total1536 >= 4, `at least 4 max_tokens=1536 (Groq params: ${groqCount}, JSON body: ${otherCount}, total: ${total1536})`);
   // Ensure NO max_tokens: 1024 remains in the news provider chain

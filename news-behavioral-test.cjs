@@ -13,6 +13,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 
 // ============================================================================
 // Helper: extract a function from source by name
@@ -56,10 +58,10 @@ function loadParseRssItems() {
   // Find and extract the three helper functions + parseRssItems from source
   // cleanHtml (line ~3778), extractFirstMatch (line ~3816), extractImageUrl (line ~3826)
   // parseRssItems (line ~3986)
-  const cleanHtmlStart = WORKER_SRC.indexOf('function cleanHtml');
-  const extractFirstMatchStart = WORKER_SRC.indexOf('function extractFirstMatch');
-  const extractImageUrlStart = WORKER_SRC.indexOf('function extractImageUrl');
-  const parseRssItemsStart = WORKER_SRC.indexOf('function parseRssItems');
+  const cleanHtmlStart = NEWS_SHARED_SRC.indexOf('function cleanHtml');
+  const extractFirstMatchStart = NEWS_SHARED_SRC.indexOf('function extractFirstMatch');
+  const extractImageUrlStart = NEWS_SHARED_SRC.indexOf('function extractImageUrl');
+  const parseRssItemsStart = NEWS_SHARED_SRC.indexOf('function parseRssItems');
   
   // Extract each function by finding its end (next function at same indent level)
   function extractByStart(src, start) {
@@ -78,9 +80,9 @@ function loadParseRssItems() {
     return src.slice(start, start + 2000);
   }
   
-  const cleanHtmlFn = extractByStart(WORKER_SRC, cleanHtmlStart);
-  const extractFirstMatchFn = extractByStart(WORKER_SRC, extractFirstMatchStart);
-  const extractImageUrlFn = extractByStart(WORKER_SRC, extractImageUrlStart);
+  const cleanHtmlFn = extractByStart(NEWS_SHARED_SRC, cleanHtmlStart);
+  const extractFirstMatchFn = extractByStart(NEWS_SHARED_SRC, extractFirstMatchStart);
+  const extractImageUrlFn = extractByStart(NEWS_SHARED_SRC, extractImageUrlStart);
   const parseRssItemsFn = extractByStart(WORKER_SRC, parseRssItemsStart);
   
   const evaluator = new Function('exports',
@@ -187,27 +189,27 @@ test('BEHAVIORAL-1: 429 Retry-After parsing exists and is passed to requeueWithR
 // ============================================================================
 test('BEHAVIORAL-7-CB: Gemini prolonged-open state machine correct', () => {
   // Constants
-  assert.ok(WORKER_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD = 3'));
-  assert.ok(WORKER_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS = 60 * 60 * 1000'));
+  assert.ok(PROVIDERS_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_THRESHOLD = 3'));
+  assert.ok(PROVIDERS_SRC.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS = 60 * 60 * 1000'));
   
   // HALF_OPEN → OPEN with probe_failures increment
   // Check the recordCircuitResult function for prolonged-open logic
-  const cbFnStart = WORKER_SRC.indexOf('async function recordCircuitResult');
+  const cbFnStart = PROVIDERS_SRC.indexOf('async function recordCircuitResult');
   let cbFnEnd = cbFnStart;
   let cbDepth = 0;
-  for (let i = cbFnStart; i < WORKER_SRC.length; i++) {
-    if (WORKER_SRC[i] === '{') cbDepth++;
-    else if (WORKER_SRC[i] === '}') { cbDepth--; if (cbDepth === 0) { cbFnEnd = i; break; } }
+  for (let i = cbFnStart; i < PROVIDERS_SRC.length; i++) {
+    if (PROVIDERS_SRC[i] === '{') cbDepth++;
+    else if (PROVIDERS_SRC[i] === '}') { cbDepth--; if (cbDepth === 0) { cbFnEnd = i; break; } }
   }
-  const cbSection = WORKER_SRC.slice(cbFnStart, cbFnEnd + 1);
+  const cbSection = PROVIDERS_SRC.slice(cbFnStart, cbFnEnd + 1);
   assert.ok(cbSection.includes('probe_failures'), 'recordCircuitResult must track probe_failures');
   assert.ok(cbSection.includes('isProlonged'), 'recordCircuitResult must check isProlonged');
   assert.ok(cbSection.includes('CIRCUIT_BREAKER_PROLONGED_OPEN_MS'), 'recordCircuitResult must use prolonged backoff');
   
   // Success resets probe_failures
-  const successSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('if (success)'),
-    WORKER_SRC.indexOf('if (success)') + 400
+  const successSection = PROVIDERS_SRC.slice(
+    PROVIDERS_SRC.indexOf('if (success)'),
+    PROVIDERS_SRC.indexOf('if (success)') + 400
   );
   assert.ok(successSection.includes('probe_failures: 0'), 'Success must reset probe_failures');
   assert.ok(successSection.includes('prolonged: false'), 'Success must reset prolonged');
@@ -227,9 +229,9 @@ test('BEHAVIORAL-8-CHAIN: News AI fallback chain has NO Gemini (Groq → OpenRou
 // Source-level: Groq verification
 // ============================================================================
 test('BEHAVIORAL-9-GROQ: Groq uses dual-key routed fetch + correct params', () => {
-  const groqSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function tryGroq'),
-    WORKER_SRC.indexOf('async function tryGroq') + 2000
+  const groqSection = PROVIDERS_SRC.slice(
+    PROVIDERS_SRC.indexOf('async function tryGroq'),
+    PROVIDERS_SRC.indexOf('async function tryGroq') + 2000
   );
   // DUAL-KEY: tryGroq now uses _groqRoutedFetch (hash routing + fallback to other key)
   assert.ok(groqSection.includes('_groqRoutedFetch'), 'Groq must use _groqRoutedFetch dual-key router');
