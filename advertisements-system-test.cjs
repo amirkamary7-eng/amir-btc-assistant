@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, "src/news/telemetry.js"), "utf8");
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const ADS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/advertisements.js'), 'utf8');
@@ -1845,8 +1846,8 @@ test('OR-11: OpenRouter uses attemptProvider wrapper for circuit breaker', () =>
 
 // OR-12: Provider stats include openrouter
 test('OR-12: Provider stats include openrouter entry', () => {
-  assert.ok(WORKER_SRC.includes("'openrouter': { success: 0, failed: 0, total_ms: 0 }"),
-    'Provider stats must include openrouter entry');
+  assert.ok(TELEMETRY_SRC.includes("'openrouter': { success: 0, failed: 0, total_ms: 0 }"),
+    'Provider stats must include openrouter entry (in src/news/telemetry.js)');
 });
 
 // OR-13: Provider arrays include openrouter
@@ -1858,7 +1859,7 @@ test('OR-13: News AI provider arrays do NOT include Gemini', () => {
 
 // OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER
 test('OR-14: Status endpoint includes NEWS_PROVIDER_OPENROUTER flag', () => {
-  assert.ok(WORKER_SRC.includes("NEWS_PROVIDER_OPENROUTER: isNewsProviderEnabled"),
+  assert.ok(TELEMETRY_SRC.includes("NEWS_PROVIDER_OPENROUTER: isNewsProviderEnabled"),
     'Status endpoint must include NEWS_PROVIDER_OPENROUTER flag');
 });
 

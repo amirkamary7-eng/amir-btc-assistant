@@ -22,19 +22,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/telemetry.js'), 'utf8');
 
 // Helper: extract a function body from source text
 function fnBody(name) {
   const marker = 'async function ' + name + '(';
-  const start = SRC.indexOf(marker);
-  if (start === -1) return '';
-  // Find the matching closing brace at depth 0
-  let depth = 0, i = SRC.indexOf('{', start);
-  for (; i < SRC.length; i++) {
-    if (SRC[i] === '{') depth++;
-    else if (SRC[i] === '}') { depth--; if (depth === 0) break; }
+  // Try telemetry module first, then fall back to worker-proxy.js for non-telemetry functions
+  let start = TELEMETRY_SRC.indexOf(marker);
+  let sourceText = TELEMETRY_SRC;
+  if (start === -1) {
+    start = SRC.indexOf(marker);
+    sourceText = SRC;
   }
-  return SRC.slice(start, i + 1);
+  if (start === -1) return '';
+  let depth = 0, i = sourceText.indexOf('{', start);
+  for (; i < sourceText.length; i++) {
+    if (sourceText[i] === '{') depth++;
+    else if (sourceText[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  return sourceText.slice(start, i + 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -42,7 +48,7 @@ function fnBody(name) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('TICK-01: recordNewsAITick exists', () => {
-  assert.ok(SRC.includes('async function recordNewsAITick(env, stats)'),
+  assert.ok(TELEMETRY_SRC.includes('async function recordNewsAITick(env, stats)'),
     'recordNewsAITick must exist');
 });
 
@@ -93,7 +99,7 @@ test('TICK-07: recordNewsAITick failure is best-effort (catch + warn, no throw)'
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('E2E-01: recordE2ETiming exists', () => {
-  assert.ok(SRC.includes('async function recordE2ETiming(env, timing)'),
+  assert.ok(TELEMETRY_SRC.includes('async function recordE2ETiming(env, timing)'),
     'recordE2ETiming must exist');
 });
 
@@ -143,7 +149,7 @@ test('E2E-07: recordE2ETiming failure is best-effort (catch + warn, no throw)', 
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('DDL-01: ensureTelemetryTables exists', () => {
-  assert.ok(SRC.includes('async function ensureTelemetryTables(env)'),
+  assert.ok(TELEMETRY_SRC.includes('async function ensureTelemetryTables(env)'),
     'ensureTelemetryTables must exist');
 });
 
@@ -169,7 +175,7 @@ test('DDL-03: news_ai_e2e_log table DDL is correct', () => {
 });
 
 test('DDL-04: ensureTelemetryTables uses isolate cache (_telemetryTablesEnsured)', () => {
-  assert.ok(SRC.includes('let _telemetryTablesEnsured = false'),
+  assert.ok(TELEMETRY_SRC.includes('let _telemetryTablesEnsured = false'),
     'must have _telemetryTablesEnsured module-level cache flag');
   const body = fnBody('ensureTelemetryTables');
   assert.ok(body.includes('_telemetryTablesEnsured'),
@@ -351,9 +357,9 @@ test('DEAD-01: NEWS_AI_MONITOR_KEY constant preserved (dead code for rollback)',
 });
 
 test('DEAD-02: NEWS_AI_E2E_TIMING_KEY + TTL preserved (dead code)', () => {
-  assert.ok(SRC.includes("const NEWS_AI_E2E_TIMING_KEY = 'news:ai_e2e_timing'"),
+  assert.ok(TELEMETRY_SRC.includes("const NEWS_AI_E2E_TIMING_KEY = 'news:ai_e2e_timing'"),
     'NEWS_AI_E2E_TIMING_KEY must still be declared');
-  assert.ok(SRC.includes('NEWS_AI_E2E_TIMING_TTL'),
+  assert.ok(TELEMETRY_SRC.includes('NEWS_AI_E2E_TIMING_TTL'),
     'NEWS_AI_E2E_TIMING_TTL must still be declared');
 });
 
