@@ -1828,11 +1828,11 @@ test('NEWS-REGRESSION-01: News AI tryGemini removed (no Gemini in News)', () => 
 });
 
 test('NEWS-REGRESSION-02: Translation circuit breaker key separate (translation-workers-ai)', () => {
-  const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-  assert.ok(SRC.includes("'translation-workers-ai'"),
+  const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
+  assert.ok(TRANSLATE_SRC.includes("'translation-workers-ai'"),
     'Translation must use separate circuit key');
   // Must NOT use 'chat-translation-workers-ai'
-  assert.ok(!SRC.includes("'chat-translation-workers-ai'"),
+  assert.ok(!TRANSLATE_SRC.includes("'chat-translation-workers-ai'"),
     'Translation key must NOT have chat- prefix');
 });
 
@@ -1917,9 +1917,10 @@ test('NEWS-REGRESSION-04: worker-proxy.js Chat AI / News / Translation sections 
 
 test('NEWS-REGRESSION-05: News pipeline functions intact', () => {
   const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+  const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, 'src/news/translate.js'), 'utf8');
   // All key News AI functions must exist
   assert.ok(SRC.includes('async function fetchAllNewsRss'), 'fetchAllNewsRss intact');
-  assert.ok(SRC.includes('async function translateToFarsi'), 'translateToFarsi intact');
+  assert.ok(TRANSLATE_SRC.includes('async function translateToFarsi'), 'translateToFarsi intact (in src/news/translate.js)');
   assert.ok(SRC.includes('async function generateSummaryWithFallback'), 'generateSummaryWithFallback intact');
   assert.ok(SRC.includes('async function processOneArticleSummary'), 'processOneArticleSummary intact');
   assert.ok(SRC.includes('async function processNewsAIBatch'), 'processNewsAIBatch intact');
