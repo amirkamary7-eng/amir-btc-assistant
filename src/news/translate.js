@@ -3,11 +3,11 @@
 //
 // Factory pattern: createNewsTranslator({ readAppCache, writeAppCache,
 //   _groqRoutedFetch, EXTERNAL_FETCH_TIMEOUT_MS, validatePersianOutput,
-//   isNewsProviderEnabled })
+//   isNewsProviderEnabled, shouldAttemptProvider, recordCircuitResult })
 // Returns: { isM2m100QuotaExhausted, markM2m100QuotaExhausted,
 //            batchTranslateToFarsi, translateToFarsi }
 //
-// DI dependencies (6):
+// DI dependencies (8):
 //   - readAppCache, writeAppCache: KV helpers (for m2m100 quota state)
 //   - _groqRoutedFetch: Groq API (for batch translation)
 //   - EXTERNAL_FETCH_TIMEOUT_MS: HTTP timeout const
@@ -16,6 +16,16 @@
 //     Required because batchTranslateToFarsi and translateToFarsi call
 //     isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) before each
 //     Groq attempt. Without this DI dep, the calls throw ReferenceError.
+//   - shouldAttemptProvider: circuit-breaker pre-check (from src/news/providers.js)
+//     Required because translateToFarsi calls
+//     shouldAttemptProvider(env, 'translation-workers-ai') before each m2m100
+//     attempt. Without this DI dep, the call throws ReferenceError when the
+//     batch path falls back to individual translation.
+//   - recordCircuitResult: circuit-breaker state recording (from src/news/providers.js)
+//     Required because translateToFarsi calls recordCircuitResult(env, ...) on
+//     m2m100 success/failure. The calls are wrapped in try/catch so a missing
+//     DI dep would be silently swallowed, but circuit-breaker state would
+//     never update (broken observability + incorrect OPEN/CLOSED transitions).
 //
 // Mutable state (inside factory closure, shared across all callers):
 //   - _translationCache (Map): translation memory cache
@@ -32,6 +42,8 @@ export function createNewsTranslator({
   EXTERNAL_FETCH_TIMEOUT_MS,
   validatePersianOutput,
   isNewsProviderEnabled,
+  shouldAttemptProvider,
+  recordCircuitResult,
 }) {
 
 const _translationCache = new Map();

@@ -7897,6 +7897,8 @@ const { isM2m100QuotaExhausted, markM2m100QuotaExhausted, batchTranslateToFarsi,
   EXTERNAL_FETCH_TIMEOUT_MS,
   validatePersianOutput,
   isNewsProviderEnabled,
+  shouldAttemptProvider,
+  recordCircuitResult,
 });
 
 
