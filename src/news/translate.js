@@ -2,15 +2,20 @@
 // News Translation Layer — extracted from worker-proxy.js (lines 4473-4876).
 //
 // Factory pattern: createNewsTranslator({ readAppCache, writeAppCache,
-//   _groqRoutedFetch, EXTERNAL_FETCH_TIMEOUT_MS, validatePersianOutput })
+//   _groqRoutedFetch, EXTERNAL_FETCH_TIMEOUT_MS, validatePersianOutput,
+//   isNewsProviderEnabled })
 // Returns: { isM2m100QuotaExhausted, markM2m100QuotaExhausted,
 //            batchTranslateToFarsi, translateToFarsi }
 //
-// DI dependencies (5):
+// DI dependencies (6):
 //   - readAppCache, writeAppCache: KV helpers (for m2m100 quota state)
 //   - _groqRoutedFetch: Groq API (for batch translation)
 //   - EXTERNAL_FETCH_TIMEOUT_MS: HTTP timeout const
 //   - validatePersianOutput: Persian validation (from src/news/shared.js)
+//   - isNewsProviderEnabled: provider flag check (from src/news/providers.js)
+//     Required because batchTranslateToFarsi and translateToFarsi call
+//     isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) before each
+//     Groq attempt. Without this DI dep, the calls throw ReferenceError.
 //
 // Mutable state (inside factory closure, shared across all callers):
 //   - _translationCache (Map): translation memory cache
@@ -26,6 +31,7 @@ export function createNewsTranslator({
   _groqRoutedFetch,
   EXTERNAL_FETCH_TIMEOUT_MS,
   validatePersianOutput,
+  isNewsProviderEnabled,
 }) {
 
 const _translationCache = new Map();

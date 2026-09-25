@@ -7896,6 +7896,7 @@ const { isM2m100QuotaExhausted, markM2m100QuotaExhausted, batchTranslateToFarsi,
   _groqRoutedFetch,
   EXTERNAL_FETCH_TIMEOUT_MS,
   validatePersianOutput,
+  isNewsProviderEnabled,
 });
 
 
