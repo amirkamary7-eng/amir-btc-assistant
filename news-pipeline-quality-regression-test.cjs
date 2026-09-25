@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 const NEWS_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/news_articles.js'), 'utf8');
@@ -31,10 +32,10 @@ const MIGRATE_SRC = fs.readFileSync(path.join(__dirname, 'scripts/00-migrate.sql
 test('A1: article text truncation uses sentence boundary (not character)', () => {
   // The old code was: if (articleText.length > 8000) articleText = articleText.substring(0, 8000);
   // The new code searches for a sentence boundary before cutting.
-  assert.ok(/SENTENCE_END/.test(WORKER_SRC), 'sentence boundary detection present');
-  assert.ok(/cutAt/.test(WORKER_SRC), 'cutAt variable used for boundary-aware cut');
+  assert.ok(/SENTENCE_END/.test(SUMMARY_SRC), 'sentence boundary detection present');
+  assert.ok(/cutAt/.test(SUMMARY_SRC), 'cutAt variable used for boundary-aware cut');
   // Ensure the old hard-cut pattern is GONE
-  assert.ok(!/articleText\.substring\(0, 8000\);[\s\n]*if \(articleText\.length < 50\)/.test(WORKER_SRC),
+  assert.ok(!/articleText\.substring\(0, 8000\);[\s\n]*if \(articleText\.length < 50\)/.test(SUMMARY_SRC),
     'old hard-cut-at-8000 pattern is removed');
 });
 
@@ -54,10 +55,10 @@ test('A2: max_tokens increased from 1024 to 1536 for all 4 providers', () => {
 test('B1: JOURNALIST_SYSTEM no longer requests "پاراگراف ۱/۲/۳/۴" structural labels', () => {
   // The old prompt had "پاراگراف ۱ — چه اتفاقی افتاد:" etc.
   // The new prompt should NOT have these as instructions (only in the forbidden list).
-  const journalistStart = WORKER_SRC.indexOf("const JOURNALIST_SYSTEM = '");
+  const journalistStart = SUMMARY_SRC.indexOf("const JOURNALIST_SYSTEM = '");
   assert.ok(journalistStart > -1, 'JOURNALIST_SYSTEM found');
-  const journalistEnd = WORKER_SRC.indexOf("';", journalistStart + 10);
-  const prompt = WORKER_SRC.substring(journalistStart, journalistEnd);
+  const journalistEnd = SUMMARY_SRC.indexOf("';", journalistStart + 10);
+  const prompt = SUMMARY_SRC.substring(journalistStart, journalistEnd);
   // Must NOT contain the old structural labels as instructions
   assert.ok(!prompt.includes('پاراگراف ۱ —'), 'no "پاراگراف ۱ —" label');
   assert.ok(!prompt.includes('پاراگراف ۲ —'), 'no "پاراگراف ۲ —" label');
@@ -66,9 +67,9 @@ test('B1: JOURNALIST_SYSTEM no longer requests "پاراگراف ۱/۲/۳/۴" st
 });
 
 test('B2: JOURNALIST_SYSTEM explicitly forbids meta-commentary and paragraph labels', () => {
-  const journalistStart = WORKER_SRC.indexOf("const JOURNALIST_SYSTEM = '");
-  const journalistEnd = WORKER_SRC.indexOf("';", journalistStart + 10);
-  const prompt = WORKER_SRC.substring(journalistStart, journalistEnd);
+  const journalistStart = SUMMARY_SRC.indexOf("const JOURNALIST_SYSTEM = '");
+  const journalistEnd = SUMMARY_SRC.indexOf("';", journalistStart + 10);
+  const prompt = SUMMARY_SRC.substring(journalistStart, journalistEnd);
   // Must contain the forbidden phrases list
   assert.ok(prompt.includes('پاراگراف اول'), 'forbids "پاراگراف اول"');
   assert.ok(prompt.includes('پاراگراف دوم'), 'forbids "پاراگراف دوم"');
@@ -79,19 +80,19 @@ test('B2: JOURNALIST_SYSTEM explicitly forbids meta-commentary and paragraph lab
 });
 
 test('B3: JOURNALIST_SYSTEM includes the "منبع ناکافی" sentinel instruction', () => {
-  const journalistStart = WORKER_SRC.indexOf("const JOURNALIST_SYSTEM = '");
-  const journalistEnd = WORKER_SRC.indexOf("';", journalistStart + 10);
-  const prompt = WORKER_SRC.substring(journalistStart, journalistEnd);
+  const journalistStart = SUMMARY_SRC.indexOf("const JOURNALIST_SYSTEM = '");
+  const journalistEnd = SUMMARY_SRC.indexOf("';", journalistStart + 10);
+  const prompt = SUMMARY_SRC.substring(journalistStart, journalistEnd);
   assert.ok(prompt.includes('منبع ناکافی'), 'prompt mentions "منبع ناکافی" sentinel');
   // Must instruct the model to write ONLY that phrase when source is insufficient
   assert.ok(prompt.includes('فقط و فقط'), 'prompt says "only" write the sentinel');
 });
 
 test('B4: JOURNALIST_USER_PROMPT mentions truncation awareness', () => {
-  const userPromptStart = WORKER_SRC.indexOf('const JOURNALIST_USER_PROMPT = `');
+  const userPromptStart = SUMMARY_SRC.indexOf('const JOURNALIST_USER_PROMPT = `');
   assert.ok(userPromptStart > -1, 'JOURNALIST_USER_PROMPT found');
-  const userPromptEnd = WORKER_SRC.indexOf('`;', userPromptStart + 10);
-  const userPrompt = WORKER_SRC.substring(userPromptStart, userPromptEnd);
+  const userPromptEnd = SUMMARY_SRC.indexOf('`;', userPromptStart + 10);
+  const userPrompt = SUMMARY_SRC.substring(userPromptStart, userPromptEnd);
   assert.ok(userPrompt.includes('ممکن است در انتها قطع شده باشد'), 'tells model article may be truncated');
   assert.ok(userPrompt.includes('منبع ناکافی'), 'user prompt mentions sentinel');
 });
@@ -209,13 +210,13 @@ test('C-FIX-2: Arabic-only text rejected, Persian accepted (functional test)', (
 // ─── D. Source integrity ───────────────────────────────────────────────────
 
 test('D1: source_insufficient_length rejection (50-150 chars → fail, no AI)', () => {
-  assert.ok(/source_insufficient_length/.test(WORKER_SRC), 'source_insufficient_length reason exists');
-  assert.ok(WORKER_SRC.includes("articleText.length < 150"), 'checks length < 150 (H5 source threshold fix: was 200, reduced to allow NYT/CoinDesk RSS-description-only articles)');
+  assert.ok(/source_insufficient_length/.test(SUMMARY_SRC), 'source_insufficient_length reason exists');
+  assert.ok(SUMMARY_SRC.includes("articleText.length < 150"), 'checks length < 150 (H5 source threshold fix: was 200, reduced to allow NYT/CoinDesk RSS-description-only articles)');
 });
 
 test('D2: source_insufficient_length in PERMANENT_FAIL_REASONS (no retry)', () => {
   assert.ok(
-    /PERMANENT_FAIL_REASONS.*source_insufficient_length/.test(WORKER_SRC),
+    /PERMANENT_FAIL_REASONS.*source_insufficient_length/.test(SUMMARY_SRC),
     'source_insufficient_length is permanent (no retry)'
   );
 });
@@ -268,9 +269,9 @@ test('E5: listForFeed returns real pub_date from DB', () => {
 test('F1: saveAnalysis call site passes real sentiment/impact/coins (not hardcoded)', () => {
   // The old code hardcoded: sentiment: 'neutral', impact: 'low', impact_reason: '', coins: []
   // The new code should pass article.sentiment, article.impact, etc.
-  const callStart = WORKER_SRC.indexOf('await newsArticleRepo.saveAnalysis(env, {');
+  const callStart = SUMMARY_SRC.indexOf('await newsArticleRepo.saveAnalysis(env, {');
   assert.ok(callStart > -1, 'saveAnalysis call site found');
-  const callBlock = WORKER_SRC.substring(callStart, callStart + 800);
+  const callBlock = SUMMARY_SRC.substring(callStart, callStart + 800);
   assert.ok(callBlock.includes('article.sentiment'), 'passes article.sentiment (not hardcoded)');
   assert.ok(callBlock.includes('article.impact'), 'passes article.impact (not hardcoded)');
   assert.ok(callBlock.includes('article.impact_reason'), 'passes article.impact_reason');
@@ -284,8 +285,8 @@ test('F1: saveAnalysis call site passes real sentiment/impact/coins (not hardcod
 // ─── G. KV published_at uses pub_date ────────────────────────────────────────
 
 test('G1: publishArticleToFarsiNews uses pub_date for published_at (not Date.now())', () => {
-  const fnStart = WORKER_SRC.indexOf('async function publishArticleToFarsiNews(');
-  const fnBody = WORKER_SRC.substring(fnStart, fnStart + 2500);
+  const fnStart = SUMMARY_SRC.indexOf('async function publishArticleToFarsiNews(');
+  const fnBody = SUMMARY_SRC.substring(fnStart, fnStart + 2500);
   assert.ok(
     /publishedAt\s*=\s*article\.pub_date\s*\?/.test(fnBody),
     'publishedAt = article.pub_date ? ... : Date.now()'
@@ -297,11 +298,11 @@ test('G1: publishArticleToFarsiNews uses pub_date for published_at (not Date.now
 test('H1: KV read path deletes corrupt entries on validation failure', () => {
   // The KV (JSON) and KV (plain) paths should both call env.APP_CACHE.delete on validation failure
   assert.ok(
-    /APP_CACHE\?\.delete\?\.\(aiKey\)/.test(WORKER_SRC),
+    /APP_CACHE\?\.delete\?\.\(aiKey\)/.test(SUMMARY_SRC),
     'APP_CACHE.delete(aiKey) called on validation failure'
   );
   // Count occurrences — should be at least 3 (KV JSON, KV plain, enrichNews)
-  const deleteCount = (WORKER_SRC.match(/APP_CACHE\?\.delete\?\.\(aiKey\)/g) || []).length;
+  const deleteCount = (SUMMARY_SRC.match(/APP_CACHE\?\.delete\?\.\(aiKey\)/g) || []).length;
   assert.ok(deleteCount >= 3, `at least 3 KV delete calls on validation failure (got ${deleteCount})`);
 });
 

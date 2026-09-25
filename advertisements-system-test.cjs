@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, "src/news/telemetry.js"), "utf8");
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/assistant.js'), 'utf8');
@@ -1819,9 +1820,9 @@ test('OR-08: tryOpenRouter uses classifyHttpError', () => {
 // Updated for Groq Secondary failover chain spec:
 //   News Summary: groq → groq-secondary → gemini → openrouter → workers-ai → openai
 test('OR-09: OpenRouter fallback inserted BEFORE Workers AI, before OpenAI', () => {
-  const openRouterIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
-  const workersAiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_WORKERS_AI', true)");
-  const openaiIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENAI', false)");
+  const openRouterIdx = SUMMARY_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
+  const workersAiIdx = SUMMARY_SRC.indexOf("NEWS_PROVIDER_WORKERS_AI', true)");
+  const openaiIdx = SUMMARY_SRC.indexOf("NEWS_PROVIDER_OPENAI', false)");
   assert.ok(openRouterIdx > 0 && workersAiIdx > 0 && openaiIdx > 0,
     'all three providers must exist in fallback chain');
   assert.ok(openRouterIdx < workersAiIdx,
@@ -1832,15 +1833,15 @@ test('OR-09: OpenRouter fallback inserted BEFORE Workers AI, before OpenAI', () 
 
 // OR-10: !summary guard ensures OpenRouter NOT called when Groq succeeds
 test('OR-10: !summary guard prevents OpenRouter call when previous provider succeeded', () => {
-  const openRouterIdx = WORKER_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
-  const fnBlock = WORKER_SRC.slice(openRouterIdx - 200, openRouterIdx + 200);
+  const openRouterIdx = SUMMARY_SRC.indexOf("NEWS_PROVIDER_OPENROUTER', true)");
+  const fnBlock = SUMMARY_SRC.slice(openRouterIdx - 200, openRouterIdx + 200);
   assert.ok(fnBlock.includes('!summary'),
     'OpenRouter must be guarded by !summary (only called when all previous providers failed)');
 });
 
 // OR-11: attemptProvider wraps tryOpenRouter (circuit breaker integration)
 test('OR-11: OpenRouter uses attemptProvider wrapper for circuit breaker', () => {
-  const openRouterIdx = WORKER_SRC.indexOf("attemptProvider('openrouter'");
+  const openRouterIdx = SUMMARY_SRC.indexOf("attemptProvider('openrouter'");
   assert.ok(openRouterIdx > 0,
     'OpenRouter must use attemptProvider("openrouter", ...) for circuit breaker');
 });
@@ -1853,7 +1854,7 @@ test('OR-12: Provider stats include openrouter entry', () => {
 
 // OR-13: Provider arrays include openrouter
 test('OR-13: News AI provider arrays do NOT include Gemini', () => {
-  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  const active = SUMMARY_SRC.replace(/\/\/[^\n]*/g, '');
   assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have Gemini in provider arrays');
   assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI must have OpenRouter');
 });

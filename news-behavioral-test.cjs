@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, 'src/news/shared.js'), 'utf8');
 const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 
@@ -137,13 +138,13 @@ test('BEHAVIORAL-7: content:encoded without CDATA → regex extracts plain text'
 // ============================================================================
 test('BEHAVIORAL-8: content:encoded wired into pipeline (STEP 0 before article fetch)', () => {
   // The pipeline must check contentEncoded BEFORE doing article fetch
-  const step0Idx = WORKER_SRC.indexOf('STEP 0: Check content:encoded');
-  const step1Idx = WORKER_SRC.indexOf('STEP 1: Fetch article HTML');
+  const step0Idx = SUMMARY_SRC.indexOf('STEP 0: Check content:encoded');
+  const step1Idx = SUMMARY_SRC.indexOf('STEP 1: Fetch article HTML');
   assert.ok(step0Idx > -1, 'STEP 0 must exist');
   assert.ok(step1Idx > -1, 'STEP 1 must exist');
   assert.ok(step0Idx < step1Idx, 'STEP 0 must come before STEP 1');
   // Must check contentEncoded length >= 200
-  const step0Block = WORKER_SRC.slice(step0Idx, step1Idx);
+  const step0Block = SUMMARY_SRC.slice(step0Idx, step1Idx);
   assert.ok(step0Block.includes('contentEncoded'), 'STEP 0 must check contentEncoded');
   assert.ok(step0Block.includes('200'), 'STEP 0 must require >= 200 chars');
   assert.ok(step0Block.includes('content_encoded'), 'STEP 0 must set contentSource to content_encoded');
@@ -153,9 +154,9 @@ test('BEHAVIORAL-8: content:encoded wired into pipeline (STEP 0 before article f
 // Source-level: 403 fallback uses stripTags before length check
 // ============================================================================
 test('BEHAVIORAL-3: 403 fallback uses stripTags on RSS description', () => {
-  const fallbackSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf("articleRes.status === 403"),
-    WORKER_SRC.indexOf("articleRes.status === 403") + 800
+  const fallbackSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf("articleRes.status === 403"),
+    SUMMARY_SRC.indexOf("articleRes.status === 403") + 800
   );
   assert.ok(fallbackSection.includes('stripTags'), '403 fallback must use stripTags');
   assert.ok(fallbackSection.includes('rssDesc'), '403 fallback must read rssDesc');
@@ -168,16 +169,16 @@ test('BEHAVIORAL-3: 403 fallback uses stripTags on RSS description', () => {
 // Source-level: Retry-After parsing from 429
 // ============================================================================
 test('BEHAVIORAL-1: 429 Retry-After parsing exists and is passed to requeueWithRetry', () => {
-  const fetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf("if (articleRes.status === 429)"),
-    WORKER_SRC.indexOf("if (articleRes.status === 429)") + 500
+  const fetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf("if (articleRes.status === 429)"),
+    SUMMARY_SRC.indexOf("if (articleRes.status === 429)") + 500
   );
   assert.ok(fetchSection.includes('Retry-After') || fetchSection.includes('retry-after'));
   assert.ok(fetchSection.includes('retryAfterSeconds'));
   // requeueWithRetry must accept retryAfterSeconds — use generous slice (function is ~4472 chars)
-  const requeueSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function requeueWithRetry'),
-    WORKER_SRC.indexOf('async function requeueWithRetry') + 5000
+  const requeueSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('async function requeueWithRetry'),
+    SUMMARY_SRC.indexOf('async function requeueWithRetry') + 5000
   );
   assert.ok(requeueSection.includes('retryAfterSeconds'));
   assert.ok(requeueSection.includes('effectiveBackoffMin'));
@@ -219,7 +220,7 @@ test('BEHAVIORAL-7-CB: Gemini prolonged-open state machine correct', () => {
 // Source-level: Provider fallback chain (Groq → Gemini → Workers AI → OpenRouter → OpenAI)
 // ============================================================================
 test('BEHAVIORAL-8-CHAIN: News AI fallback chain has NO Gemini (Groq → OpenRouter → Workers AI)', () => {
-  const active = WORKER_SRC.replace(/\/\/[^\n]*/g, '');
+  const active = SUMMARY_SRC.replace(/\/\/[^\n]*/g, '');
   assert.ok(!active.includes("attemptProvider('gemini'"), 'News AI must NOT have Gemini in fallback chain');
   assert.ok(active.includes("attemptProvider('openrouter'"), 'News AI must have OpenRouter');
   assert.ok(active.includes("attemptProvider('workers-ai'"), 'News AI must have Workers AI');
@@ -245,12 +246,12 @@ test('BEHAVIORAL-9-GROQ: Groq uses dual-key routed fetch + correct params', () =
 // Source-level: All providers failure → clean final failure
 // ============================================================================
 test('BEHAVIORAL-10: All providers failure → requeueWithRetry (no infinite retry)', () => {
-  const allFailSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf("requeueWithRetry('all_providers_failed'"),
-    WORKER_SRC.indexOf("requeueWithRetry('all_providers_failed'") + 200
+  const allFailSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf("requeueWithRetry('all_providers_failed'"),
+    SUMMARY_SRC.indexOf("requeueWithRetry('all_providers_failed'") + 200
   );
   assert.ok(allFailSection.includes('all_providers_failed'));
-  // requeueWithRetry has NEWS_SUMMARY_MAX_RETRIES = 3 (bounded)
+  // requeueWithRetry has NEWS_SUMMARY_MAX_RETRIES = 3 (bounded) — declared in worker-proxy.js (Step 5 cycle-breaker)
   assert.ok(WORKER_SRC.includes('NEWS_SUMMARY_MAX_RETRIES = 3'));
 });
 
@@ -258,9 +259,9 @@ test('BEHAVIORAL-10: All providers failure → requeueWithRetry (no infinite ret
 // Source-level: redirect handling
 // ============================================================================
 test('BEHAVIORAL-REDIRECT: Article fetch uses redirect:follow', () => {
-  const articleFetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url'),
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url') + 200
+  const articleFetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url'),
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url') + 200
   );
   assert.ok(articleFetchSection.includes("redirect: 'follow'"), 'Article fetch must use redirect:follow');
 });
@@ -269,9 +270,9 @@ test('BEHAVIORAL-REDIRECT: Article fetch uses redirect:follow', () => {
 // Source-level: User-Agent updated
 // ============================================================================
 test('BEHAVIORAL-UA: Article fetch uses Chrome/131 (not Chrome/120)', () => {
-  const articleFetchSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url'),
-    WORKER_SRC.indexOf('const articleRes = await fetch(article.url') + 1500
+  const articleFetchSection = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url'),
+    SUMMARY_SRC.indexOf('const articleRes = await fetch(article.url') + 1500
   );
   assert.ok(articleFetchSection.includes('Chrome/131'), 'Article fetch must use Chrome/131');
   assert.ok(!articleFetchSection.includes('Chrome/120'), 'Article fetch must NOT use Chrome/120');
@@ -281,9 +282,9 @@ test('BEHAVIORAL-UA: Article fetch uses Chrome/131 (not Chrome/120)', () => {
 // Source-level: content:encoded quality threshold
 // ============================================================================
 test('BEHAVIORAL-THRESHOLD: content:encoded requires >= 200 chars', () => {
-  const step0Block = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('STEP 0: Check content:encoded'),
-    WORKER_SRC.indexOf('STEP 0: Check content:encoded') + 500
+  const step0Block = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('STEP 0: Check content:encoded'),
+    SUMMARY_SRC.indexOf('STEP 0: Check content:encoded') + 500
   );
   assert.ok(step0Block.includes('>= 200'), 'content:encoded must require >= 200 chars');
 });
