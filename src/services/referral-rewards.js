@@ -51,6 +51,22 @@ export function createReferralRewardsService({
   safeError,
   getMissionRewardAmount,
   economyService,
+  // P0 REPAIR: 3 bare refs previously threw ReferenceError at request time.
+  //   - membershipAuthority: used at L223, L225, L485, L487 for tier multiplier
+  //     check (Premium users get 6 AB vs Normal 3 AB for referrals).
+  //   - ENTITLEMENT: used at L223, L226 for getReferralRewardAmount().
+  //     Module-level const in worker-proxy.js (line 69) — available at
+  //     composition root time.
+  //   - userRepo: used at L651, L652 for checkReferralCooldown() in
+  //     processReferralOnBootstrap (anti-abuse 15-day cooldown for deleted
+  //     accounts re-registering with self-referral).
+  //     NOTE: userRepo is initialized at worker-proxy.js line 3912 — AFTER
+  //     createReferralRewardsService factory call at line 3679. So userRepo
+  //     CANNOT be passed as direct DI (would cause TDZ). Use lazy getter
+  //     pattern (same as getAdvertisementsRepo in channel-membership.js).
+  membershipAuthority,
+  ENTITLEMENT,
+  getUserRepo,
 }) {
 
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
@@ -648,6 +664,18 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   // cooldown during which they CANNOT generate a new referral reward.
   // They can still use the app — only the referral is blocked.
   // This prevents abuse: delete → re-register with self-referral → farm rewards.
+  //
+  // P0 REPAIR: previously `userRepo` was a bare unresolved reference (NOT in
+  // factory DI). The `typeof userRepo?.checkReferralCooldown` guard DOES NOT
+  // suppress ReferenceError for undeclared `userRepo` (typeof only suppresses
+  // for bare Identifier operands, not MemberExpressions). This branch would
+  // have thrown ReferenceError on every bootstrap call → silently swallowed
+  // by the catch in resolveChannelMembership (channel-membership.js). The
+  // cooldown check effectively NEVER ran. Now resolved via lazy getter DI:
+  //   const userRepo = getUserRepo ? getUserRepo() : undefined;
+  // This preserves the late-binding pattern (userRepo is initialized in
+  // worker-proxy.js AFTER the createReferralRewardsService factory call).
+  const userRepo = getUserRepo ? getUserRepo() : undefined;
   if (typeof userRepo?.checkReferralCooldown === 'function') {
     const cooldown = await userRepo.checkReferralCooldown(env, inviteeId);
     if (cooldown.inCooldown) {

@@ -43,6 +43,12 @@ export function createMarketDataService({
   jsonResponse,
   EXTERNAL_FETCH_TIMEOUT_MS,
   fetchFearGreed,
+  // P0 REPAIR: marketOverviewSvc previously bare-ref'd at L280 inside
+  // handleMarketData's getGlobalData closure (CoinMarketCap cache fast-path).
+  // Was NOT in DI signature → threw ReferenceError at request time →
+  // caught by try/catch → silently fell back to fetchGlobalStats (slow path).
+  // Now explicit DI to restore the cache-hit fast path.
+  marketOverviewSvc,
 }) {
 
 const MARKET_CACHE_TTL = 120; // 2 minutes — H6 FIX: was 300s (5 min), caused user-visible price staleness. 120s balances freshness with KV write budget (~720 writes/day, well under the 1,000/day Free limit after telemetry migration).

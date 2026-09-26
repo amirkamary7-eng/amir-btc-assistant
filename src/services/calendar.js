@@ -26,7 +26,65 @@ export function createCalendarService({
   getCalendarIsolateCache,
   getCalendarIsolateCacheAt,
   setCalendarIsolateCache,
+  // P0 REPAIR: 3 shared infrastructure helpers previously bare-ref'd inside
+  // the factory body. Now passed as explicit DI to avoid ReferenceError at
+  // request time. singleFlight + fetchJsonWithTimeout are used by multiple
+  // sections in worker-proxy.js (market route, price fetchers, etc.); they
+  // MUST stay as DI, not move into calendar.js. CHART_CHECKERS is shared with
+  // fetchSpotTickerPrice in worker-proxy.js — also DI.
+  singleFlight,
+  fetchJsonWithTimeout,
+  CHART_CHECKERS,
 }) {
+
+// P0 REPAIR: 3 calendar-only consts MOVED from worker-proxy.js as module-local
+// to the factory body. Verified calendar-only usage:
+//   - COUNTRY_FLAGS: only resolveCountryFlag uses it
+//   - IMPACT_MAP: only mapCalendarEvent uses it
+//   - EXCHANGE_ORDER: only resolveChartExchange uses it
+// No other consumer in worker-proxy.js or src/. Moving into the factory body
+// makes them accessible to nested functions via closure — no DI needed.
+const COUNTRY_FLAGS = {
+  USD: '🇺🇸',
+  US: '🇺🇸',
+  EUR: '🇪🇺',
+  EU: '🇪🇺',
+  GBP: '🇬🇧',
+  GB: '🇬🇧',
+  JPY: '🇯🇵',
+  JP: '🇯🇵',
+  AUD: '🇦🇺',
+  AU: '🇦🇺',
+  CAD: '🇨🇦',
+  CA: '🇨🇦',
+  CHF: '🇨🇭',
+  CH: '🇨🇭',
+  CNY: '🇨🇳',
+  CN: '🇨🇳',
+  NZD: '🇳🇿',
+  NZ: '🇳🇿',
+  All: '🌍',
+};
+
+const IMPACT_MAP = {
+  High: 'high',
+  Medium: 'medium',
+  Low: 'low',
+  Holiday: 'low',
+};
+
+const EXCHANGE_ORDER = [
+  ['BINANCE',  'binance',  'USDT'],
+  ['BYBIT',    'bybit',    'USDT'],
+  ['OKX',      'okx',      'USDT'],
+  ['BITGET',   'bitget',   'USDT'],
+  ['KUCOIN',   'kucoin',   'USDT'],
+  ['MEXC',     'mexc',     'USDT'],
+  ['GATE',     'gateio',   'USDT'],   // FIXED: was GATEIO (invalid on TradingView)
+  ['HTX',      'htx',      'USDT'],
+  ['COINBASE', 'coinbase', 'USD'],    // NEW — USD pair
+  ['KRAKEN',   'kraken',   'USD'],    // NEW — USD pair
+];
 
 const CALENDAR_CACHE_KEY = 'calendar:events';
 
