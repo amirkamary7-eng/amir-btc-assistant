@@ -23,6 +23,7 @@ const REWARD_PURCHASES_SRC = fs.readFileSync(path.join(__dirname, 'src/controlle
 const REWARD_PURCHASES_REPO_SRC = fs.readFileSync(path.join(__dirname, 'src/repositories/reward_purchases.js'), 'utf8');
 const WALLET_FRONTEND_SRC = fs.readFileSync(path.join(__dirname, 'wallet.js'), 'utf8');
 const WORKER_PROXY_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const RR_SRC = fs.readFileSync(path.join(__dirname, 'src/services/referral-rewards.js'), 'utf8');
 const MISSION_TOKENS_SRC = fs.readFileSync(path.join(__dirname, 'src/auth/mission-tokens.js'), 'utf8');
 
 // Helper: strip comments to avoid false-positive matches on comment text
@@ -1571,14 +1572,13 @@ test('T4: Event token one-time use — consumedMarkerKey prevents double-consume
 );
 
 test('T5: Failed grantReward recovery — retryFailedMissionRewards cron exists', () => {
-  const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
-  // The cron that re-grants if markMissionRewarded succeeded but grantReward failed
-  assert.ok(WORKER_SRC.includes('async function retryFailedMissionRewards'),
-    'retryFailedMissionRewards cron exists (handles failed grantReward)');
+  // retryFailedMissionRewards moved to src/services/referral-rewards.js
+  assert.ok(RR_SRC.includes('async function retryFailedMissionRewards'),
+    'retryFailedMissionRewards cron exists (handles failed grantReward) — now in src/services/referral-rewards.js');
   // Finds rows where completed=true, rewarded=true, but NO matching token_transactions
-  assert.ok(WORKER_SRC.includes('completed = TRUE') && WORKER_SRC.includes('rewarded = TRUE'),
+  assert.ok(RR_SRC.includes('completed = TRUE') && RR_SRC.includes('rewarded = TRUE'),
     'cron queries mission_progress where completed=true AND rewarded=true');
-  assert.ok(WORKER_SRC.includes('NOT EXISTS') || WORKER_SRC.includes('IS NULL'),
+  assert.ok(RR_SRC.includes('NOT EXISTS') || RR_SRC.includes('IS NULL'),
     'cron filters where no matching token_transactions row exists (NOT EXISTS / LEFT JOIN IS NULL)');
 });
 

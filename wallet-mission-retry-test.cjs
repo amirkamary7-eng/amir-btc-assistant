@@ -52,13 +52,14 @@ const {
 } = require('./wallet-test-harness.cjs');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const RR_SRC = fs.readFileSync(path.join(__dirname, 'src/services/referral-rewards.js'), 'utf8');
 
-// ── Extract the REAL retryFailedMissionRewards from worker-proxy.js ────────
-const startIdx = WORKER_SRC.indexOf('async function retryFailedMissionRewards');
-if (startIdx < 0) throw new Error('retryFailedMissionRewards not found in worker-proxy.js');
-const endIdx = WORKER_SRC.indexOf('async function processReferralOnBootstrap', startIdx);
+// ── Extract the REAL retryFailedMissionRewards from src/services/referral-rewards.js ────────
+const startIdx = RR_SRC.indexOf('async function retryFailedMissionRewards');
+if (startIdx < 0) throw new Error('retryFailedMissionRewards not found in src/services/referral-rewards.js');
+const endIdx = RR_SRC.indexOf('async function processReferralOnBootstrap', startIdx);
 if (endIdx < 0) throw new Error('end marker (processReferralOnBootstrap) not found');
-const RETRY_FN_SRC = WORKER_SRC.slice(startIdx, endIdx);
+const RETRY_FN_SRC = RR_SRC.slice(startIdx, endIdx);
 
 // The REAL premium-multiplier helper — the same named export the fixed retry
 // imports (NOT a copy). Normal = floor(base), Premium = ceil(base × 1.5).
