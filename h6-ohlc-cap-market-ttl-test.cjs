@@ -22,6 +22,7 @@ const path = require('node:path');
 
 const SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+const MARKET_DATA_SRC = fs.readFileSync(path.join(__dirname, 'src/services/market-data.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — uniqueSymbols cap (H6)
@@ -40,10 +41,13 @@ test('H6-02: cap is applied AFTER the Set construction (order preserved)', () =>
 });
 
 test('H6-03: H6 FIX comments exist (2 occurrences: uniqueSymbols cap + market TTL)', () => {
-  assert.ok(SRC.includes('H6 FIX'),
-    'H6 FIX comment must exist');
-  const count = (SRC.match(/H6 FIX/g) || []).length;
-  assert.equal(count, 2, 'exactly 2 H6 FIX occurrences (uniqueSymbols cap + MARKET_CACHE_TTL)');
+  // One H6 FIX is in worker-proxy.js (uniqueSymbols cap in runScheduledAlertsBaseline)
+  // The other is in src/services/market-data.js (MARKET_CACHE_TTL comment)
+  const srcCount = (SRC.match(/H6 FIX/g) || []).length;
+  const marketCount = (MARKET_DATA_SRC.match(/H6 FIX/g) || []).length;
+  const total = srcCount + marketCount;
+  assert.ok(total >= 2,
+    'at least 2 H6 FIX occurrences (uniqueSymbols cap + MARKET_CACHE_TTL). worker-proxy.js: ' + srcCount + ', market-data.js: ' + marketCount);
 });
 
 test('H6-04: FETCH_BATCH = 15 unchanged', () => {
@@ -74,12 +78,12 @@ test('H6-07: alert evaluation logic unchanged (bulk UPDATE + triggered + dispatc
 
 test('H6-08: no other cron functions modified', () => {
   // The H6 FIX for uniqueSymbols should be in the runScheduledAlertsBaseline context
-  // Find the SECOND H6 FIX occurrence (the first is MARKET_CACHE_TTL)
+  // MARKET_CACHE_TTL H6 FIX moved to src/services/market-data.js
+  // The uniqueSymbols H6 FIX is in worker-proxy.js (runScheduledAlertsBaseline)
   const firstH6 = SRC.indexOf('H6 FIX');
-  const secondH6 = SRC.indexOf('H6 FIX', firstH6 + 1);
-  assert.ok(secondH6 > -1, 'second H6 FIX (uniqueSymbols) must exist');
+  assert.ok(firstH6 > -1, 'H6 FIX (uniqueSymbols) must exist in worker-proxy.js');
   // Use a larger window — the comment is long, uniqueSymbols is ~900 chars down
-  const block = SRC.slice(secondH6, secondH6 + 1000);
+  const block = SRC.slice(firstH6, firstH6 + 1000);
   assert.ok(block.includes('uniqueSymbols'),
     'H6 FIX is in the uniqueSymbols context');
   assert.ok(!block.includes('processNewsAIBatch'),
@@ -95,13 +99,13 @@ test('H6-08: no other cron functions modified', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('TTL-01: MARKET_CACHE_TTL = 120', () => {
-  assert.ok(SRC.includes('const MARKET_CACHE_TTL = 120;'),
-    'MARKET_CACHE_TTL must be 120 (was 300)');
+  assert.ok(MARKET_DATA_SRC.includes('const MARKET_CACHE_TTL = 120;'),
+    'MARKET_CACHE_TTL must be 120 (was 300) — now in src/services/market-data.js');
 });
 
 test('TTL-02: MARKET_GLOBAL_CACHE_TTL unchanged (900)', () => {
-  assert.ok(SRC.includes('const MARKET_GLOBAL_CACHE_TTL = 900;'),
-    'MARKET_GLOBAL_CACHE_TTL must still be 900 (15 min)');
+  assert.ok(MARKET_DATA_SRC.includes('const MARKET_GLOBAL_CACHE_TTL = 900;'),
+    'MARKET_GLOBAL_CACHE_TTL must still be 900 (15 min) — now in src/services/market-data.js');
 });
 
 test('TTL-03: CHART_EXCHANGE_CACHE_TTL unchanged (3600 in wrangler.jsonc)', () => {
@@ -112,14 +116,14 @@ test('TTL-03: CHART_EXCHANGE_CACHE_TTL unchanged (3600 in wrangler.jsonc)', () =
 
 test('TTL-04: no other TTL constants changed', () => {
   // Verify the old value (300) is NOT still used for MARKET_CACHE_TTL
-  assert.ok(!SRC.includes('const MARKET_CACHE_TTL = 300;'),
+  assert.ok(!MARKET_DATA_SRC.includes('const MARKET_CACHE_TTL = 300;'),
     'old MARKET_CACHE_TTL=300 must be gone');
-  // Verify we didn't accidentally change other constants
-  assert.ok(SRC.includes('const MARKET_GLOBAL_CACHE_TTL = 900;'),
+  // Verify we didn't accidentally change other constants (now in market-data.js)
+  assert.ok(MARKET_DATA_SRC.includes('const MARKET_GLOBAL_CACHE_TTL = 900;'),
     'MARKET_GLOBAL_CACHE_TTL unchanged');
-  assert.ok(SRC.includes('const MARKET_FETCH_LIMIT = 200;'),
+  assert.ok(MARKET_DATA_SRC.includes('const MARKET_FETCH_LIMIT = 200;'),
     'MARKET_FETCH_LIMIT unchanged');
-  assert.ok(SRC.includes('const SEARCH_FETCH_LIMIT = 1500;'),
+  assert.ok(MARKET_DATA_SRC.includes('const SEARCH_FETCH_LIMIT = 1500;'),
     'SEARCH_FETCH_LIMIT unchanged');
 });
 
