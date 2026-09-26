@@ -58,6 +58,17 @@ export function createNewsFeed({
   safeReadText,
   canonicalizeUrl,
   enrichNewsWithAISummaries,
+
+  // P0 REPAIR: 2 bare refs previously bare-ref'd in factory body.
+  //   - parseRssItems: used at L64 in buildFarsiNewsArticles (RSS parsing).
+  //     Imported from src/news/shared.js by worker-proxy.js (top-level ESM
+  //     import at line 87) — TDZ-safe to pass directly.
+  //   - newsArticleRepo: used at L210/L212 in fetchFarsiNews cache-miss branch
+  //     (DB fallback for article list when KV cache is cold). Initialized at
+  //     worker-proxy.js line ~4155 (BEFORE this factory call at line ~4258) —
+  //     TDZ-safe to pass directly.
+  parseRssItems,
+  newsArticleRepo,
 }) {
 
 async function buildFarsiNewsArticles(rssText, sourceName, category, env, skipTranslate = false) {

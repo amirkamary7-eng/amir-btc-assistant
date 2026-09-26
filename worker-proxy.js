@@ -2894,18 +2894,11 @@ async function ensureUserRow(env, userId) {
 //   1. Gate.io TradingView prefix is `GATE` — NOT `GATEIO` (was wrong, caused "Symbol not found")
 //   2. Added Coinbase + Kraken with USD pairs (user requested; many coins only chart here)
 //   3. tv_symbol format is `${tvName}:${symbol}${suffix}` — all uppercase, no dash/underscore
-const EXCHANGE_ORDER = [
-  ['BINANCE',  'binance',  'USDT'],
-  ['BYBIT',    'bybit',    'USDT'],
-  ['OKX',      'okx',      'USDT'],
-  ['BITGET',   'bitget',   'USDT'],
-  ['KUCOIN',   'kucoin',   'USDT'],
-  ['MEXC',     'mexc',     'USDT'],
-  ['GATE',     'gateio',   'USDT'],   // FIXED: was GATEIO (invalid on TradingView)
-  ['HTX',      'htx',      'USDT'],
-  ['COINBASE', 'coinbase', 'USD'],    // NEW — USD pair
-  ['KRAKEN',   'kraken',   'USD'],    // NEW — USD pair
-];
+//
+// P0 REPAIR: EXCHANGE_ORDER MOVED to src/services/calendar.js as module-local
+// const inside the factory body. Verified calendar-only usage — only
+// resolveChartExchange (in calendar.js) referenced it. No other consumer in
+// worker-proxy.js or src/.
 
 const CHART_CHECKERS = {
   binance: {
@@ -3354,34 +3347,11 @@ const NEWS_RSS_SOURCES = [
   { url: 'https://www.irna.ir/rss', name: 'خبرگزاری ایرنا', category: 'economy', skipTranslate: true },
 ];
 
-const COUNTRY_FLAGS = {
-  USD: '🇺🇸',
-  US: '🇺🇸',
-  EUR: '🇪🇺',
-  EU: '🇪🇺',
-  GBP: '🇬🇧',
-  GB: '🇬🇧',
-  JPY: '🇯🇵',
-  JP: '🇯🇵',
-  AUD: '🇦🇺',
-  AU: '🇦🇺',
-  CAD: '🇨🇦',
-  CA: '🇨🇦',
-  CHF: '🇨🇭',
-  CH: '🇨🇭',
-  CNY: '🇨🇳',
-  CN: '🇨🇳',
-  NZD: '🇳🇿',
-  NZ: '🇳🇿',
-  All: '🌍',
-};
-
-const IMPACT_MAP = {
-  High: 'high',
-  Medium: 'medium',
-  Low: 'low',
-  Holiday: 'low',
-};
+// P0 REPAIR: COUNTRY_FLAGS + IMPACT_MAP MOVED to src/services/calendar.js as
+// module-local consts inside the factory body. Verified calendar-only usage:
+//   - COUNTRY_FLAGS: only resolveCountryFlag (in calendar.js) used it
+//   - IMPACT_MAP: only mapCalendarEvent (in calendar.js) used it
+// No other consumer in worker-proxy.js or src/.
 
 const EXTERNAL_FETCH_TIMEOUT_MS = 8000;
 
@@ -3688,6 +3658,17 @@ const {
   safeError,
   getMissionRewardAmount,
   economyService,
+  // P0 REPAIR: 3 bare refs previously bare-ref'd in factory body.
+  //   - membershipAuthority: initialized at line ~3582 (BEFORE this factory
+  //     call at line 3649) — TDZ-safe to pass directly.
+  //   - ENTITLEMENT: module-level const declared at line 69 (top of file) —
+  //     TDZ-safe.
+  //   - userRepo: initialized at line ~3912 (AFTER this factory call) — MUST
+  //     use lazy getter to avoid TDZ (same pattern as
+  //     getAdvertisementsRepo in channel-membership.js).
+  membershipAuthority,
+  ENTITLEMENT,
+  getUserRepo: () => (typeof userRepo !== 'undefined' ? userRepo : undefined),
 });
 
 // CHANNEL MEMBERSHIP SERVICE: extract from src/services/channel-membership.js (behavior-preserving)
@@ -4293,6 +4274,13 @@ const {
   safeReadText,
   canonicalizeUrl,
   enrichNewsWithAISummaries,
+  // P0 REPAIR: 2 previously-bare-ref'd identifiers now explicit DI.
+  //   - parseRssItems: top-level ESM import from src/news/shared.js (line
+  //     87) — hoisted at module load, always available.
+  //   - newsArticleRepo: const initialized at line ~4155 (BEFORE this
+  //     factory call at line 4258) — TDZ-safe.
+  parseRssItems,
+  newsArticleRepo,
 });
 
 // CALENDAR SERVICE: extract from src/services/calendar.js (behavior-preserving)
@@ -4311,6 +4299,14 @@ const {
   getCalendarIsolateCache,
   getCalendarIsolateCacheAt,
   setCalendarIsolateCache,
+  // P0 REPAIR: 3 shared infrastructure helpers previously bare-ref'd inside
+  // the factory body. All 3 are in scope at this composition root site.
+  // singleFlight (line 4466), fetchJsonWithTimeout (line 3340), CHART_CHECKERS
+  // (line 2903) — all module-scope consts/functions declared earlier in file
+  // (hoisted function declarations + const). TDZ-safe.
+  singleFlight,
+  fetchJsonWithTimeout,
+  CHART_CHECKERS,
 });
 
 // MARKET DATA SERVICE: extract from src/services/market-data.js (behavior-preserving)
@@ -4331,6 +4327,10 @@ const {
   jsonResponse,
   EXTERNAL_FETCH_TIMEOUT_MS,
   fetchFearGreed,
+  // P0 REPAIR: marketOverviewSvc previously bare-ref'd inside factory body
+  // (getGlobalData closure at L280 in market-data.js). Initialized at line
+  // 4139 (164 lines BEFORE this factory call) — TDZ-safe to pass directly.
+  marketOverviewSvc,
 });
 
 // appContentRepo moved before assistantHandlers (line ~10593) for TDZ-safe injection.
