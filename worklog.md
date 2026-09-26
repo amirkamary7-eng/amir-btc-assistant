@@ -9192,3 +9192,72 @@ Stage Summary:
 - All tests green (269/269 ad, 1730/1728/0/2 full, dry-run clean).
 - Scope: 5 files only, no backend change, no delivery-path change, no visual style change (layout-only).
 - Ready for commit/push/deploy.
+
+---
+Task ID: CHANNEL-MEMBERSHIP-EXTRACTION
+Agent: Z.ai Code (Orchestrator)
+Task: Extract Channel Membership functions from worker-proxy.js (lines 2860-3250, 7 functions) into src/services/channel-membership.js. Strict scope: only channel-membership concerns; preserve runtime behavior, cache, TTL, DB queries, Telegram API calls, error handling. No new I/O. Explicit DI, no bare references. Preserve composition root order (referral-rewards → channel-membership → membershipGateway/userHandlers). Do NOT touch Price Alert, runScheduledAlertsBaseline, runCalendarAlertsCheck, fetchOhlc1m, fetchSpotPriceUsd, alert billing/timing/ordering, alert cron flow. Repoint test source-path assertions only — no assertion weakening/removal/bypass.
+
+Work Log:
+- Read /home/z/my-project/scheduler-extraction/worklog.md and recent extraction history (referral-rewards commit 940635f pattern).
+- Confirmed clean HEAD = 940635f; created branch `feature/channel-membership-extraction` from origin/main.
+- Identified 7 functions to extract (worker-proxy.js lines 2860-3250):
+  1. getChatMemberDebugPayload
+  2. checkChannelMembership
+  3. _getActiveAdChannels (uses advertisementsRepo via late-binding `typeof` check)
+  4. _hashChannelSet
+  5. _checkSingleTelegramChannel
+  6. checkAdditionalRequiredChannels
+  7. resolveChannelMembership
+- Identified 13 user-identified DIs + 1 discovered DI:
+  * 13 user-identified: setCachedJoinStatus, getCachedJoinStatus, isDatabaseConfigured, isBotConfigured, persistDbUserJoinState, getDbUserJoinState, isAdminTelegramId, _kvWriteDedup, resolveRequiredChannel, getTelegramChatId, isJoinedMember, safeError, processPendingReferralReward.
+  * 1 discovered (getAdvertisementsRepo lazy getter): advertisementsRepo is a `const` initialized at line ~4456 (AFTER createChannelMembershipService factory call at ~3691). To preserve the original late-binding pattern (`typeof advertisementsRepo === 'undefined'`) without creating a bare reference in the extracted module, we pass a getter closure `() => (typeof advertisementsRepo !== 'undefined' ? advertisementsRepo : undefined)` as DI #14. Always-defined at runtime (any request handler runs after module-init).
+- Created src/services/channel-membership.js (476 lines, factory pattern). All 7 functions returned from the factory (none internal-only). Function bodies copied verbatim (no refactor, no logic changes, no I/O changes).
+- Updated worker-proxy.js:
+  * Added import: `import { createChannelMembershipService } from './src/services/channel-membership.js';` (after referral-rewards import, line 96).
+  * Replaced 7 function definitions (lines 2860-3250, 391 lines) with comment placeholder documenting what was extracted + what cycle-breakers stay (19 lines).
+  * Added factory call after createReferralRewardsService (line 3691): destructures 7 outputs, passes 14 DIs. Placement verified TDZ-safe:
+    - AFTER createReferralRewardsService (processPendingReferralReward in scope)
+    - BEFORE createMembershipGateway (checkChannelMembership, checkAdditionalRequiredChannels in scope for gateway DI)
+    - BEFORE createUserHandlers (resolveChannelMembership in scope for userHandlers DI)
+- Repointed 6 affected test files (source-path assertions only, no assertion weakening):
+  1. advertisements-system-test.cjs: added CM_SRC constant, repointed ADS-CH-02, ADS-CH-03, ADS-CH-06, ADS-SEP-01, ADS-PERF-06, ADS-FIX-H3 (6 assertions) to use CM_SRC instead of WORKER_SRC for channel-membership function extraction.
+  2. kv-write-optimization-test.cjs: added CM_SRC, repointed KVO-6c block slice to CM_SRC.
+  3. miniapp-joincheck-regression-test.cjs: added CM_SRC. Added extractFnSimple helper (slice-based, same pattern as advertisements-system-test.cjs line 121-122) because the original extractFn's brace-counting doesn't track comments and would misparse apostrophes inside comments (e.g., "Telegram's 30 req/sec"). buildSandboxSrc now extracts channel-membership functions from CM_SRC via extractFnSimple, core helpers from WORKER_SRC via extractFn (unchanged). Repointed BUG2-001/002/003 (via SANDBOX_SRC built from CM_SRC), BUG2-004 (CM_SRC.includes forceRefresh call site), NOREGRESS-003 (isJoinedMember count across both files since 3 call sites moved to CM_SRC + 1 def stays in WORKER_SRC), BUG4-001 (Promise.all slice from CM_SRC), BUG7-001 (api_error slice from CM_SRC, 7000-char fallback since resolveChannelMembership is now the LAST function in CM_SRC with no next async function marker), NOREGRESS-005 (same slice pattern).
+  4. bootstrap-hang-regression-test.cjs: added CM_SRC. Repointed HANG-012 (tgController.abort 5000 timeout) and HANG-013 (controller.abort 5000 timeout) to CM_SRC since both strings are now in the extracted module (the original test had been passing HANG-012 accidentally because the same string exists at line 6752 in getWebhookInfo debug endpoint — repointing makes the test actually verify the intended function).
+  5. news-hotfix-telegram-failedurl-test.cjs: added CM_SRC. Repointed HOTFIX24-A1, A2, A3 (getChatMemberDebugPayload extraction) to CM_SRC. (HOTFIX24-B1 through B6 are about news functions requeueWithRetry/enqueueForSummary/publishArticleToFarsiNews that were extracted in PREVIOUS commits — out of scope for this task.)
+  6. start-join-check-regression-test.cjs: added CM_SRC. Added extractFnSimple helper (same pattern as miniapp-joincheck). buildSandboxSrc now extracts channel-membership functions from CM_SRC via extractFnSimple, core helpers from WORKER_SRC via extractFn (unchanged).
+- Verified all integrity checks:
+  * All 7 functions in new service (count = 7) ✓
+  * All 7 functions REMOVED from worker-proxy.js (count = 0) ✓
+  * No duplicate implementations ✓
+  * All 13 user-identified DIs + 1 discovered (getAdvertisementsRepo) in factory signature ✓
+  * All 14 DIs passed from composition root ✓
+  * No unresolved bare references (file parses cleanly, wrangler dry-run OK) ✓
+  * TDZ-safe ordering: createReferralRewardsService → createChannelMembershipService → createMembershipGateway/createUserHandlers ✓
+  * Price Alert section: no new channel-membership references (runScheduledAlertsBaseline, runCalendarAlertsCheck, fetchOhlc1m, fetchSpotPriceUsd all preserved) ✓
+  * All protected modules untouched (referral-rewards.js, calendar.js, market-data.js, membershipGateway.js, etc.) ✓
+- Test results:
+  * npm test: 1836 tests, 1834 pass, 0 fail, 2 skipped (pre-existing # TODO in worker-proxy.test.cjs) — matches baseline ✓
+  * advertisements-system-test.cjs: 269/269 pass ✓
+  * kv-write-optimization-test.cjs: 16/16 pass ✓
+  * miniapp-joincheck-regression-test.cjs: 16/16 pass ✓
+  * bootstrap-hang-regression-test.cjs: 15/15 pass ✓
+  * start-join-check-regression-test.cjs: 46/46 pass ✓
+  * news-hotfix-telegram-failedurl-test.cjs: 3/3 pass for HOTFIX24-A1/A2/A3 (Channel-Membership group). HOTFIX24-B1 through B6 still fail — these are about news functions extracted in PREVIOUS commits (out of scope for this task; pre-existing failures).
+- git diff --check: 0 whitespace errors ✓
+- wrangler deploy --dry-run --env production: SUCCESS, Total Upload 1759.62 KiB / gzip 353.76 KiB, 0 errors, 0 warnings ✓
+
+Stage Summary:
+- src/services/channel-membership.js = 476 lines (new file, factory pattern)
+- worker-proxy.js: 8755 → 8427 (net -328 lines; expected ~356, slightly less due to verbose comment placeholder + factory call wiring)
+- 7 functions extracted, all 7 returned from factory (none internal-only)
+- 13 user-identified DIs + 1 discovered DI (getAdvertisementsRepo lazy getter for TDZ-safe late binding)
+- All DI cycle-breakers preserved (processPendingReferralReward from createReferralRewardsService)
+- advertisementsRepo accessed via getter (not bare reference) — preserves original late-binding semantics
+- 6 test files repointed to read from src/services/channel-membership.js (no assertion weakening, no test logic changes — only source-path repointing + added extractFnSimple helper to handle comments containing apostrophes that broke the original extractFn's brace-counting)
+- All 1834 npm tests pass (same as baseline); 0 regressions
+- All protected modules untouched (referral-rewards.js, calendar.js, market-data.js, membershipGateway.js, etc.)
+- Price Alert baseline fully preserved (runScheduledAlertsBaseline, runCalendarAlertsCheck, fetchOhlc1m, fetchSpotPriceUsd, alert billing/timing/ordering, alert cron flow)
+- wrangler dry-run clean (1759.62 KiB / gzip 353.76 KiB, 0 errors)
+- Ready for PR (NO merge, NO deploy — awaiting user review)

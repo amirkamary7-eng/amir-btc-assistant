@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const CM_SRC = fs.readFileSync(path.join(__dirname, 'src/services/channel-membership.js'), 'utf8');
 const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, 'src/news/summary.js'), 'utf8');
 const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, 'src/news/providers.js'), 'utf8');
 const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, "src/news/telemetry.js"), "utf8");
@@ -101,7 +102,8 @@ test('ADS-CH-01: advertisementsRepo is imported in worker-proxy.js', () => {
 });
 
 test('ADS-CH-02: checkAdditionalRequiredChannels function exists in worker-proxy.js', () => {
-  assert.ok(/async\s+function\s+checkAdditionalRequiredChannels\s*\(/.test(WORKER_SRC),
+  // checkAdditionalRequiredChannels extracted to src/services/channel-membership.js
+  assert.ok(/async\s+function\s+checkAdditionalRequiredChannels\s*\(/.test(CM_SRC),
     'checkAdditionalRequiredChannels must be defined');
 });
 
@@ -114,12 +116,12 @@ test('ADS-CH-03: resolveChannelMembership calls checkAdditionalRequiredChannels 
   //   3. Fresh check joined:true → enforce DB channels
   // The api_error path now returns joined:false immediately (fail-closed),
   // so it no longer needs to call checkAdditionalRequiredChannels.
-  const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
+  const fnStart = CM_SRC.indexOf('async function resolveChannelMembership');
   assert.ok(fnStart >= 0, 'resolveChannelMembership must exist');
   // Use the full function body (not a fixed-size slice) — the function grew
   // after the AUDIT-P1 fix comments were added.
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 5000);
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 5000);
   const calls = fnBlock.match(/checkAdditionalRequiredChannels\s*\(/g) || [];
   assert.ok(calls.length >= 3,
     `resolveChannelMembership must call checkAdditionalRequiredChannels >=3 times (got ${calls.length}). ` +
@@ -142,8 +144,8 @@ test('ADS-CH-05: /start handler calls buildStartReplyPayloadAsync (not sync vari
 });
 
 test('ADS-CH-06: Per-user KV cache key for ad-channel check uses adch:${userId}:${hash} pattern', () => {
-  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const fnBlock = WORKER_SRC.slice(fnStart, fnStart + 2000);
+  const fnStart = CM_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const fnBlock = CM_SRC.slice(fnStart, fnStart + 2000);
   assert.ok(/adch:\$\{uid\}:\$\{hash\}/.test(fnBlock) || /adch:\$\{String\([^)]+\)\}:\$\{/.test(fnBlock),
     'checkAdditionalRequiredChannels must use adch:${userId}:${hash} KV cache key');
   assert.ok(fnBlock.includes('_hashChannelSet'),
@@ -489,12 +491,12 @@ test('ADS-NS-05: Message campaigns use category=promotions which maps to ch_prom
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('ADS-SEP-01: Channel Join (ad_channels) does NOT go through ch_promotions (uses checkAdditionalRequiredChannels + Telegram getChatMember)', () => {
-  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const fnStart = CM_SRC.indexOf('async function checkAdditionalRequiredChannels');
   // Use the full function body (not a fixed-size slice) — the function grew
   // after the AUDIT-P1 forceRefresh-propagation fix, so a 2000-char window
   // no longer captures the whole function. Extract until the next `async function`.
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 3500);
   // Must use Telegram getChatMember (via _checkSingleTelegramChannel)
   assert.ok(fnBlock.includes('_checkSingleTelegramChannel'),
     'checkAdditionalRequiredChannels must use Telegram getChatMember via _checkSingleTelegramChannel');
@@ -735,11 +737,11 @@ test('ADS-PERF-05: getUserChannelPreference (notification_platform) has per-user
 });
 
 test('ADS-PERF-06: checkAdditionalRequiredChannels uses per-user KV cache (jittered TTL 55-95s, audit H3 fix) to avoid repeated Telegram calls', () => {
-  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const fnStart = CM_SRC.indexOf('async function checkAdditionalRequiredChannels');
   // Use the full function body (not a fixed-size slice) — the function grew
   // after the AUDIT-P1 Promise.all fix comments were added.
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 3500);
   // KV cache read
   assert.ok(fnBlock.includes('env.RATE_LIMITS.get(cacheKey)'),
     'checkAdditionalRequiredChannels must read per-user KV cache');
@@ -927,12 +929,12 @@ test('ADS-FIX-H2: Queue-based delivery (no per-request CPU cap needed)', () => {
 
 // FIX H3: Jittered TTL for cache stampede prevention
 test('ADS-FIX-H3: checkAdditionalRequiredChannels uses jittered TTL (55-95s)', () => {
-  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const fnStart = CM_SRC.indexOf('async function checkAdditionalRequiredChannels');
   // Use the full function body (not a fixed-size slice) — the function grew
   // after the AUDIT-P1 forceRefresh-propagation fix, so a 2500-char window
   // no longer captures the jitter logic. Extract until the next `async function`.
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 3500);
   assert.ok(fnBlock.includes('_jitterSeed'),
     'must use a jitter seed (per-user + hash) for consistent TTL');
   assert.ok(fnBlock.includes('_ttlJitter'),

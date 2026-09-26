@@ -22,6 +22,8 @@ const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
+// Channel-membership functions extracted to src/services/channel-membership.js
+const CM_SRC = fs.readFileSync(path.join(__dirname, 'src/services/channel-membership.js'), 'utf8');
 
 // ============================================================================
 // Source extraction helpers
@@ -69,6 +71,35 @@ function extractFn(src, name) {
   throw new Error(`Could not find end of ${name}`);
 }
 
+// Slice-based extractor (used for src/services/channel-membership.js where
+// the function bodies contain comments with apostrophes — extractFn's
+// brace-counting doesn't track comments and would misparse them).
+// Same pattern used by advertisements-system-test.cjs (line 121-122).
+function extractFnSimple(src, name) {
+  const re = new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\(`);
+  const m = re.exec(src);
+  if (!m) throw new Error(`Function ${name} not found`);
+  const start = m.index;
+  // Find the body's opening brace
+  let i = start;
+  while (i < src.length && src[i] !== '{') i++;
+  // The body ends at the next top-level `async function` or `function` declaration
+  // (or end of file). For the channel-membership module, each function is followed
+  // by a blank line then the next `async function`/`function` at column 0.
+  const nextAsync = src.indexOf('async function', i + 50);
+  const nextFn = src.indexOf('function ', i + 50);
+  let end;
+  if (nextAsync > -1 && (nextFn === -1 || nextAsync < nextFn)) {
+    end = nextAsync;
+  } else if (nextFn > -1) {
+    end = nextFn;
+  } else {
+    end = src.length;
+  }
+  // Trim trailing whitespace/newlines so the slice is a valid JS function.
+  return src.slice(start, end).trimEnd();
+}
+
 /** Extract a `const X = new Set([...])` declaration. */
 function extractConstSet(src, name) {
   const re = new RegExp(`const\\s+${name}\\s*=\\s*new Set\\(\\[[^\\]]*\\]\\)`);
@@ -100,11 +131,13 @@ function buildSandboxSrc() {
   parts.push(extractFn(WORKER_SRC, 'extractStartParam'));
   parts.push(extractFn(WORKER_SRC, 'extractTelegramMessageContext'));
   parts.push(extractFn(WORKER_SRC, 'buildStartReplyPayload'));
-  // Join check helpers
-  parts.push(extractFn(WORKER_SRC, 'getChatMemberDebugPayload'));
-  parts.push(extractFn(WORKER_SRC, 'checkChannelMembership'));
-  parts.push(extractFn(WORKER_SRC, '_checkSingleTelegramChannel'));
-  parts.push(extractFn(WORKER_SRC, '_hashChannelSet'));
+  // Join check helpers (extracted to src/services/channel-membership.js)
+  // Use extractFnSimple because the function bodies contain comments with
+  // apostrophes (e.g., "Telegram's") that confuse extractFn's brace-counting.
+  parts.push(extractFnSimple(CM_SRC, 'getChatMemberDebugPayload'));
+  parts.push(extractFnSimple(CM_SRC, 'checkChannelMembership'));
+  parts.push(extractFnSimple(CM_SRC, '_checkSingleTelegramChannel'));
+  parts.push(extractFnSimple(CM_SRC, '_hashChannelSet'));
   // syncMenuButton (uses fetch + buildTelegramApiUrl + resolveWebAppUrl + safeError)
   parts.push(extractFn(WORKER_SRC, 'syncMenuButton'));
   // isJoinedMember (added by audit/start-join-check fix)

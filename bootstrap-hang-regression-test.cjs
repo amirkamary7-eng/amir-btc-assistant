@@ -36,6 +36,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const CM_SRC = fs.readFileSync(path.join(__dirname, 'src/services/channel-membership.js'), 'utf8');
 const USERS_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/users.js'), 'utf8');
 
 // ============================================================================
@@ -289,12 +290,14 @@ test('HANG-011: /start handler fires-and-forgets ALL logStartE2E calls', () => {
 test('HANG-012: getChatMemberDebugPayload has 5s AbortController timeout', () => {
   // Verify the Telegram call has a timeout — this prevents the Telegram API
   // from hanging the bootstrap indefinitely
-  assert.ok(WORKER_SRC.includes('setTimeout(() => tgController.abort(), 5000)'),
+  // getChatMemberDebugPayload extracted to src/services/channel-membership.js
+  assert.ok(CM_SRC.includes('setTimeout(() => tgController.abort(), 5000)'),
     'getChatMemberDebugPayload must have 5s AbortController timeout');
 });
 
 test('HANG-013: _checkSingleTelegramChannel has 5s AbortController timeout', () => {
-  assert.ok(WORKER_SRC.includes('setTimeout(() => controller.abort(), 5000)'),
+  // _checkSingleTelegramChannel extracted to src/services/channel-membership.js
+  assert.ok(CM_SRC.includes('setTimeout(() => controller.abort(), 5000)'),
     '_checkSingleTelegramChannel must have 5s AbortController timeout');
 });
 
