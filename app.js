@@ -6856,45 +6856,61 @@ window.iconFallback = function(imgEl) {
 };
 
 /**
- * Premium AMIRBTC fallback image — dark theme, gold accent, crypto style.
- * Used for news thumbnails, analysis images, hero images, and modal images.
- * Returns a data URI SVG string.
+ * Centralized News image fallback — WebP file as primary, inline SVG as final.
+ *
+ * Tier 1: assets/news-fallback.webp (official branded fallback, 800×300, ~11KB)
+ * Tier 2: inline SVG data URI (last-resort if the WebP file itself fails)
+ *
+ * The WebP path is processed by prepare-pages.mjs at build time — it replaces
+ * 'assets/news-fallback.webp' with the content-hashed version (e.g.
+ * 'assets/abcd1234.webp') for cache-busting. Both dev and production resolve
+ * correctly because the Pages static host serves /assets/* at the root.
+ */
+const NEWS_FALLBACK_IMG = 'assets/news-fallback.webp';
+
+// Last-resort inline SVG (used only if the WebP file itself fails to load).
+// Minimal — just a dark rectangle with the ₿ symbol so the card never shows
+// a broken-image icon.
+const NEWS_FALLBACK_SVG_LAST_RESORT = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22220%22%3E%3Crect width=%22400%22 height=%22220%22 fill=%22%230B0F14%22 rx=%2212%22/%3E%3Ctext x=%22200%22 y=%22120%22 fill=%22%23FF8A00%22 font-family=%22sans-serif%22 font-size=%2248%22 font-weight=%22bold%22 text-anchor=%22middle%22%3E%E2%82%BF%3C/text%3E%3C/svg%3E';
+
+/**
+ * Returns the official News fallback image path.
+ * Replaces the old getAmirbtcFallbackSvg() — now returns a WebP file path
+ * instead of an inline SVG data URI. The build pipeline (prepare-pages.mjs)
+ * replaces this path with the content-hashed version at build time.
+ *
+ * The width/height/text params are accepted for backward compatibility with
+ * existing call sites but are no longer used — the WebP is a single file
+ * that scales via CSS object-fit:cover.
  */
 function getAmirbtcFallbackSvg(width, height, text) {
-    const w = width || 400;
-    const h = height || 220;
-    const label = text || 'AMIRBTC';
-    return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 ${w} ${h}'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230B0F14'/%3E%3Cstop offset='100%25' stop-color='%23151C24'/%3E%3C/linearGradient%3E%3ClinearGradient id='acc' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23FF8A00'/%3E%3Cstop offset='100%25' stop-color='%23FFD700'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='${w}' height='${h}' fill='url(%23bg)' rx='12'/%3E%3Crect x='${w/2-40}' y='${h/2-40}' width='80' height='80' rx='16' fill='none' stroke='url(%23acc)' stroke-width='2' opacity='0.3'/%3E%3Ctext x='${w/2}' y='${h/2+6}' fill='url(%23acc)' font-family='sans-serif' font-size='24' font-weight='bold' text-anchor='middle'%3E₿%3C/text%3E%3Ctext x='${w/2}' y='${h/2+40}' fill='%2364748b' font-family='sans-serif' font-size='11' text-anchor='middle'%3E${encodeURIComponent(label)}%3C/text%3E%3C/svg%3E`;
+    return NEWS_FALLBACK_IMG;
 }
 
 /**
  * Global news/analysis image fallback handler.
- * Replaces broken images with the premium AMIRBTC fallback SVG.
+ * Replaces broken images with the official News fallback WebP.
+ * If the WebP itself fails, falls back to an inline SVG (last resort).
+ * Loop-safe: _webpFallbackTried + _svgFallbackApplied prevent infinite loops.
+ *
  * Usage: onerror="newsImageFallback(this)"
  */
 window.newsImageFallback = function(imgEl) {
-    if (imgEl._fallbackApplied) return;
-    imgEl._fallbackApplied = true;
-    // Determine size from class or default
-    const isHero = imgEl.classList.contains('news-hero-image');
-    const isThumb = imgEl.classList.contains('news-card-thumb');
-    const isSlide = imgEl.classList.contains('slide-img');
-    const isFeatured = imgEl.classList.contains('featured-image');
-    const isModal = imgEl.id === 'news-modal-image';
-    const isAnalysisThumb = imgEl.classList.contains('acv-thumb');
-    const isViewer = imgEl.id === 'iv-image';
-
-    let w = 400, h = 220, label = 'AMIRBTC';
-    if (isHero) { w = 400; h = 220; }
-    else if (isThumb) { w = 220; h = 220; }
-    else if (isSlide) { w = 200; h = 170; label = 'No Chart'; }
-    else if (isFeatured) { w = 300; h = 200; }
-    else if (isModal) { w = 400; h = 250; }
-    else if (isAnalysisThumb) { w = 120; h = 120; label = (imgEl.alt || 'A').charAt(0); }
-    else if (isViewer) { w = 800; h = 600; label = 'Image Unavailable'; }
-
-    imgEl.src = getAmirbtcFallbackSvg(w, h, label);
-    imgEl.style.objectFit = 'cover';
+    // Tier 1: Try the WebP fallback file
+    if (!imgEl._webpFallbackTried) {
+        imgEl._webpFallbackTried = true;
+        imgEl.src = NEWS_FALLBACK_IMG;
+        imgEl.style.objectFit = 'cover';
+        return;
+    }
+    // Tier 2: WebP also failed — use inline SVG as absolute last resort
+    if (!imgEl._svgFallbackApplied) {
+        imgEl._svgFallbackApplied = true;
+        imgEl.src = NEWS_FALLBACK_SVG_LAST_RESORT;
+        imgEl.style.objectFit = 'cover';
+        return;
+    }
+    // Both tiers failed — give up silently (no infinite loop)
 };
 
 /**
@@ -9597,7 +9613,7 @@ function renderNews(category) {
     }
 
     displayedNews = filtered;
-    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+    const placeholderImg = NEWS_FALLBACK_IMG;
 
     let html = '';
 
@@ -9699,7 +9715,7 @@ function niRenderHeroSlider(items) {
     });
     if (!validItems.length) return ''; // No valid items → no slider
 
-    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22240%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22/%3E%3C/svg%3E';
+    const placeholderImg = NEWS_FALLBACK_IMG;
     const slidesHtml = validItems.map((n, i) => {
         const img = n.image && !n.image.includes('data:image/svg') ? n.image : placeholderImg;
         // PHASE 6 FIX: use displayedNews.indexOf (not newsCache.indexOf) so the
@@ -9710,7 +9726,7 @@ function niRenderHeroSlider(items) {
         const isSaved = _niSavedNews.some(s => s.url === n.url);
         return `
         <div class="ni-hero-slide" onclick="openNewsModal(${idx})">
-            <img class="ni-hero-slide-img" src="${escapeHtml(img)}" loading="${i === 0 ? 'eager' : 'lazy'}" alt="" onerror="this.src='${placeholderImg}'">
+            <img class="ni-hero-slide-img" src="${escapeHtml(img)}" loading="${i === 0 ? 'eager' : 'lazy'}" alt="" onerror="newsImageFallback(this)">
             <div class="ni-hero-slide-overlay"></div>
             <div class="ni-hero-slide-content">
                 <div class="ni-hero-badges">${niBadgeHtml(n.sentiment)}${niImpactHtml(n)}</div>
@@ -9990,7 +10006,7 @@ function renderSavedNews() {
     // Sort newest first
     const sorted = _niSavedNews.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
     displayedNews = sorted; // for modal access
-    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3Cpath d=%22M12 6v12M6 12h12%22 stroke=%22%2364748b%22 stroke-width=%222%22/%3E%3C/svg%3E';
+    const placeholderImg = NEWS_FALLBACK_IMG;
 
     let html = '';
     sorted.forEach((n, i) => {
@@ -10153,7 +10169,7 @@ function onNewsSearchInput(query) {
     }
 
     let html = '';
-    const placeholderImg = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22220%22 height=%22220%22 viewBox=%220 0 24 24%22 fill=%22%23151C24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22/%3E%3C/svg%3E';
+    const placeholderImg = NEWS_FALLBACK_IMG;
 
     if (newsResults.length) {
         html += '<div class="ni-cal-time-group">' + t('news_time_group_news') + '</div>';

@@ -2465,6 +2465,7 @@ test('CALRESTORE-008 (real DOM): renderCalendarV2 with restored functions render
   let calCountdownInterval = null;
   const globals = {
     document,
+    NEWS_FALLBACK_IMG: 'assets/news-fallback.webp',
     calendarEvents,
     calendarLoading: false,
     currentCalendarTab: 'week',
@@ -2573,6 +2574,7 @@ test('CALRESTORE-009 (real DOM): Crypto → Calendar → Crypto → Calendar ren
 
   const globals = {
     document,
+    NEWS_FALLBACK_IMG: 'assets/news-fallback.webp',
     calendarEvents,
     calendarLoading: false,
     currentCalendarTab: 'week',
@@ -2727,6 +2729,7 @@ test('CALRESTORE-010 (real DOM): Calendar today/tomorrow/week sub-tabs all rende
   let currentCalendarTab = 'week';
   const globals = {
     document,
+    NEWS_FALLBACK_IMG: 'assets/news-fallback.webp',
     calendarEvents,
     calendarLoading: false,
     get currentCalendarTab() { return currentCalendarTab; },
@@ -2807,6 +2810,7 @@ test('CALRESTORE-011 (real DOM): Calendar with empty events shows empty state (n
 
   const globals = {
     document,
+    NEWS_FALLBACK_IMG: 'assets/news-fallback.webp',
     calendarEvents: [], // EMPTY — triggers empty state path
     calendarLoading: false,
     currentCalendarTab: 'week',
@@ -2874,6 +2878,7 @@ test('CALRESTORE-012 (real DOM): Calendar with country filter no-match shows no-
 
   const globals = {
     document,
+    NEWS_FALLBACK_IMG: 'assets/news-fallback.webp',
     calendarEvents,
     calendarLoading: false,
     currentCalendarTab: 'week',
