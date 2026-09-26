@@ -22,6 +22,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, 'worker-proxy.js'), 'utf8');
+const CM_SRC = fs.readFileSync(path.join(__dirname, 'src/services/channel-membership.js'), 'utf8');
 const USERS_CTRL_SRC = fs.readFileSync(path.join(__dirname, 'src/controllers/users.js'), 'utf8');
 
 // ============================================================================
@@ -59,6 +60,35 @@ function extractFn(src, name) {
   throw new Error(`end of ${name} not found`);
 }
 
+// Slice-based extractor (used for src/services/channel-membership.js where
+// the function bodies contain comments with apostrophes — extractFn's
+// brace-counting doesn't track comments and would misparse them).
+// Same pattern used by advertisements-system-test.cjs (line 121-122).
+function extractFnSimple(src, name) {
+  const re = new RegExp(`(?:async\\s+)?function\\s+${name}\\s*\\(`);
+  const m = re.exec(src);
+  if (!m) throw new Error(`Function ${name} not found`);
+  const start = m.index;
+  // Find the body's opening brace
+  let i = start;
+  while (i < src.length && src[i] !== '{') i++;
+  // The body ends at the next top-level `async function` or `function` declaration
+  // (or end of file). For the channel-membership module, each function is followed
+  // by a blank line then the next `async function`/`function` at column 0.
+  const nextAsync = src.indexOf('async function', i + 50);
+  const nextFn = src.indexOf('function ', i + 50);
+  let end;
+  if (nextAsync > -1 && (nextFn === -1 || nextAsync < nextFn)) {
+    end = nextAsync;
+  } else if (nextFn > -1) {
+    end = nextFn;
+  } else {
+    end = src.length;
+  }
+  // Trim trailing whitespace/newlines so the slice is a valid JS function.
+  return src.slice(start, end).trimEnd();
+}
+
 function extractConstSet(src, name) {
   const re = new RegExp(`const\\s+${name}\\s*=\\s*new Set\\(\\[[^\\]]*\\]\\)`);
   const m = re.exec(src);
@@ -73,13 +103,19 @@ function extractConstSet(src, name) {
 function buildSandboxSrc() {
   const parts = [];
   parts.push(extractConstSet(WORKER_SRC, 'JOINED_STATUSES'));
+  // Core helpers (still in worker-proxy.js)
   ['safeError', 'isBotConfigured', 'getAdminIds', 'isAdminTelegramId',
    'resolveRequiredChannel', 'normalizeRequiredChannel', 'getTelegramChatId',
-   'resolveWebAppUrl', 'buildTelegramApiUrl', 'isJoinedMember',
-   'getChatMemberDebugPayload', 'checkChannelMembership',
+   'resolveWebAppUrl', 'buildTelegramApiUrl', 'isJoinedMember'].forEach(n => {
+    try { parts.push(extractFn(WORKER_SRC, n)); } catch (e) { /* skip if missing */ }
+  });
+  // Channel-membership functions (extracted to src/services/channel-membership.js)
+  // Use extractFnSimple because the function bodies contain comments with
+  // apostrophes (e.g., "Telegram's") that confuse extractFn's brace-counting.
+  ['getChatMemberDebugPayload', 'checkChannelMembership',
    '_checkSingleTelegramChannel', '_hashChannelSet',
    'checkAdditionalRequiredChannels'].forEach(n => {
-    try { parts.push(extractFn(WORKER_SRC, n)); } catch (e) { /* skip if missing */ }
+    try { parts.push(extractFnSimple(CM_SRC, n)); } catch (e) { /* skip if missing */ }
   });
   parts.push('exports.checkAdditionalRequiredChannels = checkAdditionalRequiredChannels;');
   parts.push('exports._hashChannelSet = _hashChannelSet;');
@@ -217,8 +253,8 @@ test('NOREGRESS-002: /api/users/check-join uses MembershipGateway with forceRefr
 // ============================================================================
 
 test('BUG2-004: resolveChannelMembership propagates forceRefresh to checkAdditionalRequiredChannels at the fresh-check call site', () => {
-  // The call site at line ~3232 must pass { forceRefresh }
-  assert.ok(WORKER_SRC.includes('checkAdditionalRequiredChannels(env, uid, { forceRefresh })'),
+  // The call site (now in src/services/channel-membership.js) must pass { forceRefresh }
+  assert.ok(CM_SRC.includes('checkAdditionalRequiredChannels(env, uid, { forceRefresh })'),
     'resolveChannelMembership must propagate forceRefresh to checkAdditionalRequiredChannels');
 });
 
@@ -227,10 +263,13 @@ test('BUG2-004: resolveChannelMembership propagates forceRefresh to checkAdditio
 // ============================================================================
 
 test('NOREGRESS-003: isJoinedMember is used at all 3 getChatMember call sites', () => {
-  // Count occurrences of isJoinedMember in the source
-  const matches = WORKER_SRC.match(/isJoinedMember\(/g);
-  assert.ok(matches && matches.length >= 4, // 3 call sites + 1 definition
-    `isJoinedMember must be called at 3 sites (+1 def). Found ${matches?.length || 0}`);
+  // Count occurrences of isJoinedMember across worker-proxy.js (definition)
+  // AND src/services/channel-membership.js (3 call sites — extracted).
+  const workerMatches = WORKER_SRC.match(/isJoinedMember\(/g) || [];
+  const cmMatches = CM_SRC.match(/isJoinedMember\(/g) || [];
+  const total = workerMatches.length + cmMatches.length;
+  assert.ok(total >= 4, // 3 call sites (in CM_SRC) + 1 definition (in WORKER_SRC)
+    `isJoinedMember must be called at 3 sites (+1 def). Found ${total} (worker-proxy.js: ${workerMatches.length}, channel-membership.js: ${cmMatches.length})`);
 });
 
 test('NOREGRESS-004: JOINED_STATUSES still contains restricted (isJoinedMember handles it)', () => {
@@ -246,9 +285,10 @@ test('NOREGRESS-004: JOINED_STATUSES still contains restricted (isJoinedMember h
 test('BUG4-001: checkAdditionalRequiredChannels uses Promise.all (not sequential for-await)', () => {
   // The fresh-check loop must use Promise.all to parallelize per-channel Telegram calls.
   // This bounds latency at 5s regardless of channel count (was 5N seconds).
-  const fnStart = WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels');
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 3500);
+  // checkAdditionalRequiredChannels extracted to src/services/channel-membership.js
+  const fnStart = CM_SRC.indexOf('async function checkAdditionalRequiredChannels');
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 3500);
   assert.ok(fnBlock.includes('Promise.all'),
     'checkAdditionalRequiredChannels must use Promise.all to parallelize Telegram calls');
   assert.ok(fnBlock.includes('channels.map(ch =>'),
@@ -280,9 +320,12 @@ test('BUG1-NEW-002: bootstrapUser dedup clears on completion (finally block)', (
 test('BUG7-001: resolveChannelMembership returns joined=false on api_error (fail-closed)', () => {
   // The old code fell back to DB users.channel_joined or KV cache on api_error.
   // The new code returns joined:false immediately — fail-closed, no bypass.
-  const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 4000);
+  // resolveChannelMembership extracted to src/services/channel-membership.js
+  const fnStart = CM_SRC.indexOf('async function resolveChannelMembership');
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  // 7000-char fallback covers the full function body (6075 chars) since
+  // resolveChannelMembership is the LAST function in the module — no nextFn.
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 7000);
   const apiErrorSection = fnBlock.slice(fnBlock.indexOf("result.reason === 'api_error'"));
   // Must NOT fall back to DB on api_error
   assert.ok(!apiErrorSection.includes('from_db_fallback'),
@@ -297,9 +340,12 @@ test('BUG7-001: resolveChannelMembership returns joined=false on api_error (fail
 
 // NO-REGRESSION: existing valid-member path still works (env channel joined + DB channels joined)
 test('NOREGRESS-005: resolveChannelMembership still returns joined:true for valid members', () => {
-  const fnStart = WORKER_SRC.indexOf('async function resolveChannelMembership');
-  const nextFn = WORKER_SRC.indexOf('async function', fnStart + 50);
-  const fnBlock = nextFn > -1 ? WORKER_SRC.slice(fnStart, nextFn) : WORKER_SRC.slice(fnStart, fnStart + 4000);
+  // resolveChannelMembership extracted to src/services/channel-membership.js
+  const fnStart = CM_SRC.indexOf('async function resolveChannelMembership');
+  const nextFn = CM_SRC.indexOf('async function', fnStart + 50);
+  // 7000-char fallback covers the full function body (6075 chars) since
+  // resolveChannelMembership is the LAST function in the module — no nextFn.
+  const fnBlock = nextFn > -1 ? CM_SRC.slice(fnStart, nextFn) : CM_SRC.slice(fnStart, fnStart + 7000);
   // The valid-member path (result.joined + extra.joined) must still return { joined: true }
   assert.ok(fnBlock.includes('return result;') && fnBlock.includes('setCachedJoinStatus(env, uid, true)'),
     'resolveChannelMembership must still cache + return joined:true for valid members');

@@ -19,6 +19,7 @@ const path = require('node:path');
 const ROOT = __dirname;
 
 const WORKER_SRC = fs.readFileSync(path.join(ROOT, 'worker-proxy.js'), 'utf8');
+const CM_SRC = fs.readFileSync(path.join(ROOT, 'src/services/channel-membership.js'), 'utf8');
 const SESSIONS_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/sessions.js'), 'utf8');
 const ADMIN_SRC = fs.readFileSync(path.join(ROOT, 'src/repositories/admin.js'), 'utf8');
 const ASSISTANT_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/assistant.js'), 'utf8');
@@ -176,9 +177,11 @@ test('KVO-6b: setCachedJoinStatus uses _kvWriteDedup', () => {
 });
 
 test('KVO-6c: checkAdditionalRequiredChannels uses _kvWriteDedup for both paths', () => {
-  const block = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function checkAdditionalRequiredChannels'),
-    WORKER_SRC.indexOf('async function resolveChannelMembership')
+  // checkAdditionalRequiredChannels + resolveChannelMembership extracted to
+  // src/services/channel-membership.js
+  const block = CM_SRC.slice(
+    CM_SRC.indexOf('async function checkAdditionalRequiredChannels'),
+    CM_SRC.indexOf('async function resolveChannelMembership')
   );
   // Both the negative and positive paths must use _kvWriteDedup
   // Count occurrences: should be 2 (one for '0', one for '1')

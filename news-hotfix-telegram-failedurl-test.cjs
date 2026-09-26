@@ -8,12 +8,14 @@ const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, 'worker-proxy.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
+// getChatMemberDebugPayload extracted to src/services/channel-membership.js
+const CM_SRC = fs.readFileSync(path.join(__dirname, 'src/services/channel-membership.js'), 'utf8');
 
 // TEST GROUP A — Telegram timeout
 test('HOTFIX24-A1: getChatMemberDebugPayload fetch has AbortController with 5s timeout', () => {
-  const fnStart = source.indexOf('async function getChatMemberDebugPayload');
+  const fnStart = CM_SRC.indexOf('async function getChatMemberDebugPayload');
   assert.ok(fnStart > -1, 'getChatMemberDebugPayload must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 3000);
+  const fnBlock = CM_SRC.slice(fnStart, fnStart + 3000);
 
   assert.ok(/AbortController/.test(fnBlock), 'Must use AbortController');
   assert.ok(/tgController\.abort/.test(fnBlock), 'Must call tgController.abort() on timeout');
@@ -23,14 +25,14 @@ test('HOTFIX24-A1: getChatMemberDebugPayload fetch has AbortController with 5s t
 });
 
 test('HOTFIX24-A2: Telegram timeout uses finally to clear timer', () => {
-  const fnStart = source.indexOf('async function getChatMemberDebugPayload');
-  const fnBlock = source.slice(fnStart, fnStart + 3000);
+  const fnStart = CM_SRC.indexOf('async function getChatMemberDebugPayload');
+  const fnBlock = CM_SRC.slice(fnStart, fnStart + 3000);
   assert.ok(/finally\s*\{/.test(fnBlock), 'Must have finally block to clear timeout');
 });
 
 test('HOTFIX24-A3: Existing error handling preserved (catch block returns payload)', () => {
-  const fnStart = source.indexOf('async function getChatMemberDebugPayload');
-  const fnBlock = source.slice(fnStart, fnStart + 3000);
+  const fnStart = CM_SRC.indexOf('async function getChatMemberDebugPayload');
+  const fnBlock = CM_SRC.slice(fnStart, fnStart + 3000);
   assert.ok(/catch \(error\)/.test(fnBlock), 'Must have catch block');
   assert.ok(/payload\.telegram_response/.test(fnBlock), 'Must set telegram_response on error');
   assert.ok(/return payload/.test(fnBlock), 'Must return payload (not throw)');
