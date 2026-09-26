@@ -11080,7 +11080,14 @@ if (typeof window !== 'undefined') {
 // But even a KV cache hit is ~50-100ms latency. For REPEAT visits (same coin
 // opened again), we cache the result in localStorage for instant lookup.
 // TTL: 6 hours (matches the backend's 1h KV cache × a few refreshes).
-const CHART_SYMBOL_LS_KEY = 'tv_symbol_cache_v1';
+// Version bumped to v2 to invalidate stale v1 cache entries from the
+// PR #28-#31 era (when /api/charts/resolve returned 500 → frontend
+// fell through to client-side scanner → some users cached {found:false}
+// for 6h). After PR #32 fixed the backend, these stale entries
+// prevented the frontend from calling the (now-working) backend.
+// Bumping the key version forces all users to re-fetch fresh data
+// from the backend on their next chart open.
+const CHART_SYMBOL_LS_KEY = 'tv_symbol_cache_v2';
 const CHART_SYMBOL_LS_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
 function getLsChartSymbol(symbol) {
