@@ -11,6 +11,19 @@ const AssistantUI = {
     init() {
         this.injectHTML();
         this.bindEvents();
+        this.startBlinking();
+    },
+
+    // Mascot avatar HTML helper — shared by chat panel header, bot message avatar,
+    // and typing indicator avatar. Reuses the SAME v4 assets as the FAB mascot
+    // (body.png + core.png + eyes.png). No new assets created.
+    // CSS in ai.css handles sizing/positioning per context (.ai-avatar-mini vs .ai-msg-avatar).
+    _mascotAvatarHTML() {
+        return '<div class="ai-mascot">' +
+            '<img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />' +
+            '<img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />' +
+            '<img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />' +
+            '</div>';
     },
 
     injectHTML() {
@@ -49,53 +62,21 @@ const AssistantUI = {
             </div>
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
                 <span class="ai-fab-halo"></span>
-                <span class="ai-fab-ring"></span>
-                <span class="ai-fab-surface">
-                    <svg class="ai-icon-core" width="28" height="28" viewBox="0 0 56 56" fill="none">
-                        <defs>
-                            <radialGradient id="aiCoreGrad" cx="50%" cy="50%" r="50%">
-                                <stop offset="0%" stop-color="#FFD9A0"/>
-                                <stop offset="60%" stop-color="#F5A623"/>
-                                <stop offset="100%" stop-color="#D4881A"/>
-                            </radialGradient>
-                            <linearGradient id="aiRayGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stop-color="#FFE9A0"/>
-                                <stop offset="100%" stop-color="#F5A623"/>
-                            </linearGradient>
-                        </defs>
-                        <!-- Central core (digital orb) -->
-                        <circle cx="28" cy="28" r="7" fill="url(#aiCoreGrad)"/>
-                        <circle cx="28" cy="28" r="4" fill="#020611" opacity="0.4"/>
-                        <!-- 4 cardinal rays (N, E, S, W) -->
-                        <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="url(#aiRayGrad)"/>
-                        <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="url(#aiRayGrad)"/>
-                        <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="url(#aiRayGrad)"/>
-                        <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="url(#aiRayGrad)"/>
-                        <!-- 4 diagonal accents (NE, SE, SW, NW) -->
-                        <path d="M44.97 11.03 L34.5 21.5 L32.5 21.5 L34.5 19.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
-                        <path d="M44.97 44.97 L34.5 34.5 L34.5 32.5 L36.5 34.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
-                        <path d="M11.03 44.97 L21.5 34.5 L23.5 34.5 L21.5 36.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
-                        <path d="M11.03 11.03 L21.5 21.5 L21.5 23.5 L19.5 21.5 Z" fill="url(#aiRayGrad)" opacity="0.7"/>
-                    </svg>
+                <span class="ai-mascot">
+                    <img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />
                 </span>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
                 <div class="ai-panel-header">
                     <div class="ai-panel-title">
                         <div class="ai-avatar-mini">
-                            <svg width="22" height="22" viewBox="0 0 56 56" fill="none">
-                                <defs>
-                                    <radialGradient id="aiAvatarCore" cx="50%" cy="50%" r="50%">
-                                        <stop offset="0%" stop-color="#FFD9A0"/>
-                                        <stop offset="100%" stop-color="#F5A623"/>
-                                    </radialGradient>
-                                </defs>
-                                <circle cx="28" cy="28" r="7" fill="url(#aiAvatarCore)"/>
-                                <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
-                                <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
-                                <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
-                                <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
-                            </svg>
+                            <div class="ai-mascot">
+                                <img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />
+                            </div>
                         </div>
                         <div class="ai-header-text">
                             <span class="ai-header-name" data-i18n="ai_title">دستیار هوشمند</span>
@@ -326,6 +307,33 @@ const AssistantUI = {
             // Welcome bubble is OUTSIDE chat — it's a UI notification, not a conversation message
             document.getElementById('ai-input')?.focus();
         }
+    },
+
+    // Mascot blink — randomized natural eye blink (3-7s intervals, ~150ms duration)
+    // Uses a single setTimeout chain (no setInterval, no memory leak).
+    // Respects prefers-reduced-motion: if reduced, no blinking.
+    _blinkTimer: null,
+    startBlinking() {
+        const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (prefersReduced) return;
+        const eyes = document.querySelector('.mascot-eyes');
+        if (!eyes) return;
+        const scheduleBlink = () => {
+            const delay = 3000 + Math.random() * 4000; // 3-7s
+            this._blinkTimer = setTimeout(() => {
+                eyes.classList.add('mascot-blink');
+                setTimeout(() => {
+                    eyes.classList.remove('mascot-blink');
+                    scheduleBlink();
+                }, 150);
+            }, delay);
+        };
+        scheduleBlink();
+    },
+    stopBlinking() {
+        if (this._blinkTimer) { clearTimeout(this._blinkTimer); this._blinkTimer = null; }
+        const eyes = document.querySelector('.mascot-eyes');
+        if (eyes) eyes.classList.remove('mascot-blink');
     },
 
     // Welcome is now a floating UI bubble (ai-speech-bubble) that appears
@@ -669,20 +677,11 @@ const AssistantUI = {
         wrapper.className = `ai-msg-row ai-msg-${role}`;
 
         if (role === 'assistant') {
-            // PHASE 3: Custom AI Digital Core avatar (same icon as FAB + header)
+            // v4 mascot avatar (same layered body+core+eyes as FAB).
+            // Replaces the old inline "Digital Core" SVG icon.
             const avatar = document.createElement('div');
             avatar.className = 'ai-msg-avatar';
-            const avatarId = 'aiAv' + Date.now() + Math.random().toString(36).slice(2, 6);
-            avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
-                <defs><radialGradient id="${avatarId}" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
-                </radialGradient></defs>
-                <circle cx="28" cy="28" r="7" fill="url(#${avatarId})"/>
-                <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
-                <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
-                <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
-                <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
-            </svg>`;
+            avatar.innerHTML = AssistantUI._mascotAvatarHTML();
             wrapper.appendChild(avatar);
         }
 
@@ -788,17 +787,7 @@ const AssistantUI = {
 
         const avatar = document.createElement('div');
         avatar.className = 'ai-msg-avatar';
-        const typingId = 'aiTyping' + Date.now();
-        avatar.innerHTML = `<svg width="22" height="22" viewBox="0 0 56 56" fill="none">
-            <defs><radialGradient id="${typingId}" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stop-color="#FFD9A0"/><stop offset="100%" stop-color="#F5A623"/>
-            </radialGradient></defs>
-            <circle cx="28" cy="28" r="7" fill="url(#${typingId})"/>
-            <path d="M28 4 L30.5 18 L28 20 L25.5 18 Z" fill="#F5A623"/>
-            <path d="M52 28 L38 30.5 L36 28 L38 25.5 Z" fill="#F5A623"/>
-            <path d="M28 52 L25.5 38 L28 36 L30.5 38 Z" fill="#F5A623"/>
-            <path d="M4 28 L18 25.5 L20 28 L18 30.5 Z" fill="#F5A623"/>
-        </svg>`;
+        avatar.innerHTML = AssistantUI._mascotAvatarHTML();
         wrapper.appendChild(avatar);
 
         const bubble = document.createElement('div');

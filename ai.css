@@ -20,7 +20,7 @@
 /* ============================================================================ */
 .ai-assistant-root {
     position: fixed;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 8px);
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 14px);
     inset-inline-end: 12px;
     z-index: 1100;
     display: flex;
@@ -165,18 +165,32 @@
     transform: rotate(45deg);
 }
 
-/* ═══ AI Floating Button — Premium Launcher (4-layer halo) ═══ */
+/* ═══ AI Floating Button — Transparent mascot launcher ═══
+   Design intent:
+   - The visible "FAB" IS the mascot itself — no square, no border, no halo, no
+     background, no surface, no ring. The button hit-area still exists for
+     click/drag, but it is visually transparent.
+   - Mascot layers are pre-cropped to the mascot's union bbox (see
+     assets/mascot/*.png) so they fill the FAB edge-to-edge with object-fit:contain.
+   - All 3 layers share the same canvas dimensions (680×990, aspect ≈ 0.687) and
+     the FAB shape matches that aspect ratio → mascot fills ~100% of FAB with
+     zero distortion and zero cropping.
+   - Animations (breathing, blink, core pulse) are kept but extremely subtle.
+     Core-pulse only affects the .mascot-core layer (not the whole mascot). */
 .ai-fab {
     position: relative;
+    /* Portrait shape matches mascot aspect (680/990 ≈ 0.687) so mascot fills FAB. */
     width: 56px;
-    height: 56px;
-    border-radius: 18px;
-    background: transparent;
+    height: 82px;
+    border-radius: 0;            /* no visible rounded corners */
+    background: transparent !important;
     border: none;
+    box-shadow: none;
     color: #F5A623;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    /* NOTE: deliberately NOT using display:flex here. With flex align-items:center,
+       the .ai-mascot child was shrinking to its (empty) content size, leaving the
+       mascot at ~75% of FAB width. Using position:relative + absolute .ai-mascot
+       guarantees the .ai-mascot fills the FAB exactly. */
     cursor: grab;
     transition: transform 0.16s ease-out, opacity 0.28s ease;
     touch-action: none;
@@ -184,60 +198,137 @@
     -webkit-user-select: none;
     will-change: transform;
     animation: ai-fab-float 4s ease-in-out infinite;
+    outline: none;
 }
-.ai-fab:active { cursor: grabbing; transform: scale(0.92); }
-.ai-fab:active .ai-fab-surface { transform: scale(0.95); }
+.ai-fab:active { cursor: grabbing; transform: scale(0.96); }
 
-/* Layer 1: ambient gold halo */
+/* Halo element kept in DOM for backwards-compat with assistant.js, but fully
+   invisible. Set to display:none so it never produces a visible ring/halo. */
 .ai-fab-halo {
-    position: absolute;
-    inset: -12px;
-    border-radius: 28px;
-    background: radial-gradient(circle, rgba(245, 166, 35, 0.18) 0%, rgba(15, 34, 56, 0.1) 40%, transparent 70%);
-    filter: blur(12px);
-    opacity: 0.7;
-    z-index: 0;
-    animation: ai-halo-pulse 3.5s ease-in-out infinite;
-    will-change: opacity;
-    pointer-events: none;
-}
-
-/* Layer 2: gold ring */
-.ai-fab-ring {
+    display: none;
     position: absolute;
     inset: 0;
-    border-radius: 18px;
-    border: 1px solid rgba(245, 166, 35, 0.25);
-    z-index: 1;
-    transition: border-color 0.2s ease;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    opacity: 0;
+    z-index: 0;
+    pointer-events: none;
+    animation: none;
 }
 
-/* Layer 3: dark surface */
-.ai-fab-surface {
-    position: relative;
+/* Mascot container — fully transparent, no overflow clipping, no border-radius.
+   Absolute positioning (top/left/right/bottom:0) guarantees it fills the FAB
+   exactly, regardless of FAB's display mode. */
+.ai-mascot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent !important;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    z-index: 1;
+    transition: transform 0.12s ease-out;
+}
+
+/* Each mascot layer — absolutely positioned, fills container with `contain`
+   (preserves aspect, no crop, no distortion). All 3 layers share the same
+   pre-cropped canvas (680×990) so they stay perfectly pixel-aligned. */
+.mascot-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
-    border-radius: 16px;
-    background: linear-gradient(145deg, #0F2238 0%, #081526 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+/* Body: subtle breathing (very gentle vertical drift + micro-scale). */
+.mascot-body {
+    z-index: 1;
+    animation: mascot-breathe 4s ease-in-out infinite;
+    will-change: transform;
+}
+
+/* Core: SHRUNK + REPOSITIONED to be a small glowing nucleus in the chest/belly center.
+
+   Pixel-level analysis (see mascot-fix-work/analyze-body-v2.py + simulate-transforms.py)
+   determined:
+   - body silhouette center x = 343 / 684 canvas = 50.2% (mobile FAB x ≈ 23.9)
+   - body chest vertical center y = 696 / 1004 canvas = 69.3% (mobile FAB y ≈ 48.5)
+   - core.png alpha center (current) = (299, 668) canvas → misaligned from chest center
+   - core.png alpha size (current) = 459×178 canvas → too wide/big
+
+   Transform: scale(0.35) shrinks the core to ~35% of its natural size, then translate
+   moves the resulting small core to the chest center. The translate values are
+   in the SCALED coordinate system (CSS applies scale first, then translate in
+   the scaled system). To move by (Tx, Ty) in the original FAB coords, the CSS
+   translate values must be (Tx/s, Ty/s) — which as % of the layer (=FAB size)
+   gives the values below.
+
+   Default values target desktop FAB (56×82). Mobile override at max-width:400px.
+
+   Pulse: opacity-only (0.92↔1.0 = 8% delta, very subtle), isolated to .mascot-core.
+   No position change, no scale change — only opacity. */
+.mascot-core {
     z-index: 2;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    transition: transform 0.16s ease-out, box-shadow 0.2s ease;
+    top: 0;
+    left: 0;
+    /* desktop: scale(0.35) translate(8.09%, 39.35%) — places core at chest center
+       (canvas 340, 696) */
+    transform: scale(0.35) translate(8.09%, 39.35%);
+    transform-origin: 50% 50%;
+    animation: mascot-core-pulse 3s ease-in-out infinite;
+    will-change: opacity, transform;
 }
 
-/* Layer 4: the AI icon (inside surface) */
-.ai-icon-core {
-    filter: drop-shadow(0 0 4px rgba(245, 166, 35, 0.3));
-    transition: filter 0.2s ease, transform 0.3s ease;
+/* Mobile FAB (48×70) — slightly different aspect requires slightly different
+   translate values to land on the same chest center. */
+@media (max-width: 400px) {
+    .mascot-core {
+        transform: scale(0.35) translate(9.58%, 39.49%);
+    }
 }
 
-.ai-fab:hover { transform: scale(1.04); }
-.ai-fab:hover .ai-fab-ring { border-color: rgba(245, 166, 35, 0.4); }
-.ai-fab:hover .ai-fab-surface { box-shadow: 0 6px 24px rgba(245, 166, 35, 0.12), 0 2px 10px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
-.ai-fab:hover .ai-icon-core { filter: drop-shadow(0 0 8px rgba(245, 166, 35, 0.5)); }
-.ai-fab:hover .ai-fab-halo { opacity: 0.8; }
+/* Eyes: shifted RIGHT to align eyes-center with body-center.
+
+   Pixel-level analysis showed eyes.png alpha-center is at canvas x=299, while
+   body silhouette center is at canvas x=343 — a 44px LEFT misalignment
+   (= 6.43% of canvas width). The translateX below moves the entire eyes layer
+   right by 6.43% of the FAB width, putting eyes-center on the body's vertical
+   axis (face center).
+
+   Blink: opacity goes from 1.0 → 0.4 (60% transparent, softer than the previous
+   0.15) for a more subtle, natural blink. Eyes never move during blink —
+   transform stays constant, only opacity changes via the .mascot-blink class. */
+.mascot-eyes {
+    z-index: 3;
+    top: 0;
+    left: 0;
+    transform: translateX(6.43%);
+    transition: opacity 0.08s ease;
+    will-change: opacity, transform;
+}
+
+.mascot-eyes.mascot-blink {
+    opacity: 0.4;
+}
+
+/* Press feedback on the whole mascot */
+.ai-fab:active .mascot-body { animation-play-state: paused; }
+.ai-fab:active .ai-mascot { transform: scale(0.96); }
+
+/* Hover effects (desktop only — pointer:fine) — kept subtle, no halo shown. */
+@media (hover: hover) and (pointer: fine) {
+    .ai-fab:hover { transform: scale(1.04); }
+    .ai-fab:hover .mascot-core { animation-duration: 1.5s; }
+}
 
 .ai-fab-hidden {
     opacity: 0;
@@ -247,13 +338,26 @@
 }
 
 @keyframes ai-halo-pulse {
-    0%, 100% { opacity: 0.5; transform: scale(1); }
-    50% { opacity: 0.75; transform: scale(1.04); }
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 0.65; transform: scale(1.04); }
 }
 
 @keyframes ai-fab-float {
     0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-5px); }
+    50% { transform: translateY(-3px); }
+}
+
+/* Body breathing — very subtle, 1px drift + micro-scale */
+@keyframes mascot-breathe {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-1px) scale(1.008); }
+}
+
+/* Core pulse — VERY subtle opacity change (8% delta) for a 'living glow' effect.
+   Position never changes (no transform in keyframes), only opacity. */
+@keyframes mascot-core-pulse {
+    0%, 100% { opacity: 0.92; }
+    50% { opacity: 1; }
 }
 
 @keyframes ai-bubble-in {
@@ -296,11 +400,55 @@
 .ai-status-text { font-size: 10px; color: #6B7A8F; font-weight: 400; }
 
 .ai-avatar-mini {
-    width: 36px; height: 36px; border-radius: 10px;
-    background: linear-gradient(145deg, #0F2238, #081526);
-    border: 1px solid rgba(245, 166, 35, 0.15);
+    width: 36px; height: 36px;
+    /* v4: transparent container (no dark gradient, no gold border, no border-radius)
+       so the mascot itself is the only visible element. */
+    background: transparent !important;
+    border: none;
+    border-radius: 0;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
+    overflow: visible;
+    position: relative;
+}
+
+/* Mascot layered structure inside the chat panel header avatar (.ai-avatar-mini).
+   Same 3 layers as FAB mascot (body+core+eyes), reusing the same v4 assets.
+   Layer order: body → core → eyes. */
+.ai-avatar-mini .ai-mascot {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: transparent !important;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    z-index: 1;
+}
+.ai-avatar-mini .mascot-layer {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+.ai-avatar-mini .mascot-body {
+    z-index: 1;
+    animation: mascot-breathe 4s ease-in-out infinite;
+}
+.ai-avatar-mini .mascot-core {
+    z-index: 2;
+    /* Avatar is much smaller (36px) than FAB (82px), so core scale must be
+       LARGER than FAB's 0.35 to remain visible. scale(0.55) gives a core
+       ~12×5px in a 36px container — small but visible. */
+    transform: scale(0.55) translate(7.27%, 25.04%);
+    transform-origin: 50% 50%;
+    animation: mascot-core-pulse 3s ease-in-out infinite;
+}
+.ai-avatar-mini .mascot-eyes {
+    z-index: 3;
+    /* Same percentage shift as FAB — aligns eyes with body center. */
+    transform: translateX(6.43%);
 }
 
 .ai-close-btn {
@@ -471,11 +619,58 @@
 }
 
 .ai-msg-avatar {
-    width: 32px; height: 32px; border-radius: 10px;
-    background: linear-gradient(145deg, #0F2238, #081526);
-    border: 1px solid rgba(245, 166, 35, 0.15);
+    width: 32px; height: 32px;
+    /* v4: transparent container (no dark gradient, no gold border, no border-radius)
+       so the mascot itself is the only visible element. */
+    background: transparent !important;
+    border: none;
+    border-radius: 0;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0; align-self: flex-start; margin-top: 2px;
+    overflow: visible;
+    position: relative;
+}
+
+/* Mascot layered structure inside the message avatar (.ai-msg-avatar).
+   Same 3 layers as FAB mascot, reusing the same v4 assets.
+   This rule applies to BOTH regular bot message avatar AND typing indicator avatar
+   (both use class .ai-msg-avatar). */
+.ai-msg-avatar .ai-mascot {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: transparent !important;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+    z-index: 1;
+}
+.ai-msg-avatar .mascot-layer {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+.ai-msg-avatar .mascot-body {
+    z-index: 1;
+    /* No breathing animation in message avatar — keep still for readability
+       in conversation context. (Breathing is for the floating FAB only.) */
+}
+.ai-msg-avatar .mascot-core {
+    z-index: 2;
+    /* Message avatar is 32px — slightly smaller than .ai-avatar-mini (36px).
+       Use scale(0.55) to keep core visible at small size. */
+    transform: scale(0.55) translate(7.27%, 25.04%);
+    transform-origin: 50% 50%;
+    animation: mascot-core-pulse 3s ease-in-out infinite;
+}
+.ai-msg-avatar .mascot-eyes {
+    z-index: 3;
+    /* Same percentage shift as FAB — aligns eyes with body center. */
+    transform: translateX(6.43%);
+    /* No blink animation in message avatar — eyes stay open for readability.
+       (Blink is for the floating FAB only.) */
 }
 
 .ai-msg-bubble {
@@ -629,13 +824,15 @@
     .ai-assistant-root { inset-inline-end: 8px; max-width: calc(100vw - 16px); }
     .ai-panel { left: 3%; right: 3%; height: min(65vh, calc(100vh - 100px)); }
     .ai-msg-bubble { max-width: 85%; }
-    .ai-fab { width: 48px; height: 48px; border-radius: 16px; }
+    /* Mobile FAB: smaller, but still portrait to match mascot aspect (0.687). */
+    .ai-fab { width: 48px; height: 70px; border-radius: 0; }
     .ai-empty-state { padding: 24px 16px 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .ai-fab-halo, .ai-status-dot, .ai-empty-icon, .ai-typing-dot, .ai-fab { animation: none !important; }
     .ai-msg-row, .ai-empty-state { animation: none !important; }
+    .mascot-body, .mascot-core, .mascot-eyes { animation: none !important; transition: none !important; }
 }
 
 
