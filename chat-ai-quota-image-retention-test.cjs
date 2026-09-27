@@ -924,30 +924,44 @@ console.log('✅ All Phase 12 attachment pipeline tests loaded.');
 // PHASE 14: Premium UI Redesign Tests
 // ============================================================================
 
-test('UI-REDESIGN-01: Custom AI Digital Core icon exists (not generic robot)', () => {
+test('UI-REDESIGN-01: Mascot has layered body/eyes/core structure', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  // Must have the custom Digital Core SVG (radialGradient + cardinal rays)
-  assert.ok(JS.includes('ai-icon-core'), 'Must have ai-icon-core class');
-  assert.ok(JS.includes('aiCoreGrad'), 'Must have radial gradient core');
-  assert.ok(JS.includes('M28 4 L30.5 18'), 'Must have cardinal ray paths');
-  // Must NOT have the old robot face icon
-  assert.ok(!JS.includes('c.9 0 1.6.7 1.6 1.6'), 'Must NOT have old robot face path');
+  // Must have the layered mascot structure (body + core + eyes images)
+  assert.ok(JS.includes('mascot-body'), 'Must have mascot-body layer');
+  assert.ok(JS.includes('mascot-core'), 'Must have mascot-core layer');
+  assert.ok(JS.includes('mascot-eyes'), 'Must have mascot-eyes layer');
+  assert.ok(JS.includes('assets/mascot/body.png'), 'Must reference body.png asset');
+  assert.ok(JS.includes('assets/mascot/eyes.png'), 'Must reference eyes.png asset');
+  assert.ok(JS.includes('assets/mascot/core.png'), 'Must reference core.png asset');
 });
 
-test('UI-REDESIGN-02: FAB has 4-layer premium structure (halo + ring + surface + icon)', () => {
+test('UI-REDESIGN-02: FAB has halo + mascot layered structure', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   assert.ok(JS.includes('ai-fab-halo'), 'Must have ambient halo layer');
-  assert.ok(JS.includes('ai-fab-ring'), 'Must have gold ring layer');
-  assert.ok(JS.includes('ai-fab-surface'), 'Must have dark surface layer');
-  assert.ok(JS.includes('ai-icon-core'), 'Must have AI icon layer');
+  assert.ok(JS.includes('ai-mascot'), 'Must have mascot container');
+  assert.ok(JS.includes('mascot-layer'), 'Must have mascot layer class');
 });
 
-test('UI-REDESIGN-03: FAB is soft-square (border-radius 18px, not 50%)', () => {
+test('UI-REDESIGN-03: FAB container is transparent (no visible frame/surface around mascot)', () => {
   const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
-  // FAB should use border-radius: 18px (soft-square), not 50% (circle)
-  const fabMatch = CSS.match(/\.ai-fab\s*\{[^}]*border-radius:\s*(\d+)px/);
-  assert.ok(fabMatch, 'Must find .ai-fab border-radius');
-  assert.equal(fabMatch[1], '18', 'FAB border-radius must be 18px (soft-square)');
+  // v4 design intent: the FAB container itself is fully transparent — the mascot
+  // character (body/core/eyes layers) is the only visible element. There must
+  // be NO visible square/frame/surface/border/shadow around the mascot.
+  const fabMatch = CSS.match(/\.ai-fab\s*\{[^}]*\}/);
+  assert.ok(fabMatch, 'Must find .ai-fab rule');
+  const fabRule = fabMatch[0];
+  // Background must be transparent (no visible surface fill)
+  assert.ok(/background:\s*transparent/i.test(fabRule),
+    'FAB background must be transparent (no visible surface)');
+  // Border must be none (no visible frame)
+  assert.ok(/border:\s*none/i.test(fabRule),
+    'FAB border must be none (no visible frame)');
+  // Box-shadow must be none (no visible halo around the FAB itself)
+  assert.ok(/box-shadow:\s*none/i.test(fabRule),
+    'FAB box-shadow must be none (no visible shadow)');
+  // Border-radius must be 0 (no visible rounded corners on the container)
+  assert.ok(/border-radius:\s*0/i.test(fabRule),
+    'FAB border-radius must be 0 (transparent container has no rounded corners)');
 });
 
 test('UI-REDESIGN-04: Header has AI avatar + name + status indicator', () => {
@@ -1003,6 +1017,200 @@ test('UI-REDESIGN-09: No emoji in UI chrome (💬🖼️📷📎✨)', () => {
   assert.ok(!codeOnly.includes('✨'), 'No ✨ emoji');
 });
 
+// ============================================================================
+// PHASE 14B: Bot Avatar Mascot Tests (v4 — replaces Digital Core SVG with mascot)
+// ============================================================================
+// The bot avatar (chat panel header + assistant message + typing indicator) now
+// uses the same layered mascot as the FAB (body + core + eyes images), NOT the
+// old inline "Digital Core" SVG icon.
+
+test('BOT-AVATAR-01: Assistant message avatar uses mascot layered structure (body+core+eyes)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The appendMessage function should create an .ai-msg-avatar with mascot layers
+  // Find the assistant-role block where avatar is created
+  const assistantBlock = JS.match(/if\s*\(role\s*===\s*'assistant'\)\s*\{[\s\S]*?ai-msg-avatar[\s\S]*?\}/);
+  assert.ok(assistantBlock, 'Must find assistant-role block creating .ai-msg-avatar');
+  const block = assistantBlock[0];
+  // Block must reference the mascot layered structure (either inline or via helper)
+  assert.ok(block.includes('mascot-body') || block.includes('_mascotAvatarHTML'),
+    'Assistant avatar must use mascot-body layer (or _mascotAvatarHTML helper)');
+  assert.ok(block.includes('mascot-core') || block.includes('_mascotAvatarHTML'),
+    'Assistant avatar must use mascot-core layer (or _mascotAvatarHTML helper)');
+  assert.ok(block.includes('mascot-eyes') || block.includes('_mascotAvatarHTML'),
+    'Assistant avatar must use mascot-eyes layer (or _mascotAvatarHTML helper)');
+});
+
+test('BOT-AVATAR-02: Old Digital Core SVG is no longer used for Bot message avatar', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The BOT MESSAGE AVATAR (the one created in appendMessage for role==='assistant')
+  // must NOT use the old Digital Core SVG. The cardinal ray paths may still appear
+  // elsewhere in assistant.js (e.g., welcome bubble header, empty state hero icon)
+  // — those are OUT OF SCOPE for this task and remain unchanged.
+  //
+  // We isolate the bot-avatar-creation block and verify it does NOT contain the
+  // old Digital Core SVG markers (viewBox 56x56 + radialGradient + cardinal rays).
+  const avatarBlock = JS.match(/if\s*\(role\s*===\s*'assistant'\)\s*\{[\s\S]*?ai-msg-avatar[\s\S]*?\}\s*\}/);
+  assert.ok(avatarBlock, 'Must find assistant-role avatar block');
+  const block = avatarBlock[0];
+  // Block must NOT contain old Digital Core SVG markers
+  assert.ok(!block.includes('viewBox="0 0 56 56"'),
+    'Bot message avatar block must NOT contain old Digital Core viewBox 56×56 SVG');
+  assert.ok(!block.includes('M28 4 L30.5 18 L28 20 L25.5 18 Z'),
+    'Bot message avatar block must NOT contain old Digital Core cardinal ray path');
+  assert.ok(!block.includes('M52 28 L38 30.5 L36 28 L38 25.5 Z'),
+    'Bot message avatar block must NOT contain old Digital Core east ray path');
+  assert.ok(!/aiAv\w*/.test(block),
+    'Bot message avatar block must NOT contain old aiAv SVG ID prefix');
+  assert.ok(!/aiTyping\w*/.test(block),
+    'Bot message avatar block must NOT contain old aiTyping SVG ID prefix');
+  // Block MUST contain the new mascot layered structure
+  assert.ok(block.includes('mascot-body') || block.includes('_mascotAvatarHTML'),
+    'Bot message avatar must use mascot-body layer (or _mascotAvatarHTML helper)');
+});
+
+test('BOT-AVATAR-03: User message does NOT create an avatar (user keeps no avatar)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The avatar-creation code is gated by `if (role === 'assistant')`.
+  // For role === 'user', no avatar should be created.
+  // Verify the assistant-role avatar block exists, AND it's inside an `if (role === 'assistant')` guard.
+  const avatarCreationPattern = /if\s*\(role\s*===\s*'assistant'\)\s*\{[^}]*ai-msg-avatar[^}]*\}/;
+  assert.ok(avatarCreationPattern.test(JS),
+    'Avatar creation must be inside `if (role === \'assistant\')` guard — no avatar for user');
+  // Verify no avatar is created for 'user' role (no `if (role === 'user')` creating avatar)
+  const userAvatarBlock = JS.match(/if\s*\(role\s*===\s*'user'\)\s*\{[\s\S]*?avatar[\s\S]*?\}/i);
+  assert.ok(!userAvatarBlock,
+    'Must NOT create avatar for user role — user messages keep no avatar');
+});
+
+test('BOT-AVATAR-04: Chat panel header avatar uses mascot (not Digital Core SVG)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The .ai-avatar-mini in the chat panel header template must contain the mascot
+  // layered structure, NOT the old SVG.
+  // Find the .ai-avatar-mini block in the template
+  const miniBlock = JS.match(/\.ai-avatar-mini[\s\S]*?<\/div>/);
+  assert.ok(miniBlock, 'Must find .ai-avatar-mini block in chat panel header template');
+  const block = miniBlock[0];
+  assert.ok(block.includes('ai-mascot') || block.includes('mascot-body'),
+    'Chat panel header .ai-avatar-mini must contain mascot layered structure');
+  // Must NOT contain old SVG elements
+  assert.ok(!block.includes('<svg') || !block.includes('viewBox="0 0 56 56"'),
+    'Chat panel header .ai-avatar-mini must NOT contain old 56×56 viewBox SVG');
+});
+
+test('BOT-AVATAR-05: Typing indicator avatar uses mascot (not Digital Core SVG)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The typing indicator avatar creation must use the mascot layered structure
+  // (same as bot message avatar — both use _mascotAvatarHTML helper or inline mascot HTML).
+  // Find the typing indicator block — it has wrapper.id = 'ai-typing-indicator'
+  const typingBlock = JS.match(/ai-typing-indicator[\s\S]*?ai-msg-avatar[\s\S]*?wrapper\.appendChild\(avatar\)/);
+  assert.ok(typingBlock, 'Must find typing indicator block with .ai-msg-avatar');
+  const block = typingBlock[0];
+  assert.ok(block.includes('mascot-body') || block.includes('_mascotAvatarHTML'),
+    'Typing indicator avatar must use mascot-body layer (or _mascotAvatarHTML helper)');
+  assert.ok(block.includes('mascot-core') || block.includes('_mascotAvatarHTML'),
+    'Typing indicator avatar must use mascot-core layer');
+  assert.ok(block.includes('mascot-eyes') || block.includes('_mascotAvatarHTML'),
+    'Typing indicator avatar must use mascot-eyes layer');
+});
+
+test('BOT-AVATAR-06: Bot avatar container is transparent (no visible frame/surface/halo)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
+  // The .ai-msg-avatar and .ai-avatar-mini containers must be transparent:
+  // - background: transparent (no dark surface)
+  // - border: none (no gold frame)
+  // - border-radius: 0 (no rounded corners on container)
+  const miniMatch = CSS.match(/\.ai-avatar-mini\s*\{[^}]*\}/);
+  assert.ok(miniMatch, 'Must find .ai-avatar-mini rule');
+  const miniRule = miniMatch[0];
+  assert.ok(/background:\s*transparent/i.test(miniRule),
+    '.ai-avatar-mini background must be transparent (no dark surface)');
+  assert.ok(/border:\s*none/i.test(miniRule),
+    '.ai-avatar-mini border must be none (no gold frame)');
+
+  const msgAvatarMatch = CSS.match(/\.ai-msg-avatar\s*\{[^}]*\}/);
+  assert.ok(msgAvatarMatch, 'Must find .ai-msg-avatar rule');
+  const msgAvatarRule = msgAvatarMatch[0];
+  assert.ok(/background:\s*transparent/i.test(msgAvatarRule),
+    '.ai-msg-avatar background must be transparent (no dark surface)');
+  assert.ok(/border:\s*none/i.test(msgAvatarRule),
+    '.ai-msg-avatar border must be none (no gold frame)');
+});
+
+test('BOT-AVATAR-07: Mascot layers inside bot avatar use object-fit:contain (no crop/distortion)', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
+  // The mascot layers inside .ai-avatar-mini and .ai-msg-avatar must use
+  // object-fit: contain (preserve aspect, no crop, no distortion).
+  const miniLayers = CSS.match(/\.ai-avatar-mini\s+\.mascot-layer\s*\{[^}]*\}/);
+  assert.ok(miniLayers, 'Must find .ai-avatar-mini .mascot-layer rule');
+  assert.ok(/object-fit:\s*contain/i.test(miniLayers[0]),
+    '.ai-avatar-mini .mascot-layer must use object-fit: contain (no distortion)');
+
+  const msgLayers = CSS.match(/\.ai-msg-avatar\s+\.mascot-layer\s*\{[^}]*\}/);
+  assert.ok(msgLayers, 'Must find .ai-msg-avatar .mascot-layer rule');
+  assert.ok(/object-fit:\s*contain/i.test(msgLayers[0]),
+    '.ai-msg-avatar .mascot-layer must use object-fit: contain (no distortion)');
+});
+
+test('BOT-AVATAR-08: Bot avatar mascot layers reuse FAB assets (no new asset files)', () => {
+  const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
+  // The bot avatar must reference the SAME asset paths as the FAB mascot:
+  // assets/mascot/body.png, assets/mascot/core.png, assets/mascot/eyes.png
+  // No new asset paths should be introduced.
+  assert.ok(JS.includes('assets/mascot/body.png'),
+    'Bot avatar must reuse assets/mascot/body.png (same as FAB)');
+  assert.ok(JS.includes('assets/mascot/core.png'),
+    'Bot avatar must reuse assets/mascot/core.png (same as FAB)');
+  assert.ok(JS.includes('assets/mascot/eyes.png'),
+    'Bot avatar must reuse assets/mascot/eyes.png (same as FAB)');
+  // Must NOT introduce any new mascot asset paths
+  assert.ok(!JS.includes('assets/mascot/avatar-'),
+    'Must NOT create new avatar-specific mascot assets (reuse FAB assets)');
+  assert.ok(!JS.includes('assets/mascot/mini-'),
+    'Must NOT create new mini mascot assets (reuse FAB assets)');
+});
+
+test('BOT-AVATAR-09: Reduced-motion mode disables bot avatar animations', () => {
+  const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
+  assert.ok(CSS.includes('prefers-reduced-motion'),
+    'Must support prefers-reduced-motion');
+  // There may be multiple @media (prefers-reduced-motion) blocks in the CSS
+  // (e.g., one for market-ticker, one for mascot). Find the one that contains
+  // mascot references (body/core/eyes) and verify it disables animations.
+  let pos = 0;
+  let mascotMediaBlock = null;
+  while (true) {
+    const idx = CSS.indexOf('@media (prefers-reduced-motion', pos);
+    if (idx < 0) break;
+    // Find matching closing brace by counting brace depth.
+    let depth = 0;
+    let end = -1;
+    for (let i = idx; i < CSS.length; i++) {
+      if (CSS[i] === '{') depth++;
+      else if (CSS[i] === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    const block = CSS.slice(idx, end + 1);
+    if (/mascot-(body|core|eyes)/.test(block)) {
+      mascotMediaBlock = block;
+      break;
+    }
+    pos = end + 1;
+  }
+  assert.ok(mascotMediaBlock, 'Must find a reduced-motion block that references mascot layers');
+  // The mascot reduced-motion block must reference all 3 layers
+  assert.ok(/mascot-body/.test(mascotMediaBlock),
+    'Reduced-motion block must reference mascot-body');
+  assert.ok(/mascot-core/.test(mascotMediaBlock),
+    'Reduced-motion block must reference mascot-core');
+  assert.ok(/mascot-eyes/.test(mascotMediaBlock),
+    'Reduced-motion block must reference mascot-eyes');
+  assert.ok(/animation:\s*none\s*!important/.test(mascotMediaBlock),
+    'Reduced-motion block must set animation: none !important on mascot layers');
+});
+
+
 test('UI-REDESIGN-10: Micro-interaction timing (160ms hover, 280ms open)', () => {
   const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   // Hover transitions should be ~160ms
@@ -1019,17 +1227,78 @@ test('UI-REDESIGN-11: prefers-reduced-motion support', () => {
     'Must disable animations for reduced motion');
 });
 
-test('UI-REDESIGN-12: AI avatar in assistant messages uses Digital Core icon', () => {
+test('UI-REDESIGN-12: Assistant message avatar uses mascot (body+core+eyes), not old Digital Core SVG', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
-  // appendBubble for assistant must use the Digital Core SVG (not old robot)
-  const appendFn = JS.indexOf('appendBubble(role, content, imageUrl, options');
-  const fnBlock = JS.slice(appendFn, appendFn + 2000);
-  assert.ok(fnBlock.includes('viewBox="0 0 56 56"'),
-    'Assistant avatar must use 56x56 viewBox (Digital Core)');
-  assert.ok(fnBlock.includes('radialGradient'),
-    'Assistant avatar must use radial gradient (Digital Core)');
-  assert.ok(!fnBlock.includes('c.9 0 1.6.7 1.6 1.6'),
-    'Must NOT use old robot face path');
+  // v4 design: assistant message avatar uses the mascot layered structure
+  // (body+core+eyes images from assets/mascot/), NOT the old inline Digital Core
+  // SVG (circle + 4 cardinal rays + radialGradient with viewBox="0 0 56 56").
+
+  // 1. Find the assistant-role avatar creation block in appendMessage.
+  //    This is the block where the avatar element is created and attached to wrapper.
+  const avatarBlock = JS.match(/if\s*\(role\s*===\s*'assistant'\)\s*\{[\s\S]*?ai-msg-avatar[\s\S]*?wrapper\.appendChild\(avatar\)/);
+  assert.ok(avatarBlock, 'Must find assistant-role avatar creation block (with .ai-msg-avatar + wrapper.appendChild)');
+  const block = avatarBlock[0];
+
+  // 2. Block must NOT contain old Digital Core SVG markers (specific, not generic).
+  //    These are unique markers of the OLD Digital Core icon that has been replaced.
+  assert.ok(!block.includes('viewBox="0 0 56 56"'),
+    'Assistant message avatar must NOT use old Digital Core viewBox="0 0 56 56" SVG');
+  assert.ok(!block.includes('<radialGradient'),
+    'Assistant message avatar must NOT use old Digital Core <radialGradient>');
+  assert.ok(!block.includes('M28 4 L30.5 18 L28 20 L25.5 18 Z'),
+    'Assistant message avatar must NOT use old Digital Core cardinal ray (N) path');
+  assert.ok(!block.includes('M52 28 L38 30.5 L36 28 L38 25.5 Z'),
+    'Assistant message avatar must NOT use old Digital Core cardinal ray (E) path');
+  assert.ok(!block.includes('M28 52 L25.5 38 L28 36 L30.5 38 Z'),
+    'Assistant message avatar must NOT use old Digital Core cardinal ray (S) path');
+  assert.ok(!block.includes('M4 28 L18 25.5 L20 28 L18 30.5 Z'),
+    'Assistant message avatar must NOT use old Digital Core cardinal ray (W) path');
+
+  // 3. Block MUST use the mascot avatar — either via _mascotAvatarHTML helper
+  //    OR via inline mascot HTML with all 3 layer classes.
+  const usesHelper = block.includes('AssistantUI._mascotAvatarHTML()');
+  const hasInlineMascot = block.includes('mascot-body')
+                       && block.includes('mascot-core')
+                       && block.includes('mascot-eyes');
+  assert.ok(usesHelper || hasInlineMascot,
+    'Assistant message avatar must use AssistantUI._mascotAvatarHTML() helper OR inline mascot HTML (body+core+eyes)');
+
+  // 4. If using the helper, verify the helper function returns mascot HTML
+  //    that references the EXISTING v4 FAB assets (not new asset paths) AND
+  //    uses all 3 layer classes (mascot-body, mascot-core, mascot-eyes).
+  //    This is NOT a generic selector check — it verifies the helper's actual output.
+  if (usesHelper) {
+    const helperMatch = JS.match(/_mascotAvatarHTML\s*\(\s*\)\s*\{[\s\S]*?return[\s\S]*?;\s*\}/);
+    assert.ok(helperMatch, 'Must find _mascotAvatarHTML helper function definition');
+    const helperBody = helperMatch[0];
+    // Helper must reference all 3 existing mascot asset paths (same as FAB)
+    assert.ok(helperBody.includes('assets/mascot/body.png'),
+      '_mascotAvatarHTML helper must reference assets/mascot/body.png (reusing FAB asset)');
+    assert.ok(helperBody.includes('assets/mascot/core.png'),
+      '_mascotAvatarHTML helper must reference assets/mascot/core.png (reusing FAB asset)');
+    assert.ok(helperBody.includes('assets/mascot/eyes.png'),
+      '_mascotAvatarHTML helper must reference assets/mascot/eyes.png (reusing FAB asset)');
+    // Helper must use all 3 mascot layer classes
+    assert.ok(helperBody.includes('class="mascot-layer mascot-body"'),
+      '_mascotAvatarHTML helper must produce <img class="mascot-layer mascot-body"> element');
+    assert.ok(helperBody.includes('class="mascot-layer mascot-core"'),
+      '_mascotAvatarHTML helper must produce <img class="mascot-layer mascot-core"> element');
+    assert.ok(helperBody.includes('class="mascot-layer mascot-eyes"'),
+      '_mascotAvatarHTML helper must produce <img class="mascot-layer mascot-eyes"> element');
+    // Helper must NOT introduce new mascot asset paths (must reuse FAB assets)
+    assert.ok(!helperBody.includes('assets/mascot/avatar-'),
+      '_mascotAvatarHTML helper must NOT reference new avatar-specific mascot assets');
+    assert.ok(!helperBody.includes('assets/mascot/mini-'),
+      '_mascotAvatarHTML helper must NOT reference new mini mascot assets');
+  } else if (hasInlineMascot) {
+    // Inline mascot HTML must also reference the existing v4 FAB assets
+    assert.ok(block.includes('assets/mascot/body.png'),
+      'Inline mascot HTML must reference assets/mascot/body.png (reusing FAB asset)');
+    assert.ok(block.includes('assets/mascot/core.png'),
+      'Inline mascot HTML must reference assets/mascot/core.png (reusing FAB asset)');
+    assert.ok(block.includes('assets/mascot/eyes.png'),
+      'Inline mascot HTML must reference assets/mascot/eyes.png (reusing FAB asset)');
+  }
 });
 
 test('UI-REDESIGN-13: Send button has RTL arrow (not paper plane)', () => {
@@ -1164,14 +1433,35 @@ test('QUOTA-VISUAL-04: Zero quota is clearly red (#ef4444)', () => {
     'Empty quota must be red');
 });
 
-test('FAB-VISUAL-01: Floating launcher has enhanced halo (inset -12px, blur 12px)', () => {
+test('FAB-VISUAL-01: Halo is explicitly disabled/hidden (v4 transparent FAB design)', () => {
   const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
-  assert.ok(CSS.includes('inset: -12px') || CSS.includes('inset:-12px'),
-    'Halo must extend beyond button (inset -12px)');
-  assert.ok(CSS.includes('blur(12px)') || CSS.includes('blur: 12px'),
-    'Halo must have 12px blur for ambient glow');
-  assert.ok(CSS.includes('rgba(245, 166, 35, 0.18)'),
-    'Halo must use gold radial gradient');
+  // v4 design intent: there is NO visible halo/glow container around the mascot.
+  // The .ai-fab-halo element is kept in the DOM for backwards-compat with
+  // assistant.js (which still creates the <span>), but it must be explicitly
+  // disabled/hidden so nothing visible renders.
+  const haloMatch = CSS.match(/\.ai-fab-halo\s*\{[^}]*\}/);
+  assert.ok(haloMatch, 'Must find .ai-fab-halo rule (kept in DOM for backwards-compat)');
+  const haloRule = haloMatch[0];
+  // Halo must be explicitly hidden — at least one of these disabling mechanisms:
+  //   display: none  (element removed from layout)
+  //   opacity: 0     (fully transparent)
+  const isHidden = /display:\s*none/i.test(haloRule) || /opacity:\s*0/i.test(haloRule);
+  assert.ok(isHidden,
+    'Halo must be explicitly hidden (display:none OR opacity:0) — no visible glow');
+  // Halo background must be transparent (no visible color even if it ever renders)
+  assert.ok(/background:\s*transparent/i.test(haloRule),
+    'Halo background must be transparent (no visible color)');
+  // Halo must have no border, no box-shadow (no visible ring/frame)
+  assert.ok(/border:\s*none/i.test(haloRule),
+    'Halo border must be none (no visible ring)');
+  assert.ok(/box-shadow:\s*none/i.test(haloRule),
+    'Halo box-shadow must be none (no visible shadow)');
+  // Halo must not have any animation (no glow pulse)
+  assert.ok(/animation:\s*none/i.test(haloRule),
+    'Halo animation must be none (no glow pulse)');
+  // Halo must have pointer-events: none (does not block mascot clicks/drags)
+  assert.ok(/pointer-events:\s*none/i.test(haloRule),
+    'Halo must have pointer-events: none');
 });
 
 test('FAB-VISUAL-02: Halo has pointer-events: none (does not block clicks)', () => {
@@ -1506,9 +1796,14 @@ test('IMAGE-MESSAGE-02: User message with image shown before API response', () =
 test('FAB-FLOAT-01: FAB has floating animation (translateY)', () => {
   const CSS = fs.readFileSync(path.join(__dirname, 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, 'ai.css'), 'utf8');
   assert.ok(CSS.includes('ai-fab-float'), 'Must have ai-fab-float animation');
-  assert.ok(CSS.includes('translateY(-5px)'), 'Must float up 5px');
+  assert.ok(CSS.includes('translateY'), 'Must use translateY for floating');
   assert.ok(CSS.includes('animation: ai-fab-float 4s ease-in-out infinite'),
     'Must apply float animation to FAB');
+  // Mascot animations must also exist
+  assert.ok(CSS.includes('mascot-breathe'), 'Must have body breathing animation');
+  assert.ok(CSS.includes('mascot-core-pulse'), 'Must have core pulse animation');
+  assert.ok(CSS.includes('mascot-blink'), 'Must have eyes blink class');
+  assert.ok(CSS.includes('prefers-reduced-motion'), 'Must respect reduced motion');
 });
 
 test('FAB-GLOW-01: Halo has breathing scale animation', () => {
