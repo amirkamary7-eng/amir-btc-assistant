@@ -78,7 +78,7 @@ const ReferralApp = (() => {
     if (_tokenLogo) return _tokenLogo;
     const img = document.querySelector('#wallet-preview-card .wallet-watermark img');
     if (img && img.src) { _tokenLogo = img.src; return _tokenLogo; }
-    _tokenLogo = 'assets/token-logo.png';
+    _tokenLogo = 'assets/token-logo.webp';
     return _tokenLogo;
   }
 

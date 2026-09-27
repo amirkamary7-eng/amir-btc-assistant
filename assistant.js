@@ -16,13 +16,13 @@ const AssistantUI = {
 
     // Mascot avatar HTML helper — shared by chat panel header, bot message avatar,
     // and typing indicator avatar. Reuses the SAME v4 assets as the FAB mascot
-    // (body.png + core.png + eyes.png). No new assets created.
+    // (body.webp + core.webp + eyes.webp). No new assets created.
     // CSS in ai.css handles sizing/positioning per context (.ai-avatar-mini vs .ai-msg-avatar).
     _mascotAvatarHTML() {
         return '<div class="ai-mascot">' +
-            '<img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />' +
-            '<img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />' +
-            '<img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />' +
+            '<img class="mascot-layer mascot-body" src="assets/mascot/body.webp" alt="" draggable="false" />' +
+            '<img class="mascot-layer mascot-core" src="assets/mascot/core.webp" alt="" draggable="false" />' +
+            '<img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.webp" alt="" draggable="false" />' +
             '</div>';
     },
 
@@ -63,9 +63,9 @@ const AssistantUI = {
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
                 <span class="ai-fab-halo"></span>
                 <span class="ai-mascot">
-                    <img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />
-                    <img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />
-                    <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-body" src="assets/mascot/body.webp" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-core" src="assets/mascot/core.webp" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.webp" alt="" draggable="false" />
                 </span>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
@@ -73,9 +73,9 @@ const AssistantUI = {
                     <div class="ai-panel-title">
                         <div class="ai-avatar-mini">
                             <div class="ai-mascot">
-                                <img class="mascot-layer mascot-body" src="assets/mascot/body.png" alt="" draggable="false" />
-                                <img class="mascot-layer mascot-core" src="assets/mascot/core.png" alt="" draggable="false" />
-                                <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.png" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-body" src="assets/mascot/body.webp" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-core" src="assets/mascot/core.webp" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.webp" alt="" draggable="false" />
                             </div>
                         </div>
                         <div class="ai-header-text">

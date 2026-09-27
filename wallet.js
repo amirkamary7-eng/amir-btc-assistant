@@ -346,7 +346,7 @@ const WalletApp = (() => {
   let walletSummary = null;
   let historyLoading = false;
   let historyOffset = 0;
-  let _tokenLogo = 'assets/token-logo.png';
+  let _tokenLogo = 'assets/token-logo.webp';
   // P0 RACE FIX: mutation sequence counter — incremented BEFORE any balance
   // mutation (claim, purchase, reward). fetchWallet and refreshWalletBalance
   // capture this before their API call and reject stale responses after a
@@ -399,7 +399,7 @@ const WalletApp = (() => {
    * falling back to the default path.
    */
   function getTokenLogo() {
-    if (_tokenLogo !== 'assets/token-logo.png') return _tokenLogo;
+    if (_tokenLogo !== 'assets/token-logo.webp') return _tokenLogo;
     const img = document.querySelector('#wallet-preview-card .wallet-watermark img');
     if (img && img.src) {
       _tokenLogo = img.src;

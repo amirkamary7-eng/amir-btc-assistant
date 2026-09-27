@@ -930,9 +930,9 @@ test('UI-REDESIGN-01: Mascot has layered body/eyes/core structure', () => {
   assert.ok(JS.includes('mascot-body'), 'Must have mascot-body layer');
   assert.ok(JS.includes('mascot-core'), 'Must have mascot-core layer');
   assert.ok(JS.includes('mascot-eyes'), 'Must have mascot-eyes layer');
-  assert.ok(JS.includes('assets/mascot/body.png'), 'Must reference body.png asset');
-  assert.ok(JS.includes('assets/mascot/eyes.png'), 'Must reference eyes.png asset');
-  assert.ok(JS.includes('assets/mascot/core.png'), 'Must reference core.png asset');
+  assert.ok(JS.includes('assets/mascot/body.webp'), 'Must reference body.webp asset');
+  assert.ok(JS.includes('assets/mascot/eyes.webp'), 'Must reference eyes.webp asset');
+  assert.ok(JS.includes('assets/mascot/core.webp'), 'Must reference core.webp asset');
 });
 
 test('UI-REDESIGN-02: FAB has halo + mascot layered structure', () => {
@@ -1154,14 +1154,14 @@ test('BOT-AVATAR-07: Mascot layers inside bot avatar use object-fit:contain (no 
 test('BOT-AVATAR-08: Bot avatar mascot layers reuse FAB assets (no new asset files)', () => {
   const JS = fs.readFileSync(path.join(__dirname, 'assistant.js'), 'utf8');
   // The bot avatar must reference the SAME asset paths as the FAB mascot:
-  // assets/mascot/body.png, assets/mascot/core.png, assets/mascot/eyes.png
+  // assets/mascot/body.webp, assets/mascot/core.webp, assets/mascot/eyes.webp
   // No new asset paths should be introduced.
-  assert.ok(JS.includes('assets/mascot/body.png'),
-    'Bot avatar must reuse assets/mascot/body.png (same as FAB)');
-  assert.ok(JS.includes('assets/mascot/core.png'),
-    'Bot avatar must reuse assets/mascot/core.png (same as FAB)');
-  assert.ok(JS.includes('assets/mascot/eyes.png'),
-    'Bot avatar must reuse assets/mascot/eyes.png (same as FAB)');
+  assert.ok(JS.includes('assets/mascot/body.webp'),
+    'Bot avatar must reuse assets/mascot/body.webp (same as FAB)');
+  assert.ok(JS.includes('assets/mascot/core.webp'),
+    'Bot avatar must reuse assets/mascot/core.webp (same as FAB)');
+  assert.ok(JS.includes('assets/mascot/eyes.webp'),
+    'Bot avatar must reuse assets/mascot/eyes.webp (same as FAB)');
   // Must NOT introduce any new mascot asset paths
   assert.ok(!JS.includes('assets/mascot/avatar-'),
     'Must NOT create new avatar-specific mascot assets (reuse FAB assets)');
@@ -1272,12 +1272,12 @@ test('UI-REDESIGN-12: Assistant message avatar uses mascot (body+core+eyes), not
     assert.ok(helperMatch, 'Must find _mascotAvatarHTML helper function definition');
     const helperBody = helperMatch[0];
     // Helper must reference all 3 existing mascot asset paths (same as FAB)
-    assert.ok(helperBody.includes('assets/mascot/body.png'),
-      '_mascotAvatarHTML helper must reference assets/mascot/body.png (reusing FAB asset)');
-    assert.ok(helperBody.includes('assets/mascot/core.png'),
-      '_mascotAvatarHTML helper must reference assets/mascot/core.png (reusing FAB asset)');
-    assert.ok(helperBody.includes('assets/mascot/eyes.png'),
-      '_mascotAvatarHTML helper must reference assets/mascot/eyes.png (reusing FAB asset)');
+    assert.ok(helperBody.includes('assets/mascot/body.webp'),
+      '_mascotAvatarHTML helper must reference assets/mascot/body.webp (reusing FAB asset)');
+    assert.ok(helperBody.includes('assets/mascot/core.webp'),
+      '_mascotAvatarHTML helper must reference assets/mascot/core.webp (reusing FAB asset)');
+    assert.ok(helperBody.includes('assets/mascot/eyes.webp'),
+      '_mascotAvatarHTML helper must reference assets/mascot/eyes.webp (reusing FAB asset)');
     // Helper must use all 3 mascot layer classes
     assert.ok(helperBody.includes('class="mascot-layer mascot-body"'),
       '_mascotAvatarHTML helper must produce <img class="mascot-layer mascot-body"> element');
@@ -1292,12 +1292,12 @@ test('UI-REDESIGN-12: Assistant message avatar uses mascot (body+core+eyes), not
       '_mascotAvatarHTML helper must NOT reference new mini mascot assets');
   } else if (hasInlineMascot) {
     // Inline mascot HTML must also reference the existing v4 FAB assets
-    assert.ok(block.includes('assets/mascot/body.png'),
-      'Inline mascot HTML must reference assets/mascot/body.png (reusing FAB asset)');
-    assert.ok(block.includes('assets/mascot/core.png'),
-      'Inline mascot HTML must reference assets/mascot/core.png (reusing FAB asset)');
-    assert.ok(block.includes('assets/mascot/eyes.png'),
-      'Inline mascot HTML must reference assets/mascot/eyes.png (reusing FAB asset)');
+    assert.ok(block.includes('assets/mascot/body.webp'),
+      'Inline mascot HTML must reference assets/mascot/body.webp (reusing FAB asset)');
+    assert.ok(block.includes('assets/mascot/core.webp'),
+      'Inline mascot HTML must reference assets/mascot/core.webp (reusing FAB asset)');
+    assert.ok(block.includes('assets/mascot/eyes.webp'),
+      'Inline mascot HTML must reference assets/mascot/eyes.webp (reusing FAB asset)');
   }
 });
 

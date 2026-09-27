@@ -171,7 +171,7 @@
      background, no surface, no ring. The button hit-area still exists for
      click/drag, but it is visually transparent.
    - Mascot layers are pre-cropped to the mascot's union bbox (see
-     assets/mascot/*.png) so they fill the FAB edge-to-edge with object-fit:contain.
+     assets/mascot/*.webp) so they fill the FAB edge-to-edge with object-fit:contain.
    - All 3 layers share the same canvas dimensions (680×990, aspect ≈ 0.687) and
      the FAB shape matches that aspect ratio → mascot fills ~100% of FAB with
      zero distortion and zero cropping.
@@ -262,8 +262,8 @@
    determined:
    - body silhouette center x = 343 / 684 canvas = 50.2% (mobile FAB x ≈ 23.9)
    - body chest vertical center y = 696 / 1004 canvas = 69.3% (mobile FAB y ≈ 48.5)
-   - core.png alpha center (current) = (299, 668) canvas → misaligned from chest center
-   - core.png alpha size (current) = 459×178 canvas → too wide/big
+   - core.webp alpha center (current) = (299, 668) canvas → misaligned from chest center
+   - core.webp alpha size (current) = 459×178 canvas → too wide/big
 
    Transform: scale(0.35) shrinks the core to ~35% of its natural size, then translate
    moves the resulting small core to the chest center. The translate values are
@@ -298,7 +298,7 @@
 
 /* Eyes: shifted RIGHT to align eyes-center with body-center.
 
-   Pixel-level analysis showed eyes.png alpha-center is at canvas x=299, while
+   Pixel-level analysis showed eyes.webp alpha-center is at canvas x=299, while
    body silhouette center is at canvas x=343 — a 44px LEFT misalignment
    (= 6.43% of canvas width). The translateX below moves the entire eyes layer
    right by 6.43% of the FAB width, putting eyes-center on the body's vertical

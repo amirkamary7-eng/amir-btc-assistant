@@ -109,7 +109,7 @@ test('BUILD-2: every built JS/CSS file hash matches its content', () => {
 });
 
 test('BUILD-3: specifically verify the 3 previously-broken files (app.js, referral.js, wallet.js)', () => {
-  // These 3 files had asset references (assets/market/*.webp, assets/token-logo.png)
+  // These 3 files had asset references (assets/market/*.webp, assets/token-logo.webp)
   // and were the ones that had hash mismatch before the fix.
   const files = fs.readdirSync(distDir);
   for (const base of ['app', 'referral', 'wallet']) {
