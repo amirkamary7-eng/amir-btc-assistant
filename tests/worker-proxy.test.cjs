@@ -166,6 +166,13 @@ function loadWorker(pgOverride) {
     const resolvedPath = path.resolve(path.dirname(WORKER_PATH), importPath);
     let modSource = fs.readFileSync(resolvedPath, 'utf8');
     modSource = modSource
+      // Convert ESM import statements from node: built-in modules to CJS require.
+      // This mirrors the main worker source transformation below (lines 188-190).
+      // Needed because mission-tokens.js imports createHmac/timingSafeEqual from
+      // node:crypto — without this, new Function() throws SyntaxError on the import.
+      // The require() call goes through localRequire → falls through to real
+      // require('node:crypto'), providing the actual crypto functions.
+      .replace(/import\s+\{([^}]*)\}\s+from\s+['"]node:([^'"]+)['"];?/g, (_, named, mod) => `const { ${named} } = require('node:${mod}');`)
       .replace(/export\s+(?:async\s+)?function\s+(\w+)/g, 'module.exports.$1 = function $1')
       .replace(/export\s+default\s+/g, 'module.exports.default = ')
       // PHASE 3: Support export const and export { ... } patterns

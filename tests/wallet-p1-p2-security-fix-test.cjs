@@ -48,7 +48,9 @@ function createMemoryKv(initial = {}) {
   };
 }
 
-function loadTokenService() {
+let _tokenService = null;
+async function loadTokenService() {
+  if (_tokenService) return _tokenService;
   // FA-7: _getTodayISOString now delegates to sharedGetTehranDateString (Tehran
   // timezone). The token service source references this helper, so we must
   // provide it in the eval context. We use the same implementation as
@@ -62,20 +64,24 @@ function loadTokenService() {
     });
     return fmt.format(new Date());
   };
-  // Strip `export ` so createMissionTokenService becomes a plain function declaration
-  const factorySrc = MISSION_TOKENS_SRC.replace('export function createMissionTokenService', 'function createMissionTokenService');
-  const wrapped = `${factorySrc}\nmodule.exports = { createMissionTokenService };\n`;
-  const mod = { exports: {} };
-  const { createHmac, timingSafeEqual } = require('node:crypto');
-  new Function('module', 'exports', 'sharedGetTehranDateString', 'createHmac', 'timingSafeEqual', wrapped)(mod, mod.exports, sharedGetTehranDateString, createHmac, timingSafeEqual);
+  // Load mission-tokens.js as a real ES module via data URL.
+  // This forces Node.js to resolve the `import { createHmac, timingSafeEqual }
+  // from 'node:crypto'` statement in mission-tokens.js. If the import is
+  // missing, ReferenceError is thrown at runtime — preventing the regression
+  // that was hidden by the previous new Function() + dependency injection
+  // approach (which masked the missing import by injecting createHmac as a
+  // function parameter).
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(MISSION_TOKENS_SRC).toString('base64')}`;
+  const mod = await import(dataUrl);
   // Call the factory to get the token service functions
-  return mod.exports.createMissionTokenService({ sharedGetTehranDateString });
+  _tokenService = mod.createMissionTokenService({ sharedGetTehranDateString });
+  return _tokenService;
 }
 
 // ── P1 Tests ───────────────────────────────────────────────────────────────
 
 test('P1-1: issueMissionEventToken binds target_id into signed token', async () => {
-  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const { issueMissionEventToken, consumeMissionEventToken } = await loadTokenService();
   const env = { TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
   const token = await issueMissionEventToken(env, 'u1', 'read_news', 'article_123');
@@ -92,7 +98,7 @@ test('P1-1: issueMissionEventToken binds target_id into signed token', async () 
 });
 
 test('P1-2: consume with MATCHING target_id → success', async () => {
-  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const { issueMissionEventToken, consumeMissionEventToken } = await loadTokenService();
   const kv = createMemoryKv();
   const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
@@ -102,7 +108,7 @@ test('P1-2: consume with MATCHING target_id → success', async () => {
 });
 
 test('P1-3: consume with DIFFERENT target_id → REJECTED', async () => {
-  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const { issueMissionEventToken, consumeMissionEventToken } = await loadTokenService();
   const kv = createMemoryKv();
   const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
@@ -113,7 +119,7 @@ test('P1-3: consume with DIFFERENT target_id → REJECTED', async () => {
 });
 
 test('P1-4: consume with NO target when one was bound → REJECTED', async () => {
-  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const { issueMissionEventToken, consumeMissionEventToken } = await loadTokenService();
   const kv = createMemoryKv();
   const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
@@ -124,7 +130,7 @@ test('P1-4: consume with NO target when one was bound → REJECTED', async () =>
 });
 
 test('P1-5: issue with NO target + consume with NO target → success (no-target missions)', async () => {
-  const { issueMissionEventToken, consumeMissionEventToken } = loadTokenService();
+  const { issueMissionEventToken, consumeMissionEventToken } = await loadTokenService();
   const kv = createMemoryKv();
   const env = { SESSION_CACHE: kv, TELEGRAM_BOT_TOKEN: 'test-bot-token' };
 
