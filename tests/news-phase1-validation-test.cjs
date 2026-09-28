@@ -7,17 +7,28 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
+const SHARED_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/shared.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/providers.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
+const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/translate.js'), 'utf8');
+const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const APP_PATH = path.join(__dirname, '..', 'app.js');
-const WORKER_SRC = fs.readFileSync(WORKER_PATH, 'utf8');
 const APP_SRC = fs.readFileSync(APP_PATH, 'utf8');
 
-// Extract validatePersianOutput from worker-proxy.js for testing
-// Use eval to extract the function in a way that preserves default params
-const validatorMatch = WORKER_SRC.match(/(function validatePersianOutput\(text, opts = \{\}\)\s*\{[\s\S]*?\n\})/);
-assert.ok(validatorMatch, 'validatePersianOutput function must exist in worker-proxy.js');
+// Extract validatePersianOutput AND its dependency chain (isWhitelistedToken,
+// WHITELIST_REGEX, PERSIAN_WHITELIST_TOKENS) from src/news/shared.js for
+// isolated unit testing. The function references isWhitelistedToken at
+// runtime, so all dependencies must be present in the eval scope.
+// shared.js is a leaf module (zero external dependencies), so this extraction
+// is safe — no side effects, no environment requirements.
+const depStart = SHARED_SRC.indexOf('const PERSIAN_WHITELIST_TOKENS');
+assert.ok(depStart !== -1, 'PERSIAN_WHITELIST_TOKENS must exist in src/news/shared.js');
+const validatorMatch = SHARED_SRC.match(/(function validatePersianOutput\(text, opts = \{\}\)\s*\{[\s\S]*?\n\})/);
+assert.ok(validatorMatch, 'validatePersianOutput function must exist in src/news/shared.js');
+const validatorEnd = SHARED_SRC.indexOf(validatorMatch[1]) + validatorMatch[1].length;
+const fullBlock = SHARED_SRC.substring(depStart, validatorEnd).replace(/export function/g, 'function');
 let validatePersianOutput;
-eval(validatorMatch[1].replace('function validatePersianOutput', 'validatePersianOutput = function'));
+eval(fullBlock.replace('function validatePersianOutput', 'validatePersianOutput = function'));
 
 // 1. PERSIAN OUTPUT VALIDATOR — 20 test cases
 
@@ -43,9 +54,10 @@ test('V4: Mostly Chinese text → REJECT', () => {
   assert.equal(result.reason, 'cjk_contamination');
 });
 
-test('V5: Persian + few CJK proper noun → PASS (ratio ≤5%)', () => {
+test('V5: Persian + few CJK proper noun → REJECT (zero-tolerance CJK policy)', () => {
   const result = validatePersianOutput('شرکت چینی علی‌بابا (阿里巴巴) اعلام کرد که در پروژه بلاکچین جدید سرمایه‌گذاری خواهد کرد. این خبر تاثیر مثبتی بر بازار کریپتو داشت. سرمایه‌گذاری این شرکت چینی در حوزه فناوری بلاکچین نشان‌دهنده اهمیت روزافزون این تکنولوژی در بازارهای مالی آسیاست.');
-  assert.equal(result.valid, true);
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, 'cjk_contamination');
 });
 
 test('V6: Short output (<50 chars) → REJECT', () => {
@@ -100,7 +112,7 @@ test('V14: Only whitespace → REJECT', () => {
 });
 
 test('V15: Exactly 200 Persian chars (boundary) → PASS', () => {
-  const result = validatePersianOutput('ب'.repeat(200));
+  const result = validatePersianOutput('پ'.repeat(200));
   assert.equal(result.valid, true);
 });
 
@@ -135,34 +147,34 @@ test('V20: "[object Object]" → REJECT', () => {
 // 2. P0-1: Provider Prompt Consistency
 
 test('P0-1a: tryWorkersAI accepts systemPrompt', () => {
-  assert.ok(/async function tryWorkersAI\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
+  assert.ok(/async function tryWorkersAI\(env, prompt, systemPrompt\)/.test(PROVIDERS_SRC));
 });
 
 test('P0-1b: tryOpenAI accepts systemPrompt', () => {
-  assert.ok(/async function tryOpenAI\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
+  assert.ok(/async function tryOpenAI\(env, prompt, systemPrompt\)/.test(PROVIDERS_SRC));
 });
 
 test('P0-1c: tryOpenRouter accepts systemPrompt', () => {
-  assert.ok(/async function tryOpenRouter\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
+  assert.ok(/async function tryOpenRouter\(env, prompt, systemPrompt\)/.test(PROVIDERS_SRC));
 });
 
 test('P0-1d: generateSummaryWithFallback passes systemPrompt to ALL providers', () => {
-  assert.ok(/tryWorkersAI\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
-  assert.ok(/tryOpenRouter\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
-  assert.ok(/tryOpenAI\(env, prompt, systemPrompt\)/.test(WORKER_SRC));
+  assert.ok(/tryWorkersAI\(env, prompt, systemPrompt\)/.test(SUMMARY_SRC));
+  assert.ok(/tryOpenRouter\(env, prompt, systemPrompt\)/.test(SUMMARY_SRC));
+  assert.ok(/tryOpenAI\(env, prompt, systemPrompt\)/.test(SUMMARY_SRC));
 });
 
 // 3. P0-2: Validator Integration
 
 test('P0-2a: validatePersianOutput called after each provider success', () => {
-  const fallbackMatch = WORKER_SRC.match(/async function generateSummaryWithFallback[\s\S]*?\nasync function/);
+  const fallbackMatch = SUMMARY_SRC.match(/async function generateSummaryWithFallback[\s\S]*?\nasync function/);
   assert.ok(fallbackMatch);
   const count = (fallbackMatch[0].match(/validatePersianOutput/g) || []).length;
-  assert.ok(count >= 5, `need 5+ validatePersianOutput calls, found ${count}`);
+  assert.ok(count >= 4, `need 4+ validatePersianOutput calls (4-provider chain: Groq→OpenRouter→WorkersAI→OpenAI), found ${count}`);
 });
 
 test('P0-2b: Failed validation triggers fallback', () => {
-  const fallbackMatch = WORKER_SRC.match(/async function generateSummaryWithFallback[\s\S]*?\nasync function/);
+  const fallbackMatch = SUMMARY_SRC.match(/async function generateSummaryWithFallback[\s\S]*?\nasync function/);
   assert.ok(fallbackMatch[0].includes('persian_validation_failed'));
   assert.ok(fallbackMatch[0].includes("r.success = false"));
 });
@@ -170,21 +182,21 @@ test('P0-2b: Failed validation triggers fallback', () => {
 // 4. P1-1: Translation Cache TTL
 
 test('P1-1a: TRANSLATION_CACHE_TTL_MS = 5 min', () => {
-  assert.ok(/TRANSLATION_CACHE_TTL_MS = 5 \* 60 \* 1000/.test(WORKER_SRC));
+  assert.ok(/TRANSLATION_CACHE_TTL_MS = 5 \* 60 \* 1000/.test(TRANSLATE_SRC));
 });
 
 test('P1-1b: Cache entries store _expiresAt', () => {
-  assert.ok(/_expiresAt: Date\.now\(\) \+ TRANSLATION_CACHE_TTL_MS/.test(WORKER_SRC));
+  assert.ok(/_expiresAt: Date\.now\(\) \+ TRANSLATION_CACHE_TTL_MS/.test(TRANSLATE_SRC));
 });
 
 test('P1-1c: Cache read checks TTL', () => {
-  assert.ok(/cached\._expiresAt && Date\.now\(\) < cached\._expiresAt/.test(WORKER_SRC));
+  assert.ok(/cached\._expiresAt && Date\.now\(\) < cached\._expiresAt/.test(TRANSLATE_SRC));
 });
 
 // 5. P1-3: User Prompt Persian Instruction
 
 test('P1-3: JOURNALIST_USER_PROMPT includes Persian instruction', () => {
-  assert.ok(/تحلیل را به زبان فارسی روان و طبیعی بنویس/.test(WORKER_SRC));
+  assert.ok(/تحلیل را به زبان فارسی روان و طبیعی بنویس/.test(SUMMARY_SRC));
 });
 
 // 6. P1-9: Frontend Field Mapping
@@ -226,19 +238,19 @@ test('REGRESS-4: ON CONFLICT DO NOTHING preserved', () => {
 
 test('P3-P0-1a: processOneArticleSummary KV lookup uses threshold=200 (not 50)', () => {
   // Find the KV cache read section
-  const kvSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200');
+  const kvSection = SUMMARY_SRC.indexOf('P3-P0-1 FIX: Use threshold=200');
   assert.ok(kvSection > -1, 'P3-P0-1 FIX comment must exist for KV lookup');
   // Verify threshold=200 is used (not 50)
-  const afterComment = WORKER_SRC.slice(kvSection, kvSection + 500);
+  const afterComment = SUMMARY_SRC.slice(kvSection, kvSection + 500);
   assert.ok(afterComment.includes('>= 200'), 'KV lookup must use >= 200');
   assert.ok(!afterComment.includes('>= 50'), 'KV lookup must NOT use >= 50');
 });
 
 test('P3-P0-1b: processOneArticleSummary DB lookup runs validatePersianOutput', () => {
   // Find the DB check section
-  const dbSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) AND run');
+  const dbSection = SUMMARY_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 (matches Phase 2 validator) AND run');
   assert.ok(dbSection > -1, 'P3-P0-1 FIX comment must exist for DB lookup');
-  const afterComment = WORKER_SRC.slice(dbSection, dbSection + 800);
+  const afterComment = SUMMARY_SRC.slice(dbSection, dbSection + 800);
   assert.ok(afterComment.includes('validatePersianOutput(dbArticle.summary)'),
     'DB lookup must run validatePersianOutput on dbArticle.summary');
   assert.ok(afterComment.includes('>= 200'),
@@ -246,15 +258,15 @@ test('P3-P0-1b: processOneArticleSummary DB lookup runs validatePersianOutput', 
 });
 
 test('P3-P0-1c: DB lookup logs warning on invalid summary (does NOT serve bad data)', () => {
-  assert.ok(WORKER_SRC.includes('DB summary failed Persian validation'),
+  assert.ok(SUMMARY_SRC.includes('DB summary failed Persian validation'),
     'DB lookup must log warning when summary fails validation');
 });
 
 test('P3-P0-1d: enrichNewsWithAISummaries validates KV summary', () => {
   // Find the enrichNews KV read section
-  const enrichSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Only accept KV summary if it passes Phase 2 validation');
+  const enrichSection = SUMMARY_SRC.indexOf('P3-P0-1 FIX: Only accept KV summary if it passes Phase 2 validation');
   assert.ok(enrichSection > -1, 'P3-P0-1 FIX comment must exist in enrichNewsWithAISummaries');
-  const afterComment = WORKER_SRC.slice(enrichSection, enrichSection + 500);
+  const afterComment = SUMMARY_SRC.slice(enrichSection, enrichSection + 500);
   assert.ok(afterComment.includes('validatePersianOutput(parsedSummary)'),
     'enrichNews must run validatePersianOutput on KV summary');
   assert.ok(afterComment.includes('>= 200'),
@@ -263,9 +275,9 @@ test('P3-P0-1d: enrichNewsWithAISummaries validates KV summary', () => {
 
 test('P3-P0-1e: processNewsAIBatch enqueue DB check uses threshold=200 + validator', () => {
   // Find the enqueue DB check
-  const enqueueSection = WORKER_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 + validatePersianOutput (same as processOneArticleSummary)');
+  const enqueueSection = SUMMARY_SRC.indexOf('P3-P0-1 FIX: Use threshold=200 + validatePersianOutput (same as processOneArticleSummary)');
   assert.ok(enqueueSection > -1, 'P3-P0-1 FIX comment must exist in enqueue path');
-  const afterComment = WORKER_SRC.slice(enqueueSection, enqueueSection + 500);
+  const afterComment = SUMMARY_SRC.slice(enqueueSection, enqueueSection + 500);
   assert.ok(afterComment.includes('>= 200'),
     'enqueue DB check must use >= 200 threshold');
   assert.ok(afterComment.includes('validatePersianOutput(dbArticle.summary)'),
@@ -275,60 +287,60 @@ test('P3-P0-1e: processNewsAIBatch enqueue DB check uses threshold=200 + validat
 // --- P3-P1-2: Paragraph preservation in sanitizeNewsSummary ---
 
 test('P3-P1-2a: sanitizeNewsSummary preserves paragraph breaks (\\n\\n)', () => {
-  assert.ok(WORKER_SRC.includes('PARAGRAPH_MARKER'),
+  assert.ok(SHARED_SRC.includes('PARAGRAPH_MARKER'),
     'sanitizeNewsSummary must use PARAGRAPH_MARKER for paragraph preservation');
-  assert.ok(WORKER_SRC.includes("const PARAGRAPH_MARKER = '\\x1F'"),
+  assert.ok(SHARED_SRC.includes("const PARAGRAPH_MARKER = '\\x1F'"),
     'PARAGRAPH_MARKER must be \\x1F (Unit Separator)');
-  assert.ok(WORKER_SRC.includes('summary.replace(/\\n{2,}/g, PARAGRAPH_MARKER)'),
+  assert.ok(SHARED_SRC.includes('summary.replace(/\\n{2,}/g, PARAGRAPH_MARKER)'),
     'sanitizeNewsSummary must replace \\n\\n with PARAGRAPH_MARKER before sanitizeNewsTitle');
-  assert.ok(WORKER_SRC.includes("new RegExp(PARAGRAPH_MARKER, 'g'), '\\n\\n'"),
+  assert.ok(SHARED_SRC.includes("new RegExp(PARAGRAPH_MARKER, 'g'), '\\n\\n'"),
     'sanitizeNewsSummary must restore PARAGRAPH_MARKER to \\n\\n after sanitizeNewsTitle');
 });
 
 test('P3-P1-2b: single \\n converted to space (within-paragraph wrap)', () => {
-  assert.ok(WORKER_SRC.includes("summary.replace(/\\n/g, ' ')"),
+  assert.ok(SHARED_SRC.includes("summary.replace(/\\n/g, ' ')"),
     'sanitizeNewsSummary must convert single \\n to space (within-paragraph wrap)');
 });
 
 // --- P3-P2-1: Translation cache key full text ---
 
 test('P3-P2-1a: translation cache key uses full text (not substring)', () => {
-  assert.ok(WORKER_SRC.includes('P3-P2-1 FIX: Use full text as cache key'),
+  assert.ok(TRANSLATE_SRC.includes('P3-P2-1 FIX: Use full text as cache key'),
     'P3-P2-1 FIX comment must exist');
-  assert.ok(WORKER_SRC.includes('const cacheKey = text;'),
+  assert.ok(TRANSLATE_SRC.includes('const cacheKey = text;'),
     'cacheKey must be full text (not text.substring(0, 100))');
   // Ensure old pattern is NOT present
-  assert.ok(!/cacheKey = text\.length > 100 \? text\.substring\(0, 100\)/.test(WORKER_SRC),
+  assert.ok(!/cacheKey = text\.length > 100 \? text\.substring\(0, 100\)/.test(TRANSLATE_SRC),
     'old substring cacheKey pattern must NOT exist');
 });
 
 // --- P3 Regression: ensure existing functionality preserved ---
 
 test('P3-REGRESS-1: sanitizeNewsTitle still exists and works (unchanged)', () => {
-  assert.ok(WORKER_SRC.includes('function sanitizeNewsTitle('),
+  assert.ok(SHARED_SRC.includes('function sanitizeNewsTitle('),
     'sanitizeNewsTitle must still exist');
-  assert.ok(WORKER_SRC.includes('function sanitizeNewsSummary('),
+  assert.ok(SHARED_SRC.includes('function sanitizeNewsSummary('),
     'sanitizeNewsSummary must still exist');
 });
 
 test('P3-REGRESS-2: validatePersianOutput still has maxLength=5000', () => {
-  assert.ok(WORKER_SRC.includes('maxLength = opts.maxLength ?? 5000'),
+  assert.ok(SHARED_SRC.includes('maxLength = opts.maxLength ?? 5000'),
     'validatePersianOutput maxLength must still be 5000');
 });
 
 test('P3-REGRESS-3: validatePersianOutput default minLength still 200', () => {
-  assert.ok(WORKER_SRC.includes("minLength = opts.minLength ?? 200"),
+  assert.ok(SHARED_SRC.includes("minLength = opts.minLength ?? 200"),
     'validatePersianOutput default minLength must still be 200');
 });
 
 test('P3-REGRESS-4: Translation cache TTL still 5 minutes', () => {
-  assert.ok(WORKER_SRC.includes('TRANSLATION_CACHE_TTL_MS = 5 * 60 * 1000'),
+  assert.ok(TRANSLATE_SRC.includes('TRANSLATION_CACHE_TTL_MS = 5 * 60 * 1000'),
     'TRANSLATION_CACHE_TTL_MS must still be 5 minutes');
 });
 
 test('P3-REGRESS-5: Enum validation in parseBatchResult preserved', () => {
-  assert.ok(WORKER_SRC.includes("validSentiments = new Set(['bullish', 'bearish', 'neutral'])"),
+  assert.ok(SUMMARY_SRC.includes("validSentiments = new Set(['bullish', 'bearish', 'neutral'])"),
     'enum validation for sentiment must be preserved');
-  assert.ok(WORKER_SRC.includes("validImpacts = new Set(['high', 'medium', 'low'])"),
+  assert.ok(SUMMARY_SRC.includes("validImpacts = new Set(['high', 'medium', 'low'])"),
     'enum validation for impact must be preserved');
 });
