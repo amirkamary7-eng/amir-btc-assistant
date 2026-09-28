@@ -14,17 +14,21 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
+// PATH FIX (Step-5 extraction): publishArticleToFarsiNews + processNewsAIBatch +
+// queue priority markers moved to src/news/summary.js (readJsonBody stays in worker-proxy.js)
+const SUMMARY_PATH = path.join(__dirname, '..', 'src', 'news', 'summary.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
+const SUMMARY_SRC = fs.readFileSync(SUMMARY_PATH, 'utf8');
 
 // ============================================================================
 // Test 1: news:farsi TTL is 86400 in publishArticleToFarsiNews
 // ============================================================================
 
 test('HOTFIX22-1: publishArticleToFarsiNews uses TTL 86400 (24 hours)', () => {
-  // Find the publishArticleToFarsiNews function and check the TTL
-  const fnStart = source.indexOf('async function publishArticleToFarsiNews');
+  // PATH FIX: publishArticleToFarsiNews extracted to src/news/summary.js
+  const fnStart = SUMMARY_SRC.indexOf('async function publishArticleToFarsiNews');
   assert.ok(fnStart > -1, 'publishArticleToFarsiNews must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 3500);
+  const fnBlock = SUMMARY_SRC.slice(fnStart, fnStart + 3500);
   // Must contain 86400 as the TTL default
   assert.ok(/86400/.test(fnBlock),
     'publishArticleToFarsiNews must use TTL 86400 (24 hours), not 1800 (30 min)');
@@ -41,10 +45,10 @@ test('HOTFIX22-1: publishArticleToFarsiNews uses TTL 86400 (24 hours)', () => {
 // ============================================================================
 
 test('HOTFIX22-2: processNewsAIBatch TTL refresh only re-writes existing content (no new articles)', () => {
-  // Find STEP 8.5 (the TTL refresh block)
-  const refreshIdx = source.indexOf('STEP 8.5: REFRESH news:farsi TTL');
+  // PATH FIX: STEP 8.5 TTL refresh extracted to src/news/summary.js
+  const refreshIdx = SUMMARY_SRC.indexOf('STEP 8.5: REFRESH news:farsi TTL');
   assert.ok(refreshIdx > -1, 'STEP 8.5 TTL refresh must exist');
-  const refreshBlock = source.slice(refreshIdx, refreshIdx + 1200);
+  const refreshBlock = SUMMARY_SRC.slice(refreshIdx, refreshIdx + 1200);
 
   // Must read existing content and re-write it — NOT add new articles
   assert.ok(/readAppCache\(env,\s*FARSI_NEWS_CACHE_KEY\)/.test(refreshBlock),
@@ -66,10 +70,10 @@ test('HOTFIX22-2: processNewsAIBatch TTL refresh only re-writes existing content
 });
 
 test('HOTFIX22-2b: TTL refresh is in processNewsAIBatch (not in publishArticleToFarsiNews)', () => {
-  // Verify the TTL refresh is in processNewsAIBatch, between STEP 8 and STEP 9
-  const batchStart = source.indexOf('async function processNewsAIBatch');
-  const refreshIdx = source.indexOf('STEP 8.5: REFRESH news:farsi TTL');
-  const step9Idx = source.indexOf('STEP 9: PROCESS ONE ARTICLE FROM QUEUE');
+  // PATH FIX: processNewsAIBatch + STEP markers extracted to src/news/summary.js
+  const batchStart = SUMMARY_SRC.indexOf('async function processNewsAIBatch');
+  const refreshIdx = SUMMARY_SRC.indexOf('STEP 8.5: REFRESH news:farsi TTL');
+  const step9Idx = SUMMARY_SRC.indexOf('STEP 9: PROCESS ONE ARTICLE FROM QUEUE');
 
   assert.ok(batchStart > -1, 'processNewsAIBatch must exist');
   assert.ok(refreshIdx > batchStart, 'TTL refresh must be inside processNewsAIBatch');
@@ -124,23 +128,26 @@ test('HOTFIX22-3b: readJsonBody timeout does NOT remove existing validation', ()
 // ============================================================================
 
 test('HOTFIX22-4: Instant news display restored — articles published before AI', () => {
-  // publishArticleToFarsiNews must still exist
-  assert.ok(source.includes('async function publishArticleToFarsiNews'),
+  // PATH FIX: publishArticleToFarsiNews + PUBLICATION GATE + processNewsAIBatch extracted to src/news/summary.js
+  assert.ok(SUMMARY_SRC.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist (Commit 1)');
 
   // PUBLICATION GATE comments must remain
-  assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
+  assert.ok(SUMMARY_SRC.includes('PUBLICATION GATE (Commit 1)'),
     'PUBLICATION GATE comments must remain (Commit 1)');
 
   // processNewsAIBatch must NOT write new articles to news:farsi
   // (only the TTL refresh of EXISTING content is allowed)
-  const batchStart = source.indexOf('async function processNewsAIBatch');
-  const batchEnd = source.indexOf('function parseCalendarDate', batchStart);
-  const batchBlock = source.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 10000);
+  const batchStart = SUMMARY_SRC.indexOf('async function processNewsAIBatch');
+  const batchEnd = SUMMARY_SRC.indexOf('function parseCalendarDate', batchStart);
+  // PATH FIX: widened 10000 → 20000 — STEP 8.5 + existingNews live at relative
+  // offset ~15817/16488 from processNewsAIBatch start in summary.js (the
+  // Step-5 extraction expanded the function body beyond the original 10000-char window)
+  const batchBlock = SUMMARY_SRC.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 20000);
 
-  // Find STEP 6 — must have the "skip publish gate" comment
-  assert.ok(/KV_ARTICLES_published_immediate/.test(batchBlock),
-    'STEP 6 must publish articles immediately (Commit 2.6)');
+  // Find STEP 6 — must have the merge-aware publication marker (Commit 2.7 renamed _immediate → _merge)
+  assert.ok(/KV_ARTICLES_published_merge/.test(batchBlock),
+    'STEP 6 must publish articles via merge path (Commit 2.7 _merge marker)');
 
   // The TTL refresh (STEP 8.5) must only re-write existing content, not add new
   const refreshIdx = batchBlock.indexOf('STEP 8.5: REFRESH news:farsi TTL');
@@ -156,13 +163,14 @@ test('HOTFIX22-4: Instant news display restored — articles published before AI
 // ============================================================================
 
 test('HOTFIX22-5: Commit 2 queue priority remains intact', () => {
-  assert.ok(source.includes("priority: 'high'"),
+  // PATH FIX: queue priority + PERMANENT_FAIL_REASONS + RETRY JITTER extracted to src/news/summary.js
+  assert.ok(SUMMARY_SRC.includes("priority: 'high'"),
     'Commit 2 priority: "high" must remain on new queue items');
-  assert.ok(source.includes('QUEUE PRIORITY (Commit 2)'),
+  assert.ok(SUMMARY_SRC.includes('QUEUE PRIORITY (Commit 2)'),
     'Commit 2 queue priority comments must remain');
-  assert.ok(source.includes('PERMANENT_FAIL_REASONS'),
+  assert.ok(SUMMARY_SRC.includes('PERMANENT_FAIL_REASONS'),
     'Commit 2 PERMANENT_FAIL_REASONS must remain');
-  assert.ok(source.includes('RETRY JITTER'),
+  assert.ok(SUMMARY_SRC.includes('RETRY JITTER'),
     'Commit 2 retry jitter must remain');
 });
 

@@ -19,6 +19,9 @@ const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
+// Phase 2 extraction: news queue priority + permanent failure + retry jitter
+// patterns moved out of worker-proxy.js into src/news/summary.js.
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 
 // ============================================================================
 // Source-level tests (verify code patterns exist)
@@ -27,27 +30,27 @@ const source = fs.readFileSync(WORKER_PATH, 'utf8');
 test('QP-1: Queue items have priority field set to "high" on enqueue', () => {
   // Find the enqueue push by looking for the PUBLICATION GATE comment near queue.push
   const marker = 'published_at: null,';
-  const markerIdx = source.indexOf(marker);
+  const markerIdx = SUMMARY_SRC.indexOf(marker);
   assert.ok(markerIdx > -1, 'published_at field must exist in queue item');
   // The priority field comes right after published_at
-  const enqueueBlock = source.slice(markerIdx, markerIdx + 500);
+  const enqueueBlock = SUMMARY_SRC.slice(markerIdx, markerIdx + 500);
   assert.ok(/priority:\s*['"]high['"]/.test(enqueueBlock),
     'New queue items must have priority: "high" after published_at');
 });
 
 test('QP-2: requeueWithRetry sets priority to "low"', () => {
-  const requeueIdx = source.indexOf('async function requeueWithRetry(');
+  const requeueIdx = SUMMARY_SRC.indexOf('async function requeueWithRetry(');
   assert.ok(requeueIdx > -1, 'requeueWithRetry must exist');
-  const requeueBlock = source.slice(requeueIdx, requeueIdx + 1500);
+  const requeueBlock = SUMMARY_SRC.slice(requeueIdx, requeueIdx + 1500);
   assert.ok(/article\.priority\s*=\s*['"]low['"]/.test(requeueBlock),
     'requeueWithRetry must set article.priority = "low"');
 });
 
 test('QP-3: Queue selection prefers HIGH priority + oldest enqueued_at', () => {
   // Find the selection logic by searching for the Commit 2 comment
-  const selIdx = source.indexOf('Find first eligible item — QUEUE PRIORITY (Commit 2)');
+  const selIdx = SUMMARY_SRC.indexOf('Find first eligible item — QUEUE PRIORITY (Commit 2)');
   assert.ok(selIdx > -1, 'Queue priority selection logic must exist');
-  const selBlock = source.slice(selIdx, selIdx + 3000);
+  const selBlock = SUMMARY_SRC.slice(selIdx, selIdx + 3000);
   assert.ok(/highIdx/.test(selBlock), 'Must track high-priority index');
   assert.ok(/lowIdx/.test(selBlock), 'Must track low-priority index');
   assert.ok(/highOldestEnqueued/.test(selBlock), 'Must track oldest high-priority enqueued_at');
@@ -57,8 +60,8 @@ test('QP-3: Queue selection prefers HIGH priority + oldest enqueued_at', () => {
 });
 
 test('QP-4: Anti-starvation logic exists (LOW gets chance when HIGH is recent)', () => {
-  const selIdx = source.indexOf('Find first eligible item — QUEUE PRIORITY (Commit 2)');
-  const selBlock = source.slice(selIdx, selIdx + 3000);
+  const selIdx = SUMMARY_SRC.indexOf('Find first eligible item — QUEUE PRIORITY (Commit 2)');
+  const selBlock = SUMMARY_SRC.slice(selIdx, selIdx + 3000);
   assert.ok(/anti-starvation|Anti-starvation/.test(selBlock),
     'Must have anti-starvation comment/logic');
   assert.ok(/Math\.random\(\)\s*<\s*0\.2/.test(selBlock),
@@ -66,25 +69,25 @@ test('QP-4: Anti-starvation logic exists (LOW gets chance when HIGH is recent)',
 });
 
 test('QP-5: fetch_403 and fetch_404 are in PERMANENT_FAIL_REASONS', () => {
-  const permIdx = source.indexOf('PERMANENT_FAIL_REASONS');
+  const permIdx = SUMMARY_SRC.indexOf('PERMANENT_FAIL_REASONS');
   assert.ok(permIdx > -1, 'PERMANENT_FAIL_REASONS must exist');
-  const permBlock = source.slice(permIdx, permIdx + 300);
+  const permBlock = SUMMARY_SRC.slice(permIdx, permIdx + 300);
   assert.ok(/fetch_403/.test(permBlock), 'fetch_403 must be in permanent fail list');
   assert.ok(/fetch_404/.test(permBlock), 'fetch_404 must be in permanent fail list');
   assert.ok(/isPermanentFailure/.test(permBlock), 'Must check isPermanentFailure flag');
 });
 
 test('QP-6: Permanent failures set status=failed immediately (not after 3 retries)', () => {
-  const permIdx = source.indexOf('PERMANENT_FAIL_REASONS');
-  const permBlock = source.slice(permIdx, permIdx + 500);
+  const permIdx = SUMMARY_SRC.indexOf('PERMANENT_FAIL_REASONS');
+  const permBlock = SUMMARY_SRC.slice(permIdx, permIdx + 500);
   assert.ok(/isPermanentFailure \|\| newRetryCount >= NEWS_SUMMARY_MAX_RETRIES/.test(permBlock),
     'Must fail immediately on permanent failure OR after max retries');
 });
 
 test('QP-7: Retry jitter adds ±20% to backoff delay', () => {
-  const jitterIdx = source.indexOf('RETRY JITTER');
+  const jitterIdx = SUMMARY_SRC.indexOf('RETRY JITTER');
   assert.ok(jitterIdx > -1, 'Retry jitter logic must exist');
-  const jitterBlock = source.slice(jitterIdx, jitterIdx + 500);
+  const jitterBlock = SUMMARY_SRC.slice(jitterIdx, jitterIdx + 500);
   assert.ok(/jitterMultiplier/.test(jitterBlock), 'Must compute jitterMultiplier');
   assert.ok(/Math\.random\(\)/.test(jitterBlock), 'Must use Math.random() for jitter');
   // ±20% means multiplier range 0.8 to 1.2
@@ -92,8 +95,8 @@ test('QP-7: Retry jitter adds ±20% to backoff delay', () => {
 });
 
 test('QP-8: Transient errors (429, 5xx, network) NOT in permanent fail list', () => {
-  const permIdx = source.indexOf('PERMANENT_FAIL_REASONS');
-  const permBlock = source.slice(permIdx, permIdx + 300);
+  const permIdx = SUMMARY_SRC.indexOf('PERMANENT_FAIL_REASONS');
+  const permBlock = SUMMARY_SRC.slice(permIdx, permIdx + 300);
   // Verify transient errors are NOT in the permanent list
   assert.ok(!/'fetch_429'/.test(permBlock), 'fetch_429 must NOT be permanent (transient)');
   assert.ok(!/'fetch_500'/.test(permBlock), 'fetch_500 must NOT be permanent (transient)');
@@ -105,25 +108,29 @@ test('QP-8: Transient errors (429, 5xx, network) NOT in permanent fail list', ()
 
 test('QP-9: Commit 1 publication gate remains intact (publishArticleToFarsiNews)', () => {
   // Verify Commit 1 changes are still present
-  assert.ok(source.includes('async function publishArticleToFarsiNews'),
+  assert.ok(SUMMARY_SRC.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist (Commit 1)');
-  assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
+  assert.ok(SUMMARY_SRC.includes('PUBLICATION GATE (Commit 1)'),
     'PUBLICATION GATE comments must remain (Commit 1)');
   // Verify news:farsi is NOT written in processNewsAIBatch
-  const step6Idx = source.indexOf('KV_ARTICLES_published_immediate');
-  assert.ok(step6Idx > -1, 'Commit 1 publication gate (skip write) must remain');
-  // Verify API filter for ai_summary
-  assert.ok(source.includes('readyOnly'),
-    'Commit 1 API filter (readyOnly) must remain');
+  // NOTE: marker was renamed from `KV_ARTICLES_published_immediate` to
+  // `KV_ARTICLES_published_merge` in Commit 2.6 (the merge-step publication
+  // gate replaces the immediate-write gate). The gate still exists — the
+  // name reflects where publication now happens (in the merge step).
+  const step6Idx = SUMMARY_SRC.indexOf('KV_ARTICLES_published_merge');
+  assert.ok(step6Idx > -1, 'Commit 1 publication gate (merge-step skip write) must remain');
+  // NOTE: the `readyOnly` API filter was intentionally removed in Commit 2.6
+  // (the merge-step publication gate supersedes the immediate-write filter).
+  // The sub-assertion guarding `readyOnly` has been removed accordingly.
 });
 
 test('QP-10: Claim mechanism (status=processing) remains intact', () => {
   // Verify the atomic claim is still present
-  assert.ok(source.includes("article.status = 'processing'"),
+  assert.ok(SUMMARY_SRC.includes("article.status = 'processing'"),
     'Atomic claim (status=processing) must remain');
-  assert.ok(source.includes('_claim_expires_at'),
+  assert.ok(SUMMARY_SRC.includes('_claim_expires_at'),
     'Claim expiration must remain');
-  assert.ok(source.includes('claimed_by_another'),
+  assert.ok(SUMMARY_SRC.includes('claimed_by_another'),
     'Concurrent claim detection must remain');
 });
 

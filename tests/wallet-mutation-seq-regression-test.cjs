@@ -91,7 +91,10 @@ test('WJS-6: claimDaily increments seq BEFORE the POST', () => {
 test('WJS-7: executeVpnPurchase increments seq BEFORE the POST', () => {
   const vpnIdx = walletSrc.indexOf('async function executeVpnPurchase(planId)');
   assert.ok(vpnIdx > -1, 'executeVpnPurchase function not found');
-  const vpnBody = walletSrc.slice(vpnIdx, vpnIdx + 600);
+  // executeVpnPurchase is a long function — the apiFetch call sits at
+  // offset ~1024 from function start, beyond the original 600-char window.
+  // Use a generous 2000-char window (sibling WJS-6 uses 2000 chars too).
+  const vpnBody = walletSrc.slice(vpnIdx, vpnIdx + 2000);
   // Accept either pattern
   const seqIncrIdx = vpnBody.search(/_incrementMutationSeq\(\)|_walletMutationSeq\+\+/);
   const apiCallIdx = vpnBody.indexOf("apiFetch('/api/rewards/vpn/purchase'");

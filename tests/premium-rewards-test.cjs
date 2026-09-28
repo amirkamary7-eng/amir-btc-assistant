@@ -12,6 +12,7 @@ const path = require('node:path');
 const ENT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/entitlement_config.js'), 'utf8');
 const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/wallet.js'), 'utf8');
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
+const REFERRAL_REWARDS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/referral-rewards.js'), 'utf8');
 
 function loadEC() {
   const cleaned = ENT_SRC
@@ -161,14 +162,14 @@ test('MISSION-03: refId unchanged (idempotency)', () => {
 // ─── Referral integration ───────────────────────────────────────────────────
 
 test('REFERRAL-01: processPendingReferralReward uses inviter tier', () => {
-  const block = WORKER_SRC.slice(WORKER_SRC.indexOf('async function processPendingReferralReward'), WORKER_SRC.indexOf('async function retryFailedReferralRewards'));
+  const block = REFERRAL_REWARDS_SRC.slice(REFERRAL_REWARDS_SRC.indexOf('async function processPendingReferralReward'), REFERRAL_REWARDS_SRC.indexOf('async function retryFailedReferralRewards'));
   assert.ok(block.includes('inviterIsPremium'), 'checks inviter tier');
   assert.ok(block.includes('getReferralRewardAmount'), 'uses tier-based helper');
   assert.ok(block.includes('finalRewardAmount'), 'uses final amount');
 });
 
 test('REFERRAL-02: refId unchanged (idempotency)', () => {
-  const block = WORKER_SRC.slice(WORKER_SRC.indexOf('async function creditReferralWithReward'), WORKER_SRC.indexOf('async function processPendingReferralReward'));
+  const block = REFERRAL_REWARDS_SRC.slice(REFERRAL_REWARDS_SRC.indexOf('async function creditReferralWithReward'), REFERRAL_REWARDS_SRC.indexOf('async function processPendingReferralReward'));
   assert.ok(block.includes('refId') || block.includes('ref_id'));
 });
 
@@ -183,7 +184,7 @@ test('SEC-01: No client-side isPremium trust', () => {
 test('SEC-02: isPremium always from MembershipAuthority', () => {
   assert.ok(WALLET_SRC.includes('membershipAuthority.isPremium'));
   assert.ok(WALLET_SRC.includes('_isPremiumSafe'));
-  assert.ok(WORKER_SRC.includes('membershipAuthority.isPremium(env, String(pending.inviter_id))'));
+  assert.ok(REFERRAL_REWARDS_SRC.includes('membershipAuthority.isPremium(env, String(pending.inviter_id))'));
 });
 
 test('SEC-03: Fail-safe — authority error returns Normal', () => {

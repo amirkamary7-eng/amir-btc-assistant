@@ -105,15 +105,19 @@ test('TEMPLATES-UI-4: Template table has actions column', () => {
   const fnStart = adminJsSrc.indexOf('async function loadNpTemplates');
   const fnEnd = adminJsSrc.indexOf('window.loadNpTemplates');
   const fnSrc = adminJsSrc.slice(fnStart, fnEnd);
+  // Phase i18n: column header now via t('adm_np_th_actions'); the regex
+  // /action/i still matches the key name adm_np_th_actions.
   assert.ok(/عملیات/.test(fnSrc) || /action/i.test(fnSrc), 'Must have actions column in template table');
-  assert.ok(/ویرایش/.test(fnSrc), 'Must have edit button in template table');
+  // Phase i18n: edit button label now via t('adm_ads_edit_btn')
+  assert.ok(/t\(['"]adm_ads_edit_btn['"]\)/.test(fnSrc), 'Must have edit button (t(\'adm_ads_edit_btn\')) in template table');
 });
 
 test('TEMPLATES-UI-5: Add template button exists', () => {
   const fnStart = adminJsSrc.indexOf('async function loadNpTemplates');
   const fnEnd = adminJsSrc.indexOf('window.loadNpTemplates');
   const fnSrc = adminJsSrc.slice(fnStart, fnEnd);
-  assert.ok(/افزودن قالب/.test(fnSrc), 'Must have "Add Template" button');
+  // Phase i18n: add-template button label now via t('adm_np_add_template')
+  assert.ok(/t\(['"]adm_np_add_template['"]\)/.test(fnSrc), 'Must have "Add Template" button (t(\'adm_np_add_template\'))');
   assert.ok(/showNpTemplateForm/.test(fnSrc), 'Must call showNpTemplateForm');
 });
 

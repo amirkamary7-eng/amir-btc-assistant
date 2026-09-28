@@ -44,6 +44,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
+const REFERRAL_REWARDS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/referral-rewards.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
+const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/telemetry.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -54,13 +58,13 @@ const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js')
  */
 function extractFunctionBody(fnName) {
   const startMarker = `async function ${fnName}`;
-  const startIdx = WORKER_SRC.indexOf(startMarker);
+  const startIdx = REFERRAL_REWARDS_SRC.indexOf(startMarker);
   assert.notEqual(startIdx, -1, `Function ${fnName} must exist in worker-proxy.js`);
 
-  const nextAsyncIdx = WORKER_SRC.indexOf('async function ', startIdx + startMarker.length);
-  const endIdx = nextAsyncIdx === -1 ? WORKER_SRC.length : nextAsyncIdx;
+  const nextAsyncIdx = REFERRAL_REWARDS_SRC.indexOf('async function ', startIdx + startMarker.length);
+  const endIdx = nextAsyncIdx === -1 ? REFERRAL_REWARDS_SRC.length : nextAsyncIdx;
 
-  return WORKER_SRC.slice(startIdx, endIdx);
+  return REFERRAL_REWARDS_SRC.slice(startIdx, endIdx);
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -107,13 +111,13 @@ test('H5-CRIT-04: retryFailedRefunds SQL query closes with `LIMIT 3`, (was `LIMI
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('H5-CRIT-05: all 4 retry function names are unchanged', () => {
-  assert.ok(WORKER_SRC.includes('async function retryFailedReferralRewards'),
+  assert.ok(REFERRAL_REWARDS_SRC.includes('async function retryFailedReferralRewards'),
     'retryFailedReferralRewards function name preserved');
-  assert.ok(WORKER_SRC.includes('async function retryFailedWheelRewards'),
+  assert.ok(REFERRAL_REWARDS_SRC.includes('async function retryFailedWheelRewards'),
     'retryFailedWheelRewards function name preserved');
-  assert.ok(WORKER_SRC.includes('async function retryFailedMissionRewards'),
+  assert.ok(REFERRAL_REWARDS_SRC.includes('async function retryFailedMissionRewards'),
     'retryFailedMissionRewards function name preserved');
-  assert.ok(WORKER_SRC.includes('async function retryFailedRefunds'),
+  assert.ok(REFERRAL_REWARDS_SRC.includes('async function retryFailedRefunds'),
     'retryFailedRefunds function name preserved');
 });
 
@@ -245,12 +249,12 @@ test('H5-CRIT-13: getNewsAIMonitoring still uses LIMIT 20 (unrelated — rolling
   // Find the getNewsAIMonitoring function and verify its body still has
   // `LIMIT 20` (inside the SQL template, so this is the SQL LIMIT — not
   // a comment).
-  const fnStart = WORKER_SRC.indexOf('async function getNewsAIMonitoring');
+  const fnStart = TELEMETRY_SRC.indexOf('async function getNewsAIMonitoring');
   assert.notEqual(fnStart, -1, 'getNewsAIMonitoring function must exist');
 
   // Find the next `async function ` to bound the search (function end).
-  const nextFnIdx = WORKER_SRC.indexOf('async function ', fnStart + 10);
-  const fnBody = WORKER_SRC.slice(fnStart, nextFnIdx === -1 ? WORKER_SRC.length : nextFnIdx);
+  const nextFnIdx = TELEMETRY_SRC.indexOf('async function ', fnStart + 10);
+  const fnBody = TELEMETRY_SRC.slice(fnStart, nextFnIdx === -1 ? TELEMETRY_SRC.length : nextFnIdx);
 
   assert.ok(fnBody.includes('FROM news_ai_tick_log'),
     'getNewsAIMonitoring must still SELECT FROM news_ai_tick_log');
@@ -277,7 +281,7 @@ test('H5-CRIT-15: all 4 retry functions are still called from the 1-min cron (mi
   // H5-CRITICAL fix only changed LIMIT inside the retry queries. The call
   // sites in scheduled() must remain unchanged (still 4 ctx.waitUntil calls,
   // still gated by _hourlyMinute === 0).
-  assert.ok(WORKER_SRC.includes('_hourlyMinute === 0'),
+  assert.ok(SCHEDULER_SRC.includes('_hourlyMinute === 0'),
     '1-min cron must still gate hourly retries by _hourlyMinute === 0');
 
   // Verify all 4 retry calls are still inside ctx.waitUntil blocks
@@ -287,7 +291,7 @@ test('H5-CRIT-15: all 4 retry functions are still called from the 1-min cron (mi
     'await retryFailedMissionRewards(env)',
     'await retryFailedRefunds(env)',
   ]) {
-    assert.ok(WORKER_SRC.includes(fnCall),
+    assert.ok(SCHEDULER_SRC.includes(fnCall),
       `${fnCall} must still be called from the 1-min cron hourly branch`);
   }
 });
@@ -302,7 +306,7 @@ test('H5-CRIT-16: exactly 4 `LIMIT 3\`,` occurrences in worker-proxy.js (one per
   // NOT `LIMIT 3\`,` patterns (they're either dynamic interpolation or
   // comment text). So the exact match `LIMIT 3\`,` is the precise signature
   // of the 4 retry queries.
-  const matches = (WORKER_SRC.match(/LIMIT 3`,/g) || []).length;
+  const matches = (REFERRAL_REWARDS_SRC.match(/LIMIT 3`,/g) || []).length;
   assert.equal(matches, 4,
     `must have exactly 4 \`LIMIT 3\`,\` occurrences (one per retry query) — found ${matches}`);
 });
@@ -310,12 +314,12 @@ test('H5-CRIT-16: exactly 4 `LIMIT 3\`,` occurrences in worker-proxy.js (one per
 test('H5-CRIT-17: retryFailed* jobs are NOT inside the isEvery15Min block (architecture preserved)', () => {
   // Regression guard from cron-architecture-test.cjs (T7-T9) — the H5-CRITICAL
   // fix must NOT have moved retry jobs into the */15 branch.
-  const idx15 = WORKER_SRC.indexOf('if (isEvery15Min) {');
+  const idx15 = SCHEDULER_SRC.indexOf('if (isEvery15Min) {');
   assert.notEqual(idx15, -1, 'isEvery15Min block must exist');
   // Find the next major block boundary after the isEvery15Min block
   // (the catch at the end of the withPhasePool block)
-  const catchIdx = WORKER_SRC.indexOf('}).catch((e) => {', idx15);
-  const block = WORKER_SRC.slice(idx15, catchIdx === -1 ? idx15 + 5000 : catchIdx);
+  const catchIdx = SCHEDULER_SRC.indexOf('}).catch((e) => {', idx15);
+  const block = SCHEDULER_SRC.slice(idx15, catchIdx === -1 ? idx15 + 5000 : catchIdx);
 
   assert.ok(!block.includes('await retryFailedReferralRewards'),
     'retryFailedReferralRewards must NOT be in the isEvery15Min block (architecture preserved)');

@@ -30,6 +30,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
 const NEWS_SHARED_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/shared.js'), 'utf8');
 
@@ -43,7 +44,7 @@ function findThresholdForFailReason(reason) {
   const re = new RegExp(
     'if\\s*\\(\\s*articleText\\.length\\s*<\\s*(\\d+)\\s*\\)\\s*\\{[^}]*?fail_reason\\s*=\\s*\'' + reason + '\''
   );
-  const m = WORKER_SRC.match(re);
+  const m = SUMMARY_SRC.match(re);
   return m ? Number(m[1]) : null;
 }
 
@@ -107,13 +108,13 @@ test('SOURCE-THRESHOLD-08: < 50 chars still produces text_too_short (not source_
 test('SOURCE-THRESHOLD-09: summary output minimum unchanged at 200 chars', () => {
   // Line 8910: if (sanitizedSummary.trim().length >= 200) — the AI output validator
   // Must remain 200 (AI must still produce 200+ char summaries even with 150-char source)
-  const m = WORKER_SRC.match(/if\s*\(\s*sanitizedSummary\.trim\(\)\.length\s*>=\s*(\d+)\s*\)/);
+  const m = SUMMARY_SRC.match(/if\s*\(\s*sanitizedSummary\.trim\(\)\.length\s*>=\s*(\d+)\s*\)/);
   assert.ok(m, 'Summary output validator (sanitizedSummary >= N) must exist');
   assert.equal(m[1], '200', 'Summary output minimum must remain 200 chars (unchanged — AI quality bar preserved)');
 });
 
 test('SOURCE-THRESHOLD-10: source_insufficient_length still in PERMANENT_FAIL_REASONS', () => {
-  const m = WORKER_SRC.match(/PERMANENT_FAIL_REASONS\s*=\s*\[([^\]]+)\]/);
+  const m = SUMMARY_SRC.match(/PERMANENT_FAIL_REASONS\s*=\s*\[([^\]]+)\]/);
   assert.ok(m, 'PERMANENT_FAIL_REASONS list must exist');
   assert.ok(m[1].includes("'source_insufficient_length'"),
     'source_insufficient_length must remain in PERMANENT_FAIL_REASONS (still permanent failure)');
@@ -122,7 +123,7 @@ test('SOURCE-THRESHOLD-10: source_insufficient_length still in PERMANENT_FAIL_RE
 test('SOURCE-THRESHOLD-11: Stage 4 fallback threshold unchanged at 50 chars', () => {
   // Stage 4 RSS description fallback (line 8773): if (combined.length >= 50) { articleText = combined; ... }
   // Must remain 50 (user explicitly said NOT to change this)
-  const m = WORKER_SRC.match(
+  const m = SUMMARY_SRC.match(
     /if\s*\(\s*combined\.length\s*>=\s*(\d+)\s*\)\s*\{[\s\S]*?articleText\s*=\s*combined[\s\S]*?extractionSource\s*=\s*'rss_description'/
   );
   assert.ok(m, 'Stage 4 RSS fallback threshold must exist');
@@ -131,15 +132,15 @@ test('SOURCE-THRESHOLD-11: Stage 4 fallback threshold unchanged at 50 chars', ()
 
 test('SOURCE-THRESHOLD-12: DEGRADED_PUBLISHERS unchanged (CoinDesk still present)', () => {
   // CoinDesk must still be in DEGRADED_PUBLISHERS (unchanged)
-  assert.ok(WORKER_SRC.includes("'www.coindesk.com'"),
+  assert.ok(SUMMARY_SRC.includes("'www.coindesk.com'"),
     'CoinDesk must remain in DEGRADED_PUBLISHERS (unchanged)');
 });
 
 test('SOURCE-THRESHOLD-13: news:failed_urls tracking logic unchanged', () => {
   // news:failed_urls KV set must still be written for permanent failures (unchanged)
-  assert.ok(WORKER_SRC.includes("'news:failed_urls'"),
+  assert.ok(SUMMARY_SRC.includes("'news:failed_urls'"),
     "news:failed_urls KV key must still exist (unchanged retry tracking)");
-  assert.ok(WORKER_SRC.includes('PERMANENT_FAIL_REASONS'),
+  assert.ok(SUMMARY_SRC.includes('PERMANENT_FAIL_REASONS'),
     'PERMANENT_FAIL_REASONS list must still exist (unchanged)');
 });
 
@@ -152,11 +153,11 @@ test('SOURCE-THRESHOLD-14: MAX_SUMMARIES_PER_TICK unchanged at 2 (H5-5min fix pr
 
 test('SOURCE-THRESHOLD-15: provider fallback chain unchanged', () => {
   // Provider chain order must remain: groq → openrouter → workers-ai → openai
-  assert.ok(WORKER_SRC.includes("attemptProvider('groq'"), 'Groq provider must still exist (unchanged)');
-  assert.ok(WORKER_SRC.includes("attemptProvider('openrouter'"), 'OpenRouter provider must still exist (unchanged)');
-  assert.ok(WORKER_SRC.includes("attemptProvider('workers-ai'"), 'Workers AI provider must still exist (unchanged)');
-  assert.ok(WORKER_SRC.includes("attemptProvider('openai'"), 'OpenAI provider must still exist (unchanged)');
-  assert.ok(WORKER_SRC.includes('async function generateSummaryWithFallback'),
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('groq'"), 'Groq provider must still exist (unchanged)');
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('openrouter'"), 'OpenRouter provider must still exist (unchanged)');
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('workers-ai'"), 'Workers AI provider must still exist (unchanged)');
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('openai'"), 'OpenAI provider must still exist (unchanged)');
+  assert.ok(SUMMARY_SRC.includes('async function generateSummaryWithFallback'),
     'generateSummaryWithFallback must still exist (unchanged)');
 });
 
@@ -169,6 +170,6 @@ test('SOURCE-THRESHOLD-16: validatePersianOutput validator unchanged', () => {
 test('SOURCE-THRESHOLD-17: comment above threshold line still references original rationale', () => {
   // The PHASE 2 FIX comment above line 8837 is documentation — must still exist
   // (verifies we didn't accidentally remove or modify the comment block)
-  assert.ok(WORKER_SRC.includes('PHASE 2 FIX — Source integrity'),
+  assert.ok(SUMMARY_SRC.includes('PHASE 2 FIX — Source integrity'),
     'PHASE 2 FIX source integrity comment must still exist (unchanged documentation)');
 });

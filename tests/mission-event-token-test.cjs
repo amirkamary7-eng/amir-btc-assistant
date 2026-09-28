@@ -14,7 +14,7 @@
  * minimal in-memory KV simulator to test the actual logic.
  */
 
-const test = require('node:test');
+const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -40,16 +40,23 @@ function createMemoryKv(initial = {}) {
 
 // ── Load mission token service from extracted module ───────────────────
 // The mission token functions were extracted to src/auth/mission-tokens.js
-// (behavior-preserving move). We load the factory, strip the `export `
-// keyword, evaluate in an isolated scope with mock crypto, then call the
-// factory to get the token service functions.
+// (behavior-preserving move). The module is a real ES module that begins
+// with `import { createHmac, timingSafeEqual } from 'node:crypto'`.
+//
+// We load it as real ESM via a data URL so Node.js resolves the import
+// statement natively. If the import is missing or malformed, a SyntaxError
+// is thrown at load time — preventing the regression previously masked by
+// the old `new Function()` + dependency-injection approach, which silently
+// injected createHmac/timingSafeEqual as function parameters and hid a
+// missing top-level import (PR #41 restored the import; this test now
+// guards against its accidental removal).
+//
+// The factory receives sharedGetTehranDateString (from
+// src/services/timezone.js) so the FA-7 Tehran-date fix is exercised.
 const missionTokensSrc = fs.readFileSync(path.join(__dirname, '..', 'src/auth/mission-tokens.js'), 'utf8');
 
-// Strip `export ` so createMissionTokenService becomes a plain function declaration
-const factorySrc = missionTokensSrc.replace('export function createMissionTokenService', 'function createMissionTokenService');
-
 // FA-7: _getTodayISOString now delegates to sharedGetTehranDateString (Tehran
-// timezone). We must provide this helper in the eval context.
+// timezone). We must provide this helper to the factory.
 const sharedGetTehranDateString = function() {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tehran',
@@ -60,23 +67,27 @@ const sharedGetTehranDateString = function() {
   return fmt.format(new Date());
 };
 
-const wrappedSrc = `
-${factorySrc}
-module.exports = { createMissionTokenService };
-`;
+let issueMissionEventToken;
+let consumeMissionEventToken;
+let isMissionEventTokenConsumed;
 
-const tokenFactoryModule = { exports: {} };
-const { createHmac, timingSafeEqual } = require('node:crypto');
-const evaluator = new Function('require', 'module', 'exports', 'crypto', 'createHmac', 'timingSafeEqual', 'sharedGetTehranDateString', wrappedSrc);
-evaluator(require, tokenFactoryModule, tokenFactoryModule.exports, globalThis.crypto, createHmac, timingSafeEqual, sharedGetTehranDateString);
-
-// Call the factory to get the token service functions
-const tokenService = tokenFactoryModule.exports.createMissionTokenService({ sharedGetTehranDateString });
-const {
-  issueMissionEventToken,
-  consumeMissionEventToken,
-  isMissionEventTokenConsumed,
-} = tokenService;
+before(async () => {
+  // Load mission-tokens.js as a real ES module via a base64 data URL.
+  // This forces Node.js to resolve the
+  // `import { createHmac, timingSafeEqual } from 'node:crypto'` statement.
+  // If the import is missing, ReferenceError/SyntaxError is thrown at
+  // runtime — preventing the regression previously hidden by the
+  // new Function() + dependency-injection approach.
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(missionTokensSrc).toString('base64')}`;
+  const mod = await import(dataUrl);
+  // Call the factory to get the token service functions
+  const tokenService = mod.createMissionTokenService({ sharedGetTehranDateString });
+  ({
+    issueMissionEventToken,
+    consumeMissionEventToken,
+    isMissionEventTokenConsumed,
+  } = tokenService);
+});
 
 // ── Tests ──────────────────────────────────────────────────────────────
 

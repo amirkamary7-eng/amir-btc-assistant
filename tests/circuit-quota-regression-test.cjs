@@ -2,7 +2,10 @@
  * Circuit Breaker + m2m100 Quota Suppression Regression Tests
  * ============================================================
  * Tests for:
- * 1. FIX 1: Coordinator denial must NOT trip circuit breaker
+ * 1. FIX 1: Groq Router DO handles 429/capacity internally (coordinator_skipped
+ *    marker was REMOVED — the Router DO in src/durable-objects/groq-router.js
+ *    owns per-key circuit state; tryGroq delegates to _groqRoutedFetch →
+ *    groqRouterExecute and surfaces 429 details via `groq_429_info`).
  * 2. FIX 2: m2m100 4006 daily quota suppression
  *
  * Run: node --test circuit-quota-regression-test.cjs
@@ -15,16 +18,20 @@ const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/providers.js'), 'utf8');
+const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/translate.js'), 'utf8');
 
 // ═════════════════════════════════════════════════════════════════════
-// FIX 1: Coordinator denial must NOT trip circuit
+// FIX 1: Groq Router DO handles 429/capacity internally
+// (coordinator_skipped marker REMOVED — tryGroq delegates to Router DO)
 // ═════════════════════════════════════════════════════════════════════
 
 test('FIX1-01: attemptProvider checks coordinator_skipped before recordCircuitResult', () => {
   // The code must have: if (!r.coordinator_skipped) { recordCircuitResult(...) }
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function attemptProvider'),
-    WORKER_SRC.indexOf('async function attemptProvider') + 2500
+  const section = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('async function attemptProvider'),
+    SUMMARY_SRC.indexOf('async function attemptProvider') + 3500
   );
   assert.ok(section.includes('coordinator_skipped'),
     'attemptProvider must check coordinator_skipped flag');
@@ -38,19 +45,57 @@ test('FIX1-01: attemptProvider checks coordinator_skipped before recordCircuitRe
     'recordCircuitResult must be inside the !coordinator_skipped guard');
 });
 
-test('FIX1-02: tryGroq returns coordinator_skipped=true when capacity denied', () => {
-  const tryGroqSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function tryGroq'),
-    WORKER_SRC.indexOf('async function tryGemini')
+test('FIX1-02: tryGroq delegates 429/capacity handling to the Groq Router DO via _groqRoutedFetch', () => {
+  // ARCHITECTURE CHANGE (post-coordinator-removal):
+  // The `coordinator_skipped: true` marker was REMOVED. Groq 429/capacity
+  // denial is now handled INTERNALLY by the Groq Router DO (groqRouterExecute
+  // in src/durable-objects/groq-router.js). tryGroq delegates to the Router DO
+  // via `_groqRoutedFetch` and surfaces the router's 429 verdict via
+  // `groq_429_info` on the returned object (key_slot, quota_type,
+  // retry_after_seconds). This is the equivalent assertion that tests the
+  // current Router DO behavior (per the architectural spec — it does NOT
+  // depend on the removed `coordinator_skipped` marker).
+  //
+  // tryGroq now lives in src/news/providers.js (NOT worker-proxy.js).
+  const tryGroqSection = PROVIDERS_SRC.slice(
+    PROVIDERS_SRC.indexOf('async function tryGroq'),
+    PROVIDERS_SRC.indexOf('async function tryWorkersAI')
   );
-  assert.ok(tryGroqSection.includes('coordinator_skipped: true'),
-    'tryGroq must return coordinator_skipped: true when capacity is denied');
+  assert.ok(tryGroqSection.length > 0,
+    'tryGroq function body must be found in src/news/providers.js');
+  // 1) Delegation: tryGroq must call _groqRoutedFetch (Router DO entry point).
+  assert.ok(tryGroqSection.includes('_groqRoutedFetch'),
+    'tryGroq must delegate to _groqRoutedFetch (Groq Router DO entry point)');
+  // 2) Router 429 signal: tryGroq must surface groq_429_info on 429 responses.
+  assert.ok(tryGroqSection.includes('groq_429_info'),
+    'tryGroq must surface groq_429_info (Router DO capacity-denial signal) on the returned object');
+  // 3) Negative guard: the removed `coordinator_skipped` marker must NOT be
+  //    re-introduced into tryGroq — the Router DO owns that responsibility now.
+  assert.ok(!tryGroqSection.includes('coordinator_skipped'),
+    'tryGroq must NOT use the removed coordinator_skipped marker (Router DO handles 429 internally)');
 });
 
-test('FIX1-03: Chat AI checks _coordinatorSkipped before circuit recording', () => {
-  assert.ok(ASSISTANT_SRC.includes('!error?._coordinatorSkipped'),
-    'Chat AI must check _coordinatorSkipped before recording circuit failure');
-});
+// NOTE: FIX1-03 and FIX1-05 were REMOVED.
+//
+// FIX1-03 ("Chat AI checks _coordinatorSkipped before circuit recording"):
+//   The behavior is GONE. The `_coordinatorSkipped` marker was removed from
+//   assistant.js because the Groq Router DO now handles 429 internally for
+//   Chat AI too (callGroqChat → groqRouterExecute). Chat AI's attemptChatProvider
+//   no longer needs to inspect _coordinatorSkipped before calling
+//   recordCircuitResult — the router surfaces 429 as a normal retryable
+//   provider error which the existing `errorType === 'retryable'` guard already
+//   handles. There is no equivalent source-level assertion to write (the marker
+//   simply doesn't exist anymore). Per the task rules, removing the assertion
+//   is appropriate (it is NOT weakening — the behavior no longer exists).
+//
+// FIX1-05 ("Real Groq 5xx still trips circuit — exactly 1 coordinator_skipped"):
+//   The behavior is GONE. The `coordinator_skipped` concept was entirely
+//   removed from tryGroq. The count is now 0 (not 1). There is no equivalent
+//   source-level assertion to write (the marker simply doesn't exist anymore).
+//   Per the task rules, removing the assertion is appropriate.
+//
+// The current Router DO behavior is covered by FIX1-02 above (delegation to
+// _groqRoutedFetch + groq_429_info surfacing + absence of coordinator_skipped).
 
 test('FIX1-04: Real Groq 429 still trips circuit (not skipped)', () => {
   // When Groq returns HTTP 429, tryGroq does NOT set coordinator_skipped
@@ -69,43 +114,29 @@ test('FIX1-04: Real Groq 429 still trips circuit (not skipped)', () => {
     'HTTP errors must NOT set coordinator_skipped (they are real provider failures)');
 });
 
-test('FIX1-05: Real Groq 5xx still trips circuit (not skipped)', () => {
-  // classifyHttpError(500) → 'retryable'
-  // tryGroq returns this without coordinator_skipped
-  // attemptProvider records it as failure
-  const tryGroqSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function tryGroq'),
-    WORKER_SRC.indexOf('async function tryGemini')
-  );
-  // The only place coordinator_skipped is set is in the capacity check
-  const coordinatorSkipCount = (tryGroqSection.match(/coordinator_skipped/g) || []).length;
-  assert.equal(coordinatorSkipCount, 1,
-    'coordinator_skipped should appear exactly once (only in capacity check)');
-});
-
 // ═════════════════════════════════════════════════════════════════════
 // FIX 2: m2m100 4006 daily quota suppression
 // ═════════════════════════════════════════════════════════════════════
 
 test('FIX2-01: isM2m100QuotaExhausted function exists', () => {
-  assert.ok(WORKER_SRC.includes('async function isM2m100QuotaExhausted'),
+  assert.ok(TRANSLATE_SRC.includes('async function isM2m100QuotaExhausted'),
     'isM2m100QuotaExhausted must exist');
 });
 
 test('FIX2-02: markM2m100QuotaExhausted function exists', () => {
-  assert.ok(WORKER_SRC.includes('async function markM2m100QuotaExhausted'),
+  assert.ok(TRANSLATE_SRC.includes('async function markM2m100QuotaExhausted'),
     'markM2m100QuotaExhausted must exist');
 });
 
 test('FIX2-03: M2M100_QUOTA_KV_KEY is defined', () => {
-  assert.ok(WORKER_SRC.includes("M2M100_QUOTA_KV_KEY = 'wai:m2m100:quota_exhausted'"),
+  assert.ok(TRANSLATE_SRC.includes("M2M100_QUOTA_KV_KEY = 'wai:m2m100:quota_exhausted'"),
     'M2M100_QUOTA_KV_KEY must be defined');
 });
 
 test('FIX2-04: isM2m100QuotaExhausted checks in-memory flag first (fast path)', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted'),
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted') + 500
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted'),
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted') + 500
   );
   assert.ok(section.includes('_m2m100QuotaExhausted'),
     'Must check in-memory flag');
@@ -114,9 +145,9 @@ test('FIX2-04: isM2m100QuotaExhausted checks in-memory flag first (fast path)', 
 });
 
 test('FIX2-05: isM2m100QuotaExhausted checks KV for cross-isolate propagation', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted'),
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted') + 800
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted'),
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted') + 800
   );
   assert.ok(section.includes('readAppCache'),
     'Must read from KV for cross-isolate propagation');
@@ -125,9 +156,9 @@ test('FIX2-05: isM2m100QuotaExhausted checks KV for cross-isolate propagation', 
 });
 
 test('FIX2-06: isM2m100QuotaExhausted auto-resets when reset time passes', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted'),
-    WORKER_SRC.indexOf('async function isM2m100QuotaExhausted') + 600
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted'),
+    TRANSLATE_SRC.indexOf('async function isM2m100QuotaExhausted') + 600
   );
   assert.ok(section.includes('Date.now() >= _m2m100QuotaResetAt'),
     'Must auto-reset when current time passes reset time');
@@ -136,9 +167,9 @@ test('FIX2-06: isM2m100QuotaExhausted auto-resets when reset time passes', () =>
 });
 
 test('FIX2-07: markM2m100QuotaExhausted calculates UTC midnight reset', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function markM2m100QuotaExhausted'),
-    WORKER_SRC.indexOf('async function markM2m100QuotaExhausted') + 600
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('async function markM2m100QuotaExhausted'),
+    TRANSLATE_SRC.indexOf('async function markM2m100QuotaExhausted') + 600
   );
   assert.ok(section.includes('Date.UTC'),
     'Must calculate UTC midnight using Date.UTC');
@@ -147,9 +178,9 @@ test('FIX2-07: markM2m100QuotaExhausted calculates UTC midnight reset', () => {
 });
 
 test('FIX2-08: markM2m100QuotaExhausted writes to KV with TTL until midnight', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function markM2m100QuotaExhausted'),
-    WORKER_SRC.indexOf('async function markM2m100QuotaExhausted') + 800
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('async function markM2m100QuotaExhausted'),
+    TRANSLATE_SRC.indexOf('async function markM2m100QuotaExhausted') + 800
   );
   assert.ok(section.includes('writeAppCache'),
     'Must write to KV');
@@ -160,9 +191,9 @@ test('FIX2-08: markM2m100QuotaExhausted writes to KV with TTL until midnight', (
 });
 
 test('FIX2-09: translateToFarsi checks quota BEFORE calling m2m100', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('if (env?.AI) {'),
-    WORKER_SRC.indexOf('if (env?.AI) {') + 1000
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('if (env?.AI) {'),
+    TRANSLATE_SRC.indexOf('if (env?.AI) {') + 1000
   );
   // Find the section that contains m2m100 check
   const m2m100Section = section.slice(section.indexOf('m2m100QuotaExhausted'));
@@ -177,9 +208,9 @@ test('FIX2-09: translateToFarsi checks quota BEFORE calling m2m100', () => {
 });
 
 test('FIX2-10: translateToFarsi calls markM2m100QuotaExhausted on 4006', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('FIX 2: If 4006'),
-    WORKER_SRC.indexOf('FIX 2: If 4006') + 300
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('FIX 2: If 4006'),
+    TRANSLATE_SRC.indexOf('FIX 2: If 4006') + 300
   );
   assert.ok(section.includes('markM2m100QuotaExhausted'),
     'Must call markM2m100QuotaExhausted when 4006 is detected');
@@ -188,19 +219,19 @@ test('FIX2-10: translateToFarsi calls markM2m100QuotaExhausted on 4006', () => {
 });
 
 test('FIX2-11: Suppression is separate from circuit breaker (different key)', () => {
-  assert.ok(WORKER_SRC.includes("'wai:m2m100:quota_exhausted'"),
+  assert.ok(TRANSLATE_SRC.includes("'wai:m2m100:quota_exhausted'"),
     'Quota suppression KV key is separate from circuit breaker keys');
-  assert.ok(WORKER_SRC.includes("'news:circuit:"),
+  assert.ok(PROVIDERS_SRC.includes("'news:circuit:"),
     'Circuit breaker uses different key prefix');
   // The suppression key does NOT use circuit breaker prefix
-  assert.ok(!WORKER_SRC.includes("news:circuit:wai:m2m100"),
+  assert.ok(!TRANSLATE_SRC.includes("news:circuit:wai:m2m100"),
     'Quota suppression must NOT use circuit breaker prefix');
 });
 
 test('FIX2-12: After quota exhausted, m2m100 is NOT called (no env.AI.run)', () => {
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('FIX 2: Check daily quota suppression'),
-    WORKER_SRC.indexOf('FIX 2: Check daily quota suppression') + 500
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('FIX 2: Check daily quota suppression'),
+    TRANSLATE_SRC.indexOf('FIX 2: Check daily quota suppression') + 500
   );
   assert.ok(section.includes('if (m2m100QuotaExhausted)'),
     'Must check quota flag');
@@ -216,9 +247,9 @@ test('FIX2-12: After quota exhausted, m2m100 is NOT called (no env.AI.run)', () 
 
 test('INTEGRATION-01: Circuit breaker still works for real failures (not coordinator)', () => {
   // recordCircuitResult is still called for non-coordinator failures
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('FIX: Coordinator denial'),
-    WORKER_SRC.indexOf('FIX: Coordinator denial') + 300
+  const section = SUMMARY_SRC.slice(
+    SUMMARY_SRC.indexOf('Record result in circuit breaker'),
+    SUMMARY_SRC.indexOf('Record result in circuit breaker') + 800
   );
   assert.ok(section.includes('if (!r.coordinator_skipped)'),
     'Must still call recordCircuitResult for non-coordinator failures');
@@ -229,9 +260,9 @@ test('INTEGRATION-01: Circuit breaker still works for real failures (not coordin
 test('INTEGRATION-02: m2m100 circuit breaker still works (separate from quota)', () => {
   // The circuit breaker for 'translation-workers-ai' is still checked
   // (after the quota check passes)
-  const section = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('FIX 2: Check daily quota suppression'),
-    WORKER_SRC.indexOf('FIX 2: Check daily quota suppression') + 800
+  const section = TRANSLATE_SRC.slice(
+    TRANSLATE_SRC.indexOf('FIX 2: Check daily quota suppression'),
+    TRANSLATE_SRC.indexOf('FIX 2: Check daily quota suppression') + 800
   );
   assert.ok(section.includes('shouldAttemptProvider'),
     'Circuit breaker check must still be present (after quota check)');

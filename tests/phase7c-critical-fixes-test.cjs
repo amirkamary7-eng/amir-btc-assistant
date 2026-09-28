@@ -302,12 +302,61 @@ test('H1-COVER-03: membership-admin.js has 4 admToast call sites', () => {
 
 test('H1-COVER-04: all 17 call sites use the (message, type) signature', () => {
   // Every admToast call must pass 2 arguments (message + type).
+  // Use a balanced-paren extraction instead of the naive
+  // `/admToast\(([^)]+)\)/g` regex — that regex stops at the first `)`,
+  // but several calls nest t() calls inside (e.g. `admToast(t('mem_err_invalid_uid'), 'error')`),
+  // which made the regex capture only `t('mem_err_invalid_uid'` (0 commas → 1 arg).
+  // The balanced-paren matcher correctly handles nested parens/strings and
+  // splits the argument list at top-level commas only.
   const allSources = MEMBERSHIP_USER_SRC + COSMETICS_SRC + MEMBERSHIP_ADMIN_SRC;
-  const calls = [...allSources.matchAll(/admToast\(([^)]+)\)/g)];
-  for (const m of calls) {
-    const args = m[1].split(',');
+  const calls = [];
+  let searchFrom = 0;
+  while (true) {
+    const idx = allSources.indexOf('admToast(', searchFrom);
+    if (idx === -1) break;
+    const argStart = idx + 'admToast('.length;
+    let depth = 1;
+    let argEnd = argStart;
+    let inStr = null;
+    for (let i = argStart; i < allSources.length; i++) {
+      const ch = allSources[i];
+      if (inStr) {
+        if (ch === '\\') { i++; continue; }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+      if (ch === '(') depth++;
+      else if (ch === ')') { depth--; if (depth === 0) { argEnd = i; break; } }
+    }
+    if (depth !== 0) break; // unmatched paren — abort to avoid infinite loop
+    calls.push(allSources.slice(argStart, argEnd));
+    searchFrom = argEnd + 1;
+  }
+  assert.ok(calls.length >= 17, `expected ≥17 admToast call sites, got ${calls.length}`);
+  for (const argStr of calls) {
+    // Split at top-level commas only (skip commas inside nested parens/strings)
+    const args = [];
+    let depth = 0;
+    let inStr = null;
+    let cur = '';
+    for (let i = 0; i < argStr.length; i++) {
+      const ch = argStr[i];
+      if (inStr) {
+        cur += ch;
+        if (ch === '\\') { i++; if (i < argStr.length) cur += argStr[i]; continue; }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; cur += ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; cur += ch; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { depth--; cur += ch; continue; }
+      if (ch === ',' && depth === 0) { args.push(cur); cur = ''; continue; }
+      cur += ch;
+    }
+    if (cur.trim() !== '') args.push(cur);
     assert.ok(args.length >= 2,
-      `admToast call must have 2+ args (message, type). Got: admToast(${m[1]})`);
+      `admToast call must have 2+ args (message, type). Got: admToast(${argStr})`);
   }
 });
 
@@ -338,10 +387,14 @@ test('H1-UX-02: RULES_NOT_ACCEPTED Persian message preserved', () => {
     MEMBERSHIP_USER_SRC.indexOf("res.code === 'RULES_NOT_ACCEPTED'"),
     MEMBERSHIP_USER_SRC.indexOf("res.code === 'RULES_NOT_ACCEPTED'") + 800
   );
-  assert.ok(block.includes('قوانین عضویت به‌روزرسانی شده‌اند'),
-    'Persian "rules updated" message preserved');
-  assert.ok(block.includes('نسخه جدید را مطالعه کرده و دوباره تأیید کنید'),
-    'Persian "read + re-accept new version" message preserved');
+  // Phase i18n: the actionable "rules updated" message now resolves at runtime
+  // via t('mem_err_rules_updated_request') (fa/en dictionary entries), so the
+  // literal Persian text moved out of the source and into the i18n dictionary.
+  assert.ok(block.includes("t('mem_err_rules_updated_request')"),
+    'RULES_NOT_ACCEPTED message uses t(\'mem_err_rules_updated_request\') (Phase i18n)');
+  // The toast/alert must still surface the message to the user (fallback pattern).
+  assert.ok(block.includes('admToast(rulesMsg') || block.includes('alert(rulesMsg'),
+    'message still surfaced to the user via admToast/alert');
 });
 
 // ─── H1: Verify no native alert fallback for affected paths ────────────────

@@ -25,6 +25,14 @@ const path = require('node:path');
 
 const MEMBERSHIP_USER_SRC = fs.readFileSync(path.join(__dirname, '..', 'membership-user.js'), 'utf8');
 const STYLE_CSS = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+// Phase 8: The membership rules CSS (.mb-rules-section, .mb-rules-version,
+// .mb-rules-checkbox, .mb-uid-submit--disabled, etc.) was extracted from
+// style.css into a dedicated membership.css stylesheet. The 6 CSS assertions
+// below (B1-CSS-01 .. B1-CSS-06) now read from MEMBERSHIP_CSS instead of
+// STYLE_CSS so they keep matching the rules-section selectors after the
+// Phase 8 extraction. No assertion logic or expected values are changed —
+// only the source-file path is repointed.
+const MEMBERSHIP_CSS = fs.readFileSync(path.join(__dirname, '..', 'membership.css'), 'utf8');
 
 // Helper: extract a function body by name (between its definition and the
 // next function definition at the same indentation level).
@@ -59,8 +67,10 @@ function submitUidBlock() {
 test('B1-LOAD-01: loadRules() function exists and calls /api/membership/rules', () => {
   assert.ok(MEMBERSHIP_USER_SRC.includes('async function loadRules'),
     'loadRules() must be defined');
-  assert.ok(MEMBERSHIP_USER_SRC.includes("apiFetch('/api/membership/rules')"),
-    'loadRules must fetch /api/membership/rules');
+  // Phase i18n: loadRules() now passes ?lang=fa|en so the backend returns
+  // language-appropriate content (mb:rules:active:fa / :en cache keys).
+  assert.ok(MEMBERSHIP_USER_SRC.includes("apiFetch('/api/membership/rules?lang=' + langParam)"),
+    'loadRules must fetch /api/membership/rules?lang=<langParam>');
 });
 
 test('B1-LOAD-02: loadRules() caches in module-level _rules variable (no duplicate fetches)', () => {
@@ -158,9 +168,9 @@ test('B1-RENDER-05: Explicit acceptance checkbox with Persian label (Phase 8L)',
     'checkbox has stable id');
   assert.ok(body.includes('mb-rules-accept-label'),
     'acceptance label element rendered');
-  // Phase 8L: Updated acceptance text (shorter, no violation consequence)
-  assert.ok(body.includes('مطالعه کرده‌ام و با آن موافقم'),
-    'Persian acceptance text must mention reading + accepting');
+  // Phase i18n: acceptance label now via t('mem_rules_accept_label')
+  assert.ok(body.includes("t('mem_rules_accept_label')"),
+    'acceptance label uses t(\'mem_rules_accept_label\') (Phase i18n)');
 });
 
 test('B1-RENDER-06: Rules section inserted into activation popup HTML', () => {
@@ -186,8 +196,9 @@ test('B1-RENDER-08: FAIL-OPEN rendering when rules.active === false', () => {
     'inactive variant class applied');
   assert.ok(body.includes('mb-rules-body--empty'),
     'empty-body class applied in FAIL-OPEN mode');
-  assert.ok(body.includes('قوانین فعال در حال حاضر در دسترس نیست'),
-    'Persian FAIL-OPEN notice text present');
+  // Phase i18n: FAIL-OPEN notice text now via t('mem_rules_unavailable')
+  assert.ok(body.includes("t('mem_rules_unavailable')"),
+    'FAIL-OPEN notice uses t(\'mem_rules_unavailable\') (Phase i18n)');
 });
 
 // ─── Tests: Checkbox state gating ──────────────────────────────────────────
@@ -221,14 +232,14 @@ test('B1-CHECK-03: onRulesCheckboxChange() toggles submit button state', () => {
 
 test('B1-CHECK-04: updateSubmitButtonState() swaps label + icon on disable', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'updateSubmitButtonState');
-  // When disabled, shows "ابتدا قوانین را بپذیرید" with a lock icon.
-  assert.ok(body.includes('ابتدا قوانین را بپذیرید'),
-    'disabled hint label present');
+  // Phase i18n: disabled hint now via t('mem_submit_accept_first'); the
+  // enabled label is restored via t('mem_submit_btn').
+  assert.ok(body.includes("t('mem_submit_accept_first')"),
+    'disabled hint label uses t(\'mem_submit_accept_first\') (Phase i18n)');
   assert.ok(body.includes('aria-disabled'),
     'aria-disabled updated for accessibility');
-  // When enabled, restores the normal "ارسال درخواست عضویت" label.
-  assert.ok(body.includes('ارسال درخواست عضویت'),
-    'enabled label restored');
+  assert.ok(body.includes("t('mem_submit_btn')"),
+    'enabled label restored via t(\'mem_submit_btn\') (Phase i18n)');
 });
 
 test('B1-CHECK-05: onRulesCheckboxChange exposed via MembershipApp for inline onchange', () => {
@@ -278,8 +289,9 @@ test('B1-ORDER-04: /request NOT called if /accept fails', () => {
 
 test('B1-ORDER-05: Acceptance skipped when checkbox not checked (actionable message)', () => {
   const block = submitUidBlock();
-  assert.ok(block.includes('برای ارسال درخواست، ابتدا قوانین عضویت را مطالعه و تأیید کنید.'),
-    'actionable Persian message when checkbox unchecked');
+  // Phase i18n: actionable message now via t('mem_err_rules_required')
+  assert.ok(block.includes("t('mem_err_rules_required')"),
+    'actionable message uses t(\'mem_err_rules_required\') when checkbox unchecked (Phase i18n)');
   // The unchecked path must return before /accept.
   const uncheckedCheck = block.indexOf('if (!checkbox || !checkbox.checked)');
   const acceptCall = block.indexOf("/api/membership/rules/accept");
@@ -341,10 +353,11 @@ test('B1-RECOVER-04: On RULES_NOT_ACCEPTED, actionable Persian message shown', (
   const block = submitUidBlock();
   const recoverIdx = block.indexOf("res.code === 'RULES_NOT_ACCEPTED'");
   const afterRecover = block.slice(recoverIdx, recoverIdx + 800);
-  assert.ok(afterRecover.includes('قوانین عضویت به‌روزرسانی شده‌اند'),
-    'actionable Persian message present');
-  assert.ok(afterRecover.includes('نسخه جدید را مطالعه کرده و دوباره تأیید کنید'),
-    'message tells user to read + re-accept the new version');
+  // Phase i18n: actionable message now via t('mem_err_rules_updated_request')
+  assert.ok(afterRecover.includes("t('mem_err_rules_updated_request')"),
+    'actionable message uses t(\'mem_err_rules_updated_request\') (Phase i18n)');
+  assert.ok(afterRecover.includes('admToast(rulesMsg') || afterRecover.includes('alert(rulesMsg'),
+    'message displayed to user via admToast/alert (read + re-accept prompt)');
 });
 
 test('B1-RECOVER-05: refreshRulesAndRerenderSection() re-renders section in-place', () => {
@@ -411,8 +424,10 @@ test('B1-PRESERVE-01: Requirement flow intact (loadRequirement, getRequirement, 
     'loadRequirement still exists');
   assert.ok(MEMBERSHIP_USER_SRC.includes('function getRequirement'),
     'getRequirement still exists');
-  assert.ok(MEMBERSHIP_USER_SRC.includes('var FALLBACK_REQUIREMENT'),
-    'FALLBACK_REQUIREMENT still exists');
+  // Phase i18n: FALLBACK_REQUIREMENT was converted from a `var` to a
+  // `function` so t() is only called at use-time (after app.js loaded).
+  assert.ok(MEMBERSHIP_USER_SRC.includes('function FALLBACK_REQUIREMENT'),
+    'FALLBACK_REQUIREMENT still exists (now a function — Phase i18n)');
   assert.ok(MEMBERSHIP_USER_SRC.includes("exchange_name: 'Bitunix'"),
     'Bitunix fallback intact');
 });
@@ -423,8 +438,9 @@ test('B1-PRESERVE-02: UID validation unchanged (4-64 alphanumeric)', () => {
     'UID length validation preserved');
   assert.ok(block.includes("!/^[A-Za-z0-9_-]+$/.test(uid)"),
     'UID character validation preserved');
-  assert.ok(block.includes('شناسه نامعتبر است'),
-    'UID invalid Persian message preserved');
+  // Phase i18n: invalid-UID message now via t('mem_err_invalid_uid')
+  assert.ok(block.includes("t('mem_err_invalid_uid')"),
+    'UID invalid message uses t(\'mem_err_invalid_uid\') (Phase i18n)');
 });
 
 test('B1-PRESERVE-03: Register button + openBitunix/openRegisterUrl preserved', () => {
@@ -456,8 +472,9 @@ test('B1-PRESERVE-05: Activation timeline (6 steps) preserved', () => {
     'timeline step 1 preserved');
   assert.ok(block.includes('timelineStep(6,'),
     'timeline step 6 preserved');
-  assert.ok(block.includes('فعال‌سازی پریمیوم'),
-    'step 6 text updated to فعال‌سازی پریمیوم (Phase 8N)');
+  // Phase i18n: step 6 text now via t('mem_timeline_step6')
+  assert.ok(block.includes("t('mem_timeline_step6')"),
+    'step 6 text uses t(\'mem_timeline_step6\') (Phase i18n)');
 });
 
 test('B1-PRESERVE-06: Pending popup + openPendingPopup preserved', () => {
@@ -507,30 +524,30 @@ test('B1-PRESERVE-11: MembershipApp.refresh() clears rules cache too', () => {
 // ─── Tests: CSS for the rules section ──────────────────────────────────────
 
 test('B1-CSS-01: .mb-rules-section base styles defined', () => {
-  assert.ok(STYLE_CSS.includes('.mb-rules-section'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-section'),
     '.mb-rules-section CSS rule exists');
-  assert.ok(STYLE_CSS.includes('.mb-rules-section--inactive'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-section--inactive'),
     'inactive variant CSS exists');
 });
 
 test('B1-CSS-02: .mb-rules-version badge styled with gold accent', () => {
-  assert.ok(STYLE_CSS.includes('.mb-rules-version'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-version'),
     '.mb-rules-version CSS exists');
   // Must use the gold/amber accent color (matching the existing premium theme).
-  const rule = STYLE_CSS.slice(
-    STYLE_CSS.indexOf('.mb-rules-version'),
-    STYLE_CSS.indexOf('.mb-rules-effective')
+  const rule = MEMBERSHIP_CSS.slice(
+    MEMBERSHIP_CSS.indexOf('.mb-rules-version'),
+    MEMBERSHIP_CSS.indexOf('.mb-rules-effective')
   );
   assert.ok(rule.includes('#F5A623') || rule.includes('245, 158, 11'),
     'version badge uses gold accent color');
 });
 
 test('B1-CSS-03: .mb-rules-body has max-height + scroll overflow', () => {
-  assert.ok(STYLE_CSS.includes('.mb-rules-body'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-body'),
     '.mb-rules-body CSS exists');
-  const rule = STYLE_CSS.slice(
-    STYLE_CSS.indexOf('.mb-rules-body {'),
-    STYLE_CSS.indexOf('.mb-rules-body::-webkit-scrollbar')
+  const rule = MEMBERSHIP_CSS.slice(
+    MEMBERSHIP_CSS.indexOf('.mb-rules-body {'),
+    MEMBERSHIP_CSS.indexOf('.mb-rules-body::-webkit-scrollbar')
   );
   assert.ok(rule.includes('max-height'),
     'rules body has max-height');
@@ -539,27 +556,27 @@ test('B1-CSS-03: .mb-rules-body has max-height + scroll overflow', () => {
 });
 
 test('B1-CSS-04: Custom checkbox styling (.mb-rules-checkbox + .mb-rules-checkbox-custom)', () => {
-  assert.ok(STYLE_CSS.includes('.mb-rules-checkbox'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-checkbox'),
     'native checkbox hidden');
-  assert.ok(STYLE_CSS.includes('.mb-rules-checkbox-custom'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-checkbox-custom'),
     'custom checkbox visual element styled');
-  assert.ok(STYLE_CSS.includes('.mb-rules-checkbox:checked + .mb-rules-checkbox-custom'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-rules-checkbox:checked + .mb-rules-checkbox-custom'),
     'checked state styled with sibling selector');
 });
 
 test('B1-CSS-05: Mobile/narrow WebView responsive breakpoints', () => {
-  assert.ok(STYLE_CSS.includes('@media (max-width: 380px)'),
+  assert.ok(MEMBERSHIP_CSS.includes('@media (max-width: 380px)'),
     '380px breakpoint for narrow phones');
-  assert.ok(STYLE_CSS.includes('@media (max-width: 320px)'),
+  assert.ok(MEMBERSHIP_CSS.includes('@media (max-width: 320px)'),
     '320px breakpoint for very narrow phones');
   // Find the 380px breakpoint that contains our rules-section adjustments.
-  // (style.css has many 380px breakpoints; we need the one we added.)
+  // (membership.css has many 380px breakpoints; we need the one we added.)
   let rules380 = -1;
   let searchFrom = 0;
   while (true) {
-    const found = STYLE_CSS.indexOf('@media (max-width: 380px)', searchFrom);
+    const found = MEMBERSHIP_CSS.indexOf('@media (max-width: 380px)', searchFrom);
     if (found < 0) break;
-    const slice = STYLE_CSS.slice(found, found + 400);
+    const slice = MEMBERSHIP_CSS.slice(found, found + 400);
     if (slice.includes('.mb-rules-section')) {
       rules380 = found;
       break;
@@ -568,23 +585,23 @@ test('B1-CSS-05: Mobile/narrow WebView responsive breakpoints', () => {
   }
   assert.ok(rules380 >= 0,
     'a 380px breakpoint must adjust .mb-rules-section');
-  const after380 = STYLE_CSS.slice(rules380, rules380 + 400);
+  const after380 = MEMBERSHIP_CSS.slice(rules380, rules380 + 400);
   assert.ok(after380.includes('.mb-rules-body'),
     'rules body adjusted at 380px');
   assert.ok(after380.includes('.mb-rules-accept'),
     'rules accept row adjusted at 380px');
   // Verify the 320px breakpoint follows shortly after (within 600 chars).
-  const after380toEnd = STYLE_CSS.slice(rules380, rules380 + 600);
+  const after380toEnd = MEMBERSHIP_CSS.slice(rules380, rules380 + 600);
   assert.ok(after380toEnd.includes('@media (max-width: 320px)'),
     '320px breakpoint follows the 380px one');
 });
 
 test('B1-CSS-06: Disabled submit button hint state styled (.mb-uid-submit--disabled)', () => {
-  assert.ok(STYLE_CSS.includes('.mb-uid-submit--disabled'),
+  assert.ok(MEMBERSHIP_CSS.includes('.mb-uid-submit--disabled'),
     'disabled hint class CSS exists');
-  const rule = STYLE_CSS.slice(
-    STYLE_CSS.indexOf('.mb-uid-submit--disabled {'),
-    STYLE_CSS.indexOf('.mb-uid-submit--disabled:hover')
+  const rule = MEMBERSHIP_CSS.slice(
+    MEMBERSHIP_CSS.indexOf('.mb-uid-submit--disabled {'),
+    MEMBERSHIP_CSS.indexOf('.mb-uid-submit--disabled:hover')
   );
   assert.ok(rule.includes('cursor: not-allowed'),
     'not-allowed cursor');
@@ -596,14 +613,14 @@ test('B1-CSS-06: Disabled submit button hint state styled (.mb-uid-submit--disab
 
 test('B1-RTL-01: Persian text present in rules section (RTL content, Phase 8L)', () => {
   const body = fnBody(MEMBERSHIP_USER_SRC, 'buildRulesSectionHtml');
-  // Phase 8L: Updated Persian phrases for new card design
-  const persianPhrases = [
-    'قوانین عضویت',           // section title
-    'مطالعه کرده‌ام و با آن موافقم', // acceptance label (Phase 8L)
-    'مشاهده کامل قوانین',      // view full rules button (Phase 8L)
+  // Phase i18n: Persian phrases now resolved via t('mem_*') calls.
+  const persianKeys = [
+    "t('mem_rules_title')",        // section title
+    "t('mem_rules_accept_label')", // acceptance label (Phase 8L)
+    "t('mem_rules_view_full')",    // view full rules button (Phase 8L)
   ];
-  for (const p of persianPhrases) {
-    assert.ok(body.includes(p), 'Persian phrase present: ' + p);
+  for (const k of persianKeys) {
+    assert.ok(body.includes(k), 'i18n key present: ' + k);
   }
 });
 

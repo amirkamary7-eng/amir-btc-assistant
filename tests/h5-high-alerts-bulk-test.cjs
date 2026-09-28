@@ -49,6 +49,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
+const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
 const ALERTS_REPO_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/repositories/alerts.js'), 'utf8');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -357,9 +358,9 @@ test('H5HIGH-11: existing processQueue(5) at end of 1-min cron preserved (NOT mo
   const scheduledMatch = WORKER_SRC.indexOf('notificationPlatformRepo?.processQueue');
   assert.notEqual(scheduledMatch, -1, 'processQueue call must exist in scheduled()');
   // Verify the limit is 5 for the 1-min cron (not changed by H5-HIGH fix)
-  const oneMinBlock = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('if (isEveryMinute)'),
-    WORKER_SRC.indexOf('return;', WORKER_SRC.indexOf('if (isEveryMinute)'))
+  const oneMinBlock = SCHEDULER_SRC.slice(
+    SCHEDULER_SRC.indexOf('if (isEveryMinute)'),
+    SCHEDULER_SRC.indexOf('return;', SCHEDULER_SRC.indexOf('if (isEveryMinute)'))
   );
   assert.ok(oneMinBlock.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
     '1-min cron must still call processQueue with limit=5 (unchanged)');
@@ -735,9 +736,9 @@ test('H5HIGH-OPTD-09: NO trigger cap (all triggered alerts processed in same tic
 test('H5HIGH-OPTD-10: processQueue(5) unchanged at end of 1-min cron', () => {
   // Option D does NOT touch processQueue(5) — it's still at the end of the
   // 1-min cron, unchanged.
-  const oneMinBlock = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('if (isEveryMinute)'),
-    WORKER_SRC.indexOf('return;', WORKER_SRC.indexOf('if (isEveryMinute)'))
+  const oneMinBlock = SCHEDULER_SRC.slice(
+    SCHEDULER_SRC.indexOf('if (isEveryMinute)'),
+    SCHEDULER_SRC.indexOf('return;', SCHEDULER_SRC.indexOf('if (isEveryMinute)'))
   );
   assert.ok(oneMinBlock.includes('processQueue(env, sendTelegramMessage, pool, 5)'),
     '1-min cron must still call processQueue with limit=5 (unchanged by Option D)');

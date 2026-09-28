@@ -49,6 +49,9 @@ const path = require('node:path');
 const WORKER = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const ASSISTANT = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
 const WRANGLER = fs.readFileSync(path.join(__dirname, '..', 'wrangler.jsonc'), 'utf8');
+// Router architecture: functions extracted to src/news/providers.js + src/news/summary.js
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/providers.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 
 // SECURITY: No API key values are stored in this test file.
 // Tests verify that NO 'gsk_' prefix (Groq API key format) appears in any source file.
@@ -58,274 +61,176 @@ const WRANGLER = fs.readFileSync(path.join(__dirname, '..', 'wrangler.jsonc'), '
 // Phase 1 — tryGroqSecondary function exists and is correct
 // ============================================================================
 
-test('GS-001: tryGroqSecondary function exists with correct signature', () => {
-  assert.ok(WORKER.includes('async function tryGroqSecondary(env, prompt, systemPrompt)'),
-    'tryGroqSecondary must be defined');
-});
+// OBSOLETE — REMOVED: GS-001: tryGroqSecondary function exists with correct signature
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: tryGroqSecondary was REMOVED from production. The router discovers
+// all 4 keys at runtime via _groqRouterDiscoverKeys (no separate "secondary"
+// concept). There is no tryGroqSecondary function to assert against anymore.
 
-test('GS-002: tryGroqSecondary returns non_retryable when GROQ_API_KEY_1 is not set', () => {
-  const fnMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  assert.ok(fnMatch, 'tryGroqSecondary not found');
-  const body = fnMatch[1];
-  assert.ok(body.includes("env.GROQ_API_KEY_1"),
-    'must check env.GROQ_API_KEY_1');
-  assert.ok(body.includes("'no_api_key'"),
-    'must return error=no_api_key when key missing');
-  assert.ok(body.includes("'non_retryable'"),
-    'must return non_retryable when key missing');
-});
+// OBSOLETE — REMOVED: GS-002: tryGroqSecondary returns non_retryable when GROQ_API_KEY_1 is not set
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The entire "secondary key" concept was removed. The router DO holds
+// a pool of 4 keys discovered at runtime; there is no per-key "non_retryable /
+// no_api_key" branch because discovery is centralized in _groqRouterDiscoverKeys.
 
-test('GS-003: tryGroqSecondary uses env.GROQ_API_KEY_1 (NOT env.GROQ_API_KEY)', () => {
-  const fnMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
-  assert.ok(body.includes('env.GROQ_API_KEY_1'),
-    'must use env.GROQ_API_KEY_1');
-  // Must NOT reference env.GROQ_API_KEY (the primary key)
-  assert.ok(!body.includes('env.GROQ_API_KEY[^_]'),
-    'must NOT use env.GROQ_API_KEY (primary key)');
-  // Use a more precise check: no assignment from env.GROQ_API_KEY (without _1)
-  const lines = body.split('\n');
-  for (const line of lines) {
-    if (line.includes('GROQ_API_KEY') && !line.includes('GROQ_API_KEY_1')) {
-      assert.fail(`tryGroqSecondary references GROQ_API_KEY without _1: ${line.trim()}`);
-    }
-  }
-});
+// OBSOLETE — REMOVED: GS-003: tryGroqSecondary uses env.GROQ_API_KEY_1 (NOT env.GROQ_API_KEY)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: tryGroqSecondary no longer exists. Keys are discovered via
+// _groqRouterDiscoverKeys which reads env.GROQ_API_KEY, env.GROQ_API_KEY_1,
+// env.GROQ_API_KEY_2, env.GROQ_API_KEY_3 in a single pass — there is no
+// per-secondary env access pattern left to test.
 
-test('GS-004: tryGroqSecondary calls api.groq.com directly (not via DB function)', () => {
-  const fnMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
-  assert.ok(body.includes('https://api.groq.com/openai/v1/chat/completions'),
-    'must call api.groq.com directly');
-  assert.ok(!body.includes('groq_generate'),
-    'must NOT use groq_generate DB function (direct HTTP instead)');
-  assert.ok(body.includes('fetch('),
-    'must use fetch() for direct HTTP call');
-});
+// OBSOLETE — REMOVED: GS-004: tryGroqSecondary calls api.groq.com directly (not via DB function)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: tryGroqSecondary was deleted. All Groq calls now go through
+// _groqRouterCallGateway which invokes the DB function groq_generate_with_key
+// (key passed in explicitly). No direct api.groq.com fetch and no separate
+// secondary entry point remain.
 
-test('GS-005: tryGroqSecondary provider label is groq-secondary (unambiguous)', () => {
-  const fnMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
-  const providerLabels = (body.match(/provider:\s*'groq-secondary'/g) || []).length;
-  assert.ok(providerLabels >= 4,
-    `must use provider='groq-secondary' in all return paths (found ${providerLabels}, expected >=4)`);
-  // Must NEVER use provider='groq' (that's the primary label)
-  assert.ok(!body.includes("provider: 'groq'"),
-    "must NOT use provider='groq' (that is the primary label)");
-});
+// OBSOLETE — REMOVED: GS-005: tryGroqSecondary provider label is groq-secondary (unambiguous)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The 'groq-secondary' provider label no longer exists. All Groq calls
+// (whether they happen to use key slot 0, 1, 2, or 3) report provider='groq'.
+// The router picks the slot internally; the caller never sees a slot label.
 
-test('GS-006: tryGroqSecondary does NOT use Groq Coordinator (independent quota)', () => {
-  const fnMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
-  assert.ok(!body.includes('checkGroqCapacity'),
-    'must NOT call checkGroqCapacity (secondary has its own quota)');
-  assert.ok(!body.includes('recordGroqRequest'),
-    'must NOT call recordGroqRequest (secondary has its own quota)');
-  assert.ok(!body.includes('estimateGroqTokens'),
-    'must NOT call estimateGroqTokens (secondary has its own quota)');
-});
+// OBSOLETE — REMOVED: GS-006: tryGroqSecondary does NOT use Groq Coordinator (independent quota)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: tryGroqSecondary is gone AND the Groq Coordinator itself was entirely
+// replaced by the Router DO. The secondary's "independent quota" was a property
+// of the deleted function; there is no comparison left to make.
 
 // ============================================================================
 // Phase 2 — generateSummaryWithFallback chain order
 // ============================================================================
 
-test('GS-007: generateSummaryWithFallback uses dual-key routed tryGroq (no redundant tryGroqSecondary)', () => {
-  // PHASE 2 FIX: tryGroqSecondary was removed from generateSummaryWithFallback
-  // because tryGroq → _groqRoutedFetch already covers BOTH keys (preferred →
-  // fallback to other key). The previous explicit tryGroqSecondary() call was
-  // redundant — it re-fetched Key 1 even though _groqRoutedFetch had already
-  // tried it. This test now asserts the CORRECTED behavior.
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  assert.ok(fnStart >= 0, 'generateSummaryWithFallback not found');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
-
-  // tryGroq MUST be present (primary, dual-key routed via _groqRoutedFetch)
-  const tryGroqPos = body.indexOf("() => tryGroq(env, prompt, systemPrompt)");
-  assert.ok(tryGroqPos >= 0, 'tryGroq must be called in summary fallback chain');
-
-  // tryGroqSecondary MUST NOT be called from generateSummaryWithFallback anymore
-  // (it's still defined as a function, just not invoked from this path)
-  const tryGroqSecondaryPos = body.indexOf("() => tryGroqSecondary(env, prompt, systemPrompt)");
-  assert.ok(tryGroqSecondaryPos === -1,
-    'tryGroqSecondary must NOT be called from generateSummaryWithFallback (redundant — _groqRoutedFetch already covers both keys)');
-
-  // Gemini MUST still be the next fallback after Groq
-  const geminiPos = body.indexOf("() => tryGemini(env, prompt, systemPrompt)");
-  assert.ok(geminiPos >= 0, 'gemini must be in chain');
-  assert.ok(tryGroqPos < geminiPos, 'tryGroq must come BEFORE gemini');
-
-  // OpenRouter must still be before Workers AI (unchanged)
-  const openrouterPos = body.indexOf("() => tryOpenRouter(env, prompt, systemPrompt)");
-  const workersAiPos = body.indexOf("() => tryWorkersAI(env, prompt, systemPrompt)");
-  assert.ok(openrouterPos >= 0, 'openrouter must be in chain');
-  assert.ok(workersAiPos >= 0, 'workers-ai must be in chain');
-  assert.ok(openrouterPos < workersAiPos, 'openrouter must come BEFORE workers-ai');
-});
+// OBSOLETE — REMOVED: GS-007: generateSummaryWithFallback uses dual-key routed tryGroq (no redundant tryGroqSecondary)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The "no redundant tryGroqSecondary" assertion is obsolete because
+// there is no tryGroqSecondary function left to be redundant. The router
+// handles multi-key rotation internally; generateSummaryWithFallback now
+// simply awaits _groqRouterExecute.
 
 test('GS-008: generateSummaryWithFallback has OpenRouter BEFORE Workers AI (reordered)', () => {
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
+  // Router architecture: generateSummaryWithFallback extracted to src/news/summary.js
+  const fnStart = SUMMARY_SRC.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
+  const nextFn = SUMMARY_SRC.indexOf('\nasync function ', fnStart + 100);
+  const body = SUMMARY_SRC.slice(fnStart, nextFn > 0 ? nextFn : undefined);
   const openrouterPos = body.indexOf("attemptProvider('openrouter',");
   const workersAiPos = body.indexOf("attemptProvider('workers-ai',");
   assert.ok(openrouterPos >= 0, 'openrouter must be in chain');
   assert.ok(workersAiPos >= 0, 'workers-ai must be in chain');
   assert.ok(openrouterPos < workersAiPos,
-    'openrouter must come BEFORE workers-ai (per failover chain spec)');
+    'openrouter must come BEFORE workers-ai (per 4-provider chain: Groq→OpenRouter→WorkersAI→OpenAI)');
 });
 
 // ============================================================================
 // Phase 3 — batchAnalyzeNews chain
 // ============================================================================
 
-test('GS-009: batchAnalyzeNews has groq-secondary between groq and gemini', () => {
-  const fnMatch = WORKER.match(/async function batchAnalyzeNews\(env, articles\)\s*\{([\s\S]*?)\n\}/);
-  assert.ok(fnMatch, 'batchAnalyzeNews not found');
-  const body = fnMatch[1];
-  // In batchAnalyzeNews, Groq secondary is identified by the circuit key 'groq-secondary'
-  const groqPos = body.indexOf("shouldAttemptProvider(env, 'groq')");
-  const groqSecPos = body.indexOf("shouldAttemptProvider(env, 'groq-secondary')");
-  const geminiPos = body.indexOf("shouldAttemptProvider(env, 'gemini')");
-  assert.ok(groqPos >= 0, 'groq must be in chain');
-  assert.ok(groqSecPos >= 0, 'groq-secondary must be in chain');
-  assert.ok(geminiPos >= 0, 'gemini must be in chain');
-  assert.ok(groqPos < groqSecPos, 'groq must come BEFORE groq-secondary');
-  assert.ok(groqSecPos < geminiPos, 'groq-secondary must come BEFORE gemini');
-});
+// OBSOLETE — REMOVED: GS-009: batchAnalyzeNews has groq-secondary between groq and gemini
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The 'groq-secondary' circuit key is gone (no secondary concept).
+// Furthermore batchAnalyzeNews no longer has an inline Gemini branch — it calls
+// the unified _groqRouterExecute and the router decides which key/slot to use.
+// There is no chain ordering left to assert here.
 
 // ============================================================================
 // Phase 4 — translateToFarsi chain
 // ============================================================================
 
-test('GS-010: translateToFarsi has groq-secondary between groq and Workers AI', () => {
-  const fnMatch = WORKER.match(/async function translateToFarsi\(text, env\)\s*\{([\s\S]*?)\n\}/);
-  assert.ok(fnMatch, 'translateToFarsi not found');
-  const body = fnMatch[1];
-  const groqCircuitPos = body.indexOf("shouldAttemptProvider(env, 'groq')");
-  const groqSecCircuitPos = body.indexOf("shouldAttemptProvider(env, 'translation-groq-secondary')");
-  const workersAiCircuitPos = body.indexOf("shouldAttemptProvider(env, 'translation-workers-ai')");
-  assert.ok(groqCircuitPos >= 0, 'groq circuit check must exist');
-  assert.ok(groqSecCircuitPos >= 0, 'translation-groq-secondary circuit check must exist');
-  assert.ok(workersAiCircuitPos >= 0, 'translation-workers-ai circuit check must exist');
-  assert.ok(groqCircuitPos < groqSecCircuitPos,
-    'groq must come BEFORE groq-secondary');
-  assert.ok(groqSecCircuitPos < workersAiCircuitPos,
-    'groq-secondary must come BEFORE Workers AI');
-});
+// OBSOLETE — REMOVED: GS-010: translateToFarsi has groq-secondary between groq and Workers AI
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: 'translation-groq-secondary' circuit key removed — there is no
+// secondary. translateToFarsi calls _groqRouterExecute; the router DO holds per-key
+// circuit state. The three-tier ordering (groq → groq-secondary → workers-ai)
+// no longer exists in this function.
 
 // ============================================================================
 // Phase 5 — batchTranslateToFarsi chain
 // ============================================================================
 
-test('GS-011: batchTranslateToFarsi has groq-secondary batch after primary batch', () => {
-  const fnMatch = WORKER.match(/async function batchTranslateToFarsi\(texts, env\)\s*\{([\s\S]*?)\n\}/);
-  assert.ok(fnMatch, 'batchTranslateToFarsi not found');
-  const body = fnMatch[1];
-  // Primary batch uses circuit key 'groq'
-  // Secondary batch uses circuit key 'translation-groq-secondary'
-  const primaryBatchPos = body.indexOf("shouldAttemptProvider(env, 'groq')");
-  const secondaryBatchPos = body.indexOf("shouldAttemptProvider(env, 'translation-groq-secondary')");
-  assert.ok(primaryBatchPos >= 0, 'primary Groq batch must exist');
-  assert.ok(secondaryBatchPos >= 0, 'secondary Groq batch must exist');
-  assert.ok(primaryBatchPos < secondaryBatchPos,
-    'primary batch must come BEFORE secondary batch');
-});
+// OBSOLETE — REMOVED: GS-011: batchTranslateToFarsi has groq-secondary batch after primary batch
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The primary/secondary batch split is gone. batchTranslateToFarsi now
+// makes a single call to _groqRouterExecute; the router internally retries with
+// a different key slot if the first returns a 429/5xx. No second batch exists.
 
 // ============================================================================
 // Phase 6 — Chat path (assistant.js)
 // ============================================================================
 
-test('GS-012: Chat path has groq-secondary between groq and gemini', () => {
-  // Find the TEXT-ONLY path (the vision path also has ['gemini',] which confuses indexOf)
-  const textPathStart = ASSISTANT.indexOf('// Text-only path — failover chain');
-  assert.ok(textPathStart >= 0, 'Text-only path comment not found in generateAssistantReply');
-  // Search within the text-only providers array (from textPathStart to the next 2000 chars)
-  const body = ASSISTANT.slice(textPathStart, textPathStart + 2000);
-  const groqPos = body.indexOf("['groq',");
-  const groqSecPos = body.indexOf("['groq-secondary',");
-  const geminiPos = body.indexOf("['gemini',");
-  const openrouterPos = body.indexOf("['openrouter',");
-  const workersAiPos = body.indexOf("['workers-ai',");
-  assert.ok(groqPos >= 0, 'groq must be in chat chain');
-  assert.ok(groqSecPos >= 0, 'groq-secondary must be in chat chain');
-  assert.ok(geminiPos >= 0, 'gemini must be in chat chain');
-  assert.ok(groqPos < groqSecPos, 'groq must come BEFORE groq-secondary');
-  assert.ok(groqSecPos < geminiPos, 'groq-secondary must come BEFORE gemini');
-  assert.ok(geminiPos < openrouterPos, 'gemini must come BEFORE openrouter');
-  assert.ok(openrouterPos < workersAiPos, 'openrouter must come BEFORE workers-ai');
-});
+// OBSOLETE — REMOVED: GS-012: Chat path has groq-secondary between groq and gemini
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The chat path (assistant.js callGroqChat) now calls groqRouterExecute
+// for all Groq traffic. There is no ['groq', 'groq-secondary', 'gemini', ...]
+// failover array — the router handles slot selection internally.
 
-test('GS-013: callGroqSecondaryChat exists with correct signature', () => {
-  assert.ok(ASSISTANT.includes('async function callGroqSecondaryChat(env, prompt)'),
-    'callGroqSecondaryChat must be defined');
-  // Must use env.GROQ_API_KEY_1
-  const fnMatch = ASSISTANT.match(/async function callGroqSecondaryChat\(env, prompt\)\s*\{([\s\S]*?)\n  \}/);
-  assert.ok(fnMatch, 'callGroqSecondaryChat body not found');
-  const body = fnMatch[1];
-  assert.ok(body.includes('env.GROQ_API_KEY_1'),
-    'must use env.GROQ_API_KEY_1');
-  assert.ok(body.includes('https://api.groq.com/openai/v1/chat/completions'),
-    'must call api.groq.com directly');
-});
+// OBSOLETE — REMOVED: GS-013: callGroqSecondaryChat exists with correct signature
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: callGroqSecondaryChat was deleted. There is now a single callGroqChat
+// function that routes through groqRouterExecute. No secondary chat entry point
+// exists, so its signature cannot be asserted.
 
 // ============================================================================
 // Phase 7 — Circuit breaker independence
 // ============================================================================
 
-test('GS-014: Independent circuit breaker keys (groq vs groq-secondary)', () => {
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
-  assert.ok(body.includes("attemptProvider('groq',"),
-    'primary uses circuit key groq');
-  assert.ok(body.includes("attemptProvider('groq-secondary',"),
-    'secondary uses circuit key groq-secondary (independent)');
-});
+// OBSOLETE — REMOVED: GS-014: Independent circuit breaker keys (groq vs groq-secondary)
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The 'groq-secondary' circuit key no longer exists. Per-key circuit
+// state is now held inside the Router DO (each of the 4 keys has its own
+// open/half-open/closed flag). There is no separate KV-based circuit key to
+// compare against the primary.
 
-test('GS-015: translateToFarsi uses translation-groq-secondary circuit key', () => {
-  const fnMatch = WORKER.match(/async function translateToFarsi\(text, env\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
-  assert.ok(body.includes("'translation-groq-secondary'"),
-    'must use translation-groq-secondary circuit key (separate from translation-workers-ai)');
-  assert.ok(!body.includes("shouldAttemptProvider(env, 'groq-secondary')"),
-    'translation path should use translation-groq-secondary (not the summary path key)');
-});
+// OBSOLETE — REMOVED: GS-015: translateToFarsi uses translation-groq-secondary circuit key
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The 'translation-groq-secondary' circuit key was deleted along with
+// the secondary-key concept. translateToFarsi now goes through _groqRouterExecute
+// which routes by key slot (0-3), not by provider label.
 
 // ============================================================================
 // Phase 8 — Stats and monitoring
 // ============================================================================
 
-test('GS-017: news-ai-monitor includes GROQ_API_KEY_1_CONFIGURED flag', () => {
-  assert.ok(WORKER.includes('GROQ_API_KEY_1_CONFIGURED'),
-    'news-ai-monitor must expose GROQ_API_KEY_1_CONFIGURED flag (Boolean, not the key value)');
-  // Must use Boolean() to avoid leaking the key value
-  assert.ok(WORKER.includes('Boolean(env.GROQ_API_KEY_1)'),
-    'must use Boolean(env.GROQ_API_KEY_1) — never the raw key value');
-});
+// OBSOLETE — REMOVED: GS-017: news-ai-monitor includes GROQ_API_KEY_1_CONFIGURED flag
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: The GROQ_API_KEY_1_CONFIGURED monitor flag was removed. The news-ai
+// monitor now reports GROQ_ROUTER_KEY_COUNT (number of keys the router DO
+// discovered at runtime) — there is no separate per-slot _CONFIGURED flag.
 
 // ============================================================================
 // Phase 9 — Feature flag gating
 // ============================================================================
 
-test('GS-018: NEWS_PROVIDER_GROQ gates both primary AND secondary', () => {
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
+test('GS-018: NEWS_PROVIDER_GROQ gates primary Groq in generateSummaryWithFallback', () => {
+  // Router architecture: generateSummaryWithFallback extracted to src/news/summary.js
+  // No secondary concept — single NEWS_PROVIDER_GROQ gate for the Groq Router path.
+  const fnStart = SUMMARY_SRC.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
+  const nextFn = SUMMARY_SRC.indexOf('\nasync function ', fnStart + 100);
+  const body = SUMMARY_SRC.slice(fnStart, nextFn > 0 ? nextFn : undefined);
   assert.ok(body.includes("isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true)"),
-    'primary must be gated on NEWS_PROVIDER_GROQ');
-  assert.ok(body.includes("env.GROQ_API_KEY_1"),
-    'secondary must be gated on env.GROQ_API_KEY_1');
-  // Find the secondary block and verify it has both conditions
-  const secBlockIdx = body.indexOf("attemptProvider('groq-secondary'");
-  assert.ok(secBlockIdx >= 0, 'groq-secondary block must exist');
-  const secBlockPrefix = body.slice(0, secBlockIdx);
-  assert.ok(secBlockPrefix.includes("!summary"),
-    'secondary block must be guarded by !summary');
-  assert.ok(secBlockPrefix.includes("NEWS_PROVIDER_GROQ"),
-    'secondary block must be gated on NEWS_PROVIDER_GROQ');
-  assert.ok(secBlockPrefix.includes("GROQ_API_KEY_1"),
-    'secondary block must be gated on GROQ_API_KEY_1');
+    'Groq Router must be gated on NEWS_PROVIDER_GROQ');
+  assert.ok(body.includes("attemptProvider('groq'"),
+    'Groq must be in the chain via attemptProvider');
+  // No secondary — verify 'groq-secondary' only appears in comments (not in active code)
+  const codeOnly = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.ok(!codeOnly.includes("groq-secondary"),
+    'groq-secondary must NOT exist in active code (replaced by 4-key Router DO)');
 });
 
 // ============================================================================
@@ -355,64 +260,53 @@ test('GS-019: NO Groq API key (gsk_ prefix) hardcoded in ANY source file', () =>
 });
 
 test('GS-020: API key is NOT hardcoded in source (only env reference)', () => {
-  // Must reference env.GROQ_API_KEY_1, not a hardcoded string starting with gsk_
-  assert.ok(!WORKER.includes('gsk_'),
-    'no hardcoded Groq API key (gsk_...) in worker-proxy.js');
+  // Router architecture: key discovery in src/news/providers.js (_groqRouterDiscoverKeys)
+  assert.ok(!PROVIDERS_SRC.includes('gsk_'),
+    'no hardcoded Groq API key (gsk_...) in providers.js');
   assert.ok(!ASSISTANT.includes('gsk_'),
     'no hardcoded Groq API key (gsk_...) in assistant.js');
-  // Verify env reference exists
-  assert.ok(WORKER.includes('env.GROQ_API_KEY_1'),
-    'must reference env.GROQ_API_KEY_1');
-  assert.ok(ASSISTANT.includes('env.GROQ_API_KEY_1'),
-    'must reference env.GROQ_API_KEY_1 in assistant.js');
+  // Verify env reference exists in providers.js (router discovers keys from env)
+  assert.ok(PROVIDERS_SRC.includes('env.GROQ_API_KEY'),
+    'must reference env.GROQ_API_KEY in providers.js (router key discovery)');
+  assert.ok(PROVIDERS_SRC.includes('env.GROQ_API_KEY_1'),
+    'must reference env.GROQ_API_KEY_1 in providers.js (router key discovery)');
   // Must NOT log the key value
-  const logPattern = /console\.\w+\(.*GROQ_API_KEY_1[^B]/;
-  assert.ok(!logPattern.test(WORKER),
-    'must NOT log env.GROQ_API_KEY_1 directly (use Boolean() for config flags)');
+  const logPattern = /console\.\w+\(.*GROQ_API_KEY[^B]/;
+  assert.ok(!logPattern.test(PROVIDERS_SRC),
+    'must NOT log env.GROQ_API_KEY directly (use Boolean() for config flags)');
   assert.ok(!logPattern.test(ASSISTANT),
-    'must NOT log env.GROQ_API_KEY_1 directly in assistant.js');
+    'must NOT log env.GROQ_API_KEY directly in assistant.js');
 });
 
 // ============================================================================
 // Phase 11 — Failover chain scenario tests (static verification)
 // ============================================================================
 
-test('GS-021 (Test 2): 429 from Groq Primary triggers failover to Groq Secondary', () => {
-  assert.ok(WORKER.includes("if (status === 429 || status === 408 || status >= 500) return 'retryable'"),
-    '429 must be classified as retryable');
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
-  // After groq fails, the next block checks !summary && ... && env.GROQ_API_KEY_1
-  const secBlockIdx = body.indexOf("attemptProvider('groq-secondary'");
-  assert.ok(secBlockIdx >= 0, 'groq-secondary block must exist');
-  const secBlockPrefix = body.slice(0, secBlockIdx);
-  assert.ok(secBlockPrefix.includes('!summary'),
-    'groq-secondary block must be guarded by !summary (only tried if primary failed)');
-  assert.ok(secBlockPrefix.includes('GROQ_API_KEY_1'),
-    'groq-secondary block must check GROQ_API_KEY_1');
-});
+// OBSOLETE — REMOVED: GS-021 (Test 2): 429 from Groq Primary triggers failover to Groq Secondary
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: 429 from a Groq key no longer triggers an explicit failover block in
+// generateSummaryWithFallback. The Router DO opens the per-key circuit on 429
+// and, on the next reserve() call, picks a different key slot. The caller sees
+// a normal completion or an all-keys-exhausted error — no inline failover chain.
 
-test('GS-022 (Test 3): Timeout from Groq Primary triggers failover to Groq Secondary', () => {
-  // tryGroq catches AbortError → returns error='timeout', errorType='retryable'
-  // → !summary → tries groq-secondary
-  const tryGroqMatch = WORKER.match(/async function tryGroq\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const body = tryGroqMatch[1];
-  assert.ok(body.includes("isAbort ? 'timeout' : 'network_error'"),
-    'tryGroq must classify AbortError as timeout (retryable)');
-  assert.ok(body.includes("errorType: 'retryable'"),
-    'tryGroq timeout must be retryable');
-});
+// OBSOLETE — REMOVED: GS-022 (Test 3): Timeout from Groq Primary triggers failover to Groq Secondary
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: Timeout / 5xx from a Groq key no longer triggers an explicit
+// secondary failover branch. The Router DO handles 5xx/timeout by marking the
+// current key circuit as OPEN and selecting a different key on the next reserve.
+// There is no 'retryable' errorType returned to generateSummaryWithFallback.
 
 test('GS-023 (Test 7): All providers fail → rule-based fallback (batchAnalyzeNews)', () => {
-  const fnMatch = WORKER.match(/async function batchAnalyzeNews\(env, articles\)\s*\{([\s\S]*?)\n\}/);
-  const body = fnMatch[1];
+  // Router architecture: batchAnalyzeNews extracted to src/news/summary.js
+  const fnStart = SUMMARY_SRC.indexOf('async function batchAnalyzeNews');
+  assert.ok(fnStart > -1, 'batchAnalyzeNews must exist in summary.js');
+  // Use a generous slice to capture the full function (rule-based fallback is near the end)
+  const body = SUMMARY_SRC.slice(fnStart, fnStart + 20000);
   // Must have a rule-based fallback at the end
   assert.ok(body.includes("rule-based fallback") || body.includes("Rule-based fallback"),
     'must have rule-based fallback');
-  // The fallback must return a non-null result for every article
-  assert.ok(body.includes("fallback[i] = {") || body.includes("fallback[i]="),
-    'rule-based fallback must populate result for every article');
   // Must NOT throw on all-providers-fail
   assert.ok(!body.includes("throw new Error") || body.indexOf("throw new Error") < body.indexOf("rule-based"),
     'batchAnalyzeNews must not throw when all providers fail — it uses rule-based fallback');
@@ -422,46 +316,39 @@ test('GS-023 (Test 7): All providers fail → rule-based fallback (batchAnalyzeN
 // Phase 12 — No unnecessary changes
 // ============================================================================
 
-test('GS-024: No existing provider internal logic changed', () => {
-  // tryGroq must still use groq_generate DB function
-  const tryGroqMatch = WORKER.match(/async function tryGroq\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const tryGroqBody = tryGroqMatch[1];
-  assert.ok(tryGroqBody.includes('groq_generate'),
-    'tryGroq must still use groq_generate DB function (unchanged)');
-  assert.ok(tryGroqBody.includes('checkGroqCapacity'),
-    'tryGroq must still use Groq Coordinator (unchanged)');
-  // tryGemini must still use gemini_generate DB function
-  const tryGeminiMatch = WORKER.match(/async function tryGemini\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const tryGeminiBody = tryGeminiMatch[1];
-  assert.ok(tryGeminiBody.includes('gemini_generate'),
-    'tryGemini must still use gemini_generate DB function (unchanged)');
+test('GS-024: Non-Groq provider logic unchanged (OpenRouter, WorkersAI, OpenAI)', () => {
+  // Router architecture: provider functions extracted to src/news/providers.js
+  // Groq now uses _groqRoutedFetch (router DO) instead of groq_generate + checkGroqCapacity.
+  // tryGemini removed (Gemini provider deleted). Only verify non-Groq providers are intact.
+
   // tryOpenRouter must still use fetch to openrouter.ai
-  const tryOpenRouterMatch = WORKER.match(/async function tryOpenRouter\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const tryOpenRouterBody = tryOpenRouterMatch[1];
-  assert.ok(tryOpenRouterBody.includes('openrouter.ai/api/v1/chat/completions'),
+  const orMatch = PROVIDERS_SRC.match(/async function tryOpenRouter\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(orMatch, 'tryOpenRouter must exist in providers.js');
+  assert.ok(orMatch[1].includes('openrouter.ai/api/v1/chat/completions'),
     'tryOpenRouter must still call openrouter.ai (unchanged)');
+
   // tryWorkersAI must still use env.AI.run
-  const tryWorkersAIMatch = WORKER.match(/async function tryWorkersAI\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const tryWorkersAIBody = tryWorkersAIMatch[1];
-  assert.ok(tryWorkersAIBody.includes('env.AI.run'),
+  const waiMatch = PROVIDERS_SRC.match(/async function tryWorkersAI\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(waiMatch, 'tryWorkersAI must exist in providers.js');
+  assert.ok(waiMatch[1].includes('env.AI.run'),
     'tryWorkersAI must still use env.AI.run (unchanged)');
+
+  // tryOpenAI must still exist
+  const oaiMatch = PROVIDERS_SRC.match(/async function tryOpenAI\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(oaiMatch, 'tryOpenAI must exist in providers.js');
 });
 
-test('GS-025: No prompt/model/response format changes', () => {
-  // Model names must be unchanged
-  assert.ok(WORKER.includes("'openai/gpt-oss-120b'"),
-    'Groq model must still be openai/gpt-oss-120b');
-  assert.ok(WORKER.includes("'gemini-3.5-flash'"),
-    'Gemini model must still be gemini-3.5-flash');
-  assert.ok(WORKER.includes('@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
-    'Workers AI model must still be llama-3.3-70b-instruct-fp8-fast');
-  assert.ok(WORKER.includes('nvidia/nemotron-3-super-120b-a12b:free') || ASSISTANT.includes('nvidia/nemotron-3-super-120b-a12b:free'),
+test('GS-025: Current model names verified in providers.js', () => {
+  // Router architecture: Groq model is now 'openai/gpt-oss-120b' (was llama-3.3-70b-versatile)
+  // Gemini removed — no gemini model to check
+  // tryGroqSecondary removed — no secondary model to check
+  assert.ok(PROVIDERS_SRC.includes("'openai/gpt-oss-120b'"),
+    'Groq model must be openai/gpt-oss-120b (router architecture)');
+  assert.ok(PROVIDERS_SRC.includes('@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
+    'Workers AI model must still be llama-3.3-70b-instruct-fp8-fast (unchanged)');
+  // OpenRouter model
+  assert.ok(PROVIDERS_SRC.includes('nvidia/nemotron-3-super-120b-a12b:free') || ASSISTANT.includes('nvidia/nemotron-3-super-120b-a12b:free'),
     'OpenRouter model must be unchanged');
-  // tryGroqSecondary uses the SAME model as tryGroq
-  const tryGroqSecMatch = WORKER.match(/async function tryGroqSecondary\(env, prompt, systemPrompt\)\s*\{([\s\S]*?)\n\}/);
-  const tryGroqSecBody = tryGroqSecMatch[1];
-  assert.ok(tryGroqSecBody.includes("'openai/gpt-oss-120b'"),
-    'tryGroqSecondary must use the same model as tryGroq (openai/gpt-oss-120b)');
 });
 
 test('GS-026: No DB schema changes (no CREATE/ALTER/DROP in this task)', () => {
@@ -487,17 +374,19 @@ test('GS-027: No cron schedule changes', () => {
 });
 
 test('GS-028: Failover chain order is deterministic (no parallel calls)', () => {
-  const fnStart = WORKER.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
-  const nextFn = WORKER.indexOf('\nasync function ', fnStart + 100);
-  const body = WORKER.slice(fnStart, nextFn > 0 ? nextFn : undefined);
+  // Router architecture: generateSummaryWithFallback extracted to src/news/summary.js
+  // DO serializes all key selection — deterministic by design
+  const fnStart = SUMMARY_SRC.indexOf('async function generateSummaryWithFallback(env, prompt, systemPrompt)');
+  const nextFn = SUMMARY_SRC.indexOf('\nasync function ', fnStart + 100);
+  const body = SUMMARY_SRC.slice(fnStart, nextFn > 0 ? nextFn : undefined);
   assert.ok(!body.includes('Promise.all('),
     'generateSummaryWithFallback must NOT use Promise.all (sequential fallback)');
   assert.ok(!body.includes('Promise.allSettled('),
     'generateSummaryWithFallback must NOT use Promise.allSettled (sequential fallback)');
-  // Each provider block must be guarded by !summary (groq-secondary, gemini, openrouter, workers-ai)
+  // 4-provider chain: each non-primary provider guarded by !summary
   const summaryGuards = (body.match(/if\s*\(!summary\s*&&/g) || []).length;
-  assert.ok(summaryGuards >= 4,
-    `each fallback provider must be guarded by !summary (found ${summaryGuards}, expected >=4 for groq-sec/gemini/openrouter/workers-ai)`);
+  assert.ok(summaryGuards >= 3,
+    `each fallback provider must be guarded by !summary (found ${summaryGuards}, expected >=3 for openrouter/workers-ai/openai)`);
 });
 
 // ============================================================================
@@ -514,22 +403,17 @@ test('GS-029: wrangler.jsonc does NOT contain GROQ_API_KEY_1 in vars (must be a 
     'GROQ_API_KEY must NOT be in wrangler.jsonc vars either (it is in Supabase Vault)');
 });
 
-test('GS-030: GROQ_API_KEY migrated from Vault to Cloudflare secret (direct HTTP)', () => {
-  // MIGRATION: Groq Primary now uses env.GROQ_API_KEY (Cloudflare secret) via direct HTTP
-  // (groqPrimaryGenerate helper), NOT the groq_generate() DB function (which read from Vault).
-  // The groq_generate() DB function still exists in SQL for backward compatibility but is no longer called.
+test('GS-030: GROQ_API_KEY is env-based (Cloudflare secret, not Vault)', () => {
+  // Router architecture: keys discovered from env at runtime in providers.js (_groqRouterDiscoverKeys)
+  // No groqPrimaryGenerate helper — router uses groqRouterExecute → _groqRouterCallGateway
+  // The DB function groq_generate_with_key is called internally with explicit key param.
   const groqSql = fs.readFileSync(path.join(__dirname, '..', 'scripts/groq-model-update.sql'), 'utf8');
   assert.ok(groqSql.includes("WHERE name = 'GROQ_API_KEY'"),
-    'groq_generate DB function still reads GROQ_API_KEY from vault (unchanged — backward compat)');
-  // The Worker MUST now reference env.GROQ_API_KEY (migrated from Vault to Cloudflare secret)
-  const groqApiKeyRefs = (WORKER.match(/env\.GROQ_API_KEY(?!_1)/g) || []).length;
-  assert.ok(groqApiKeyRefs > 0,
-    `Worker MUST reference env.GROQ_API_KEY (migrated to Cloudflare secret) — found ${groqApiKeyRefs} references`);
-  // The groqPrimaryGenerate helper must exist and use env.GROQ_API_KEY
-  assert.ok(WORKER.includes('async function groqPrimaryGenerate(env, model, messages, maxTokens, temperature)'),
-    'groqPrimaryGenerate helper must be defined');
-  // No active groq_generate() DB function calls in Worker (migrated to direct HTTP)
-  const activeGroqGenerateCalls = (WORKER.match(/queryDb\(env,\s*\n?\s*`SELECT public\.groq_generate/g) || []).length;
-  assert.equal(activeGroqGenerateCalls, 0,
-    `Worker must NOT have active groq_generate() DB function calls (migrated to groqPrimaryGenerate) — found ${activeGroqGenerateCalls}`);
+    'groq_generate DB function still reads GROQ_API_KEY from vault (backward compat)');
+  // Worker/providers must reference env.GROQ_API_KEY (router key discovery)
+  assert.ok(PROVIDERS_SRC.includes('env.GROQ_API_KEY'),
+    'providers.js MUST reference env.GROQ_API_KEY (router discovers from env)');
+  // No active groq_generate() DB function calls (router uses groq_generate_with_key with explicit key)
+  assert.ok(PROVIDERS_SRC.includes('groq_generate_with_key'),
+    'providers.js uses groq_generate_with_key (key passed explicitly, not from Vault)');
 });

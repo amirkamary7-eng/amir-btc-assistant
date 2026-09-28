@@ -367,7 +367,14 @@ test('AUTH-20: Phase 3/4 — authority is called for tier-based quotas (expected
   // Phase 3+4: isPremium IS called (for tier-based quotas and rewards), but require() is NOT.
   const requireCalls = workerSrc.match(/membershipAuthority\.require\s*\(/g) || [];
   assert.equal(requireCalls.length, 0, 'no authority.require() calls (no Premium-exclusive gating)');
-  const isPremiumCalls = workerSrc.match(/membershipAuthority\.isPremium\s*\(/g) || [];
+  // After Step-5 extraction, controller isPremium call sites live in src/controllers/*.js
+  // (still wired via worker-proxy.js DI — see AUTH-21).
+  const controllersDir = path.join(__dirname, '..', 'src/controllers');
+  const controllersSrc = fs.readdirSync(controllersDir)
+    .filter(f => f.endsWith('.js'))
+    .map(f => fs.readFileSync(path.join(controllersDir, f), 'utf8'))
+    .join('\n');
+  const isPremiumCalls = controllersSrc.match(/membershipAuthority\.isPremium\s*\(/g) || [];
   assert.ok(isPremiumCalls.length >= 1, 'isPremium called for tier-based quotas (Phase 3/4)');
 });
 
