@@ -18,6 +18,8 @@
 //       btoa, atob (builtins), env.TELEGRAM_BOT_TOKEN, env.SESSION_CACHE.
 // ═════════════════════════════════════════════════════════════════════════════
 
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 export function createMissionTokenService({ sharedGetTehranDateString }) {
 const MISSION_TOKEN_TTL_SECONDS = 120; // 2 minutes — enough for frontend to complete
 const MISSION_TOKEN_PREFIX = 'mt:';
