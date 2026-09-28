@@ -24,7 +24,7 @@
  *   - No regression in wallet/reward system
  */
 
-const test = require('node:test');
+const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -169,16 +169,21 @@ const _tzModule = { exports: {} };
 new Function('module', 'exports', _tzBody + '\nmodule.exports = { getTehranDateString };')(_tzModule, _tzModule.exports);
 const _sharedGetTehranDateString = _tzModule.exports.getTehranDateString;
 
-const tokenModule = { exports: {} };
-const { createHmac: _ch, timingSafeEqual: _tse } = require('node:crypto');
-const tokenEvaluator = new Function(
-  'require', 'module', 'exports', 'crypto', 'createHmac', 'timingSafeEqual', 'sharedGetTehranDateString',
-  factorySrc + '\nmodule.exports = { createMissionTokenService };'
-);
-tokenEvaluator(require, tokenModule, tokenModule.exports, globalThis.crypto, _ch, _tse, _sharedGetTehranDateString);
-// Call the factory to get the token service functions
-const _tokenService = tokenModule.exports.createMissionTokenService({ sharedGetTehranDateString: _sharedGetTehranDateString });
-const { issueMissionEventToken, consumeMissionEventToken } = _tokenService;
+// Load mission-tokens.js as a real ES module via data URL.
+// This forces Node.js to resolve the `import { createHmac, timingSafeEqual }
+// from 'node:crypto'` statement. If the import is missing, ReferenceError
+// is thrown at runtime — preventing the regression that was hidden by the
+// previous new Function() + dependency injection approach (which masked
+// the missing import by injecting createHmac as a function parameter).
+let issueMissionEventToken, consumeMissionEventToken;
+
+before(async () => {
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(missionTokensSrc).toString('base64')}`;
+  const mod = await import(dataUrl);
+  const _tokenService = mod.createMissionTokenService({ sharedGetTehranDateString: _sharedGetTehranDateString });
+  issueMissionEventToken = _tokenService.issueMissionEventToken;
+  consumeMissionEventToken = _tokenService.consumeMissionEventToken;
+});
 
 // In-memory KV
 function createMemoryKv() {
