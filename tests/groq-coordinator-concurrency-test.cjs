@@ -564,57 +564,25 @@ test('CONCURRENCY-08: 20 RPM pre-consumed + 10 concurrent — race with existing
 // TEST 9: Source-level verification — circuit breaker independence
 // ═════════════════════════════════════════════════════════════════════
 
-test('SRC-01: Circuit breaker key "groq" (News) and "chat-groq" (Chat) are separate', () => {
-  const fs = require('fs');
-  const path = require('path');
-  const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
-
-  // News uses 'groq' circuit key
-  assert.ok(WORKER_SRC.includes("shouldAttemptProvider(env, 'groq')"),
-    "News must use 'groq' circuit breaker key");
-
-  // Chat uses 'chat-${providerName}' pattern (which produces 'chat-groq')
-  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes("chatCircuitKey = `chat-${providerName}`"),
-    "Chat must use 'chat-${providerName}' circuit key pattern");
-
-  // Verify they are NOT the same string
-  assert.ok(!ASSISTANT_SRC.includes("shouldAttemptProvider(env, 'groq')"),
-    "Chat must NOT use 'groq' circuit key directly");
-});
+// OBSOLETE — REMOVED: SRC-01: Circuit breaker key "groq" (News) and "chat-groq" (Chat) are separate
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: shouldAttemptProvider(env, 'groq') and the chatCircuitKey = `chat-${providerName}`
+// pattern are gone. The Router DO handles per-key circuit state internally;
+// neither the News path nor the Chat path branch on a provider circuit key
+// anymore. There is no News-vs-Chat circuit isolation left to assert.
 
 // ═════════════════════════════════════════════════════════════════════
 // TEST 10: Source-level — recordGroqRequest only on success paths
 // ═════════════════════════════════════════════════════════════════════
 
-test('SRC-02: recordGroqRequest is NOT called in error/rejected paths', () => {
-  const fs = require('fs');
-  const path = require('path');
-  const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
-  const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
-
-  // In tryGroq: recordGroqRequest should be AFTER the success check
-  const tryGroqSection = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function tryGroq'),
-    WORKER_SRC.indexOf('async function tryGemini')
-  );
-  const recordIdx = tryGroqSection.indexOf('recordGroqRequest');
-  const successCheckIdx = tryGroqSection.indexOf('text.trim().length >= 50');
-  assert.ok(recordIdx > successCheckIdx,
-    'recordGroqRequest must come AFTER success check in tryGroq');
-
-  // In assistant.js: recordGroqRequest must come AFTER _parseGroqResult
-  const callGroqSection = ASSISTANT_SRC.slice(
-    ASSISTANT_SRC.indexOf('async function callGroqChat'),
-    ASSISTANT_SRC.indexOf('function _parseGroqResult')
-  );
-  const parseIdx = callGroqSection.indexOf('_parseGroqResult');
-  const recordIdxChat = callGroqSection.indexOf('recordGroqRequest');
-  assert.ok(parseIdx > -1 && recordIdxChat > -1,
-    'Both _parseGroqResult and recordGroqRequest must exist in callGroqChat');
-  assert.ok(recordIdxChat > parseIdx,
-    'recordGroqRequest must come AFTER _parseGroqResult in callGroqChat');
-});
+// OBSOLETE — REMOVED: SRC-02: recordGroqRequest is NOT called in error/rejected paths
+// The following functionality was removed when the Groq Coordinator was
+// replaced by the Groq Router Durable Object (src/durable-objects/groq-router.js).
+// Reason: recordGroqRequest was removed; the DO `record` action is called
+// exactly once per request (success or failure) inside _groqRouterCallGateway.
+// There is no "record only on success" ordering left to verify in tryGroq or
+// callGroqChat.
 
 // ═════════════════════════════════════════════════════════════════════
 // TEST 11: Summary — overall assessment

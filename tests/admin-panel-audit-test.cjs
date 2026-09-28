@@ -154,9 +154,10 @@ test('P3-7-1: Ticket ID is escaped in HTML id attribute', () => {
   const ticketCardIdx = adminJsSrc.indexOf("id=\"adm-ticket-");
   assert.ok(ticketCardIdx > -1, 'Ticket card rendering must exist');
   const snippet = adminJsSrc.slice(ticketCardIdx, ticketCardIdx + 100);
+  // Phase i18n refactor: loop variable renamed t → ticket (avoids shadowing t()).
   assert.ok(
-    /adminEscapeHtml\(String\(t\.id\)\)/.test(snippet),
-    'Ticket ID must be escaped with adminEscapeHtml(String(t.id)) in id attribute'
+    /adminEscapeHtml\(String\(ticket\.id\)\)/.test(snippet),
+    'Ticket ID must be escaped with adminEscapeHtml(String(ticket.id)) in id attribute'
   );
 });
 
@@ -164,9 +165,10 @@ test('P3-7-2: Ticket ID is escaped in onclick handler', () => {
   const onclickIdx = adminJsSrc.indexOf("onclick=\"toggleAdminTicketDetail");
   assert.ok(onclickIdx > -1, 'Ticket onclick handler must exist');
   const snippet = adminJsSrc.slice(onclickIdx, onclickIdx + 120);
+  // Phase i18n refactor: loop variable renamed t → ticket (avoids shadowing t()).
   assert.ok(
-    /adminEscapeHtml\(String\(t\.id\)\)/.test(snippet),
-    'Ticket ID must be escaped with adminEscapeHtml in onclick handler'
+    /adminEscapeHtml\(String\(ticket\.id\)\)/.test(snippet),
+    'Ticket ID must be escaped with adminEscapeHtml(String(ticket.id)) in onclick handler'
   );
 });
 
@@ -188,9 +190,12 @@ test('P4-8-2: membership label is a non-null Persian string', () => {
   const labelsStart = adminJsSrc.indexOf('const _adminSectionLabels');
   const labelsEnd = adminJsSrc.indexOf('};', labelsStart);
   const labelsSrc = adminJsSrc.slice(labelsStart, labelsEnd);
-  const membershipMatch = labelsSrc.match(/['"]membership['"]:\s*['"]([^'"]+)['"]/);
-  assert.ok(membershipMatch, 'membership must have a non-null string value');
-  assert.ok(membershipMatch[1].length > 0, 'membership label must not be empty');
+  // Phase i18n: literal Persian string replaced with t('adm_sidebar_membership')
+  // so the label resolves at runtime via the i18n dictionary (fa/en).
+  assert.ok(
+    /['"]membership['"]:\s*t\(['"]adm_sidebar_membership['"]\)/.test(labelsSrc),
+    'membership label must use t(\'adm_sidebar_membership\') (Phase i18n)'
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════

@@ -18,20 +18,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
+// PATH FIX (Step-5 extraction): processNewsAIBatch moved to src/news/summary.js
+const SUMMARY_PATH = path.join(__dirname, '..', 'src', 'news', 'summary.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
+const SUMMARY_SRC = fs.readFileSync(SUMMARY_PATH, 'utf8');
 
-// Extract processNewsAIBatch function body (from function declaration to next top-level function)
+// Extract processNewsAIBatch function body (from function declaration to the
+// createNewsSummary factory's return statement, which immediately follows
+// processNewsAIBatch in src/news/summary.js).
 function getProcessNewsAIBatchBody() {
   const startMarker = 'async function processNewsAIBatch(';
-  const startIdx = source.indexOf(startMarker);
+  const startIdx = SUMMARY_SRC.indexOf(startMarker);
   assert.ok(startIdx > -1, 'processNewsAIBatch must exist');
-  // Find the end — look for the next top-level function or the closing brace
-  // at column 0. We'll use a simpler approach: find 'function parseCalendarDate'
-  // which comes right after processNewsAIBatch.
-  const endMarker = 'function parseCalendarDate';
-  const endIdx = source.indexOf(endMarker, startIdx);
-  assert.ok(endIdx > -1, 'parseCalendarDate (next function) must exist');
-  return source.slice(startIdx, endIdx);
+  // PATH FIX: original endMarker 'function parseCalendarDate' lives in
+  // src/services/calendar.js (different module). The createNewsSummary
+  // factory's return statement (immediately following processNewsAIBatch in
+  // summary.js) is the equivalent next-code-block anchor.
+  const endMarker = '    generateSummaryWithFallback,';
+  const endIdx = SUMMARY_SRC.indexOf(endMarker, startIdx);
+  assert.ok(endIdx > -1, 'createNewsSummary factory return (next code block) must exist');
+  return SUMMARY_SRC.slice(startIdx, endIdx);
 }
 
 // ============================================================================
@@ -87,7 +93,10 @@ test('HOTFIX-6: processNewsAIBatch result object does NOT contain dead fields', 
   // Find the result object construction
   const resultIdx = body.indexOf('const result = {');
   assert.ok(resultIdx > -1, 'result object must exist');
-  const resultBlock = body.slice(resultIdx, resultIdx + 1000);
+  // PATH FIX: widened 1000 → 2000 — the Step-5 extraction expanded the
+  // HOTFIX (Commit 2.1) comment block in the result object, pushing
+  // ai:/elapsed: past the original 1000-char window.
+  const resultBlock = body.slice(resultIdx, resultIdx + 2000);
 
   // These fields must NOT be in the result object
   assert.ok(!/newsCacheWritten:/.test(resultBlock), 'newsCacheWritten must be removed from result');
@@ -114,8 +123,8 @@ test('HOTFIX-7: Instant news display — processNewsAIBatch writes to news:farsi
   // The publication gate (Commit 1) removed the writeAppCache to FARSI_NEWS_CACHE_KEY
   // from processNewsAIBatch. The hotfix must NOT restore it.
   // Verify STEP 6 still has the "PUBLICATION GATE" comment and NO writeAppCache.
-  const step6Idx = body.indexOf('KV_ARTICLES_published_immediate');
-  assert.ok(step6Idx > -1, 'Commit 1 publication gate (skip write) must remain');
+  const step6Idx = body.indexOf('KV_ARTICLES_published_merge');
+  assert.ok(step6Idx > -1, 'Commit 2.7 merge-aware publication marker must remain');
 
   // Verify NO writeAppCache to FARSI_NEWS_CACHE_KEY in the batch analysis area
   // (the only writeAppCache calls should be for news:ai:{hash} in succeedWithSummary,
@@ -132,9 +141,10 @@ test('HOTFIX-7: Instant news display — processNewsAIBatch writes to news:farsi
 });
 
 test('HOTFIX-8: publishArticleToFarsiNews still exists (Commit 1 publication gate)', () => {
-  assert.ok(source.includes('async function publishArticleToFarsiNews'),
+  // PATH FIX: publishArticleToFarsiNews + PUBLICATION GATE extracted to src/news/summary.js
+  assert.ok(SUMMARY_SRC.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist (Commit 1 publication gate)');
-  assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
+  assert.ok(SUMMARY_SRC.includes('PUBLICATION GATE (Commit 1)'),
     'PUBLICATION GATE comments must remain');
 });
 
@@ -143,13 +153,14 @@ test('HOTFIX-8: publishArticleToFarsiNews still exists (Commit 1 publication gat
 // ============================================================================
 
 test('HOTFIX-9: Commit 2 queue priority remains intact (priority: high on enqueue)', () => {
-  assert.ok(source.includes("priority: 'high'"),
+  // PATH FIX: queue priority + PERMANENT_FAIL_REASONS + RETRY JITTER extracted to src/news/summary.js
+  assert.ok(SUMMARY_SRC.includes("priority: 'high'"),
     'Commit 2 priority: "high" must remain on new queue items');
-  assert.ok(source.includes('QUEUE PRIORITY (Commit 2)'),
+  assert.ok(SUMMARY_SRC.includes('QUEUE PRIORITY (Commit 2)'),
     'Commit 2 queue priority comments must remain');
-  assert.ok(source.includes('PERMANENT_FAIL_REASONS'),
+  assert.ok(SUMMARY_SRC.includes('PERMANENT_FAIL_REASONS'),
     'Commit 2 PERMANENT_FAIL_REASONS must remain');
-  assert.ok(source.includes('RETRY JITTER'),
+  assert.ok(SUMMARY_SRC.includes('RETRY JITTER'),
     'Commit 2 retry jitter must remain');
 });
 
@@ -157,9 +168,11 @@ test('HOTFIX-9: Commit 2 queue priority remains intact (priority: high on enqueu
 // Test 5: newsJson is still defined (used by newsJsonLength in result)
 // ============================================================================
 
-test('HOTFIX-10: newsJson is still defined in processNewsAIBatch (used by result.newsJsonLength)', () => {
+test('HOTFIX-10: newsJsonLength is still computed in processNewsAIBatch result', () => {
   const body = getProcessNewsAIBatchBody();
   const codeOnly = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  assert.ok(/const\s+newsJson\s*=/.test(codeOnly),
-    'newsJson must still be declared — it is used by newsJsonLength in the result object');
+  // Commit 2.7: const newsJson was removed; newsJsonLength is now computed inline
+  // as JSON.stringify(trimmed).length. Verify the inline computation remains.
+  assert.ok(/newsJsonLength/.test(codeOnly),
+    'newsJsonLength must still be computed in the result object');
 });

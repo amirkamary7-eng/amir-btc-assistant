@@ -20,6 +20,7 @@ const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 const WRANGLER_SRC = fs.readFileSync(path.join(__dirname, '..', 'wrangler.jsonc'), 'utf8');
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -109,19 +110,19 @@ test('T10: all three retryFailed* jobs are called inside the 1-min block, gated 
 // ────────────────────────────────────────────────────────────────────────────
 
 test('T11: processOneArticleSummary is NOT called inside processNewsAIBatch', () => {
-  const batchStart = WORKER_SRC.indexOf('async function processNewsAIBatch');
+  const batchStart = SUMMARY_SRC.indexOf('async function processNewsAIBatch');
   assert.ok(batchStart > 0, 'processNewsAIBatch function must exist');
 
   // Find the closing brace of the function
   let depth = 0;
   let batchEnd = -1;
-  for (let i = batchStart; i < WORKER_SRC.length; i++) {
-    if (WORKER_SRC[i] === '{') depth++;
-    if (WORKER_SRC[i] === '}') { depth--; if (depth === 0) { batchEnd = i; break; } }
+  for (let i = batchStart; i < SUMMARY_SRC.length; i++) {
+    if (SUMMARY_SRC[i] === '{') depth++;
+    if (SUMMARY_SRC[i] === '}') { depth--; if (depth === 0) { batchEnd = i; break; } }
   }
   assert.ok(batchEnd > 0, 'Must find closing brace of processNewsAIBatch');
 
-  const fnBody = WORKER_SRC.slice(batchStart, batchEnd);
+  const fnBody = SUMMARY_SRC.slice(batchStart, batchEnd);
   assert.ok(!fnBody.includes('await processOneArticleSummary'),
     'processOneArticleSummary must NOT be called inside processNewsAIBatch (removed from STEP 9)');
 });
@@ -146,14 +147,14 @@ test('T12: processOneArticleSummary IS called in the */5 Phase 1d path', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 test('T13: queue circuit breaker exists in processNewsAIBatch with threshold 40', () => {
-  const batchStart = WORKER_SRC.indexOf('async function processNewsAIBatch');
+  const batchStart = SUMMARY_SRC.indexOf('async function processNewsAIBatch');
   let depth = 0;
   let batchEnd = -1;
-  for (let i = batchStart; i < WORKER_SRC.length; i++) {
-    if (WORKER_SRC[i] === '{') depth++;
-    if (WORKER_SRC[i] === '}') { depth--; if (depth === 0) { batchEnd = i; break; } }
+  for (let i = batchStart; i < SUMMARY_SRC.length; i++) {
+    if (SUMMARY_SRC[i] === '{') depth++;
+    if (SUMMARY_SRC[i] === '}') { depth--; if (depth === 0) { batchEnd = i; break; } }
   }
-  const fnBody = WORKER_SRC.slice(batchStart, batchEnd);
+  const fnBody = SUMMARY_SRC.slice(batchStart, batchEnd);
 
   assert.ok(fnBody.includes('CIRCUIT_BREAKER'),
     'Circuit breaker must exist in processNewsAIBatch');
@@ -266,7 +267,7 @@ test('T17: 15-min branch still runs calendar cache + market overview + processNe
 // T18: stepLog is untouched (still 34+ references)
 // ────────────────────────────────────────────────────────────────────────────
 
-test('T18: stepLog is untouched (still exists in worker-proxy.js)', () => {
-  const count = (WORKER_SRC.match(/stepLog/g) || []).length;
+test('T18: stepLog is untouched (still exists in src/news/summary.js)', () => {
+  const count = (SUMMARY_SRC.match(/stepLog/g) || []).length;
   assert.ok(count >= 30, `stepLog must have at least 30 references (found ${count})`);
 });

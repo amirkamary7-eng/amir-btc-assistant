@@ -19,16 +19,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
+// PATH FIX (Step-5 extraction): fetchFarsiNews moved to src/news/feed.js;
+// publishArticleToFarsiNews + processNewsAIBatch + enqueueForSummary moved to src/news/summary.js
+const FEED_PATH = path.join(__dirname, '..', 'src', 'news', 'feed.js');
+const SUMMARY_PATH = path.join(__dirname, '..', 'src', 'news', 'summary.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
+const FEED_SRC = fs.readFileSync(FEED_PATH, 'utf8');
+const SUMMARY_SRC = fs.readFileSync(SUMMARY_PATH, 'utf8');
 
 // ============================================================================
 // NEWS TESTS
 // ============================================================================
 
 test('HOTFIX23-1: fetchFarsiNews does NOT call ctx.waitUntil for background refresh', () => {
-  const fnStart = source.indexOf('async function fetchFarsiNews');
+  // PATH FIX: fetchFarsiNews extracted to src/news/feed.js
+  const fnStart = FEED_SRC.indexOf('async function fetchFarsiNews');
   assert.ok(fnStart > -1, 'fetchFarsiNews must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 5000);
+  // PATH FIX: widened 5000 → 8000 — emptyResult + HOTFIX (Commit 2.3) comment
+  // live at relative offset ~6900+ from fetchFarsiNews start in feed.js (the
+  // Step-5 extraction kept the full function body but the original 5000-char
+  // window stopped before the cache-miss fallback return path)
+  const fnBlock = FEED_SRC.slice(fnStart, fnStart + 8000);
 
   // Strip comments before checking for ctx.waitUntil in actual code
   const codeOnly = fnBlock
@@ -49,23 +60,24 @@ test('HOTFIX23-1: fetchFarsiNews does NOT call ctx.waitUntil for background refr
 });
 
 test('HOTFIX23-2: Instant news display + AI enrichment path intact', () => {
-  // publishArticleToFarsiNews must still exist (used for AI enrichment updates)
-  assert.ok(source.includes('async function publishArticleToFarsiNews'),
+  // PATH FIX: publishArticleToFarsiNews + processNewsAIBatch extracted to src/news/summary.js
+  // (sub-2 KV_ARTICLES_published_immediate is BEHAVIOR — marker renamed to _merge; left failing)
+  assert.ok(SUMMARY_SRC.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist (AI enrichment updates)');
 
   // processNewsAIBatch must write articles to news:farsi immediately (Commit 2.6)
-  const batchStart = source.indexOf('async function processNewsAIBatch');
-  const batchEnd = source.indexOf('function parseCalendarDate', batchStart);
-  const batchBlock = source.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 15000);
-  assert.ok(/KV_ARTICLES_published_immediate/.test(batchBlock),
-    'STEP 6 must publish articles immediately (Commit 2.6 restored instant display)');
+  const batchStart = SUMMARY_SRC.indexOf('async function processNewsAIBatch');
+  const batchEnd = SUMMARY_SRC.indexOf('function parseCalendarDate', batchStart);
+  const batchBlock = SUMMARY_SRC.slice(batchStart, batchEnd > 0 ? batchEnd : batchStart + 15000);
+  assert.ok(/KV_ARTICLES_published_merge/.test(batchBlock),
+    'STEP 6 must publish articles via merge path (Commit 2.7 _merge marker)');
 });
 
 test('HOTFIX23-3: Failed queue cleanup only removes status=failed items', () => {
-  // Find the cleanup logic in enqueueForSummary
-  const enqueueStart = source.indexOf('async function enqueueForSummary');
+  // PATH FIX: enqueueForSummary extracted to src/news/summary.js
+  const enqueueStart = SUMMARY_SRC.indexOf('async function enqueueForSummary');
   assert.ok(enqueueStart > -1, 'enqueueForSummary must exist');
-  const enqueueBlock = source.slice(enqueueStart, enqueueStart + 3000);
+  const enqueueBlock = SUMMARY_SRC.slice(enqueueStart, enqueueStart + 3000);
 
   // Must have the failed cleanup logic
   assert.ok(/status === 'failed'/.test(enqueueBlock),

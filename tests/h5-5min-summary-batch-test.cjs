@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -45,22 +46,22 @@ test('H5-5MIN-04: overlap skip on :00/:15/:30/:45 still exists', () => {
 });
 
 test('H5-5MIN-05: queue processing still functional (processOneArticleSummary unchanged)', () => {
-  assert.ok(WORKER_SRC.includes('async function processOneArticleSummary'),
+  assert.ok(SUMMARY_SRC.includes('async function processOneArticleSummary'),
     'processOneArticleSummary must still exist (unchanged)');
   assert.ok(WORKER_SRC.includes('async function getSummaryQueue'),
     'getSummaryQueue must still exist');
-  assert.ok(WORKER_SRC.includes('async function saveSummaryQueue'),
+  assert.ok(SUMMARY_SRC.includes('async function saveSummaryQueue'),
     'saveSummaryQueue must still exist');
 });
 
 test('H5-5MIN-06: AI provider chain unchanged (generateSummaryWithFallback)', () => {
-  assert.ok(WORKER_SRC.includes('async function generateSummaryWithFallback'),
+  assert.ok(SUMMARY_SRC.includes('async function generateSummaryWithFallback'),
     'generateSummaryWithFallback must still exist');
-  assert.ok(WORKER_SRC.includes("attemptProvider('groq'"),
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('groq'"),
     'Groq provider attempt must still exist');
-  assert.ok(WORKER_SRC.includes("attemptProvider('openrouter'"),
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('openrouter'"),
     'OpenRouter provider attempt must still exist');
-  assert.ok(WORKER_SRC.includes("attemptProvider('workers-ai'"),
+  assert.ok(SUMMARY_SRC.includes("attemptProvider('workers-ai'"),
     'Workers AI provider attempt must still exist');
 });
 

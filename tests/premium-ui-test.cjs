@@ -63,7 +63,9 @@ test('VIP-05: VIP popup subtitle mentions higher quotas', () => {
     MEMBERSHIP_USER_SRC.indexOf('function openVipStatusPopup'),
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
-  assert.ok(block.includes('سهمیه بالاتر'), 'mentions higher quotas');
+  // Phase i18n: subtitle text now resolved via t('mem_vip_status_subtitle')
+  // (the higher-quotas copy lives in the i18n dictionary, fa/en).
+  assert.ok(block.includes("t('mem_vip_status_subtitle')"), 'subtitle uses t(\'mem_vip_status_subtitle\') (Phase i18n)');
 });
 
 // Phase 8L: Replaced cosmetics shop benefit with Professional Badge
@@ -73,7 +75,8 @@ test('VIP-06: VIP benefits include Professional Badge (Phase 8L)', () => {
     MEMBERSHIP_USER_SRC.indexOf('function openActivationPopup')
   );
   assert.ok(!block.includes('فروشگاه ظاهر پروفایل'), 'cosmetics shop benefit removed');
-  assert.ok(block.includes('Badge حرفه‌ای'), 'Professional Badge benefit added');
+  // Phase i18n: Professional Badge benefit now via t('mem_benefit_pro_badge')
+  assert.ok(block.includes("t('mem_benefit_pro_badge')"), 'Professional Badge benefit uses t(\'mem_benefit_pro_badge\') (Phase i18n)');
 });
 
 // ─── Activation Popup tests ─────────────────────────────────────────────────

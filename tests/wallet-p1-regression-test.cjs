@@ -55,22 +55,26 @@ test('P1-6a: no duplicate refreshWalletAfterMutation CALL inside setTimeout', ()
 // P1-6b: closeWallet checks mutation seq
 // ============================================================================
 
-test('P1-6b: closeWallet checks _mutationSeq before rendering from cache', () => {
-  assert.match(WALLET_SRC, /closeWallet[\s\S]*?_walletCache\._mutationSeq/,
-    'closeWallet must check _walletCache._mutationSeq');
-  assert.match(WALLET_SRC, /cacheSeq === _walletMutationSeq/,
-    'closeWallet must compare cacheSeq with _walletMutationSeq');
-});
+// OBSOLETE — REMOVED: P1-6b: closeWallet checks _mutationSeq before rendering from cache
+// closeWallet was deliberately refactored to ALWAYS invalidate the wallet
+// cache on close (`_walletCache.wallet = null; _walletCache.walletAt = 0;`)
+// instead of seq-checking. The WALLET/CRON H1 FIX comment in wallet.js
+// explicitly documents why: the mutation-seq guard only catches
+// frontend-initiated mutations, so cron rewards could still leave stale cache;
+// unconditional invalidation is strictly better.
 
 test('P1-6b: fetchWallet stores _mutationSeq at cache write time', () => {
   assert.match(WALLET_SRC, /_walletCache\._mutationSeq = _walletMutationSeq/,
     'fetchWallet must store _mutationSeq at cache write time');
 });
 
-test('P1-6b: closeWallet falls through to loadProfileCard on mutation mismatch', () => {
-  assert.match(WALLET_SRC, /Mutation occurred since cache was written — fetch fresh data/,
-    'closeWallet must fetch fresh data when mutation seq mismatch detected');
-});
+// OBSOLETE — REMOVED: P1-6b: closeWallet falls through to loadProfileCard on mutation mismatch
+// closeWallet was deliberately refactored to ALWAYS invalidate the wallet
+// cache on close (`_walletCache.wallet = null; _walletCache.walletAt = 0;`)
+// instead of seq-checking. The WALLET/CRON H1 FIX comment in wallet.js
+// explicitly documents why: the mutation-seq guard only catches
+// frontend-initiated mutations, so cron rewards could still leave stale cache;
+// unconditional invalidation is strictly better.
 
 // ============================================================================
 // P1-3: 60s wallet balance polling

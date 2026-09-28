@@ -46,7 +46,8 @@ test('CFG-01: Alert quotas correct', () => {
 
 test('CFG-02: AI chat quotas correct', () => {
   const c = EC.ENTITLEMENT_CONFIG.ai_chat;
-  assert.equal(c.normal_daily_limit, 50);
+  // Phase 10: normal_daily_limit reduced from 50 → 10 (FINAL QUOTA comment in entitlement_config.js:30)
+  assert.equal(c.normal_daily_limit, 10);
   assert.equal(c.premium_daily_limit, 100);
 });
 
@@ -71,7 +72,8 @@ test('CFG-05: Watchlist quotas correct', () => {
 test('CFG-06: Helpers return correct per tier', () => {
   assert.equal(EC.getAlertFreePerDay(false), 3);
   assert.equal(EC.getAlertFreePerDay(true), 10);
-  assert.equal(EC.getAiChatDailyLimit(false), 50);
+  // Phase 10: Free tier AI chat limit reduced from 50 → 10
+  assert.equal(EC.getAiChatDailyLimit(false), 10);
   assert.equal(EC.getAiChatDailyLimit(true), 100);
   assert.equal(EC.getWheelDailySpins(false), 3);
   assert.equal(EC.getWheelDailySpins(true), 5);

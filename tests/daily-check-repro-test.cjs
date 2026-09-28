@@ -36,7 +36,14 @@ test('STATIC-2: claimDaily has early-return guard at the top', () => {
 
 test('STATIC-3: _isClaiming resets in finally block', () => {
   const fnStart = walletSrc.indexOf('async function claimDaily()');
-  const fnBody = walletSrc.slice(fnStart, fnStart + 8000);
+  // Find the end of claimDaily by matching braces (function is ~9400 chars long)
+  let depth = 0;
+  let fnEnd = fnStart;
+  for (let i = fnStart; i < walletSrc.length; i++) {
+    if (walletSrc[i] === '{') depth++;
+    else if (walletSrc[i] === '}') { depth--; if (depth === 0) { fnEnd = i + 1; break; } }
+  }
+  const fnBody = walletSrc.slice(fnStart, fnEnd);
   assert.match(fnBody, /finally\s*\{[\s\S]*?_isClaiming\s*=\s*false/,
     'claimDaily must reset _isClaiming = false in a finally block');
 });
@@ -64,7 +71,14 @@ test('STATIC-4: fetchHistory(0) is NOT awaited in claimDaily (non-blocking)', ()
 
 test('STATIC-5: showPopup runs AFTER fetchHistory fire-and-forget (not blocked)', () => {
   const fnStart = walletSrc.indexOf('async function claimDaily()');
-  const fnBody = walletSrc.slice(fnStart, fnStart + 8000);
+  // Find the end of claimDaily by matching braces (function is ~9400 chars long)
+  let depth = 0;
+  let fnEnd = fnStart;
+  for (let i = fnStart; i < walletSrc.length; i++) {
+    if (walletSrc[i] === '{') depth++;
+    else if (walletSrc[i] === '}') { depth--; if (depth === 0) { fnEnd = i + 1; break; } }
+  }
+  const fnBody = walletSrc.slice(fnStart, fnEnd);
   const fetchHistoryIdx = fnBody.indexOf('fetchHistory(0).then');
   const showPopupIdx = fnBody.indexOf('showPopup');
   assert.ok(fetchHistoryIdx > -1, 'fetchHistory(0).then must exist');

@@ -64,6 +64,7 @@ const createReferralHandlers = loadFactory('src/controllers/referrals.js', 'crea
 const WALLET_CTRL_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/wallet.js'), 'utf8');
 const REFERRAL_CTRL_SRC = fs.readFileSync(path.join(ROOT, 'src/controllers/referrals.js'), 'utf8');
 const WORKER_SRC = fs.readFileSync(path.join(ROOT, 'worker-proxy.js'), 'utf8');
+const REFERRAL_REWARDS_SRC = fs.readFileSync(path.join(ROOT, 'src/services/referral-rewards.js'), 'utf8');
 const REFERRAL_JS_SRC = fs.readFileSync(path.join(ROOT, 'referral.js'), 'utf8');
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -389,10 +390,10 @@ test('PD-H2: claimDailyRewardWithStreak still uses getMissionRewardAmount (credi
 });
 
 test('PD-H3: processPendingReferralReward still uses getReferralRewardAmount (credit unchanged)', () => {
-  // The referral CREDITING path in worker-proxy is unchanged.
-  const block = WORKER_SRC.slice(
-    WORKER_SRC.indexOf('async function processPendingReferralReward'),
-    WORKER_SRC.indexOf('async function retryFailedReferralRewards')
+  // The referral CREDITING path in src/services/referral-rewards.js is unchanged.
+  const block = REFERRAL_REWARDS_SRC.slice(
+    REFERRAL_REWARDS_SRC.indexOf('async function processPendingReferralReward'),
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedReferralRewards')
   );
   assert.ok(block.includes('inviterIsPremium'), 'credit path checks inviter tier');
   assert.ok(block.includes('getReferralRewardAmount'), 'credit path uses canonical helper');

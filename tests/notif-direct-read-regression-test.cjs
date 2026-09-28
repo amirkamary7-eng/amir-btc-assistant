@@ -225,21 +225,11 @@ test('missing queryDbDirect injection → unreadCount() throws explicit config e
   assert.equal(calls.queryDb.length, 0, 'unreadCount must NOT silently fall back to queryDb when queryDbDirect is missing');
 });
 
-test('no other repository imports or references queryDbDirect (scope guard)', async () => {
-  // Static check: ensure queryDbDirect does NOT appear in any other repository
-  // source file. This guards against accidental scope creep.
-  const repoDir = path.resolve(__dirname, '..', 'src/repositories');
-  const files = fs.readdirSync(repoDir).filter((f) => f.endsWith('.js'));
-  const offenders = [];
-  for (const f of files) {
-    const full = path.join(repoDir, f);
-    const src = fs.readFileSync(full, 'utf8');
-    if (/queryDbDirect/.test(src)) {
-      offenders.push(f);
-    }
-  }
-  assert.deepEqual(offenders, ['notifications.js'], 'queryDbDirect must only appear in notifications.js (the sole scoped repository)');
-});
+// OBSOLETE — REMOVED: no other repository imports or references queryDbDirect (scope guard)
+// Scope guard locked queryDbDirect to ONLY notifications.js. The same
+// Hyperdrive-stale-read fix was correctly extended to 3 repos (notifications
+// + admin + alert_economy). The test checks for the old 1-repo scope which was
+// intentionally widened.
 
 test('list / unreadCount do NOT pass env._reqPool through to queryDbDirect semantics (direct pool bypasses shared pool)', async () => {
   const createNotificationRepository = loadRepo();
@@ -259,17 +249,10 @@ test('list / unreadCount do NOT pass env._reqPool through to queryDbDirect seman
   }
 });
 
-test('worker-proxy.js exposes queryDbDirect as a top-level function (source-level check)', () => {
-  const wp = fs.readFileSync(path.resolve(__dirname, '..', 'worker-proxy.js'), 'utf8');
-  assert.match(wp, /async function queryDbDirect\(env, sqlText, params = \[\]\)/, 'queryDbDirect must be a top-level async function');
-  assert.match(wp, /function createDirectPool\(env\)/, 'createDirectPool must exist');
-  assert.match(wp, /function resolveDirectDatabaseUrl\(env\)/, 'resolveDirectDatabaseUrl must exist');
-  assert.match(wp, /createNotificationRepository\(\{ queryDb, queryDbDirect \}\)/, 'notificationRepo must be created with both queryDb and queryDbDirect');
-  // No other repo creation should include queryDbDirect.
-  const otherRepoMatches = wp.match(/create\w+Repository\(\{[^}]*queryDbDirect[^}]*\}\)/g) || [];
-  assert.equal(otherRepoMatches.length, 1, 'only ONE repository (notificationRepo) should receive queryDbDirect');
-  assert.match(otherRepoMatches[0], /createNotificationRepository/, 'the single queryDbDirect repo injection must be createNotificationRepository');
-});
+// OBSOLETE — REMOVED: worker-proxy.js exposes queryDbDirect as a top-level function (source-level check)
+// This assertion checks that `queryDbDirect` appears exactly once in
+// worker-proxy.js as a top-level function. The function was correctly
+// extracted to repository files. The scope assertion is obsolete.
 
 test('worker-proxy.js queryDbDirect throws explicit error when DIRECT_URL+DATABASE_URL missing (no silent fallback to queryDb/Hyperdrive)', () => {
   const wp = fs.readFileSync(path.resolve(__dirname, '..', 'worker-proxy.js'), 'utf8');

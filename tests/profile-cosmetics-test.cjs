@@ -110,14 +110,29 @@ test('CTRL-04: purchase uses atomic AB debit', () => {
 });
 
 test('CTRL-05: race condition — ownership conflict returns 409 WITHOUT refund (FIX C2)', () => {
-  const block = COSMETICS_CTRL_SRC.slice(COSMETICS_CTRL_SRC.indexOf('async function handlePurchase'), COSMETICS_CTRL_SRC.indexOf('async function handleActivate'));
+  const handlePurchaseBlock = COSMETICS_CTRL_SRC.slice(COSMETICS_CTRL_SRC.indexOf('async function handlePurchase'), COSMETICS_CTRL_SRC.indexOf('async function handleActivate'));
   // FIX C2 (free purchase): the old race-condition refund returned the tokens
   // while the user kept the cosmetic (net free purchase). The conflict path
   // must return 409 ALREADY_OWNED and must NOT issue any refund — the single
   // completed debit for the deterministic refId paid for the delivered
   // ownership. Regression-locked by cosmetics-refund-guard-test.cjs CSM5-7.
-  assert.ok(block.includes('ALREADY_OWNED'));
-  assert.ok(!block.includes('grantReward'), 'handlePurchase must NOT issue refunds on the ownership-conflict path (FIX C2)');
+  assert.ok(handlePurchaseBlock.includes('ALREADY_OWNED'));
+  // Scope the no-refund check to ONLY the ownership-conflict branch
+  // (`if (!created) { ... }`) — this is the FIX C2 path. The outer catch
+  // block legitimately refunds via grantReward when createOwnership throws
+  // (BUG 1 FIX: phantom debit refund), a separate concern — do not flag it.
+  const conflictStart = handlePurchaseBlock.indexOf('if (!created)');
+  assert.ok(conflictStart > -1, 'handlePurchase must have an ownership-conflict branch (`if (!created)`)');
+  // Find the end of the `if (!created)` block by matching braces
+  let depth = 0;
+  let started = false;
+  let conflictEnd = conflictStart;
+  for (let i = conflictStart; i < handlePurchaseBlock.length; i++) {
+    if (handlePurchaseBlock[i] === '{') { depth++; started = true; }
+    else if (handlePurchaseBlock[i] === '}') { depth--; if (started && depth === 0) { conflictEnd = i + 1; break; } }
+  }
+  const conflictBranch = handlePurchaseBlock.slice(conflictStart, conflictEnd);
+  assert.ok(!conflictBranch.includes('grantReward'), 'handlePurchase ownership-conflict branch must NOT issue refunds (FIX C2)');
 });
 
 test('CTRL-06: fail-safe — authority error returns Normal', () => {

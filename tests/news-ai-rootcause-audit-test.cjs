@@ -6,7 +6,8 @@
  * correctly applied and that the previously-buggy behavior no longer occurs.
  *
  * Fix coverage:
- *   P0-1: Gemini fallback guard now has `!summary &&` — Groq success skips Gemini
+ *   P0-1: First-fallback guard now has `!summary &&` — Groq success skips OpenRouter
+ *         (Gemini was removed from the chain; OpenRouter is now the first fallback.)
  *   P0-2: validatePersianOutput moved INSIDE attemptProvider, BEFORE recordCircuitResult
  *         → invalid Persian output is recorded as a circuit FAILURE (not success)
  *   P1-A: KV cache lookup (both JSON + plain-string paths) now calls validatePersianOutput
@@ -23,11 +24,17 @@
  *   F-5: enrichNewsWithAISummaries validates
  *
  * New regression tests (functional proofs):
- *   R-1: Groq success → Gemini is NOT called (P0-1 functional proof)
+ *   R-1: Groq success → next fallback is NOT called (P0-1 functional proof)
  *   R-2: invalid Persian output × 3 → circuit opens (P0-2 functional proof)
  *   R-3: invalid KV summary → AI fallback occurs (P1-A functional proof)
  *   R-4: error code 3036 classification (P1-B functional proof)
  *   R-5: Workers AI timeout fires (P1-C functional proof)
+ *
+ * Architecture note (post-Gemini-removal):
+ *   Provider chain is now 4 providers: Groq → OpenRouter → Workers AI → OpenAI.
+ *   Gemini was removed entirely; `tryGemini` no longer exists. The P0-1 `!summary &&`
+ *   guard is now checked on OpenRouter (the first non-Groq fallback). Provider
+ *   function definitions live in `src/news/providers.js` (not `summary.js`).
  *
  * Run: node --test news-ai-rootcause-audit-test.cjs
  */
@@ -38,44 +45,59 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
-const LINES = WORKER_SRC.split('\n');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
+const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/providers.js'), 'utf8');
+const TRANSLATE_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/translate.js'), 'utf8');
+const SHARED_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/shared.js'), 'utf8');
+const LINES = SUMMARY_SRC.split('\n');
 
 function line(n) { return LINES[n - 1] || ''; }
 
 // ============================================================================
-// P0-1: Gemini fallback guard now has `!summary &&` (FIXED)
+// P0-1: First-fallback guard now has `!summary &&` (FIXED)
+//       (Gemini was removed; OpenRouter is now the first fallback after Groq.)
 // ============================================================================
 
-test('P0-1.FIXED: Gemini provider block now HAS !summary guard', () => {
-  // Find the Gemini guard line (search by NEWS_PROVIDER_GEMINI in the fallback chain)
+test('P0-1.FIXED: first fallback (OpenRouter) block now HAS !summary guard', () => {
+  // Gemini was removed; OpenRouter is now the first non-Groq fallback in the chain.
+  // The !summary guard on OpenRouter proves the P0-1 fix is still in place: when
+  // Groq succeeds, OpenRouter is NOT called (and neither are the later fallbacks).
+  const openRouterLineIdx = LINES.findIndex(l =>
+    /if\s*\(\s*!summary\s*&&\s*isNewsProviderEnabled.*NEWS_PROVIDER_OPENROUTER/.test(l));
+  assert.ok(openRouterLineIdx !== -1,
+    'P0-1 FIXED: first fallback (OpenRouter, post-Gemini-removal) must have `!summary &&` guard ' +
+    'so it is NOT called when Groq succeeds');
+  // Negative guard: Gemini must NOT appear in the fallback chain at all.
   const geminiLineIdx = LINES.findIndex(l =>
-    /if\s*\(\s*!summary\s*&&\s*isNewsProviderEnabled.*NEWS_PROVIDER_GEMINI/.test(l));
-  assert.ok(giniLineFound(geminiLineIdx),
-    'P0-1 FIXED: Gemini guard must now have `!summary &&` so Gemini is NOT called when Groq succeeds');
+    /isNewsProviderEnabled.*NEWS_PROVIDER_GEMINI/.test(l));
+  assert.equal(geminiLineIdx, -1,
+    'P0-1 FIXED: Gemini guard must NOT exist in the fallback chain (Gemini removed)');
 });
-function giniLineFound(idx) { return idx !== -1; }
 
 test('P0-1.FIXED: Groq provider block is first (no !summary needed — it is primary)', () => {
   const groqIdx = LINES.findIndex(l =>
     /if\s*\(isNewsProviderEnabled.*NEWS_PROVIDER_GROQ/.test(l));
-  const geminiIdx = LINES.findIndex(l =>
-    /isNewsProviderEnabled.*NEWS_PROVIDER_GEMINI/.test(l));
-  assert.ok(groqIdx !== -1 && geminiIdx !== -1, 'both Groq and Gemini guards must exist');
-  assert.ok(groqIdx < geminiIdx, 'Groq must come before Gemini in the fallback chain');
+  // Gemini was removed; OpenRouter is now the first fallback after Groq.
+  const openRouterIdx = LINES.findIndex(l =>
+    /isNewsProviderEnabled.*NEWS_PROVIDER_OPENROUTER/.test(l));
+  assert.ok(groqIdx !== -1 && openRouterIdx !== -1,
+    'both Groq and OpenRouter guards must exist (Gemini removed)');
+  assert.ok(groqIdx < openRouterIdx,
+    'Groq must come before OpenRouter in the fallback chain (Gemini removed)');
 });
 
-test('P0-1.FIXED: all 5 providers receive validatePersianOutput as 3rd arg (P0-2 wiring)', () => {
+test('P0-1.FIXED: all 4 providers receive validatePersianOutput as 3rd arg (P0-2 wiring)', () => {
+  // Gemini removed; 4 providers remain in the chain: groq, openrouter, workers-ai, openai.
   const providers = [
     ['groq', 'tryGroq'],
-    ['gemini', 'tryGemini'],
-    ['workers-ai', 'tryWorkersAI'],
     ['openrouter', 'tryOpenRouter'],
+    ['workers-ai', 'tryWorkersAI'],
     ['openai', 'tryOpenAI'],
   ];
   for (const [name, fn] of providers) {
     const re = new RegExp(
       `attemptProvider\\(['"]${name}['"],\\s*\\(\\)\\s*=>\\s*${fn}\\(env,\\s*prompt,\\s*systemPrompt\\),\\s*validatePersianOutput\\)`);
-    assert.match(WORKER_SRC, re,
+    assert.match(SUMMARY_SRC, re,
       `${fn} must be called with validatePersianOutput as the 3rd arg to attemptProvider (P0-2 fix)`);
   }
 });
@@ -85,16 +107,16 @@ test('P0-1.FIXED: all 5 providers receive validatePersianOutput as 3rd arg (P0-2
 // ============================================================================
 
 test('P0-2.FIXED: attemptProvider now accepts a validator parameter (3rd arg)', () => {
-  assert.match(WORKER_SRC, /async function attemptProvider\(providerName,\s*tryFn,\s*validator\)/,
+  assert.match(SUMMARY_SRC, /async function attemptProvider\(providerName,\s*tryFn,\s*validator\)/,
     'P0-2 FIXED: attemptProvider signature must accept a 3rd `validator` parameter');
 });
 
 test('P0-2.FIXED: validator runs BEFORE recordCircuitResult inside attemptProvider', () => {
   // Find the attemptProvider function body and confirm validator block comes before recordCircuitResult
-  const fnStart = WORKER_SRC.indexOf('async function attemptProvider(providerName, tryFn, validator)');
+  const fnStart = SUMMARY_SRC.indexOf('async function attemptProvider(providerName, tryFn, validator)');
   assert.ok(fnStart !== -1, 'attemptProvider with validator param must exist');
-  const fnEnd = WORKER_SRC.indexOf('return r;', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnEnd = SUMMARY_SRC.indexOf('return r;', fnStart);
+  const fnBody = SUMMARY_SRC.slice(fnStart, fnEnd);
   const validatorIdx = fnBody.indexOf('typeof validator === \'function\'');
   const recordIdx = fnBody.indexOf('recordCircuitResult(env, providerName');
   assert.ok(validatorIdx !== -1 && recordIdx !== -1,
@@ -104,9 +126,9 @@ test('P0-2.FIXED: validator runs BEFORE recordCircuitResult inside attemptProvid
 });
 
 test('P0-2.FIXED: validation failure mutates r.success to false before recordCircuitResult', () => {
-  const fnStart = WORKER_SRC.indexOf('async function attemptProvider(providerName, tryFn, validator)');
-  const fnEnd = WORKER_SRC.indexOf('return r;', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = SUMMARY_SRC.indexOf('async function attemptProvider(providerName, tryFn, validator)');
+  const fnEnd = SUMMARY_SRC.indexOf('return r;', fnStart);
+  const fnBody = SUMMARY_SRC.slice(fnStart, fnEnd);
   assert.match(fnBody, /r\.success\s*=\s*false;[\s\S]*r\.error\s*=\s*['"]persian_validation_failed['"]/,
     'P0-2 FIXED: validation failure must mutate r.success=false + r.error before recordCircuitResult');
 });
@@ -114,9 +136,9 @@ test('P0-2.FIXED: validation failure mutates r.success to false before recordCir
 test('P0-2.FIXED: no duplicate validatePersianOutput call in caller (validator is inside attemptProvider now)', () => {
   // The caller should no longer call validatePersianOutput directly — it's delegated to attemptProvider
   // Find generateSummaryWithFallback and check that validatePersianOutput is NOT called on r.summary there
-  const fnStart = WORKER_SRC.indexOf('async function generateSummaryWithFallback');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = SUMMARY_SRC.indexOf('async function generateSummaryWithFallback');
+  const fnEnd = SUMMARY_SRC.indexOf('\n}', fnStart);
+  const fnBody = SUMMARY_SRC.slice(fnStart, fnEnd);
   // The only references to validatePersianOutput in the caller should be as the 3rd arg to attemptProvider
   const directCalls = fnBody.match(/const validation = validatePersianOutput\(r\.summary\)/g);
   assert.equal(directCalls, null,
@@ -130,12 +152,12 @@ test('P0-2.FIXED: no duplicate validatePersianOutput call in caller (validator i
 
 test('P1-A.FIXED: KV JSON-path lookup now calls validatePersianOutput', () => {
   // Find the KV lookup block and confirm validatePersianOutput is called on parsed.summary
-  const fnStart = WORKER_SRC.indexOf('async function processOneArticleSummary');
+  const fnStart = SUMMARY_SRC.indexOf('async function processOneArticleSummary');
   assert.ok(fnStart !== -1, 'processOneArticleSummary must exist');
   // Find the KV block within this function (search for the JSON.parse + parsed.summary pattern)
-  const kvBlockStart = WORKER_SRC.indexOf('const parsed = JSON.parse(existingRaw);', fnStart);
-  const kvBlockEnd = WORKER_SRC.indexOf('// ── DB CHECK', kvBlockStart);
-  const kvBlock = WORKER_SRC.slice(kvBlockStart, kvBlockEnd);
+  const kvBlockStart = SUMMARY_SRC.indexOf('const parsed = JSON.parse(existingRaw);', fnStart);
+  const kvBlockEnd = SUMMARY_SRC.indexOf('// ── DB CHECK', kvBlockStart);
+  const kvBlock = SUMMARY_SRC.slice(kvBlockStart, kvBlockEnd);
   assert.match(kvBlock, /validatePersianOutput\(parsed\.summary\)/,
     'P1-A FIXED: KV JSON-path lookup must call validatePersianOutput(parsed.summary)');
   assert.match(kvBlock, /kvValidation\.valid/,
@@ -143,10 +165,10 @@ test('P1-A.FIXED: KV JSON-path lookup now calls validatePersianOutput', () => {
 });
 
 test('P1-A.FIXED: KV plain-string-path lookup also calls validatePersianOutput', () => {
-  const fnStart = WORKER_SRC.indexOf('async function processOneArticleSummary');
-  const kvBlockStart = WORKER_SRC.indexOf('const parsed = JSON.parse(existingRaw);', fnStart);
-  const kvBlockEnd = WORKER_SRC.indexOf('// ── DB CHECK', kvBlockStart);
-  const kvBlock = WORKER_SRC.slice(kvBlockStart, kvBlockEnd);
+  const fnStart = SUMMARY_SRC.indexOf('async function processOneArticleSummary');
+  const kvBlockStart = SUMMARY_SRC.indexOf('const parsed = JSON.parse(existingRaw);', fnStart);
+  const kvBlockEnd = SUMMARY_SRC.indexOf('// ── DB CHECK', kvBlockStart);
+  const kvBlock = SUMMARY_SRC.slice(kvBlockStart, kvBlockEnd);
   assert.match(kvBlock, /validatePersianOutput\(existingRaw\)/,
     'P1-A FIXED: KV plain-string-path lookup must call validatePersianOutput(existingRaw)');
 });
@@ -156,9 +178,9 @@ test('P1-A.FIXED: KV plain-string-path lookup also calls validatePersianOutput',
 // ============================================================================
 
 test('P1-B.FIXED: tryWorkersAI inspects e.code (numeric Cloudflare codes)', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   assert.match(fnBody, /e\?\.code|e\.code/,
     'P1-B FIXED: tryWorkersAI must inspect e.code for numeric Cloudflare error codes');
   assert.match(fnBody, /code\s*===\s*3036/,
@@ -170,9 +192,9 @@ test('P1-B.FIXED: tryWorkersAI inspects e.code (numeric Cloudflare codes)', () =
 });
 
 test('P1-B.FIXED: 3036 classified as non_retryable', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   // Find the 3036 block and check errorType
   const code3036Idx = fnBody.indexOf('code === 3036');
   const blockEnd = fnBody.indexOf('}', code3036Idx);
@@ -184,9 +206,9 @@ test('P1-B.FIXED: 3036 classified as non_retryable', () => {
 });
 
 test('P1-B.FIXED: 3040 classified as retryable', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   const code3040Idx = fnBody.indexOf('code === 3040');
   const blockEnd = fnBody.indexOf('}', code3040Idx);
   const block = fnBody.slice(code3040Idx, blockEnd);
@@ -197,9 +219,9 @@ test('P1-B.FIXED: 3040 classified as retryable', () => {
 });
 
 test('P1-B.FIXED: 5035 classified as non_retryable', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   const code5035Idx = fnBody.indexOf('code === 5035');
   const blockEnd = fnBody.indexOf('}', code5035Idx);
   const block = fnBody.slice(code5035Idx, blockEnd);
@@ -214,9 +236,9 @@ test('P1-B.FIXED: 5035 classified as non_retryable', () => {
 // ============================================================================
 
 test('P1-C.FIXED: tryWorkersAI uses Promise.race with 15s timeout', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   assert.match(fnBody, /WORKERS_AI_TIMEOUT_MS\s*=\s*15000/,
     'P1-C FIXED: tryWorkersAI must define WORKERS_AI_TIMEOUT_MS = 15000');
   assert.match(fnBody, /Promise\.race/,
@@ -226,9 +248,9 @@ test('P1-C.FIXED: tryWorkersAI uses Promise.race with 15s timeout', () => {
 });
 
 test('P1-C.FIXED: timeout error classified as retryable', () => {
-  const fnStart = WORKER_SRC.indexOf('async function tryWorkersAI');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnStart = PROVIDERS_SRC.indexOf('async function tryWorkersAI');
+  const fnEnd = PROVIDERS_SRC.indexOf('\n}', fnStart);
+  const fnBody = PROVIDERS_SRC.slice(fnStart, fnEnd);
   // Find the workers_ai_timeout handler block (after the code-specific handlers)
   const timeoutIdx = fnBody.indexOf('/workers_ai_timeout/i.test(msg)');
   assert.ok(timeoutIdx !== -1, 'workers_ai_timeout handler must exist');
@@ -247,10 +269,10 @@ test('P1-C.FIXED: timeout error classified as retryable', () => {
 
 test('P2-A.FIXED: comment now says Groq is primary (not Gemini)', () => {
   // The old comment "Gemini is ALWAYS tried first" must be gone
-  assert.ok(!/Gemini is ALWAYS tried first/.test(WORKER_SRC),
+  assert.ok(!/Gemini is ALWAYS tried first/.test(SUMMARY_SRC),
     'P2-A FIXED: stale comment "Gemini is ALWAYS tried first" must be removed');
   // The new comment must mention Groq as primary
-  assert.match(WORKER_SRC, /Groq is ALWAYS tried first/,
+  assert.match(SUMMARY_SRC, /Groq is ALWAYS tried first/,
     'P2-A FIXED: comment must now say "Groq is ALWAYS tried first"');
 });
 
@@ -259,7 +281,7 @@ test('P2-A.FIXED: comment now says Groq is primary (not Gemini)', () => {
 // ============================================================================
 
 test('F-1.VERIFIED: News AI circuit keys use "news:circuit:{provider}" prefix', () => {
-  assert.match(WORKER_SRC, /news:circuit:[`'"]/,
+  assert.match(PROVIDERS_SRC, /news:circuit:[`'"]/,
     'News AI circuit breaker keys use news:circuit: prefix');
 });
 
@@ -277,12 +299,12 @@ test('F-1.VERIFIED: Chat AI uses separate circuit keys (isolated from News AI)',
 // ============================================================================
 
 test('F-2.VERIFIED: translation cache has TTL (5 min)', () => {
-  assert.match(WORKER_SRC, /TRANSLATION_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/,
+  assert.match(TRANSLATE_SRC, /TRANSLATION_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/,
     'Translation cache has 5-minute TTL (Phase 1 P1-1 fix in place)');
 });
 
 test('F-2.VERIFIED: translation cache key uses full text (not substring)', () => {
-  assert.match(WORKER_SRC, /const cacheKey\s*=\s*text\s*;|cacheKey\s*=\s*text\b/,
+  assert.match(TRANSLATE_SRC, /const cacheKey\s*=\s*text\s*;|cacheKey\s*=\s*text\b/,
     'Translation cache key uses full text (Phase 3 P3-P2-1 fix in place)');
 });
 
@@ -291,26 +313,30 @@ test('F-2.VERIFIED: translation cache key uses full text (not substring)', () =>
 // ============================================================================
 
 test('F-3.VERIFIED: validator now runs inside attemptProvider for all providers (P0-2 fix)', () => {
-  // P0-2 fix moved the validator inside attemptProvider, so it runs for ALL 5 providers
-  // automatically. The old per-provider validatePersianOutput calls in the caller are gone.
-  const providers = ['groq', 'gemini', 'workers-ai', 'openrouter', 'openai'];
+  // P0-2 fix moved the validator inside attemptProvider, so it runs for ALL 4 providers
+  // automatically (Gemini removed). The old per-provider validatePersianOutput calls in
+  // the caller are gone.
+  const providers = ['groq', 'openrouter', 'workers-ai', 'openai'];
   for (const p of providers) {
     const re = new RegExp(`attemptProvider\\(['"]${p}['"],[\\s\\S]*?validatePersianOutput\\)`);
-    assert.match(WORKER_SRC, re,
+    assert.match(SUMMARY_SRC, re,
       `${p} must pass validatePersianOutput as the validator to attemptProvider`);
   }
+  // Negative guard: Gemini must NOT be wired into attemptProvider (Gemini removed).
+  assert.ok(!/attemptProvider\(['"]gemini['"]/.test(SUMMARY_SRC),
+    'Gemini must NOT be wired into attemptProvider (Gemini removed from the chain)');
 });
 
 test('F-4.VERIFIED: DB lookup validates Persian', () => {
-  assert.match(WORKER_SRC, /validatePersianOutput\(dbArticle\.summary\)/,
+  assert.match(SUMMARY_SRC, /validatePersianOutput\(dbArticle\.summary\)/,
     'Phase 3 P3-P0-1: DB lookup calls validatePersianOutput');
 });
 
 test('F-5.VERIFIED: enrichNewsWithAISummaries validates cached summaries', () => {
-  const fnStart = WORKER_SRC.indexOf('function enrichNewsWithAISummaries');
+  const fnStart = SUMMARY_SRC.indexOf('function enrichNewsWithAISummaries');
   assert.ok(fnStart !== -1, 'enrichNewsWithAISummaries function must exist');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+  const fnEnd = SUMMARY_SRC.indexOf('\n}', fnStart);
+  const fnBody = SUMMARY_SRC.slice(fnStart, fnEnd);
   assert.match(fnBody, /validatePersianOutput/,
     'Phase 3: enrichNewsWithAISummaries calls validatePersianOutput');
   assert.match(fnBody, />=\s*200/,
@@ -321,27 +347,40 @@ test('F-5.VERIFIED: enrichNewsWithAISummaries validates cached summaries', () =>
 // STRUCTURE: fallback chain structure preserved
 // ============================================================================
 
-test('STRUCTURE: 5 providers in fallback chain (Groq→Gemini→WorkersAI→OpenRouter→OpenAI)', () => {
-  const providers = ['tryGroq', 'tryGemini', 'tryWorkersAI', 'tryOpenRouter', 'tryOpenAI'];
+test('STRUCTURE: 4 providers in fallback chain (Groq→OpenRouter→WorkersAI→OpenAI)', () => {
+  // Gemini removed; provider function definitions live in src/news/providers.js
+  // (not summary.js — they were extracted in the Step-5 refactor).
+  const providers = ['tryGroq', 'tryOpenRouter', 'tryWorkersAI', 'tryOpenAI'];
   for (const p of providers) {
     const re = new RegExp(`async function ${p}\\b`);
-    assert.match(WORKER_SRC, re, `${p} function must exist`);
+    assert.match(PROVIDERS_SRC, re, `${p} function must exist in src/news/providers.js`);
   }
+  // Negative guard: tryGemini must NOT exist anywhere (Gemini removed).
+  assert.ok(!/async function tryGemini\b/.test(PROVIDERS_SRC),
+    'tryGemini function must NOT exist (Gemini removed)');
+  assert.ok(!/async function tryGemini\b/.test(SUMMARY_SRC),
+    'tryGemini function must NOT exist in summary.js either (Gemini removed)');
 });
 
-test('STRUCTURE: fallback order in generateSummaryWithFallback is Groq→Gemini→WorkersAI→OpenRouter→OpenAI', () => {
-  const fnStart = WORKER_SRC.indexOf('async function generateSummaryWithFallback');
-  const fnEnd = WORKER_SRC.indexOf('\n}', fnStart);
-  const fnBody = WORKER_SRC.slice(fnStart, fnEnd);
+test('STRUCTURE: fallback order in generateSummaryWithFallback is Groq→OpenRouter→WorkersAI→OpenAI', () => {
+  // Gemini removed; new fallback order is Groq → OpenRouter → Workers AI → OpenAI.
+  const fnStart = SUMMARY_SRC.indexOf('async function generateSummaryWithFallback');
+  const fnEnd = SUMMARY_SRC.indexOf('\n}', fnStart);
+  const fnBody = SUMMARY_SRC.slice(fnStart, fnEnd);
   const groqIdx = fnBody.indexOf("attemptProvider('groq'");
-  const geminiIdx = fnBody.indexOf("attemptProvider('gemini'");
-  const workersAiIdx = fnBody.indexOf("attemptProvider('workers-ai'");
   const openRouterIdx = fnBody.indexOf("attemptProvider('openrouter'");
+  const workersAiIdx = fnBody.indexOf("attemptProvider('workers-ai'");
   const openAiIdx = fnBody.indexOf("attemptProvider('openai'");
-  assert.ok(groqIdx < geminiIdx, 'Groq before Gemini');
-  assert.ok(geminiIdx < workersAiIdx, 'Gemini before Workers AI');
-  assert.ok(workersAiIdx < openRouterIdx, 'Workers AI before OpenRouter');
-  assert.ok(openRouterIdx < openAiIdx, 'OpenRouter before OpenAI');
+  assert.ok(groqIdx > -1, 'groq attemptProvider call must exist');
+  assert.ok(openRouterIdx > -1, 'openrouter attemptProvider call must exist');
+  assert.ok(workersAiIdx > -1, 'workers-ai attemptProvider call must exist');
+  assert.ok(openAiIdx > -1, 'openai attemptProvider call must exist');
+  assert.ok(groqIdx < openRouterIdx, 'Groq before OpenRouter');
+  assert.ok(openRouterIdx < workersAiIdx, 'OpenRouter before Workers AI');
+  assert.ok(workersAiIdx < openAiIdx, 'Workers AI before OpenAI');
+  // Negative guard: Gemini must NOT appear in the fallback chain.
+  assert.ok(fnBody.indexOf("attemptProvider('gemini'") === -1,
+    'Gemini must NOT appear in the fallback chain (Gemini removed)');
 });
 
 // ============================================================================

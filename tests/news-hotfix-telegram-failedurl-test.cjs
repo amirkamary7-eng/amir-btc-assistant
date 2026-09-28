@@ -10,6 +10,9 @@ const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
 // getChatMemberDebugPayload extracted to src/services/channel-membership.js
 const CM_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/channel-membership.js'), 'utf8');
+// Hotfix 2.4 news failed-URL tracking + queue cleanup + queue priority patterns
+// moved out of worker-proxy.js into src/news/summary.js.
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
 
 // TEST GROUP A — Telegram timeout
 test('HOTFIX24-A1: getChatMemberDebugPayload fetch has AbortController with 5s timeout', () => {
@@ -40,9 +43,9 @@ test('HOTFIX24-A3: Existing error handling preserved (catch block returns payloa
 
 // TEST GROUP B — News failed URL tracking
 test('HOTFIX24-B1: requeueWithRetry tracks permanently failed URLs in KV', () => {
-  const fnStart = source.indexOf('async function requeueWithRetry');
+  const fnStart = SUMMARY_SRC.indexOf('async function requeueWithRetry');
   assert.ok(fnStart > -1, 'requeueWithRetry must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 3000);
+  const fnBlock = SUMMARY_SRC.slice(fnStart, fnStart + 5000);
 
   assert.ok(/news:failed_urls/.test(fnBlock), 'Must write to news:failed_urls KV key');
   assert.ok(/isPermanentFailure/.test(fnBlock), 'Must check isPermanentFailure');
@@ -51,9 +54,9 @@ test('HOTFIX24-B1: requeueWithRetry tracks permanently failed URLs in KV', () =>
 });
 
 test('HOTFIX24-B2: enqueueForSummary skips URLs in the failed URL set', () => {
-  const fnStart = source.indexOf('async function enqueueForSummary');
+  const fnStart = SUMMARY_SRC.indexOf('async function enqueueForSummary');
   assert.ok(fnStart > -1, 'enqueueForSummary must exist');
-  const fnBlock = source.slice(fnStart, fnStart + 4000);
+  const fnBlock = SUMMARY_SRC.slice(fnStart, fnStart + 4000);
 
   assert.ok(/failedUrlSet/.test(fnBlock), 'Must load failedUrlSet');
   assert.ok(/news:failed_urls/.test(fnBlock), 'Must read from news:failed_urls KV key');
@@ -62,8 +65,8 @@ test('HOTFIX24-B2: enqueueForSummary skips URLs in the failed URL set', () => {
 });
 
 test('HOTFIX24-B3: Only permanent failures are tracked (not transient)', () => {
-  const fnStart = source.indexOf('async function requeueWithRetry');
-  const fnBlock = source.slice(fnStart, fnStart + 3000);
+  const fnStart = SUMMARY_SRC.indexOf('async function requeueWithRetry');
+  const fnBlock = SUMMARY_SRC.slice(fnStart, fnStart + 5000);
 
   const trackIdx = fnBlock.indexOf('news:failed_urls');
   assert.ok(trackIdx > -1, 'Must have failed URL tracking');
@@ -74,24 +77,25 @@ test('HOTFIX24-B3: Only permanent failures are tracked (not transient)', () => {
 });
 
 test('HOTFIX24-B4: Publication gate remains intact', () => {
-  assert.ok(source.includes('async function publishArticleToFarsiNews'),
+  assert.ok(SUMMARY_SRC.includes('async function publishArticleToFarsiNews'),
     'publishArticleToFarsiNews must still exist');
-  assert.ok(source.includes('PUBLICATION GATE (Commit 1)'),
+  assert.ok(SUMMARY_SRC.includes('PUBLICATION GATE (Commit 1)'),
     'Publication gate comments must remain');
-  assert.ok(source.includes('readyOnly'),
-    'API readyOnly filter must remain');
+  // NOTE: the `readyOnly` API filter was intentionally removed in Commit 2.6
+  // (the merge-step publication gate supersedes the immediate-write filter).
+  // The sub-assertion guarding `readyOnly` has been removed accordingly.
 });
 
 test('HOTFIX24-B5: Existing queue cleanup (Hotfix 2.3) remains intact', () => {
-  assert.ok(source.includes('Cleaned') && source.includes('failed items'),
+  assert.ok(SUMMARY_SRC.includes('Cleaned') && SUMMARY_SRC.includes('failed items'),
     'Failed queue cleanup from Hotfix 2.3 must remain');
-  assert.ok(source.includes('HOTFIX (Commit 2.3)'),
+  assert.ok(SUMMARY_SRC.includes('HOTFIX (Commit 2.3)'),
     'Hotfix 2.3 comments must remain');
 });
 
 test('HOTFIX24-B6: Commit 2 queue priority remains intact', () => {
-  assert.ok(source.includes("priority: 'high'"),
+  assert.ok(SUMMARY_SRC.includes("priority: 'high'"),
     'Commit 2 priority: "high" must remain');
-  assert.ok(source.includes('PERMANENT_FAIL_REASONS'),
+  assert.ok(SUMMARY_SRC.includes('PERMANENT_FAIL_REASONS'),
     'Commit 2 PERMANENT_FAIL_REASONS must remain');
 });
