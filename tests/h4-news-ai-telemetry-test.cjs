@@ -12,6 +12,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
+const SUMMARY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/summary.js'), 'utf8');
+const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/telemetry.js'), 'utf8');
 const SCHEDULER_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/cron/scheduler.js'), 'utf8');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ test('H4-10: recordNewsAITick call site includes final_provider field', () => {
 // GROUP 4 — succeedWithSummary + requeueWithRetry return cache_hit + provider_attempts
 
 test('H4-11: succeedWithSummary return includes cache_hit: false + provider_attempts', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'succeedWithSummary');
+  const body = extractFunctionBody(SUMMARY_SRC, 'succeedWithSummary');
   assert.ok(body.includes('cache_hit: false'),
     'succeedWithSummary must return cache_hit: false (AI success path = cache miss)');
   assert.ok(body.includes('provider_attempts:'),
@@ -82,10 +84,10 @@ test('H4-11: succeedWithSummary return includes cache_hit: false + provider_atte
 
 test('H4-12: requeueWithRetry return includes cache_hit: false + provider_attempts', () => {
   // Find the requeueWithRetry return block by searching for the function
-  const requeueIdx = WORKER_SRC.indexOf('async function requeueWithRetry');
+  const requeueIdx = SUMMARY_SRC.indexOf('async function requeueWithRetry');
   assert.notEqual(requeueIdx, -1, 'requeueWithRetry must exist');
   // Extract a generous block (5000 chars) to capture the return
-  const requeueBlock = WORKER_SRC.slice(requeueIdx, requeueIdx + 5000);
+  const requeueBlock = SUMMARY_SRC.slice(requeueIdx, requeueIdx + 5000);
   assert.ok(requeueBlock.includes('cache_hit: false'),
     'requeueWithRetry must return cache_hit: false');
   assert.ok(requeueBlock.includes('provider_attempts:'),
@@ -97,21 +99,21 @@ test('H4-12: requeueWithRetry return includes cache_hit: false + provider_attemp
 // GROUP 5 — getNewsAIMonitoring reads from Postgres (not KV)
 
 test('H4-13: getNewsAIMonitoring does NOT read NEWS_AI_CACHE_STATS_KEY from KV', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'getNewsAIMonitoring');
+  const body = extractFunctionBody(TELEMETRY_SRC, 'getNewsAIMonitoring');
   const kvReadPattern = /readAppCache\s*\(\s*env\s*,\s*NEWS_AI_CACHE_STATS_KEY\s*\)/g;
   assert.equal((body.match(kvReadPattern) || []).length, 0,
     'getNewsAIMonitoring must NOT read NEWS_AI_CACHE_STATS_KEY from KV');
 });
 
 test('H4-14: getNewsAIMonitoring does NOT read NEWS_AI_PROVIDER_STATS_KEY from KV', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'getNewsAIMonitoring');
+  const body = extractFunctionBody(TELEMETRY_SRC, 'getNewsAIMonitoring');
   const kvReadPattern = /readAppCache\s*\(\s*env\s*,\s*NEWS_AI_PROVIDER_STATS_KEY\s*\)/g;
   assert.equal((body.match(kvReadPattern) || []).length, 0,
     'getNewsAIMonitoring must NOT read NEWS_AI_PROVIDER_STATS_KEY from KV');
 });
 
 test('H4-15: getNewsAIMonitoring queries Postgres for provider stats', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'getNewsAIMonitoring');
+  const body = extractFunctionBody(TELEMETRY_SRC, 'getNewsAIMonitoring');
   assert.ok(body.includes('jsonb_array_elements(stats->\'provider_attempts\')'),
     'getNewsAIMonitoring must use jsonb_array_elements for provider stats');
   assert.ok(body.includes("FROM news_ai_tick_log"),
@@ -119,7 +121,7 @@ test('H4-15: getNewsAIMonitoring queries Postgres for provider stats', () => {
 });
 
 test('H4-16: getNewsAIMonitoring queries Postgres for cache stats', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'getNewsAIMonitoring');
+  const body = extractFunctionBody(TELEMETRY_SRC, 'getNewsAIMonitoring');
   assert.ok(body.includes("stats ? 'cache_hit'"),
     'getNewsAIMonitoring must check for cache_hit field (backward compat with old rows)');
   assert.ok(body.includes("summary_reason' = 'cache_hit'"),
@@ -135,24 +137,24 @@ test('H4-17: essential KV writes still exist (saveSummaryQueue, aiKey, farsi, fa
     'news:ai:{hash} must still exist');
   assert.ok(WORKER_SRC.includes('FARSI_NEWS_CACHE_KEY'),
     'news:farsi must still exist');
-  assert.ok(WORKER_SRC.includes("'news:failed_urls'"),
+  assert.ok(SUMMARY_SRC.includes("'news:failed_urls'"),
     'news:failed_urls must still exist');
 });
 
 // GROUP 7 — AI generation behavior unchanged
 
 test('H4-18: generateSummaryWithFallback unchanged (still exists + returns attempts)', () => {
-  assert.ok(WORKER_SRC.includes('async function generateSummaryWithFallback'),
+  assert.ok(SUMMARY_SRC.includes('async function generateSummaryWithFallback'),
     'generateSummaryWithFallback must still exist');
   // Check in the WHOLE source (attempts.push is in a nested function)
-  assert.ok(WORKER_SRC.includes('attempts.push'),
+  assert.ok(SUMMARY_SRC.includes('attempts.push'),
     'generateSummaryWithFallback (or its nested attemptProvider) must still push attempts');
-  assert.ok(WORKER_SRC.includes('fallbackUsed'),
+  assert.ok(SUMMARY_SRC.includes('fallbackUsed'),
     'generateSummaryWithFallback must still return fallbackUsed');
 });
 
 test('H4-19: succeedWithSummary AI logic unchanged (summary save + publish)', () => {
-  const body = extractFunctionBody(WORKER_SRC, 'succeedWithSummary');
+  const body = extractFunctionBody(SUMMARY_SRC, 'succeedWithSummary');
   assert.ok(body.includes('writeAppCache(env, aiKey'),
     'succeedWithSummary must still save summary to KV (aiKey)');
   assert.ok(body.includes('publishArticleToFarsiNews'),

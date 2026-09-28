@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKER_PATH = path.join(__dirname, '..', 'worker-proxy.js');
+const WORKER_PATH = path.join(__dirname, '..', 'src/news/summary.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
 
 // Extract publishArticleToFarsiNews from source for isolated unit testing.
@@ -25,7 +25,7 @@ function loadPublishFunction() {
   // Find the function definition
   const startMarker = 'async function publishArticleToFarsiNews(env, article) {';
   const startIdx = source.indexOf(startMarker);
-  assert.notStrictEqual(startIdx, -1, 'publishArticleToFarsiNews not found in worker-proxy.js');
+  assert.notStrictEqual(startIdx, -1, 'publishArticleToFarsiNews not found in src/news/summary.js');
 
   // Find the end of the function via brace matching
   const afterStart = source.slice(startIdx);
