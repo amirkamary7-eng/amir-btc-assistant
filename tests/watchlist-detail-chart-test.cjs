@@ -29,6 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const APP_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const I18N_SRC = fs.readFileSync(path.join(__dirname, '..', 'i18n.js'), 'utf8');
 const USERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/users.js'), 'utf8');
 const MEMBERSHIP_USER_SRC = fs.readFileSync(path.join(__dirname, '..', 'membership-user.js'), 'utf8');
 
@@ -290,12 +291,12 @@ test('WL-CHART-12: Market and Watchlist routing agree for forex (EURUSD)', () =>
 // ELSE branch now selects the premium variant when _isPremium.
 
 test('WL-MSG-01: watchlist_limit_premium key exists in FA i18n (with "۲۰")', () => {
-  assert.ok(APP_SRC.includes("watchlist_limit_premium: 'حداکثر ۲۰ ارز"),
+  assert.ok(I18N_SRC.includes("watchlist_limit_premium: 'حداکثر ۲۰ ارز"),
     'FA i18n must have watchlist_limit_premium with "۲۰"');
 });
 
 test('WL-MSG-02: watchlist_limit_premium key exists in EN i18n (with "20")', () => {
-  assert.ok(APP_SRC.includes("watchlist_limit_premium: 'You can add up to 20 coins"),
+  assert.ok(I18N_SRC.includes("watchlist_limit_premium: 'You can add up to 20 coins"),
     'EN i18n must have watchlist_limit_premium with "20"');
 });
 
@@ -312,9 +313,9 @@ test('WL-MSG-03: toggleWatchlist ELSE branch selects premium variant when _isPre
 
 test('WL-MSG-04: original watchlist_limit key still has "7" (Free unchanged)', () => {
   // The Free message must be untouched.
-  assert.ok(APP_SRC.includes("watchlist_limit: 'حداکثر ۷ ارز"),
+  assert.ok(I18N_SRC.includes("watchlist_limit: 'حداکثر ۷ ارز"),
     'FA watchlist_limit must still have "۷" (Free unchanged)');
-  assert.ok(APP_SRC.includes("watchlist_limit: 'You can add up to 7 coins"),
+  assert.ok(I18N_SRC.includes("watchlist_limit: 'You can add up to 7 coins"),
     'EN watchlist_limit must still have "7" (Free unchanged)');
 });
 
@@ -332,9 +333,9 @@ test('WL-MSG-06: upsell flow unchanged — Free branch still calls MembershipApp
 
 test('WL-MSG-07: no unrelated i18n keys changed', () => {
   // Sanity: the i18n object structure is intact — a few adjacent keys still present.
-  assert.ok(APP_SRC.includes('watchlist_empty:'), 'watchlist_empty key present');
-  assert.ok(APP_SRC.includes('watchlist_add_btn:'), 'watchlist_add_btn key present');
-  assert.ok(APP_SRC.includes('no_analysis:'), 'no_analysis key present');
+  assert.ok(I18N_SRC.includes('watchlist_empty:'), 'watchlist_empty key present');
+  assert.ok(I18N_SRC.includes('watchlist_add_btn:'), 'watchlist_add_btn key present');
+  assert.ok(I18N_SRC.includes('no_analysis:'), 'no_analysis key present');
 });
 
 test('WL-MSG-08: message selection logic — premium picks premium variant', () => {
