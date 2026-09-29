@@ -1591,6 +1591,8 @@
     <script src="membership-user.js" defer></script>
     <script src="membership-admin.js" defer></script>
     <script src="cosmetics.js" defer></script>
+    <!-- i18n.js must load before app.js and any script that calls t() at runtime -->
+    <script src="i18n.js" defer></script>
     <!-- PERFORMANCE: admin.js lazy-loaded via dynamic import in openAdminPanel() -->
     <script src="app.js" defer></script>
     <!-- #endregion -->

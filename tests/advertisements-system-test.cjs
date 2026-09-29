@@ -31,6 +31,7 @@ const PROVIDERS_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/news/provi
 const TELEMETRY_SRC = fs.readFileSync(path.join(__dirname, "..", "src/news/telemetry.js"), "utf8");
 const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const I18N_SRC = fs.readFileSync(path.join(__dirname, '..', 'i18n.js'), 'utf8');
 const ADS_REPO_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/repositories/advertisements.js'), 'utf8');
 const ADS_CTRL_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/advertisements.js'), 'utf8');
 const NOTIF_PLATFORM_CTRL_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/notification_platform.js'), 'utf8');
@@ -3145,32 +3146,32 @@ test('ADS-DEL-GUARD-10 (simulation): stale Hyperdrive refetch cannot re-introduc
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('ADS-TAB-01: adm_ads_tab_channels defined in Persian (fa) dictionary', () => {
-  assert.ok(/adm_ads_tab_channels:\s*'کانال‌ها'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_channels:\s*'کانال‌ها'/.test(I18N_SRC),
     "fa dict must define adm_ads_tab_channels: 'کانال‌ها'");
 });
 test('ADS-TAB-02: adm_ads_tab_popups defined in Persian (fa) dictionary', () => {
-  assert.ok(/adm_ads_tab_popups:\s*'پاپ‌آپ‌ها'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_popups:\s*'پاپ‌آپ‌ها'/.test(I18N_SRC),
     "fa dict must define adm_ads_tab_popups: 'پاپ‌آپ‌ها'");
 });
 test('ADS-TAB-03: adm_ads_tab_messages defined in Persian (fa) dictionary', () => {
-  assert.ok(/adm_ads_tab_messages:\s*'پیام‌های تبلیغاتی'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_messages:\s*'پیام‌های تبلیغاتی'/.test(I18N_SRC),
     "fa dict must define adm_ads_tab_messages: 'پیام‌های تبلیغاتی'");
 });
 test('ADS-TAB-04: adm_ads_tab_* keys defined in English (en) dictionary', () => {
-  assert.ok(/adm_ads_tab_channels:\s*'Channels'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_channels:\s*'Channels'/.test(I18N_SRC),
     "en dict must define adm_ads_tab_channels: 'Channels'");
-  assert.ok(/adm_ads_tab_popups:\s*'Popups'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_popups:\s*'Popups'/.test(I18N_SRC),
     "en dict must define adm_ads_tab_popups: 'Popups'");
-  assert.ok(/adm_ads_tab_messages:\s*'Ad Messages'/.test(APP_SRC),
+  assert.ok(/adm_ads_tab_messages:\s*'Ad Messages'/.test(I18N_SRC),
     "en dict must define adm_ads_tab_messages: 'Ad Messages'");
 });
 
 test('ADS-TAB-05: t() fallback returns the raw key when missing — root cause of the bug', () => {
   // This is the fallback chain that caused the raw key to render. With the keys
   // now defined, t('adm_ads_tab_*') returns the Persian value, never the raw key.
-  const tFn = APP_SRC.indexOf('function t(key, params)');
+  const tFn = I18N_SRC.indexOf('function t(key, params)');
   assert.ok(tFn > -1, 't() function exists');
-  const tBlock = APP_SRC.slice(tFn, tFn + 200);
+  const tBlock = I18N_SRC.slice(tFn, tFn + 200);
   assert.ok(tBlock.includes('i18n[currentLang]?.[key]'),
     't() checks current-language dict first');
   assert.ok(tBlock.includes('|| i18n.fa[key]'),
@@ -3244,7 +3245,7 @@ test('ADS-TAB-10: no raw adm_ads_tab_* key would render in the UI anymore', () =
   // With the keys now defined in both dicts, t('adm_ads_tab_*') returns the
   // Persian value. The raw key can never reach the DOM via applyLanguage().
   // This is a negative assertion: the bug condition (missing key) is gone.
-  assert.ok(APP_SRC.includes("adm_ads_tab_channels:") && APP_SRC.includes("adm_ads_tab_popups:") && APP_SRC.includes("adm_ads_tab_messages:"),
+  assert.ok(I18N_SRC.includes("adm_ads_tab_channels:") && I18N_SRC.includes("adm_ads_tab_popups:") && I18N_SRC.includes("adm_ads_tab_messages:"),
     'all 3 ad tab keys are now defined → t() never falls back to the raw key');
 });
 

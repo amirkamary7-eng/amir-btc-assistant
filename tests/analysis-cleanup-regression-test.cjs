@@ -22,6 +22,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const APP_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const I18N_SRC = fs.readFileSync(path.join(__dirname, '..', 'i18n.js'), 'utf8');
 const HTML_SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const CTRL_SRC = fs.readFileSync(path.join(__dirname, '..', 'src', 'controllers', 'analyses.js'), 'utf8');
 const REPO_SRC = fs.readFileSync(path.join(__dirname, '..', 'src', 'repositories', 'analyses.js'), 'utf8');
@@ -356,11 +357,11 @@ test('AA6: CSS — .adp-levels and .adp-sentiment selectors preserved (CSS regre
 test('AA7: Translation keys — sentiment_bullish/bearish/neutral preserved (news uses them)', () => {
   // The translation keys remain in app.js because news sentiment uses them.
   // Only `decision_range` was analysis-specific, but it's harmless to keep.
-  assert.ok(APP_SRC.includes("sentiment_bullish:"),
+  assert.ok(I18N_SRC.includes("sentiment_bullish:"),
     'sentiment_bullish translation key preserved (news uses it)');
-  assert.ok(APP_SRC.includes("sentiment_bearish:"),
+  assert.ok(I18N_SRC.includes("sentiment_bearish:"),
     'sentiment_bearish translation key preserved (news uses it)');
-  assert.ok(APP_SRC.includes("sentiment_neutral:"),
+  assert.ok(I18N_SRC.includes("sentiment_neutral:"),
     'sentiment_neutral translation key preserved (news uses it)');
 });
 
