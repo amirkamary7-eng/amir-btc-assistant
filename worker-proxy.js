@@ -5571,7 +5571,6 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     //   - create() and remove() already invalidate 'alerts:active-exists'
     //     cache → we also invalidate 'alerts:active-list' in those functions
     // ═══════════════════════════════════════════════════════════════════
-    const ALERTS_EXIST_CACHE_KEY = 'alerts:active-exists';
     const ALERTS_LIST_CACHE_KEY = 'alerts:active-list';
     const ALERTS_LIST_TTL = 60; // seconds — same as alerts:active-exists
 
@@ -5646,7 +5645,10 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         _alertsIsolateCacheAt = Date.now();
         try {
           await writeAppCache(env, ALERTS_LIST_CACHE_KEY, JSON.stringify(alerts), ALERTS_LIST_TTL);
-          await writeAppCache(env, ALERTS_EXIST_CACHE_KEY, '1', ALERTS_LIST_TTL);
+          // H4 FIX: Removed dead write to alerts:active-exists — this key was
+          // written but NEVER read by any code path (confirmed via grep + git
+          // history). Saved ~1,440-4,320 KV writes/day. Alert behavior
+          // unchanged (3-layer cache still works via module → KV list → DB).
         } catch {}
       } else {
         // FIX: Cache empty array in module memory (same as non-empty above).
