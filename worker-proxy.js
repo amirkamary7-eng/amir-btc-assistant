@@ -180,23 +180,27 @@ function withCors(headers = {}, env = null) {
   if (isLocalhost) {
     merged.set('Access-Control-Allow-Origin', reqOrigin);
   } else if (env) {
-    // A-5 FIX: Fail-closed in production — if WEBAPP_URL is not set or malformed,
-    // do NOT fall back to '*'. Return the request origin (if present) or empty.
-    // This prevents cross-origin access from arbitrary domains when misconfigured.
+    // M3 FIX (Phase 3.2): In production, pin to WEBAPP_URL origin.
+    // If WEBAPP_URL is not set or malformed, fail TRULY closed — set empty
+    // string instead of reflecting reqOrigin. Empty ACAO header causes
+    // browsers to block cross-origin access (no valid CORS response).
+    // Previous code reflected reqOrigin in fallback cases, which allowed
+    // arbitrary origins if WEBAPP_URL was misconfigured.
     const webappUrl = resolveWebAppUrl(env);
     if (webappUrl) {
       try {
         merged.set('Access-Control-Allow-Origin', new URL(webappUrl).origin);
       } catch {
-        // Malformed WEBAPP_URL — fail closed (no wildcard)
-        merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+        // Malformed WEBAPP_URL — fail closed (empty, NOT reqOrigin)
+        merged.set('Access-Control-Allow-Origin', '');
       }
     } else {
-      // WEBAPP_URL not set — fail closed (no wildcard)
-      merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+      // WEBAPP_URL not set — fail closed (empty, NOT reqOrigin)
+      merged.set('Access-Control-Allow-Origin', '');
     }
   } else {
-    merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+    // No env context — fail closed
+    merged.set('Access-Control-Allow-Origin', '');
   }
   merged.set('Access-Control-Allow-Methods', CORS_METHODS);
   merged.set('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
