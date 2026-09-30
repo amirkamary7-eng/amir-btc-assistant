@@ -2702,7 +2702,6 @@ const i18n = {
         adm_broadcast_send_failed: 'Failed to send broadcast'
     }
 };
-};
 
 /**
  * رشته ترجمه‌شده متناظر با کلید ورودی را از دیکشنری زبان فعال برمی‌گرداند.
