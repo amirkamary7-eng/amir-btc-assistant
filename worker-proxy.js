@@ -180,23 +180,27 @@ function withCors(headers = {}, env = null) {
   if (isLocalhost) {
     merged.set('Access-Control-Allow-Origin', reqOrigin);
   } else if (env) {
-    // A-5 FIX: Fail-closed in production — if WEBAPP_URL is not set or malformed,
-    // do NOT fall back to '*'. Return the request origin (if present) or empty.
-    // This prevents cross-origin access from arbitrary domains when misconfigured.
+    // M3 FIX (Phase 3.2): In production, pin to WEBAPP_URL origin.
+    // If WEBAPP_URL is not set or malformed, fail TRULY closed — set empty
+    // string instead of reflecting reqOrigin. Empty ACAO header causes
+    // browsers to block cross-origin access (no valid CORS response).
+    // Previous code reflected reqOrigin in fallback cases, which allowed
+    // arbitrary origins if WEBAPP_URL was misconfigured.
     const webappUrl = resolveWebAppUrl(env);
     if (webappUrl) {
       try {
         merged.set('Access-Control-Allow-Origin', new URL(webappUrl).origin);
       } catch {
-        // Malformed WEBAPP_URL — fail closed (no wildcard)
-        merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+        // Malformed WEBAPP_URL — fail closed (empty, NOT reqOrigin)
+        merged.set('Access-Control-Allow-Origin', '');
       }
     } else {
-      // WEBAPP_URL not set — fail closed (no wildcard)
-      merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+      // WEBAPP_URL not set — fail closed (empty, NOT reqOrigin)
+      merged.set('Access-Control-Allow-Origin', '');
     }
   } else {
-    merged.set('Access-Control-Allow-Origin', reqOrigin || '');
+    // No env context — fail closed
+    merged.set('Access-Control-Allow-Origin', '');
   }
   merged.set('Access-Control-Allow-Methods', CORS_METHODS);
   merged.set('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
@@ -7638,7 +7642,18 @@ export default {
       // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
       let _protectedUser = null;
       let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel)/;
+      // M1+M2 FIX (Phase 3.1): Extended PROTECTED_PATHS to cover user-sensitive
+      // routes that were previously outside the global auth gate:
+      //   - calendar/reminders (GET + DELETE were unauthenticated — M1)
+      //   - cosmetics/mine + cosmetics/:id/(purchase|activate) (M2)
+      //   - membership/(status|request|welcome-shown|rules/accept|rules/accepted) (M2)
+      //   - rewards/* (M2)
+      // Intentionally PUBLIC routes NOT matched by this regex (remain public):
+      //   - GET /api/cosmetics (catalog — like /api/analyses)
+      //   - GET /api/membership/rules (rules document — like /api/content)
+      //   - GET /api/membership/requirement (requirement config)
+      //   - GET /api/calendar/events (public calendar data)
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
