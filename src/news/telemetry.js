@@ -14,9 +14,19 @@
 //     (used by getNewsAIMonitoring to report current configuration)
 //
 // Mutable state (inside factory closure, shared across all calls):
-//   - _telemetryTablesEnsured: prevents redundant CREATE TABLE calls
+//   - _telemetryTablesEnsured: prevents redundant CREATE TABLE calls (set on SUCCESS)
+//   - _telemetryCreatePermissionDenied: TELEMETRY-PERM-FIX Phase A — after first
+//     'permission denied for schema' error in this isolate, skip subsequent
+//     ensureTelemetryTables calls (0 DB subrequests). Only set on PERMISSION
+//     errors; transient errors (timeout/connection) do NOT set this flag and
+//     still retry. Resets on isolate cold-start (next isolate retries once).
+//   - _tickCleanupPermissionDenied: Phase B — same pattern for cleanupTickLog
+//     ('permission denied for table' on news_ai_tick_log).
+//   - _e2eCleanupPermissionDenied: Phase B — same pattern for cleanupE2ETimingLog
+//     ('permission denied for table' on news_ai_e2e_log).
 //
-// Behavior-preserving extraction: no logic, SQL, or error handling changes.
+// Behavior-preserving extraction: no logic, SQL, or error handling changes
+// EXCEPT for the new skip-after-permission-denied flags (Phase A+B).
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function createNewsTelemetry({
@@ -40,8 +50,45 @@ export function createNewsTelemetry({
 
 let _telemetryTablesEnsured = false;
 
+// TELEMETRY-PERM-FIX Phase A: skip subsequent ensureTelemetryTables calls
+// after the first 'permission denied for schema' error in this isolate.
+// amirbtc_worker has USAGE but NOT CREATE on schema public, so CREATE TABLE
+// IF NOT EXISTS fails even when the table already exists (PostgreSQL checks
+// privilege before existence). Without this flag, every call retries and
+// wastes 1 subrequest (failing CREATE TABLE). With the flag, only the first
+// call per isolate retries; subsequent calls short-circuit (0 subrequests).
+// Transient errors (timeout/connection) do NOT set this flag — they still
+// retry. The flag resets on isolate cold-start (next isolate retries once).
+let _telemetryCreatePermissionDenied = false;
+
+// TELEMETRY-PERM-FIX Phase B: same pattern for cleanup functions.
+// amirbtc_worker has INSERT+SELECT but NOT DELETE on telemetry tables.
+let _tickCleanupPermissionDenied = false;
+let _e2eCleanupPermissionDenied = false;
+
+// Helper: detect 'permission denied for schema' errors.
+// PostgreSQL error format: 'permission denied for schema <name>'.
+// Used by CREATE TABLE/INDEX. Returns false for transient errors
+// (timeout, connection failure) — those should still retry.
+function _isPermissionDeniedSchemaError(e) {
+  const msg = String(e?.message || '').toLowerCase();
+  return msg.includes('permission denied for schema');
+}
+
+// Helper: detect 'permission denied for table' errors.
+// PostgreSQL error format: 'permission denied for table <name>'.
+// Used by DELETE FROM. Returns false for transient errors.
+function _isPermissionDeniedTableError(e) {
+  const msg = String(e?.message || '').toLowerCase();
+  return msg.includes('permission denied for table');
+}
+
 async function ensureTelemetryTables(env) {
   if (_telemetryTablesEnsured) return;
+  // Phase A: short-circuit after first permission-denied failure in this
+  // isolate. Saves 1 wasted subrequest per call (was: every call retried
+  // the failing CREATE TABLE). Flag is per-isolate; cold-start retries once.
+  if (_telemetryCreatePermissionDenied) return;
   try {
     await queryDb(env, `
       CREATE TABLE IF NOT EXISTS news_ai_tick_log (
@@ -65,7 +112,13 @@ async function ensureTelemetryTables(env) {
     _telemetryTablesEnsured = true;
   } catch (e) {
     // Non-fatal — table creation is best-effort. News AI must NOT fail.
-    // Next isolate cold start resets _telemetryTablesEnsured and retries.
+    // Phase A: if this is a 'permission denied for schema' error, set the
+    // skip flag so subsequent calls in this isolate short-circuit.
+    // Transient errors (timeout/connection) do NOT set the flag and will
+    // still retry on the next call.
+    if (_isPermissionDeniedSchemaError(e)) {
+      _telemetryCreatePermissionDenied = true;
+    }
     console.warn('[TELEMETRY-DB] ensureTelemetryTables failed:', e?.message);
   }
 }
@@ -96,6 +149,13 @@ async function insertNewsAIE2ELog(env, url, provider, timing) {
 
 async function cleanupTickLog(env, days) {
   if (days === undefined) days = 4;
+  // Phase B: short-circuit after first permission-denied failure in this
+  // isolate. amirbtc_worker has INSERT+SELECT but NOT DELETE on
+  // news_ai_tick_log, so DELETE fails with 'permission denied for table'.
+  // Without this flag, every call retries and wastes 1 subrequest. With the
+  // flag, only the first call per isolate retries; subsequent calls
+  // short-circuit (0 subrequests). Transient errors still retry.
+  if (_tickCleanupPermissionDenied) return 0;
   try {
     const result = await queryDb(env, `
       DELETE FROM news_ai_tick_log
@@ -104,6 +164,11 @@ async function cleanupTickLog(env, days) {
     return (result.rows || []).length;
   } catch (e) {
     // Non-fatal — cleanup failure must NOT break News AI.
+    // Phase B: if this is a 'permission denied for table' error, set the
+    // skip flag so subsequent calls in this isolate short-circuit.
+    if (_isPermissionDeniedTableError(e)) {
+      _tickCleanupPermissionDenied = true;
+    }
     console.warn('[TELEMETRY-DB] cleanupTickLog failed:', e?.message);
     return 0;
   }
@@ -111,6 +176,9 @@ async function cleanupTickLog(env, days) {
 
 async function cleanupE2ETimingLog(env, days) {
   if (days === undefined) days = 4;
+  // Phase B: short-circuit after first permission-denied failure in this
+  // isolate. Same pattern as cleanupTickLog but for news_ai_e2e_log.
+  if (_e2eCleanupPermissionDenied) return 0;
   try {
     const result = await queryDb(env, `
       DELETE FROM news_ai_e2e_log
@@ -119,6 +187,11 @@ async function cleanupE2ETimingLog(env, days) {
     return (result.rows || []).length;
   } catch (e) {
     // Non-fatal — cleanup failure must NOT break News AI.
+    // Phase B: if this is a 'permission denied for table' error, set the
+    // skip flag so subsequent calls in this isolate short-circuit.
+    if (_isPermissionDeniedTableError(e)) {
+      _e2eCleanupPermissionDenied = true;
+    }
     console.warn('[TELEMETRY-DB] cleanupE2ETimingLog failed:', e?.message);
     return 0;
   }
