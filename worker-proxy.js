@@ -7638,7 +7638,18 @@ export default {
       // Unprotected routes (health, market, charts, calendar, public analyses, bootstrap) are above this line.
       let _protectedUser = null;
       let _joinBlocked = null;
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel)/;
+      // M1+M2 FIX (Phase 3.1): Extended PROTECTED_PATHS to cover user-sensitive
+      // routes that were previously outside the global auth gate:
+      //   - calendar/reminders (GET + DELETE were unauthenticated — M1)
+      //   - cosmetics/mine + cosmetics/:id/(purchase|activate) (M2)
+      //   - membership/(status|request|welcome-shown|rules/accept|rules/accepted) (M2)
+      //   - rewards/* (M2)
+      // Intentionally PUBLIC routes NOT matched by this regex (remain public):
+      //   - GET /api/cosmetics (catalog — like /api/analyses)
+      //   - GET /api/membership/rules (rules document — like /api/content)
+      //   - GET /api/membership/requirement (requirement config)
+      //   - GET /api/calendar/events (public calendar data)
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
       const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
       if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
