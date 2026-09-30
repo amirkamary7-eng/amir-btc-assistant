@@ -1,5 +1,5 @@
 /**
- * H5-CRITICAL Fix — Retry Batch Size Regression Test
+ * H5-CRITICAL + H5 Layer 2+3 Fix — Retry Batch Size + enqueueOnly Regression Test
  *
  * Background:
  *   The H5 audit identified that the 1-min cron at minute===0 runs 4 retry
@@ -10,28 +10,43 @@
  *   limit per invocation (subrequests accumulate across the entire
  *   invocation including all ctx.waitUntil promises).
  *
- * Fix (H5-CRITICAL):
- *   Reduced `LIMIT 20` → `LIMIT 3` in all 4 retry queries:
- *     1. retryFailedReferralRewards  (worker-proxy.js:~3351)
- *     2. retryFailedWheelRewards      (worker-proxy.js:~3406)
- *     3. retryFailedMissionRewards   (worker-proxy.js:~3521)
- *     4. retryFailedRefunds          (worker-proxy.js:~3622)
+ * Fix Stage 1 (H5-CRITICAL):
+ *   Reduced `LIMIT 20` → `LIMIT 3` in all 4 retry queries.
+ *
+ * Fix Stage 2 (H5 Layer 2 — option A+ enhanced):
+ *   Further reduced `LIMIT 3` → `LIMIT 1` in 3 of the 4 retry queries:
+ *     1. retryFailedReferralRewards  — LIMIT 3 → LIMIT 1
+ *     2. retryFailedWheelRewards      — LIMIT 3 → LIMIT 1
+ *     3. retryFailedMissionRewards   — KEEP LIMIT 3 (3-day hard window)
+ *     4. retryFailedRefunds           — LIMIT 3 → LIMIT 1
+ *   Mission is kept at LIMIT 3 because of the 3-day hard window
+ *   (daily_date >= CURRENT_DATE - 2). LIMIT=1 would drain max 24 items
+ *   in 3 days; a backlog spike > 24 items would cause permanent mission
+ *   reward loss. LIMIT=3 drains 72 items in 3 days (3× safety margin).
+ *
+ * Fix Stage 3 (H5 Layer 3 — enqueueOnly on referral notifications):
+ *   Added `enqueueOnly: true` to the 3 `notificationService.create`
+ *   calls inside `creditReferralWithReward`. This skips the in-flight
+ *   processQueue(3) cascade inside sendNotification. The 1-min cron's
+ *   processQueue(5) (scheduler.js:148) drains the queue every minute
+ *   using FOR UPDATE SKIP LOCKED, so notifications are still delivered
+ *   within ~60s. Saves ~21 subrequests per referral retry item.
  *
  * This test asserts:
- *   1. Each of the 4 retry QUERIES has `LIMIT 3` (verified via the SQL
- *      template closing pattern `LIMIT 3\`,`, which is unique to SQL
- *      query strings — comments mentioning "LIMIT 20" don't have this
- *      pattern).
- *   2. None of the 4 retry function bodies contain the SQL template
- *      closing pattern `LIMIT 20\`,` anymore (comments are allowed).
- *   3. Function names and overall logic are unchanged (still bounded by
+ *   1. Referral/Wheel/Refund retry queries close with `LIMIT 1\`,`.
+ *   2. Mission retry query STILL closes with `LIMIT 3\`,` (preserved).
+ *   3. None of the 4 retry function bodies contain `LIMIT 20\`,` anymore.
+ *   4. Function names and overall logic are unchanged (still bounded by
  *      ORDER BY ... ASC, still iterate the result rows, still per-row
  *      try/catch for batch isolation).
- *   4. Unrelated `LIMIT 20` occurrences elsewhere in worker-proxy.js
+ *   5. Unrelated `LIMIT 20` occurrences elsewhere in worker-proxy.js
  *      (getNewsAIMonitoring rolling window, admin diagnostic endpoints)
  *      are UNCHANGED — only the 4 retry queries were modified.
- *   5. Retry idempotency is preserved (UNIQUE constraint references still
+ *   6. Retry idempotency is preserved (UNIQUE constraint references still
  *      present; per-row try/catch still present; only batch size changed).
+ *   7. Exactly 3 `enqueueOnly: true` occurrences in creditReferralWithReward
+ *      (one per notificationService.create call).
+ *   8. enqueueOnly is NOT used anywhere else (no accidental scope creep).
  *
  * Scope:
  *   Source-inspection test (no runtime execution). Mirrors the pattern
@@ -70,38 +85,48 @@ function extractFunctionBody(fnName) {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GROUP 1 — All 4 retry QUERIES have `LIMIT 3` (verified via SQL template
-// closing pattern `LIMIT 3\`,` — unique to SQL strings, NOT to comments)
+// GROUP 1 — Retry QUERIES: referral/wheel/refund use LIMIT 1, mission
+// KEEPS LIMIT 3 (H5 Layer 2 — staged LIMIT reduction).
+// Verified via SQL template closing pattern `LIMIT N\`,` — unique to SQL
+// strings, NOT to comments.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('H5-CRIT-01: retryFailedReferralRewards SQL query closes with `LIMIT 3`, (was `LIMIT 20`,)', () => {
+test('H5-CRIT-01: retryFailedReferralRewards SQL query closes with `LIMIT 1`, (was `LIMIT 3`, was `LIMIT 20`, — H5 Layer 2)', () => {
   const body = extractFunctionBody('retryFailedReferralRewards');
-  assert.ok(body.includes('LIMIT 3`,'),
-    'retryFailedReferralRewards SQL query must close with `LIMIT 3`, (H5-CRITICAL fix)');
+  assert.ok(body.includes('LIMIT 1`,'),
+    'retryFailedReferralRewards SQL query must close with `LIMIT 1`, (H5 Layer 2 — was LIMIT 3, was LIMIT 20)');
+  assert.ok(!body.includes('LIMIT 3`,'),
+    'retryFailedReferralRewards SQL query must NOT close with `LIMIT 3`, anymore (H5 Layer 2)');
   assert.ok(!body.includes('LIMIT 20`,'),
     'retryFailedReferralRewards SQL query must NOT close with `LIMIT 20`, anymore');
 });
 
-test('H5-CRIT-02: retryFailedWheelRewards SQL query closes with `LIMIT 3`, (was `LIMIT 20`,)', () => {
+test('H5-CRIT-02: retryFailedWheelRewards SQL query closes with `LIMIT 1`, (was `LIMIT 3`, was `LIMIT 20`, — H5 Layer 2)', () => {
   const body = extractFunctionBody('retryFailedWheelRewards');
-  assert.ok(body.includes('LIMIT 3`,'),
-    'retryFailedWheelRewards SQL query must close with `LIMIT 3`, (H5-CRITICAL fix)');
+  assert.ok(body.includes('LIMIT 1`,'),
+    'retryFailedWheelRewards SQL query must close with `LIMIT 1`, (H5 Layer 2 — was LIMIT 3, was LIMIT 20)');
+  assert.ok(!body.includes('LIMIT 3`,'),
+    'retryFailedWheelRewards SQL query must NOT close with `LIMIT 3`, anymore (H5 Layer 2)');
   assert.ok(!body.includes('LIMIT 20`,'),
     'retryFailedWheelRewards SQL query must NOT close with `LIMIT 20`, anymore');
 });
 
-test('H5-CRIT-03: retryFailedMissionRewards SQL query closes with `LIMIT 3`, (was `LIMIT 20`,)', () => {
+test('H5-CRIT-03: retryFailedMissionRewards SQL query STILL closes with `LIMIT 3`, (KEPT — 3-day hard window safety margin — H5 Layer 2)', () => {
   const body = extractFunctionBody('retryFailedMissionRewards');
   assert.ok(body.includes('LIMIT 3`,'),
-    'retryFailedMissionRewards SQL query must close with `LIMIT 3`, (H5-CRITICAL fix)');
+    'retryFailedMissionRewards SQL query must STILL close with `LIMIT 3`, (H5 Layer 2 — KEPT for 3-day window safety)');
+  assert.ok(!body.includes('LIMIT 1`,'),
+    'retryFailedMissionRewards SQL query must NOT close with `LIMIT 1`, (would risk permanent mission reward loss)');
   assert.ok(!body.includes('LIMIT 20`,'),
     'retryFailedMissionRewards SQL query must NOT close with `LIMIT 20`, anymore');
 });
 
-test('H5-CRIT-04: retryFailedRefunds SQL query closes with `LIMIT 3`, (was `LIMIT 20`,)', () => {
+test('H5-CRIT-04: retryFailedRefunds SQL query closes with `LIMIT 1`, (was `LIMIT 3`, was `LIMIT 20`, — H5 Layer 2)', () => {
   const body = extractFunctionBody('retryFailedRefunds');
-  assert.ok(body.includes('LIMIT 3`,'),
-    'retryFailedRefunds SQL query must close with `LIMIT 3`, (H5-CRITICAL fix)');
+  assert.ok(body.includes('LIMIT 1`,'),
+    'retryFailedRefunds SQL query must close with `LIMIT 1`, (H5 Layer 2 — was LIMIT 3, was LIMIT 20)');
+  assert.ok(!body.includes('LIMIT 3`,'),
+    'retryFailedRefunds SQL query must NOT close with `LIMIT 3`, anymore (H5 Layer 2)');
   assert.ok(!body.includes('LIMIT 20`,'),
     'retryFailedRefunds SQL query must NOT close with `LIMIT 20`, anymore');
 });
@@ -296,19 +321,27 @@ test('H5-CRIT-15: all 4 retry functions are still called from the 1-min cron (mi
   }
 });
 
-test('H5-CRIT-16: exactly 4 `LIMIT 3\`,` occurrences in worker-proxy.js (one per retry query, no extras)', () => {
+test('H5-CRIT-16: exactly 1 `LIMIT 3\`,` occurrence in referral-rewards.js (only mission retry — H5 Layer 2)', () => {
   // The H5-CRITICAL fix added exactly 4 `LIMIT 3\`,` occurrences (one per
-  // retry query). This count must be exactly 4 — not less (regression) and
-  // not more (accidental scope creep).
+  // retry query). H5 Layer 2 reduced 3 of them to `LIMIT 1\`,`, Only the
+  // mission retry KEEPS `LIMIT 3\`,`` (preserved for 3-day window safety).
   //
   // Note: processQueue uses `LIMIT ${batchLimit}` (dynamic) and cron comments
   // mention "LIMIT 3" in processQueue CPU budget discussions, but those are
   // NOT `LIMIT 3\`,` patterns (they're either dynamic interpolation or
   // comment text). So the exact match `LIMIT 3\`,` is the precise signature
-  // of the 4 retry queries.
+  // of SQL retry queries.
   const matches = (REFERRAL_REWARDS_SRC.match(/LIMIT 3`,/g) || []).length;
-  assert.equal(matches, 4,
-    `must have exactly 4 \`LIMIT 3\`,\` occurrences (one per retry query) — found ${matches}`);
+  assert.equal(matches, 1,
+    `must have exactly 1 \`LIMIT 3\`,\` occurrence (only mission retry — H5 Layer 2) — found ${matches}`);
+});
+
+test('H5-CRIT-16b: exactly 3 `LIMIT 1\`,` occurrences in referral-rewards.js (referral/wheel/refund — H5 Layer 2)', () => {
+  // H5 Layer 2 added exactly 3 `LIMIT 1\`,` occurrences (referral, wheel,
+  // refund). Mission KEEPS LIMIT 3 (asserted in H5-CRIT-03/16 above).
+  const matches = (REFERRAL_REWARDS_SRC.match(/LIMIT 1`,/g) || []).length;
+  assert.equal(matches, 3,
+    `must have exactly 3 \`LIMIT 1\`,\` occurrences (referral/wheel/refund — H5 Layer 2) — found ${matches}`);
 });
 
 test('H5-CRIT-17: retryFailed* jobs are NOT inside the isEvery15Min block (architecture preserved)', () => {
@@ -329,4 +362,153 @@ test('H5-CRIT-17: retryFailed* jobs are NOT inside the isEvery15Min block (archi
     'retryFailedMissionRewards must NOT be in the isEvery15Min block (architecture preserved)');
   assert.ok(!block.includes('await retryFailedRefunds'),
     'retryFailedRefunds must NOT be in the isEvery15Min block (architecture preserved)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GROUP 6 — H5 Layer 3: enqueueOnly=true on the 3 referral notification
+// calls inside creditReferralWithReward. Skips the in-flight processQueue(3)
+// cascade inside sendNotification; the 1-min cron's processQueue(5) still
+// delivers within ~60s. Saves ~21 subrequests per referral retry item.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function extractCreditReferralWithRewardBody() {
+  // creditReferralWithReward is the function containing the 3
+  // notificationService.create calls. Extracted to its own block.
+  const startMarker = 'async function creditReferralWithReward';
+  const startIdx = REFERRAL_REWARDS_SRC.indexOf(startMarker);
+  assert.notEqual(startIdx, -1, 'creditReferralWithReward must exist');
+  const nextAsyncIdx = REFERRAL_REWARDS_SRC.indexOf('async function ', startIdx + startMarker.length);
+  const endIdx = nextAsyncIdx === -1 ? REFERRAL_REWARDS_SRC.length : nextAsyncIdx;
+  return REFERRAL_REWARDS_SRC.slice(startIdx, endIdx);
+}
+
+test('H5-LAYER3-01: creditReferralWithReward contains exactly 3 notificationService.create calls', () => {
+  const body = extractCreditReferralWithRewardBody();
+  const matches = (body.match(/notificationService\.create\(env, \{/g) || []).length;
+  assert.equal(matches, 3,
+    `creditReferralWithReward must contain exactly 3 notificationService.create calls (referral_new_invite, referral_reward, referral_rich) — found ${matches}`);
+});
+
+test('H5-LAYER3-02: all 3 notificationService.create calls in creditReferralWithReward have enqueueOnly: true', () => {
+  const body = extractCreditReferralWithRewardBody();
+  // Count occurrences of `enqueueOnly: true` — must be exactly 3.
+  const matches = (body.match(/enqueueOnly: true/g) || []).length;
+  assert.equal(matches, 3,
+    `all 3 notificationService.create calls must have enqueueOnly: true (H5 Layer 3) — found ${matches}`);
+});
+
+test('H5-LAYER3-03: referral_new_invite notification has enqueueOnly: true', () => {
+  const body = extractCreditReferralWithRewardBody();
+  // Find the block for the referral_new_invite call (Call 1)
+  const callStart = body.indexOf("templateKey: 'referral_new_invite'");
+  assert.notEqual(callStart, -1, 'referral_new_invite call must exist');
+  // The enqueueOnly: true must appear AFTER this call's opening and BEFORE
+  // the next call's closing `}).catch(() => {})` (or `});` for the rich call).
+  const callEnd = body.indexOf('}).catch(() => {})', callStart);
+  assert.notEqual(callEnd, -1, 'referral_new_invite call must close');
+  const callBlock = body.slice(callStart, callEnd);
+  assert.ok(callBlock.includes('enqueueOnly: true'),
+    'referral_new_invite notification must have enqueueOnly: true (H5 Layer 3)');
+});
+
+test('H5-LAYER3-04: referral_reward notification has enqueueOnly: true', () => {
+  const body = extractCreditReferralWithRewardBody();
+  const callStart = body.indexOf("templateKey: 'referral_reward'");
+  assert.notEqual(callStart, -1, 'referral_reward call must exist');
+  const callEnd = body.indexOf('}).catch(() => {})', callStart);
+  assert.notEqual(callEnd, -1, 'referral_reward call must close');
+  const callBlock = body.slice(callStart, callEnd);
+  assert.ok(callBlock.includes('enqueueOnly: true'),
+    'referral_reward notification must have enqueueOnly: true (H5 Layer 3)');
+});
+
+test('H5-LAYER3-05: referral_rich notification has enqueueOnly: true', () => {
+  const body = extractCreditReferralWithRewardBody();
+  // The referral_rich call is the 3rd call (Phase 2 — rich Telegram message).
+  // It uses `dedupKey: `referral_rich_${referralId}`` and has telegramExtra.
+  const callStart = body.indexOf('dedupKey: `referral_rich_${referralId}`');
+  assert.notEqual(callStart, -1, 'referral_rich call (Phase 2) must exist');
+  // The call ends with `});` (no .catch wrapper — it's awaited directly).
+  // Find the first `});` AFTER the telegramExtra block closes.
+  const telegramExtraIdx = body.indexOf('telegramExtra:', callStart);
+  assert.notEqual(telegramExtraIdx, -1, 'referral_rich must have telegramExtra');
+  const callEnd = body.indexOf('});', telegramExtraIdx);
+  assert.notEqual(callEnd, -1, 'referral_rich call must close after telegramExtra');
+  const callBlock = body.slice(callStart, callEnd);
+  assert.ok(callBlock.includes('enqueueOnly: true'),
+    'referral_rich notification must have enqueueOnly: true (H5 Layer 3)');
+});
+
+test('H5-LAYER3-06: enqueueOnly is NOT used outside creditReferralWithReward in referral-rewards.js (no accidental scope creep)', () => {
+  // enqueueOnly: true must ONLY appear in creditReferralWithReward's 3 calls.
+  // It must NOT be added to retryFailedReferralRewards, retryFailedWheelRewards,
+  // retryFailedMissionRewards, retryFailedRefunds, or processPendingReferralReward.
+  const creditBody = extractCreditReferralWithRewardBody();
+  const totalMatches = (REFERRAL_REWARDS_SRC.match(/enqueueOnly: true/g) || []).length;
+  const creditMatches = (creditBody.match(/enqueueOnly: true/g) || []).length;
+  assert.equal(totalMatches, creditMatches,
+    `enqueueOnly: true must ONLY appear inside creditReferralWithReward — total=${totalMatches}, credit=${creditMatches}`);
+});
+
+test('H5-LAYER3-07: enqueueOnly: true is NOT added to worker-proxy.js (no accidental scope creep beyond referral-rewards.js)', () => {
+  // The H5 Layer 3 change must ONLY affect the 3 referral notification calls
+  // in src/services/referral-rewards.js. No other notificationService.create
+  // call (in alerts, calendar, broadcast, etc.) should have enqueueOnly: true
+  // added by this change.
+  //
+  // Note: the existing broadcast loops already use enqueueOnly: true
+  // (added by the Phase 1 broadcast-batch fix). That's fine — those are
+  // pre-existing. We only assert that we did NOT add NEW enqueueOnly: true
+  // occurrences outside referral-rewards.js.
+  //
+  // Approach: count enqueueOnly: true occurrences in worker-proxy.js. This
+  // count must be 0 (the existing broadcast loops are in
+  // notification_platform.js's processBroadcastFull, not in worker-proxy.js).
+  const workerMatches = (WORKER_SRC.match(/enqueueOnly: true/g) || []).length;
+  assert.equal(workerMatches, 0,
+    `worker-proxy.js must have ZERO new enqueueOnly: true occurrences (H5 Layer 3 only touched referral-rewards.js) — found ${workerMatches}`);
+});
+
+test('H5-LAYER3-08: notification persistence preserved — INSERT notifications + enqueue still run (enqueueOnly only skips processQueue cascade)', () => {
+  // enqueueOnly: true is gated at notification_platform.js:1227:
+  //   `if (env_sendTelegramMessage && !enqueueOnly) { await processQueue(...); }`
+  // The INSERT notifications (line 1185-1194) and enqueue (line 706-710)
+  // are NOT gated by enqueueOnly — they ALWAYS run. This test verifies
+  // the gate is still present and correct.
+  const NOTIF_REPO = fs.readFileSync(path.join(__dirname, '..', 'src/repositories/notification_platform.js'), 'utf8');
+  assert.ok(NOTIF_REPO.includes('if (env_sendTelegramMessage && !enqueueOnly)'),
+    'processQueue cascade must still be gated on !enqueueOnly (H5 Layer 3 relies on this)');
+  // INSERT notifications must NOT be gated by enqueueOnly — must always run
+  // when deliverToMiniApp is true.
+  assert.ok(NOTIF_REPO.includes('if (deliverToMiniApp)'),
+    'INSERT notifications must still be gated on deliverToMiniApp (NOT on enqueueOnly)');
+  // Enqueue must NOT be gated by enqueueOnly — must always run when
+  // deliverToTelegram is true.
+  assert.ok(NOTIF_REPO.includes('if (deliverToTelegram)'),
+    'enqueue must still be gated on deliverToTelegram (NOT on enqueueOnly)');
+});
+
+test('H5-LAYER3-09: dedupKey pattern preserved for all 3 referral notifications (idempotency unchanged)', () => {
+  // enqueueOnly: true only skips the in-flight processQueue(3). The dedupKey
+  // (which becomes the deterministic notificationId) MUST be preserved
+  // so ON CONFLICT (id) DO NOTHING still prevents duplicates.
+  const body = extractCreditReferralWithRewardBody();
+  assert.ok(body.includes('dedupKey: `referral_new_${referralId}`'),
+    'referral_new_invite dedupKey must be preserved (idempotency via deterministic notificationId)');
+  assert.ok(body.includes('dedupKey: `referral_reward_${referralId}`'),
+    'referral_reward dedupKey must be preserved');
+  assert.ok(body.includes('dedupKey: `referral_rich_${referralId}`'),
+    'referral_rich dedupKey must be preserved');
+});
+
+test('H5-LAYER3-10: telegramExtra preserved on referral_rich notification (rich message buttons unchanged)', () => {
+  // The referral_rich notification has inline keyboard buttons (telegramExtra).
+  // H5 Layer 3 must NOT have touched this — only enqueueOnly was added.
+  const body = extractCreditReferralWithRewardBody();
+  assert.ok(body.includes('telegramExtra:'),
+    'referral_rich notification must still have telegramExtra (inline keyboard)');
+  assert.ok(body.includes('reply_markup:'),
+    'referral_rich notification must still have reply_markup (inline keyboard)');
+  assert.ok(body.includes("parse_mode: 'HTML'"),
+    'referral_rich notification must still have parse_mode HTML');
 });

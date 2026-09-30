@@ -108,6 +108,16 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     try {
       // Referral notification (new referral created) + Reward notification
       // dispatched in parallel for efficiency
+      // H5 Layer 3: enqueueOnly=true skips the in-flight processQueue(3)
+      // cascade inside sendNotification (notification_platform.js:1232).
+      // The 1-min cron's processQueue(5) (scheduler.js:148) drains the
+      // queue every minute using FOR UPDATE SKIP LOCKED, so notifications
+      // are still delivered within ~60s. This saves ~21 subrequests per
+      // referral retry item in the minute-0 cron invocation.
+      // Persistence (INSERT notifications) and enqueue (INSERT
+      // notification_queue) are UNCHANGED — only the immediate
+      // processQueue(3) call is skipped. dedupKey/ON CONFLICT idempotency
+      // preserved.
       await Promise.all([
         notificationService.create(env, {
           userId: inviterId,
@@ -117,6 +127,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           channel: 'mini_app',
           metadata: { invitee_id: String(inviteeId), referral_id: String(referralId) },
           dedupKey: `referral_new_${referralId}`,
+          enqueueOnly: true,
         }).catch(() => {}),
         notificationService.create(env, {
           userId: inviterId,
@@ -126,6 +137,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           channel: 'both',
           metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
           dedupKey: `referral_reward_${referralId}`,
+          enqueueOnly: true,
         }).catch(() => {}),
       ]);
     } catch { /* notification failure should not break reward */ }
@@ -167,6 +179,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         }]);
       }
 
+      // H5 Layer 3: enqueueOnly=true — see comment above (Phase 1 Promise.all).
       await notificationService.create(env, {
         userId: String(inviterId),
         category: 'referral',
@@ -177,6 +190,7 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         message: messageText,
         metadata: { kind: 'referral_rich_message', invitee_id: String(inviteeId), amount: String(amount), new_balance: String(newBalance) },
         dedupKey: `referral_rich_${referralId}`,
+        enqueueOnly: true,
         telegramExtra: {
           parse_mode: 'HTML',
           disable_web_page_preview: true,
@@ -291,11 +305,15 @@ async function retryFailedReferralRewards(env) {
     //   4. Subrequest budget — ~21 subrequests for 20 retries (under 50 limit)
     //   5. No starvation — next tick continues from where this one left off
     //      (processed referrals get rewarded=TRUE, so they're excluded next time)
+    // H5 Layer 2: LIMIT reduced 3 → 1 to bound subrequest budget in the
+    // minute-0 cron invocation. Idempotency preserved via refId UNIQUE
+    // constraint; backlog drains at 1 item/hour (vs 3/hour). No time
+    // window on referrals, so no correctness risk.
     const result = await queryDb(env,
       `SELECT DISTINCT invitee_id FROM referrals
        WHERE rewarded = FALSE AND channel_verified = TRUE
        ORDER BY invitee_id ASC
-       LIMIT 3`,
+       LIMIT 1`,
     );
     if (result.rows.length === 0) return;
 
@@ -350,7 +368,7 @@ async function retryFailedWheelRewards(env) {
          AND tt.status = 'completed'
        )
        ORDER BY wh.created_at ASC
-       LIMIT 3`,
+       LIMIT 1`,
     );
     if (result.rows.length === 0) return;
 
@@ -467,6 +485,11 @@ async function retryFailedMissionRewards(env) {
        ORDER BY mp.daily_date ASC, mp.user_id ASC
        LIMIT 3`,
     );
+    // H5 Layer 2: LIMIT kept at 3 for mission retry because of the
+    // 3-day hard window (daily_date >= CURRENT_DATE - 2). LIMIT=1 would
+    // drain max 24 items in 3 days; a backlog spike > 24 items would
+    // cause permanent mission reward loss. LIMIT=3 drains 72 items in
+    // 3 days (3× safety margin).
     if (result.rows.length === 0) return;
 
     let retried = 0;
@@ -566,8 +589,11 @@ async function retryFailedRefunds(env) {
        FROM pending_refunds
        WHERE status = 'pending' AND retry_count < 10
        ORDER BY created_at ASC
-       LIMIT 3`,
+       LIMIT 1`,
     );
+    // H5 Layer 2: LIMIT reduced 3 → 1. pending_refunds has a 10-retry
+    // cap; with hourly cadence, takes 10 hours to mark exhausted. No
+    // correctness risk.
     if (result.rows.length === 0) return;
 
     let succeeded = 0;
