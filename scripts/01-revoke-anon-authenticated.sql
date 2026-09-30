@@ -1,0 +1,274 @@
+-- ============================================================================
+-- 01-revoke-anon-authenticated.sql — Phase 1 Security Hardening
+-- ============================================================================
+-- Purpose:
+--   Revoke ALL privileges from PostgREST roles (anon, authenticated) on all
+--   public schema tables, and revoke EXECUTE on the two SECURITY DEFINER
+--   AI gateway functions from PUBLIC.
+--
+-- Safety:
+--   * Idempotent — REVOKE is naturally idempotent (revoking twice has no
+--     effect on already-absent privileges).
+--   * Rollback-safe — see Rollback section at the bottom of this file.
+--   * Does NOT enable RLS, create policies, or alter any table schema.
+--   * Does NOT modify any existing migration file (00-migrate.sql, etc.).
+--   * Does NOT change Worker code, frontend, or any secret.
+--   * Does NOT touch sequences or schema-level USAGE — only table DML.
+--
+-- Application impact analysis (verified by code audit at origin/main 611f541):
+--   * Frontend (11 JS files: app.js, wallet.js, referral.js, cosmetics.js,
+--     membership-admin.js, membership-user.js, assistant.js, admin.js,
+--     notifications.js, shared-utils.js, i18n.js) NEVER uses PostgREST
+--     directly — verified by grep for createClient/.from(...)/supabase./
+--     rpc()/groq_generate/gemini_generate = ZERO matches.
+--   * Worker (worker-proxy.js + 22 repositories + 22 controllers + 11
+--     services) accesses DB via pg.Pool bound to
+--     env.HYPERDRIVE.connectionString (primary) or
+--     env.DIRECT_URL/env.DATABASE_URL (fallback for 4 specific read paths).
+--     Worker NEVER uses anon/authenticated PostgREST roles.
+--   * Therefore: revoking from anon/authenticated has ZERO runtime impact
+--     on application code paths.
+--
+-- PROTECTED pipeline impact (per user rule):
+--   * Alert/Price Alert cron (runScheduledAlertsBaseline, 1-min cron) —
+--     uses queryDb (Hyperdrive) + inline bulk SQL on price_alerts,
+--     notifications, notification_queue. Worker role bypasses REVOKE.
+--     NO behavior or performance change.
+--   * Notification cron (runCalendarAlertsCheck, */5 + */15 cron) —
+--     uses queryDb + inline bulk SQL on notifications, notification_queue,
+--     calendar_reminders. Worker role bypasses REVOKE. NO change.
+--   * Wallet/financial flows (token_balances, token_transactions,
+--     wheel_spins, reward_purchases) — all DML via Worker's pg.Pool.
+--     Worker role bypasses REVOKE. NO change.
+--
+-- Worker role consideration:
+--   * Worker's actual PostgreSQL role is determined by the connection
+--     string in env.HYPERDRIVE.connectionString and env.DIRECT_URL/
+--     DATABASE_URL secrets (stored in Cloudflare, NOT in repo — per prior
+--     audit blocker, role is NOT DETERMINED from repository evidence).
+--   * This migration does NOT grant EXECUTE to any specific Worker role.
+--     Reason: per user rule, do not assume Worker's role without evidence.
+--   * Worker will continue to function because:
+--     (a) If Worker role = service_role → Supabase default grants EXECUTE
+--         on all public functions to service_role (independent of PUBLIC
+--         grant). Also service_role has BYPASSRLS (but we're not enabling
+--         RLS in this migration, so that's irrelevant here).
+--     (b) If Worker role = postgres (superuser) → bypasses ALL privilege
+--         checks, including EXECUTE.
+--   * REVOKE FROM PUBLIC only affects anon + authenticated (which inherit
+--     from PUBLIC). Worker's role is unaffected regardless of which of the
+--     above it is.
+--
+-- gemini_generate — DEFERRED:
+--   This migration does NOT touch public.gemini_generate. Reason: no
+--   migration file exists in the repo for this function. It was created
+--   via Supabase SQL Editor or external SQL pre-repo. Before any REVOKE
+--   on gemini_generate, the following MUST be verified via live query:
+--     1. Exact signature (args + return type)
+--     2. Owner
+--     3. SECURITY DEFINER status
+--     4. search_path configuration
+--     5. Current EXECUTE privileges (PUBLIC / anon / authenticated /
+--        service_role / postgres)
+--   See "Verification queries for gemini_generate" section below.
+--   Per user STOP rule: do not modify without definitive evidence.
+--
+-- References:
+--   * Phase 2 audit worklog entry (SECURITY-AUDIT-PHASE2-FINAL)
+--   * DIRECT_URL role audit worklog entry (DIRECT-URL-ROLE-AUDIT)
+--   * 00-migrate.sql line 1681 (existing GRANT EXECUTE TO PUBLIC on
+--     groq_generate_with_key — this migration reverses that grant)
+--   * scripts/groq-model-update.sql (groq_generate definition)
+--   * scripts/groq-gateway-migration.sql (groq_generate_with_key definition)
+-- ============================================================================
+
+BEGIN;
+
+-- ============================================================================
+-- SECTION 1: Revoke ALL DML privileges from PostgREST roles on public tables
+-- ============================================================================
+-- Supabase default grants SELECT/INSERT/UPDATE/DELETE on all public.* tables
+-- to anon + authenticated (via PostgREST). This is the surface area for
+-- direct frontend→DB access via PostgREST if anon_key ever leaks.
+--
+-- Since the AmirBTC frontend NEVER uses PostgREST directly (verified by grep
+-- of 11 frontend JS files), these grants are unused at runtime. Revoking
+-- them is a defense-in-depth measure that closes the PostgREST exposure
+-- surface without affecting any application code path.
+--
+-- This affects ALL 48 tables in public schema:
+--   ad_campaigns, ad_channels, ad_messages, ad_popups, admins, alert_config,
+--   alert_quota, analyses, app_content, calendar_reminders, campaigns,
+--   daily_checkin_streaks, deleted_users, exchange_campaigns,
+--   membership_admins, membership_audit_logs, membership_requests,
+--   membership_requirements, membership_rule_acceptances, membership_rules,
+--   membership_users, mission_progress, mission_rewards, news_articles,
+--   notification_broadcasts, notification_queue, notification_settings,
+--   notification_templates, notifications, pending_refunds, price_alerts,
+--   profile_cosmetics, referral_reward_tiers, referrals,
+--   reward_emergency_controls, reward_library, reward_purchases,
+--   ticket_replies, tickets, token_balances, token_transactions,
+--   user_cosmetic_ownership, users, watchlist_items, wheel_config,
+--   wheel_history, wheel_rewards, wheel_spins
+-- (Also affects any legacy tables that may exist in live DB but not in
+--  repo migration: admin_logs, broadcasts, rewards, support_messages,
+--  alerts — REVOKE ALL is schema-wide, not table-specific.)
+--
+-- NOTE: This also revokes privileges on the 2 dead schema tables
+-- (exchange_campaigns, membership_admins) — which is fine since no code
+-- references them anyway.
+--
+-- NOTE: This does NOT revoke:
+--   * USAGE on schema public itself (only table DML)
+--   * EXECUTE on functions (handled separately in SECTION 2)
+--   * Privileges on sequences (SERIAL columns) — left as-is for now
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;
+
+-- ============================================================================
+-- SECTION 2: Revoke EXECUTE on SECURITY DEFINER AI gateway functions
+-- ============================================================================
+-- These functions are SECURITY DEFINER with search_path locked to 'public',
+-- 'vault', 'extensions'. They make outbound HTTP calls to api.groq.com
+-- via the pg_net extension (http() function).
+--
+-- Risk if EXECUTE remains on PUBLIC:
+--   * groq_generate: reads GROQ_API_KEY from vault.decrypted_secrets and
+--     makes HTTP call. If anon_key leaks, attacker can call this function
+--     to make Groq API calls using the project's Vault-stored key
+--     (quota abuse + potential key extraction via response analysis).
+--   * groq_generate_with_key: takes API key as function parameter. If
+--     anon_key leaks, attacker can call this function with their own API
+--     key to bypass Cloudflare Worker WAF block (Supabase IP is not
+--     blocked by Groq WAF) — quota abuse from Supabase's IP pool.
+--
+-- REVOKE FROM PUBLIC affects anon + authenticated (both inherit from
+-- PUBLIC). Worker role unaffected (see "Worker role consideration" above).
+--
+-- Function signatures (verified from migration files):
+--   * public.groq_generate(
+--       p_model text,
+--       p_messages jsonb,
+--       p_max_tokens integer DEFAULT 1024,
+--       p_temperature double precision DEFAULT 0.4
+--     ) RETURNS jsonb
+--   * public.groq_generate_with_key(
+--       p_model text,
+--       p_messages jsonb,
+--       p_api_key text,
+--       p_max_tokens integer DEFAULT 1024,
+--       p_temperature double precision DEFAULT 0.4
+--     ) RETURNS jsonb
+--
+-- NOTE: This migration does NOT explicitly GRANT EXECUTE to service_role
+-- or any other specific role. Reason: per user rule, do not assume
+-- Worker's actual role without definitive evidence. Worker's role already
+-- has EXECUTE via:
+--   (a) Supabase default (service_role gets EXECUTE on all public functions
+--       by default — this is independent of the PUBLIC grant we're revoking).
+--   (b) Superuser bypass (postgres role bypasses all privilege checks).
+--
+-- The explicit GRANT EXECUTE TO PUBLIC at 00-migrate.sql:1681 was added
+-- when groq_generate_with_key was created (commit in PR for Groq DB
+-- gateway migration). At the time, the intent was likely "anyone can call"
+-- — but this is overly permissive for a SECURITY DEFINER function that
+-- makes outbound HTTP calls. This migration reverses that decision.
+
+REVOKE EXECUTE ON FUNCTION public.groq_generate(text, jsonb, integer, double precision) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) FROM PUBLIC;
+
+-- ============================================================================
+-- SECTION 3: gemini_generate — DEFERRED (live verification required first)
+-- ============================================================================
+-- public.gemini_generate is NOT touched by this migration.
+--
+-- Reason: there is NO migration file in the repo for this function. It was
+-- created via Supabase SQL Editor or external SQL pre-repo (likely around
+-- commit fe801b5 "fix(groq): route through Supabase DB gateway to bypass
+-- Worker WAF block").
+--
+-- Before any REVOKE on gemini_generate, the following MUST be verified via
+-- live query in Supabase SQL Editor:
+--
+--   \df+ public.gemini_generate
+--
+--   SELECT
+--     p.proname AS function_name,
+--     pg_get_function_identity_arguments(p.oid) AS args_identity,
+--     pg_get_function_arguments(p.oid) AS args_full,
+--     pg_get_function_result(p.oid) AS return_type,
+--     l.lanname AS language,
+--     p.prosecdef AS is_security_definer,
+--     p.proconfig AS set_clauses,
+--     pg_get_userbyid(p.proowner) AS owner,
+--     p.prokind AS kind
+--   FROM pg_proc p
+--   JOIN pg_namespace n ON n.oid = p.pronamespace
+--   JOIN pg_language l ON l.oid = p.prolang
+--   WHERE n.nspname = 'public' AND p.proname = 'gemini_generate';
+--
+--   SELECT grantee, routine_name, privilege_type, is_grantable
+--   FROM information_schema.routine_privileges
+--   WHERE routine_schema = 'public' AND routine_name = 'gemini_generate';
+--
+-- If signature/owner/SECURITY DEFINER/search_path/EXECUTE privileges are
+-- confirmed equivalent to groq_generate's pattern, a SEPARATE migration
+-- can be created to REVOKE EXECUTE FROM PUBLIC on gemini_generate.
+--
+-- Per user STOP rule: do not modify without definitive evidence.
+
+COMMIT;
+
+-- ============================================================================
+-- Rollback (manual — run ONLY if application breaks)
+-- ============================================================================
+-- If application breakage is observed (e.g., Worker errors with
+-- "permission denied for relation X" or "permission denied for function
+-- Y"), run the following to restore the previous state:
+--
+-- BEGIN;
+--   -- Restore default PostgREST grants on tables (Supabase convention)
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon;
+--   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+--
+--   -- Restore PUBLIC EXECUTE on AI gateway functions
+--   GRANT EXECUTE ON FUNCTION public.groq_generate(text, jsonb, integer, double precision) TO PUBLIC;
+--   GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO PUBLIC;
+-- COMMIT;
+-- ============================================================================
+
+-- ============================================================================
+-- Verification queries (run AFTER migration to confirm)
+-- ============================================================================
+-- 1. Confirm anon has NO privileges on public tables:
+--    SELECT grantee, table_name, privilege_type
+--    FROM information_schema.table_privileges
+--    WHERE table_schema = 'public' AND grantee = 'anon'
+--    ORDER BY table_name, privilege_type;
+--    Expected: 0 rows.
+--
+-- 2. Confirm authenticated has NO privileges on public tables:
+--    SELECT grantee, table_name, privilege_type
+--    FROM information_schema.table_privileges
+--    WHERE table_schema = 'public' AND grantee = 'authenticated'
+--    ORDER BY table_name, privilege_type;
+--    Expected: 0 rows.
+--
+-- 3. Confirm PUBLIC has NO EXECUTE on groq_generate / groq_generate_with_key:
+--    SELECT grantee, routine_name, privilege_type
+--    FROM information_schema.routine_privileges
+--    WHERE routine_schema = 'public'
+--      AND routine_name IN ('groq_generate', 'groq_generate_with_key')
+--      AND grantee = 'PUBLIC';
+--    Expected: 0 rows.
+--
+-- 4. Confirm service_role still has EXECUTE (Worker continues to function):
+--    SELECT has_function_privilege('service_role',
+--           'public.groq_generate(text, jsonb, integer, double precision)'::regprocedure,
+--           'EXECUTE') AS service_role_can_call_groq_generate,
+--           has_function_privilege('service_role',
+--           'public.groq_generate_with_key(text, jsonb, text, integer, double precision)'::regprocedure,
+--           'EXECUTE') AS service_role_can_call_groq_generate_with_key;
+--    Expected: both TRUE.
+-- ============================================================================
