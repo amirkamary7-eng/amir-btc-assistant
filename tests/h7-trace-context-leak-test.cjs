@@ -62,18 +62,38 @@ test('H7-06: module-level _traceQuerySeq REMOVED', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SECTION 2 — _setTraceContext uses ALS.enterWith (request-local)
+// SECTION 2 — _setTraceContext returns context (NOT enterWith — not supported in Workers)
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('H7-07: _setTraceContext uses _traceContextALS.enterWith', () => {
-  assert.ok(SRC.includes('_traceContextALS.enterWith('),
-    '_setTraceContext must use _traceContextALS.enterWith for per-request storage');
-  // Must NOT use module-level assignment (old pattern)
+test('H7-07: _setTraceContext returns context object (NOT enterWith)', () => {
+  // enterWith() is NOT supported in Cloudflare Workers runtime.
+  // _setTraceContext now RETURNS the context object, and the fetch handler
+  // wraps its body in _traceContextALS.run(ctx, async () => { ... }).
   const fnStart = SRC.indexOf('function _setTraceContext');
   const fnEnd = SRC.indexOf('function _nextQuerySeq', fnStart);
   const fnBody = SRC.slice(fnStart, fnEnd);
+  assert.ok(!fnBody.includes('_traceContextALS.enterWith('),
+    '_setTraceContext must NOT call enterWith() (not supported in Workers)');
+  assert.ok(fnBody.includes('return {'),
+    '_setTraceContext must return the context object');
+  // Must NOT use module-level assignment (old pattern)
   assert.ok(!fnBody.includes('_traceId ='),
     '_setTraceContext must NOT assign to _traceId (module-level var removed)');
+});
+
+test('H7-07b: no enterWith() calls remain in production source (only comments)', () => {
+  // Check that enterWith is NOT called anywhere in the source.
+  // Comments mentioning enterWith are OK (they explain why it's not used).
+  // The actual call pattern would be `_traceContextALS.enterWith(`
+  assert.ok(!SRC.includes('_traceContextALS.enterWith('),
+    'No _traceContextALS.enterWith() calls must remain in source');
+});
+
+test('H7-07c: fetch handler wraps body in als.run()', () => {
+  assert.ok(SRC.includes('_traceContextALS.run(_traceCtx, async () => {'),
+    'Fetch handler must wrap its body in _traceContextALS.run() for per-request trace isolation');
+  assert.ok(SRC.includes('}); // end als.run()'),
+    'als.run() callback must be properly closed at end of fetch handler');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

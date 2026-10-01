@@ -243,12 +243,16 @@ const _traceContextALS = new AsyncLocalStorage();
 let _dbTraceEnabled = null; // cached env check (null = not yet checked)
 
 function _setTraceContext(endpoint, method) {
-  _traceContextALS.enterWith({
+  // H7 FIX: return the context object instead of calling enterWith().
+  // enterWith() is NOT supported in Cloudflare Workers runtime.
+  // The fetch handler wraps its body in _traceContextALS.run(_traceCtx, ...)
+  // which IS supported and provides the same per-request isolation.
+  return {
     id: Math.random().toString(36).slice(2, 10),
     endpoint: endpoint || '?',
     method: method || '?',
     seq: 0,
-  });
+  };
 }
 
 function _nextQuerySeq() {
@@ -6317,7 +6321,11 @@ export default {
     env.ctx = ctx;
     // TEMP: set trace context for instrumentation
     const _url = new URL(request.url);
-    _setTraceContext(_url.pathname, request.method);
+    // H7 FIX: use als.run() instead of enterWith() (not supported in Workers).
+    // run() creates a new async context with the trace store — all getStore()
+    // calls within this callback (and awaited async operations) will see it.
+    const _traceCtx = _setTraceContext(_url.pathname, request.method);
+    return _traceContextALS.run(_traceCtx, async () => {
     // PHASE 2 SAFE OPTIMIZATION: Cache DB_TRACE_ENABLED flag per request.
     // Default: false (no verbose query logging). Set env.DB_TRACE_ENABLED=true
     // to re-enable _traceQuery/_traceLog for debugging.
@@ -8451,6 +8459,7 @@ export default {
       // structural compatibility with the existing try/catch/finally shape.
     }
     }); // end withSharedPool
+    }); // end als.run()
   },
 
   async scheduled(controller, env, ctx) {
