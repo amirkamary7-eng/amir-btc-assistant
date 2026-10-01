@@ -37,9 +37,25 @@ export function createNewsArticleRepository(deps) {
    * Called once per isolate (cached by _tableEnsured flag).
    * NOT called from cron — only from the first HTTP request that needs it,
    * or manually via migration script.
+   *
+   * PRODUCTION: Tables are already provisioned by migrations (scripts/00-migrate.sql).
+   * Runtime DDL (CREATE TABLE / ALTER TABLE / CREATE INDEX) is unnecessary and
+   * fails because amirbtc_worker has USAGE but NOT CREATE on schema public.
+   * PostgreSQL checks privileges BEFORE existence, so even when the table exists,
+   * CREATE TABLE IF NOT EXISTS fails with "permission denied for schema public".
+   * Skip DDL entirely in production — INSERT/SELECT/UPDATE/DELETE all work fine.
+   * Non-production environments (staging/development) still run DDL for
+   * fresh-DB provisioning.
    */
   async function ensureTable(env) {
     if (_tableEnsured) return;
+    // Production: skip all runtime DDL. Tables already provisioned by migrations.
+    // This also prevents the "01000 resource was not closed: TupleDesc" warning
+    // caused by ALTER TABLE invalidating prepared statement caches.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _tableEnsured = true;
+      return;
+    }
     await queryDb(env, `
       CREATE TABLE IF NOT EXISTS news_articles (
         id VARCHAR(64) PRIMARY KEY,
