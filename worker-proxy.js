@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool as NeonPool, neon } from '@neondatabase/serverless';
 import { Pool as PgPool } from 'pg';
 import { createAlertRepository } from './src/repositories/alerts.js';
@@ -222,34 +223,50 @@ function withCors(headers = {}, env = null) {
 // env.DB_TRACE_ENABLED. Previously they ran on EVERY queryDb call (console.log
 // + JSON.stringify with 13 fields = ~0.08ms CPU each, ~2.4ms per bootstrap with
 // 30 queries). Now they only run when explicitly enabled for debugging.
-// _traceStage (slow stage >500ms) is ALWAYS enabled — it's cheap (only fires
-// on slow operations) and useful for production observability.
-let _traceId = 'no-trace';
-let _traceEndpoint = '?';
-let _traceMethod = '?';
-let _traceQuerySeq = 0;
+// H7 FIX: trace context is now request-local via AsyncLocalStorage instead of
+// module-level vars. Module-level vars (_traceId, _traceEndpoint, _traceMethod,
+// _traceQuerySeq) were shared across concurrent requests in the same isolate →
+// cross-request contamination in TRACE_SLOW_STAGE logs (wrong endpoint/method
+// attributed to a slow operation from a different request).
+//
+// AsyncLocalStorage stores per-async-context state. Each fetch invocation has
+// its own async context → no contamination. The scheduled (cron) handler does
+// NOT call _setTraceContext, so its async context has no store → trace functions
+// fall back to safe defaults ({ id: 'no-trace', endpoint: '?', method: '?' }).
+//
+// No function signatures or call sites changed — _traceStage(name, t0) still
+// works the same. Only the storage mechanism changed (module-level → ALS).
+const _traceContextALS = new AsyncLocalStorage();
+
+// H7 FIX: removed module-level _traceId, _traceEndpoint, _traceMethod, _traceQuerySeq.
+// They are now stored per-request via _traceContextALS.
 let _dbTraceEnabled = null; // cached env check (null = not yet checked)
 
 function _setTraceContext(endpoint, method) {
-  _traceId = Math.random().toString(36).slice(2, 10);
-  _traceEndpoint = endpoint || '?';
-  _traceMethod = method || '?';
-  _traceQuerySeq = 0;
+  _traceContextALS.enterWith({
+    id: Math.random().toString(36).slice(2, 10),
+    endpoint: endpoint || '?',
+    method: method || '?',
+    seq: 0,
+  });
 }
 
 function _nextQuerySeq() {
-  _traceQuerySeq += 1;
-  return _traceQuerySeq;
+  const _ctx = _traceContextALS.getStore();
+  if (!_ctx) return 0;
+  _ctx.seq += 1;
+  return _ctx.seq;
 }
 
 function _traceStage(stageName, startTime) {
   const duration = Date.now() - startTime;
   if (duration > 500) {
+    const _ctx = _traceContextALS.getStore() || { id: 'no-trace', endpoint: '?', method: '?' };
     console.log(JSON.stringify({
       type: 'TRACE_SLOW_STAGE',
-      traceId: _traceId,
-      endpoint: _traceEndpoint,
-      method: _traceMethod,
+      traceId: _ctx.id,
+      endpoint: _ctx.endpoint,
+      method: _ctx.method,
       stage: stageName,
       durationMs: duration,
       ts: new Date().toISOString()
@@ -264,11 +281,12 @@ function _traceLog(stageName, extra) {
   // Keeping the function signature for backward compat but making it a no-op
   // saves the JSON.stringify + console.log cost on every call.
   if (!_dbTraceEnabled) return;
+  const _ctx = _traceContextALS.getStore() || { id: 'no-trace', endpoint: '?', method: '?' };
   console.log(JSON.stringify({
     type: 'TRACE',
-    traceId: _traceId,
-    endpoint: _traceEndpoint,
-    method: _traceMethod,
+    traceId: _ctx.id,
+    endpoint: _ctx.endpoint,
+    method: _ctx.method,
     stage: stageName,
     ...extra,
     ts: new Date().toISOString()
@@ -279,11 +297,12 @@ function _traceLog(stageName, extra) {
 // Previously logged EVERY queryDb call. Now only logs when debugging is needed.
 function _traceQuery(opts) {
   if (!_dbTraceEnabled) return;
+  const _ctx = _traceContextALS.getStore() || { id: 'no-trace', endpoint: '?', method: '?' };
   console.log(JSON.stringify({
     type: 'TRACE_QUERY',
-    traceId: _traceId,
-    endpoint: _traceEndpoint,
-    method: _traceMethod,
+    traceId: _ctx.id,
+    endpoint: _ctx.endpoint,
+    method: _ctx.method,
     querySeq: opts.seq,
     poolType: opts.poolType,         // 'shared' | 'new'
     sql: opts.sql,                    // SQL preview (first 120 chars)
