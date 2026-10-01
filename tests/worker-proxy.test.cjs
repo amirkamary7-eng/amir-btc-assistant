@@ -196,6 +196,9 @@ function loadWorker(pgOverride) {
       "import { createHmac, timingSafeEqual } from 'node:crypto';",
       "const { createHmac, timingSafeEqual } = require('node:crypto');",
     )
+    // Generic: convert ANY remaining node: built-in import to CJS require.
+    // Handles node:async_hooks (H7 fix) and any future node: imports.
+    .replace(/import\s+\{([^}]*)\}\s+from\s+['"]node:([^'"]+)['"];?/g, (_, named, mod) => `const { ${named} } = require('node:${mod}');`)
     .replace("import { Pool as NeonPool, neon } from '@neondatabase/serverless';", "const { Pool: NeonPool, neon } = require('@neondatabase/serverless');")
     .replace("import { Pool as PgPool } from 'pg';", "const { Pool: PgPool } = require('pg');")
     .replace(
