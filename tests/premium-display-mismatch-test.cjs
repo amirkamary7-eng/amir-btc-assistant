@@ -456,11 +456,15 @@ test('PD-WIRE: referral handlers wired with membershipAuthority + entitlementCon
 // PD-TEXT: membership benefit text no longer hardcodes "20 free AB"
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('PD-TEXT: app.js benefit text no longer hardcodes misleading amount', () => {
+test('PD-TEXT: benefit text no longer hardcodes misleading amount (moved to i18n.js)', () => {
   const APP_SRC = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
-  assert.ok(!/20 free AB/i.test(APP_SRC), 'no "20 free AB" hardcode remains');
-  assert.ok(APP_SRC.includes('Daily AB rewards through your streak'),
-    'English benefit text updated to generic streak-based wording');
-  assert.ok(APP_SRC.includes('پاداش روزانه AB با چک‌این هر روز'),
-    'Persian benefit text updated to generic streak-based wording');
+  const I18N_SRC = fs.readFileSync(path.join(ROOT, 'i18n.js'), 'utf8');
+  // Assert "20 free AB" is removed from app.js (still hardcoded → misleading)
+  assert.ok(!/20 free AB/i.test(APP_SRC), 'no "20 free AB" hardcode remains in app.js');
+  // Benefit text was moved from app.js to i18n.js during the membership rebuild.
+  // The generic streak-based wording now lives in i18n.js as mem_benefit_daily_desc.
+  assert.ok(I18N_SRC.includes('Daily AB rewards through your streak'),
+    'English benefit text (mem_benefit_daily_desc) must exist in i18n.js');
+  assert.ok(I18N_SRC.includes('پاداش روزانه AB با چک‌این هر روز'),
+    'Persian benefit text (mem_benefit_daily_desc) must exist in i18n.js');
 });
