@@ -85,6 +85,18 @@ function _isPermissionDeniedTableError(e) {
 
 async function ensureTelemetryTables(env) {
   if (_telemetryTablesEnsured) return;
+  // TELEMETRY-PROD-FIX: In production, telemetry tables are already provisioned
+  // by migrations. Runtime DDL (CREATE TABLE IF NOT EXISTS) is unnecessary and
+  // fails because amirbtc_worker has USAGE but NOT CREATE on schema public.
+  // PostgreSQL checks privileges BEFORE existence, so even when tables exist,
+  // CREATE TABLE IF NOT EXISTS fails with "permission denied for schema public".
+  // Skip DDL entirely in production — INSERTs/SELECTs work fine (tables exist).
+  // Non-production environments (staging/development) still run DDL for
+  // fresh-DB provisioning.
+  if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+    _telemetryTablesEnsured = true;
+    return;
+  }
   // Phase A: short-circuit after first permission-denied failure in this
   // isolate. Saves 1 wasted subrequest per call (was: every call retried
   // the failing CREATE TABLE). Flag is per-isolate; cold-start retries once.

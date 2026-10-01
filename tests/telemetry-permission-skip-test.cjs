@@ -526,3 +526,37 @@ test('PERM-SCOPE-04: telemetry.js is the ONLY file changed in this fix', () => {
       `${name} must NOT contain _e2eCleanupPermissionDenied (scope leak)`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 4 — TELEMETRY-PROD-FIX: ensureTelemetryTables skips DDL in production
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('PROD-DDL-01: ensureTelemetryTables has production early-return', () => {
+  assert.ok(TELEMETRY_SRC.includes("env.APP_ENV") && TELEMETRY_SRC.includes("production"),
+    'ensureTelemetryTables must check env.APP_ENV === production for early return');
+  assert.ok(TELEMETRY_SRC.includes("_telemetryTablesEnsured = true"),
+    'Production early-return must set _telemetryTablesEnsured = true (skip future DDL)');
+});
+
+test('PROD-DDL-02: ensureTelemetryTables still runs DDL in non-production', () => {
+  // The DDL code (CREATE TABLE) must still be present for staging/development
+  assert.ok(TELEMETRY_SRC.includes('CREATE TABLE IF NOT EXISTS news_ai_tick_log'),
+    'ensureTelemetryTables must still contain CREATE TABLE for non-production environments');
+  assert.ok(TELEMETRY_SRC.includes('CREATE TABLE IF NOT EXISTS news_ai_e2e_log'),
+    'ensureTelemetryTables must still contain CREATE TABLE for e2e log in non-production');
+});
+
+test('PROD-DDL-03: production check comes BEFORE DDL code', () => {
+  const checkIdx = TELEMETRY_SRC.indexOf("=== 'production'");
+  const ddlIdx = TELEMETRY_SRC.indexOf('CREATE TABLE IF NOT EXISTS news_ai_tick_log');
+  assert.ok(checkIdx > -1 && ddlIdx > -1, 'Both production check and DDL must exist');
+  assert.ok(checkIdx < ddlIdx,
+    'Production check must come BEFORE DDL code (so DDL is skipped in production)');
+});
+
+test('PROD-DDL-04: production check comes AFTER _telemetryTablesEnsured check', () => {
+  const ensuredIdx = TELEMETRY_SRC.indexOf('if (_telemetryTablesEnsured) return');
+  const checkIdx = TELEMETRY_SRC.indexOf("=== 'production'");
+  assert.ok(ensuredIdx < checkIdx,
+    '_telemetryTablesEnsured check must come first (fast path for repeated calls)');
+});
