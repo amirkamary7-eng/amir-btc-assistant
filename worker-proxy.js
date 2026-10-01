@@ -5533,6 +5533,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     skipped_price_missing: 0,
     skipped_guest_users: 0,
     skipped_pref_disabled: 0,
+    skipped_ohlc_unavailable: 0, // H6 Phase 1: alerts skipped because OHLC wasn't fetched this tick (symbol beyond cap or fetch failed). These alerts retain their previous last_price/last_checked_at — NO silent loss.
     duplicate_triggers_prevented: 0,
     cross_detections: 0,
     immediate_triggers: 0,
@@ -5753,8 +5754,27 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
 
       const ohlc = symbolOhlcMap.get(symbol);
       if (!ohlc || !Number.isFinite(ohlc.high) || !Number.isFinite(ohlc.low) || !Number.isFinite(ohlc.close)) {
-        // Queue update with price=0 (price not available)
-        _pendingUpdates.push({ alertId, currentPrice: 0 });
+        // H6 Phase 1 SILENT-LOSS FIX: Do NOT push to _pendingUpdates when OHLC
+        // is unavailable. Previously, this pushed { alertId, currentPrice: 0 }
+        // which caused the bulk UPDATE to set last_price=0 AND last_checked_at=
+        // NOW() for this alert. For direction='below' alerts, when OHLC arrived
+        // on a subsequent tick, prevPrice=0 (≤ targetPrice) and last_checked_at
+        // was set → triggerReason became 'still_below_no_retrigger' → NO TRIGGER
+        // → SILENT LOSS (the alert never fired even though price WAS below target).
+        //
+        // Fix: skip the alert entirely this tick. Don't touch last_price or
+        // last_checked_at. The alert retains its previous valid last_price and
+        // last_checked_at from the last tick where OHLC WAS available. On the
+        // next tick when OHLC is available, cross-detection runs with the
+        // ORIGINAL prevPrice → trigger fires correctly.
+        //
+        // This does NOT affect:
+        // - direction='above' alerts (trigger evaluation unchanged when OHLC arrives)
+        // - markTriggeredBulk (only processes _triggeredAlerts, not _pendingUpdates)
+        // - notification flow (only triggered alerts produce notifications)
+        // - trigger evaluation logic (unchanged — just skipped this tick for this alert)
+        // - subrequest count (no new DB calls — actually REDUCES bulk UPDATE size)
+        resultPayload.skipped_ohlc_unavailable += 1;
         continue;
       }
 
