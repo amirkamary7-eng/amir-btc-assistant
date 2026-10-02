@@ -27,6 +27,11 @@ const REPOS = [
   { file: 'src/repositories/notifications.js', flag: '_tableEnsured', func: 'ensureTable', pattern: 'return' },
   { file: 'src/repositories/app_content.js', flag: '_tableEnsured', func: 'ensureTable', pattern: 'return' },
   { file: 'src/repositories/membership.js', flag: '_welcomeColumnEnsured', func: 'inline ALTER', pattern: 'if-else' },
+  { file: 'src/repositories/alerts.js', flag: '_tableEnsured', func: 'ensureTable', pattern: 'return' },
+  { file: 'src/repositories/users.js', flag: '_tableEnsured', func: 'ensureTable', pattern: 'return' },
+  { file: 'src/repositories/alert_economy.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
+  { file: 'src/repositories/reward_purchases.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
+  { file: 'src/repositories/notification_platform.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
 ];
 
 for (const repo of REPOS) {

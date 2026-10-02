@@ -30,6 +30,11 @@ export function createUserRepository(deps) {
    */
   async function ensureTable(env) {
     if (_tableEnsured) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _tableEnsured = true;
+      return;
+    }
     // Phase 5: Promise singleton — concurrent callers await the same initialization.
     // On failure, _ensureTablePromise is cleared so the next request can retry.
     if (!_ensureTablePromise) {
