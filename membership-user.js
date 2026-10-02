@@ -1345,9 +1345,8 @@
 
   // Auto-load on DOMContentLoaded (also called from loadUser in app.js)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { loadCard(); initRipple(); });
+    document.addEventListener('DOMContentLoaded', function () { initRipple(); });
   } else {
-    loadCard();
     initRipple();
   }
 })();
