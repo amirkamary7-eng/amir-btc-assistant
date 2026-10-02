@@ -31,8 +31,13 @@ export function createMembershipRepository(deps) {
       // Ensure welcome_shown column exists (Phase 4 — added after initial deploy).
       // Runs once per isolate, then cached. Safe for existing deployments.
       if (!_welcomeColumnEnsured) {
-        await queryDb(env, `ALTER TABLE membership_users ADD COLUMN IF NOT EXISTS welcome_shown BOOLEAN NOT NULL DEFAULT FALSE`);
-        _welcomeColumnEnsured = true;
+        // PROD-DDL-SKIP: column provisioned by migrations; skip runtime ALTER in production.
+        if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+          _welcomeColumnEnsured = true;
+        } else {
+          await queryDb(env, `ALTER TABLE membership_users ADD COLUMN IF NOT EXISTS welcome_shown BOOLEAN NOT NULL DEFAULT FALSE`);
+          _welcomeColumnEnsured = true;
+        }
       }
       _schemaVerified = true;
     } catch (e) {

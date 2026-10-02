@@ -59,6 +59,11 @@ export function createAnalysisRepository(deps) {
   let _schemaVerified = false;
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _schemaVerified = true;
+      return;
+    }
     // FIX: CREATE TABLE IF NOT EXISTS as a safety net. Previously ensureSchema
     // only ran ALTER TABLE ADD COLUMN — if the base table didn't exist (e.g.
     // external SQLAlchemy migration never ran on this DB), the ALTER failed

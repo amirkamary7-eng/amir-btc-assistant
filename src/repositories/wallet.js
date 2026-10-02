@@ -18,6 +18,11 @@ export function createWalletRepository(deps) {
    */
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _schemaVerified = true;
+      return;
+    }
     const batchSql = `
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'completed';
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS source VARCHAR(32) NOT NULL DEFAULT 'system';
