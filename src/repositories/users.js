@@ -406,16 +406,21 @@ export function createUserRepository(deps) {
       // The CREATE TABLE IF NOT EXISTS is idempotent, but running it on every
       // call wastes a DB round-trip. Now it only runs once per isolate.
       if (!_deletedUsersTableEnsured) {
-        await queryDb(env, `
-          CREATE TABLE IF NOT EXISTS deleted_users (
-            id SERIAL PRIMARY KEY,
-            telegram_id VARCHAR(64) NOT NULL UNIQUE,
-            previous_inviter_id VARCHAR(64),
-            deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
-          )
-        `);
-        _deletedUsersTableEnsured = true;
+        // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+        if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+          _deletedUsersTableEnsured = true;
+        } else {
+          await queryDb(env, `
+            CREATE TABLE IF NOT EXISTS deleted_users (
+              id SERIAL PRIMARY KEY,
+              telegram_id VARCHAR(64) NOT NULL UNIQUE,
+              previous_inviter_id VARCHAR(64),
+              deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
+            )
+          `);
+          _deletedUsersTableEnsured = true;
+        }
       }
       const result = await queryDb(env,
         `SELECT telegram_id, deleted_at, cooldown_until

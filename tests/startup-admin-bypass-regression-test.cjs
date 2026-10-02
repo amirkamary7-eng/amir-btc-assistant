@@ -230,34 +230,57 @@ test('BOOT-PARALLEL-006: chainE (isPremium) is independent — defaults to false
   assert.ok(chainE.includes('return isPremiumUser;'), 'chainE must return isPremiumUser');
 });
 
-test('BOOT-PARALLEL-007: Promise.all([chainA, chainB]) for fatal chains', () => {
-  assert.ok(USERS_SRC.includes('const [userRow, watchlist] = await Promise.all([chainA, chainB]);'),
-    'chainA (userRow) and chainB (watchlist) must be awaited via Promise.all — both are fatal');
+test('BOOT-PARALLEL-007: single Promise.all for all 5 chains (A/B fatal, C/D/E non-fatal)', () => {
+  // All 5 chains are now awaited via a SINGLE Promise.all (previously 3 sequential groups).
+  assert.ok(USERS_SRC.includes('Promise.all([chainA, chainB, chainC, chainD, chainE])'),
+    'all 5 chains must be awaited via a single Promise.all');
+  assert.ok(USERS_SRC.includes('const [userRow, watchlist, chainCResult, isUserAdmin, isPremiumUser]'),
+    'destructuring must include userRow, watchlist, chainCResult, isUserAdmin, isPremiumUser');
+  // Old separate Promise.all([chainA, chainB]) must NOT exist
+  assert.ok(!USERS_SRC.includes("const [userRow, watchlist] = await Promise.all([chainA, chainB]);"),
+    'old separate Promise.all([chainA, chainB]) must be removed');
 });
 
-test('BOOT-PARALLEL-008: chainC resolved separately for null-fallback logic', () => {
-  // chainC must be awaited SEPARATELY (not in Promise.all) because its result
-  // can be null (signal fallback) — we need to handle that explicitly.
-  assert.ok(USERS_SRC.includes('const chainCResult = await chainC;'),
-    'chainC must be awaited separately as chainCResult');
+test('BOOT-PARALLEL-008: chainC null-fallback logic preserved after single Promise.all', () => {
+  // chainC is now part of the single Promise.all — its result (chainCResult)
+  // is destructured from the same Promise.all. The null-fallback logic must still exist.
   assert.ok(USERS_SRC.includes('if (chainCResult === null)'),
     'main code must check chainCResult === null for fallback');
   assert.ok(USERS_SRC.includes('channelJoined = Boolean(userRow?.channel_joined)'),
     'main code must fall back to Boolean(userRow?.channel_joined) when chainC returns null');
+  // Old separate `const chainCResult = await chainC;` must NOT exist
+  assert.ok(!USERS_SRC.includes('const chainCResult = await chainC;'),
+    'old separate await chainC must be removed (now in single Promise.all)');
 });
 
-test('BOOT-PARALLEL-009: Promise.all([chainD, chainE]) for non-fatal chains', () => {
-  assert.ok(USERS_SRC.includes('const [isUserAdmin, isPremiumUser] = await Promise.all([chainD, chainE]);'),
-    'chainD (admin) and chainE (premium) must be awaited via Promise.all — both non-fatal');
+test('BOOT-PARALLEL-009: chainD and chainE included in single Promise.all', () => {
+  // chainD (admin) and chainE (premium) are now part of the single Promise.all
+  // with all 5 chains. Their results are destructured as isUserAdmin and isPremiumUser.
+  assert.ok(USERS_SRC.includes('Promise.all([chainA, chainB, chainC, chainD, chainE])'),
+    'chainD and chainE must be in the single Promise.all with all 5 chains');
+  assert.ok(USERS_SRC.includes('isUserAdmin'),
+    'isUserAdmin must be destructured from the Promise.all result');
+  assert.ok(USERS_SRC.includes('isPremiumUser'),
+    'isPremiumUser must be destructured from the Promise.all result');
+  // Old separate Promise.all([chainD, chainE]) must NOT exist
+  assert.ok(!USERS_SRC.includes("const [isUserAdmin, isPremiumUser] = await Promise.all([chainD, chainE]);"),
+    'old separate Promise.all([chainD, chainE]) must be removed');
 });
 
-test('BOOT-PARALLEL-010: fireDailyLoginMission still runs AFTER chainC resolves (needs channelJoined)', () => {
-  // Mission reward logic requires channelJoined — must run after chainC
-  const chainCResolveIdx = USERS_SRC.indexOf('const chainCResult = await chainC;');
-  const fireDailyIdx = USERS_SRC.indexOf('fireDailyLoginMission', chainCResolveIdx);
-  assert.ok(chainCResolveIdx > -1, 'chainC must be resolved');
-  assert.ok(fireDailyIdx > chainCResolveIdx,
-    'fireDailyLoginMission must run AFTER chainC is resolved (needs channelJoined)');
+test('BOOT-PARALLEL-010: fireDailyLoginMission runs AFTER channelJoined is resolved', () => {
+  // Mission reward logic requires channelJoined — must run after chainC resolves.
+  // chainC is now part of the single Promise.all, and channelJoined is computed
+  // from chainCResult after the Promise.all completes.
+  const promiseAllIdx = USERS_SRC.indexOf('Promise.all([chainA, chainB, chainC, chainD, chainE])');
+  assert.ok(promiseAllIdx > -1, 'single Promise.all must exist');
+  // channelJoined must be computed AFTER the Promise.all
+  const channelJoinedIdx = USERS_SRC.indexOf('channelJoined', promiseAllIdx);
+  assert.ok(channelJoinedIdx > promiseAllIdx,
+    'channelJoined must be computed AFTER the Promise.all resolves');
+  // fireDailyLoginMission must run AFTER channelJoined is computed
+  const fireDailyIdx = USERS_SRC.indexOf('fireDailyLoginMission', channelJoinedIdx);
+  assert.ok(fireDailyIdx > channelJoinedIdx,
+    'fireDailyLoginMission must run AFTER channelJoined is computed');
   // The guard must still check channelJoined
   const fireBlockMatch = USERS_SRC.match(/if \(channelJoined && isDatabaseConfigured[\s\S]*?fireDailyLoginMission/);
   assert.ok(fireBlockMatch, 'fireDailyLoginMission must still be gated on channelJoined');

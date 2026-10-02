@@ -259,10 +259,10 @@ export function createUserHandlers(deps) {
       // (processReferralOnBootstrap only touches referrals + token_transactions
       // + token_balances, not users). Using userRow directly saves 1 DB
       // round-trip per bootstrap with zero behavior change.
-      const [userRow, watchlist] = await Promise.all([chainA, chainB]);
+      // ── Single Promise.all for all 5 chains (A/B fatal, C/D/E non-fatal) ──
+      const [userRow, watchlist, chainCResult, isUserAdmin, isPremiumUser] = await Promise.all([chainA, chainB, chainC, chainD, chainE]);
 
       // ── Resolve chainC (membership) — fall back to DB row on null ──
-      const chainCResult = await chainC;
       let channelJoined;
       if (chainCResult === null) {
         // Fallback: either tgUser.id was missing OR membership check failed.
@@ -274,9 +274,6 @@ export function createUserHandlers(deps) {
       } else {
         channelJoined = chainCResult;
       }
-
-      // ── Await chainD (admin) + chainE (premium) — both non-fatal ──
-      const [isUserAdmin, isPremiumUser] = await Promise.all([chainD, chainE]);
 
       // MISSION-ABUSE FIX (WALLET-002): auto-fire the daily_login mission.
       // Bootstrap itself IS proof of login — no event_token needed for this mission.
