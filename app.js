@@ -8376,12 +8376,8 @@ function ensureTradingViewLoaded() {
     return _tvJsLoadPromise || Promise.resolve();
 }
 
-// Start preloading as soon as this script parses (non-blocking)
-// The script tag is async, so it won't block page render.
-if (typeof window !== 'undefined') {
-    // Defer to next tick to avoid blocking initial render
-    setTimeout(preloadTradingViewScript, 100);
-}
+// TradingView tv.js is now lazy-loaded by ensureTradingViewLoaded() on first
+// openCoinDetail call. Previously preloaded eagerly via setTimeout(100ms).
 
 // ============================================================================
 // ── PERFORMANCE: localStorage cache for resolved chart symbols ──
