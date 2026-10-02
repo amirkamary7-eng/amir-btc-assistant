@@ -50,6 +50,11 @@ export function createNotificationRepository(deps) {
   let _tableEnsured = false;
   async function ensureTable(env) {
     if (_tableEnsured) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _tableEnsured = true;
+      return;
+    }
     try {
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS notifications (

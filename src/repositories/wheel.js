@@ -81,6 +81,11 @@ export function createWheelRepository(deps) {
    */
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _schemaVerified = true;
+      return;
+    }
     const batchSql = `
       CREATE TABLE IF NOT EXISTS wheel_spins (
         id SERIAL PRIMARY KEY,

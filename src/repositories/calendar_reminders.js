@@ -26,6 +26,11 @@ export function createCalendarReminderRepository(deps) {
 
   async function ensureSchema(env, pool = null) {
     if (_schemaVerified) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _schemaVerified = true;
+      return;
+    }
     const sql = `
       CREATE TABLE IF NOT EXISTS calendar_reminders (
         id SERIAL PRIMARY KEY,

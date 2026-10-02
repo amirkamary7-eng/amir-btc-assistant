@@ -38,6 +38,11 @@ export function createAdminRepository(deps) {
 
   async function ensureSchema(env) {
     if (_schemaVerified) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _schemaVerified = true;
+      return;
+    }
     // ROOT-CAUSE FIX: Merge ALL schema migrations into a SINGLE queryDb call.
     // Previously this was 5 separate queryDb calls (CREATE TABLE + 4 ALTER TABLE),
     // each creating a new Pool + TLS handshake (~3-5ms CPU each).
