@@ -163,11 +163,18 @@ test('A-5-1: CORS does NOT return wildcard * when WEBAPP_URL is missing', () => 
     'CORS must NOT return wildcard * in any branch');
 });
 
-test('A-5-2: CORS returns request origin or empty when WEBAPP_URL missing', () => {
+test('A-5-2: CORS fails TRULY closed (empty, not reqOrigin) when WEBAPP_URL missing or malformed', () => {
+  // M3 FIX (Phase 3.2): the old `reqOrigin || ''` fallback was removed.
+  // All non-localhost branches now set empty Access-Control-Allow-Origin
+  // directly via merged.set('Access-Control-Allow-Origin', ''). This is
+  // fail-TRULY-closed: browsers block cross-origin access when ACAO is empty.
   const corsStart = workerSrc.indexOf('function withCors');
   const corsEnd = workerSrc.indexOf('return merged;', corsStart);
   const corsSrc = workerSrc.slice(corsStart, corsEnd);
-  assert.ok(/reqOrigin \|\| ''/.test(corsSrc), 'Must return reqOrigin || empty string when WEBAPP_URL missing');
+  assert.ok(/merged\.set\('Access-Control-Allow-Origin',\s*''\)/.test(corsSrc),
+    'Must set empty Access-Control-Allow-Origin (fail-closed) in non-localhost branches');
+  assert.ok(!/reqOrigin \|\| ''/.test(corsSrc),
+    'Must NOT use the old reqOrigin || empty fallback (M3 removed it)');
 });
 
 // ═══════════════════════════════════════════════════════════════════════

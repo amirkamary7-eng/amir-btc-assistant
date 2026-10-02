@@ -53,6 +53,11 @@ export function createAlertRepository(deps) {
    */
   async function ensureTable(env) {
     if (_tableEnsured) return;
+    // PROD-DDL-SKIP: tables provisioned by migrations; skip runtime DDL in production.
+    if (env && String(env.APP_ENV || '').toLowerCase() === 'production') {
+      _tableEnsured = true;
+      return;
+    }
     await queryDb(env, `
       CREATE TABLE IF NOT EXISTS price_alerts (
         id VARCHAR(64) PRIMARY KEY,
