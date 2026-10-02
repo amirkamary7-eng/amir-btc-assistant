@@ -786,17 +786,16 @@ export function createWalletHandlers(deps) {
       // reward_amount always matches the amount the user receives on
       // completion. Does NOT modify m.token_amount in DB; does NOT change
       // the crediting transaction logic.
-      const isPremium = await _isPremiumSafe(env, userId);
-
-      // Get all active mission definitions from DB
-      const activeMissions = rewardCenterRepo
-        ? await rewardCenterRepo.getActiveMissionRewards(env)
-        : [];
-
-      // Get today's progress for this user
-      const progressList = rewardCenterRepo
-        ? await rewardCenterRepo.getTodayMissionProgress(env, userId)
-        : [];
+      // Parallelize 3 independent DB queries (same pattern as handleMissionComplete L549)
+      const [isPremium, activeMissions, progressList] = await Promise.all([
+        _isPremiumSafe(env, userId),
+        rewardCenterRepo
+          ? rewardCenterRepo.getActiveMissionRewards(env)
+          : Promise.resolve([]),
+        rewardCenterRepo
+          ? rewardCenterRepo.getTodayMissionProgress(env, userId)
+          : Promise.resolve([]),
+      ]);
 
       const progressMap = {};
       for (const p of progressList) {
