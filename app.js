@@ -5894,7 +5894,13 @@ function refreshWalletAfterMutation(newBalance) {
     // 2. Update balance display immediately
     if (typeof newBalance === 'number') {
         // Use authoritative newBalance from API response (no extra API call)
-        const balanceEl = document.querySelector('.wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
+        // DOM-FIX: target the ACTUAL rendered balance elements (.balance-value
+        // on the Profile preview card, .wallet-hero-balance-value on the Wallet
+        // hero). Legacy selectors retained for compatibility. The previous list
+        // (.wallet-balance-value, ...) did not match the real .balance-value
+        // element (missing the wallet- prefix mismatch), so the optimistic
+        // animation was a no-op.
+        const balanceEl = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
         if (balanceEl) {
             const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
             if (typeof animateBalanceChange === 'function') {
