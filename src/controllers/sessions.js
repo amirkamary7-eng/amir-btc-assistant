@@ -17,8 +17,19 @@ export function createSessionHandlers(deps) {
     sessionRepo,
   } = deps;
 
-  // Worker-level cache for online count (reduces DO requests by ~95%)
-  // MUST be `let` — handlers reassign it on every heartbeat/online-cache-miss/end.
+  // Per-isolate Worker cache for online count. FALLBACK-ONLY.
+  //
+  // This cache is WRITTEN on every successful heartbeat/online-count/end DO
+  // call, but it is ONLY READ when the PresenceDO itself fails (see the
+  // catch block in handleOnline) — it is NEVER used to short-circuit a
+  // normal /api/online request. Previously it short-circuited /api/online,
+  // but because each Cloudflare Worker isolate keeps its OWN module-level
+  // cache, a heartbeat from User B on isolate #2 did not refresh isolate
+  // #1's cache — so isolate #1 kept serving a stale count=1 for up to 30s
+  // (the cache TTL), causing "online count stuck at 1 when multiple users
+  // are online". Always querying the DO fixes this; DO `count` is an
+  // in-memory Map.size so the extra subrequests are cheap.
+  // MUST be `let` — handlers reassign it on every heartbeat/online/end.
   // (Previous `const` threw TypeError on reassignment → silent fall-through to KV,
   //  defeating the entire PresenceDO migration. See presence-do-verification-test.cjs P7.)
   let _onlineCountCache = { count: null, expiresAt: 0 };
@@ -146,51 +157,63 @@ export function createSessionHandlers(deps) {
 
     // PRESENCE DO PATH (primary — race-free)
     if (env.PRESENCE_DO) {
-      // Check Worker cache first (30s TTL — reduces DO requests by ~95%).
-      // NOTE: count=0 is NOT cached — a transient 0 (from a stale DO isolate
-      // or a race between session-expiry and heartbeat) would otherwise be
-      // served for up to 30s, causing the visible 1→0 jump. By invalidating
-      // the cache on 0, the next online-count request always re-queries the
-      // DO and picks up the freshest value. The cost is one extra DO call
-      // only when count is genuinely 0, which is rare (single-user or empty).
+      // ALWAYS query the DO directly for the freshest count.
+      //
+      // ROOT CAUSE FIX (online-count stuck at 1): the previous per-isolate
+      // Worker cache (_onlineCountCache, 30s TTL) short-circuited /api/online
+      // and returned a CACHED count without querying the DO. Because each
+      // Cloudflare Worker isolate keeps its OWN module-level cache, a
+      // heartbeat from User B landing on isolate #2 updated isolate #2's
+      // cache but NOT isolate #1's — so isolate #1 kept serving a stale
+      // count=1 (from User A's earlier heartbeat) for up to 30s, and the
+      // frontend only refreshed the badge every 180s (heartbeat interval).
+      // The net effect was "online count stuck at 1 when multiple users
+      // are online".
+      //
+      // The cache is now WRITTEN on every successful DO query (and on
+      // heartbeat/end) so a subsequent DO FAILURE on this isolate can fall
+      // back to it, but it is NEVER used to short-circuit a normal
+      // online-count request. DO `count` is an in-memory Map.size plus a
+      // cheap O(n) lazy-prune (n = active sessions, typically <1000), so
+      // the extra subrequests are not a performance concern — see the
+      // multi-user regression test (tests/online-count-multi-user-test.cjs).
       const now = Date.now();
-      const _rcaCacheHit = _onlineCountCache.count !== null && _onlineCountCache.count > 0 && now < _onlineCountCache.expiresAt;
-      // [PRESENCE-RCA] backend: online cache check
-      try { console.log('[PRESENCE-RCA] backend:online_cache', JSON.stringify({ ts: now, cache_hit: _rcaCacheHit, cache_count: _onlineCountCache.count, cache_expired: now >= _onlineCountCache.expiresAt })); } catch (_) {}
-      if (_rcaCacheHit) {
-        // [PRESENCE-RCA] backend: online cache HIT response
-        try { console.log('[PRESENCE-RCA] backend:online', JSON.stringify({ ts: Date.now(), endpoint: 'online', cache_hit: true, do_called: false, returned_count: _onlineCountCache.count })); } catch (_) {}
-        return jsonResponse({
-          status: 'success',
-          count: _onlineCountCache.count,
-        }, {}, env);
-      }
-      // Cache miss, expired, or cached-0 (re-verify) → query DO
+      let doResult = null;
       try {
         const _rcaT0 = Date.now();
-        const doResult = await _callPresenceDO(env, 'count');
+        doResult = await _callPresenceDO(env, 'count');
         // [PRESENCE-RCA] backend: online DO result
-        try { console.log('[PRESENCE-RCA] backend:online', JSON.stringify({ ts: Date.now(), endpoint: 'online', cache_hit: false, do_called: true, do_success: !!(doResult && typeof doResult.count === 'number'), returned_count: doResult?.count, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
-        if (doResult && typeof doResult.count === 'number') {
-          // Only cache non-zero counts. A 0 is returned to the caller but
-          // NOT stored in the cache, so the next request re-queries the DO.
-          if (doResult.count > 0) {
-            _onlineCountCache = { count: doResult.count, expiresAt: now + ONLINE_COUNT_CACHE_TTL_MS };
-          }
-          return jsonResponse({
-            status: 'success',
-            count: doResult.count,
-          }, {}, env);
-        }
+        try { console.log('[PRESENCE-RCA] backend:online', JSON.stringify({ ts: Date.now(), endpoint: 'online', do_called: true, do_success: !!(doResult && typeof doResult.count === 'number'), returned_count: doResult?.count, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
       } catch (e) {
-        // DO failed — return cached value if available and non-zero, else fall through to KV
-        // [PRESENCE-RCA] backend: online DO failure → KV fallback
-        try { console.log('[PRESENCE-RCA] backend:online_do_fail', JSON.stringify({ ts: Date.now(), endpoint: 'online', err: String(e?.message || e).slice(0, 100), kv_fallback: true })); } catch (_) {}
-        if (_onlineCountCache.count !== null && _onlineCountCache.count > 0) {
-          return jsonResponse({ status: 'success', count: _onlineCountCache.count }, {}, env);
-        }
-        console.warn('[SESSIONS] PresenceDO count failed, falling back to KV:', e?.message);
+        // _callPresenceDO catches internally and returns null, so this is
+        // only reached if an unexpected error escapes it. Log and treat as
+        // a DO failure (fall through to the cache/KV fallback below).
+        try { console.log('[PRESENCE-RCA] backend:online_do_fail', JSON.stringify({ ts: Date.now(), endpoint: 'online', err: String(e?.message || e).slice(0, 100) })); } catch (_) {}
       }
+      if (doResult && typeof doResult.count === 'number') {
+        // Refresh the per-isolate cache with the FRESH DO count so a
+        // subsequent DO failure on this isolate can fall back to it.
+        // count=0 is NOT cached (preserves the existing zero-protection:
+        // a transient 0 doesn't lock out the KV fallback or get re-served).
+        if (doResult.count > 0) {
+          _onlineCountCache = { count: doResult.count, expiresAt: now + ONLINE_COUNT_CACHE_TTL_MS };
+        }
+        return jsonResponse({
+          status: 'success',
+          count: doResult.count,
+        }, {}, env);
+      }
+      // DO failed or returned a malformed result → best-effort fallback to
+      // the per-isolate cache (last-known-good count from a prior successful
+      // heartbeat/online query on THIS isolate) before the legacy KV path.
+      // This is the ONLY read path for _onlineCountCache now: per-isolate
+      // divergence here is acceptable (no source is authoritative during a
+      // DO outage, and a stale last-known-good is better than nothing).
+      if (_onlineCountCache.count !== null && _onlineCountCache.count > 0) {
+        return jsonResponse({ status: 'success', count: _onlineCountCache.count }, {}, env);
+      }
+      // No usable cache → fall through to KV fallback below.
+      console.warn('[SESSIONS] PresenceDO count failed (or returned no count), falling back to KV');
     }
 
     // KV FALLBACK (legacy — read-only, no write)
