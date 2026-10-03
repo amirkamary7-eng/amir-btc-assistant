@@ -466,6 +466,7 @@ let _appVisible = true;
 // notifications. See RCA-ONLINE-COUNT-1-TO-0 in worklog.
 let _onlineCountSeq = 0;
 let _onlineCountLastApplied = -1;
+let _lastHeartbeatSuccessTs = 0; // P0-1: timestamp of last successful heartbeat — suppresses transient 0 from fetchOnlineCount
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
@@ -3122,6 +3123,7 @@ async function sendSessionHeartbeat(_rcaTrigger) {
             sessionId = data.session_id;
             localStorage.setItem('app_session_id', sessionId);
         }
+        _lastHeartbeatSuccessTs = Date.now(); // P0-1: record successful heartbeat for fetchOnlineCount 0-suppression
         updateOnlineBadge(data.online_count, mySeq, 'heartbeat');
         // First successful heartbeat = auth confirmed → load alerts lazily (only once)
         if (!_alertsLoaded && (!alerts.length || alerts.every(a => !a.serverId))) {
@@ -3160,6 +3162,15 @@ async function fetchOnlineCount(_rcaTrigger) {
         const data = await apiFetch('/api/sessions/online');
         // [PRESENCE-RCA] D: online count response
         try { console.log('[PRESENCE-RCA] online:response', JSON.stringify({ ts: Date.now(), http: 200, count: data?.count, seq: mySeq, dur_ms: Date.now() - _rcaT0 })); } catch (_) {}
+        // P0-1: Suppress transient 0 from fetchOnlineCount when a heartbeat
+        // succeeded recently (within SESSION_TTL=360s). The DO may transiently
+        // return 0 between session expiry and the next heartbeat — this 0 is
+        // not authoritative when we know the user is still active.
+        if (data && data.count === 0 && _lastHeartbeatSuccessTs > 0 &&
+            (Date.now() - _lastHeartbeatSuccessTs) < 360000) {
+            try { console.log('[PRESENCE-RCA] online:suppressed_zero', JSON.stringify({ ts: Date.now(), seq: mySeq, last_hb_age_ms: Date.now() - _lastHeartbeatSuccessTs })); } catch (_) {}
+            return; // Don't update badge — heartbeat will correct it on next tick
+        }
         updateOnlineBadge(data.count, mySeq, _rcaTrigger || 'unknown');
     } catch (e) {
         // [PRESENCE-RCA] D: online count error
