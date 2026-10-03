@@ -1492,7 +1492,9 @@ const WalletApp = (() => {
             _walletCache.wallet = walletData;
             _walletCache.walletAt = Date.now();
           }
-          const balanceEl = document.querySelector('.wallet-hero-balance-value, .wallet-balance-value, .hero-balance, #wallet-balance-amount');
+          // DOM-FIX: add .balance-value (Profile preview card) so the claim
+          // also updates the Profile tab's balance, not just the Wallet hero.
+          const balanceEl = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
           if (balanceEl) {
             const currentBalance = parseFloat(balanceEl.textContent?.replace(/[^0-9.]/g, '')) || 0;
             if (typeof animateBalanceChange === 'function') {
@@ -2153,7 +2155,11 @@ const WalletApp = (() => {
           // AUTHORITATIVE BALANCE GUARD: protect against stale GET overwriting
           // the post-purchase balance with a pre-purchase DB snapshot.
           _setAuthoritativeBalance(resp.new_balance);
-          const balEl = document.getElementById('wallet-balance-amount');
+          // DOM-FIX: target the real balance elements (.balance-value /
+          // .wallet-hero-balance-value) — see refreshWalletBalance for the
+          // canonical selector list. getElementById('wallet-balance-amount')
+          // was a no-op (that id never exists in the DOM).
+          const balEl = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
           if (balEl) balEl.textContent = resp.new_balance.toLocaleString('en-US');
           // FA-6 FIX: keep walletData.balance in sync with the authoritative
           // server response so closeWallet's profile card render (which uses
@@ -2298,7 +2304,13 @@ const WalletApp = (() => {
       }
       if (resp?.status === 'success') {
         _lastKnownBalance = Number(resp.balance) || 0;
-        const el = document.getElementById('wallet-balance-amount');
+        // DOM-FIX: target the ACTUAL rendered balance elements. The previous
+        // getElementById('wallet-balance-amount') was a no-op — that id never
+        // existed in the DOM, so the polled/foreground balance was fetched
+        // (fresh via queryDbDirect) but never displayed. The real elements are
+        // .balance-value (Profile preview card) and .wallet-hero-balance-value
+        // (Wallet hero). Legacy selectors are retained for compatibility.
+        const el = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
         if (el) el.textContent = Number(resp.balance).toLocaleString('en-US');
       }
     } catch (_) {}
