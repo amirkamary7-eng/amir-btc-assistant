@@ -551,7 +551,13 @@ test('P2.count-DO-path: cache miss queries DO', async () => {
   assert.equal(calls.read, 0, 'KV must NOT be read for online count when DO works');
 });
 
-test('P2.count-cache: 30s TTL — second call within TTL skips DO', async () => {
+test('P2.count-always-queries-DO: /api/online always hits DO for freshness (no stale cache)', async () => {
+  // ROOT CAUSE FIX (online-count stuck at 1): /api/online must NEVER
+  // short-circuit on the per-isolate Worker cache, because a heartbeat from
+  // another user on a DIFFERENT isolate would not refresh THIS isolate's
+  // cache — serving a stale count. The cache is now FALLBACK-ONLY (read
+  // when the DO itself fails). Every normal /api/online request queries the
+  // DO directly and returns the freshest global count.
   const PresenceDO = loadPresenceDOClass();
   const doBinding = createMockPresenceDOBinding(PresenceDO);
   const repo = createMockSessionRepo();
@@ -559,25 +565,28 @@ test('P2.count-cache: 30s TTL — second call within TTL skips DO', async () => 
 
   const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
 
-  // Seed one user via heartbeat so the count is 1 (non-zero — count=0 is NOT
-  // cached by design so transient zeros don't get served for 30s).
+  // Seed one user via heartbeat so the count is 1 (non-zero).
   await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
 
-  // First online call: cache miss (heartbeat set cache to 1, but a fresh
-  // handlers instance starts with count=null) → hits DO, returns 1, caches 1.
+  // First online call → must hit DO and return the fresh count of 1.
   const r1 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
   const b1 = await r1.json();
   assert.equal(b1.count, 1, 'first online call must return the seeded count of 1');
   const callsAfter1 = doBinding._getFetchCount();
   assert.ok(callsAfter1 >= 1, 'first online call must hit DO');
 
-  // Second call immediately: cache hit (count=1, non-zero, within TTL) → must NOT hit DO
-  await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  // Second call immediately → MUST also hit DO (no stale cache short-circuit).
+  const r2 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b2 = await r2.json();
+  assert.equal(b2.count, 1, 'second online call must return the fresh count of 1');
   const callsAfter2 = doBinding._getFetchCount();
-  assert.equal(callsAfter2, callsAfter1, 'second online call within TTL must NOT hit DO (cache hit on non-zero count)');
+  assert.ok(callsAfter2 > callsAfter1, 'second online call MUST hit DO (cache is fallback-only, never short-circuits /api/online)');
 });
 
-test('P2.count-cache-invalidation: heartbeat refreshes cache', async () => {
+test('P2.count-after-heartbeat: online queries DO (fresh), heartbeat refreshes fallback cache', async () => {
+  // ROOT CAUSE FIX: a heartbeat refreshes the per-isolate FALLBACK cache,
+  // but /api/online still queries the DO directly for the freshest count
+  // (the cache is only read if the DO itself fails — see catch block).
   const PresenceDO = loadPresenceDOClass();
   const doBinding = createMockPresenceDOBinding(PresenceDO);
   const repo = createMockSessionRepo();
@@ -585,21 +594,22 @@ test('P2.count-cache-invalidation: heartbeat refreshes cache', async () => {
 
   const env = { PRESENCE_DO: doBinding, SESSION_TTL: 240 };
 
-  // Seed cache with count=0
+  // Initial state: DO has 0 sessions
   const r0 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
   const b0 = await r0.json();
   assert.equal(b0.count, 0);
 
-  // Heartbeat → should refresh cache to 1
+  // Heartbeat → registers the user in the DO (count becomes 1) and refreshes
+  // the per-isolate fallback cache to 1.
   await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
 
-  // Next online call: should return 1 from the refreshed cache WITHOUT hitting DO
+  // Next online call → MUST query the DO (not the cache) and return the fresh count of 1.
   const callsBefore = doBinding._getFetchCount();
   const r1 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
   const b1 = await r1.json();
   const callsAfter = doBinding._getFetchCount();
-  assert.equal(b1.count, 1, 'cache must reflect heartbeat-refreshed count');
-  assert.equal(callsAfter, callsBefore, 'online after heartbeat must use refreshed cache (no DO call)');
+  assert.equal(b1.count, 1, 'online after heartbeat must return the fresh DO count of 1');
+  assert.ok(callsAfter > callsBefore, 'online after heartbeat MUST query the DO (cache is fallback-only)');
 });
 
 test('P2.end-DO-path: removes session and refreshes cache', async () => {
@@ -978,10 +988,17 @@ test('P9.cache-ttl: ONLINE_COUNT_CACHE_TTL_MS is 30000 (30s)', () => {
   assert.equal(Number(m[1]), 30000, 'cache TTL must be exactly 30000ms (30s)');
 });
 
-test('P9.cache-ttl: cache guards on expiresAt (expiry respected)', () => {
-  // The online handler must check `now < _onlineCountCache.expiresAt` for cache hit
-  assert.match(SESSIONS_CTRL_SRC, /now\s*<\s*_onlineCountCache\.expiresAt/,
-    'online handler must respect cache expiry via now < expiresAt check');
+test('P9.cache-ttl: fallback cache write sets expiresAt; no stale-serving short-circuit', () => {
+  // ROOT CAUSE FIX: /api/online no longer short-circuits on the cache, so
+  // there is no `now < expiresAt` READ guard (that was the stale-serving
+  // bug source). The cache is now FALLBACK-ONLY: it is WRITTEN with an
+  // expiresAt (now + TTL) on every successful DO query and on heartbeat/end.
+  // The expiresAt bounds how long a fallback value is considered fresh.
+  assert.match(SESSIONS_CTRL_SRC, /expiresAt:\s*now\s*\+\s*ONLINE_COUNT_CACHE_TTL_MS/,
+    'cache write must record expiresAt = now + ONLINE_COUNT_CACHE_TTL_MS');
+  // And confirms the cache-hit short-circuit (the bug source) is GONE.
+  assert.doesNotMatch(SESSIONS_CTRL_SRC, /now\s*<\s*_onlineCountCache\.expiresAt/,
+    '/api/online must NOT short-circuit on cache expiry (that was the stale-serving bug)');
 });
 
 // ============================================================================
@@ -1222,7 +1239,13 @@ test('P12.cache-zero-fallback-to-kv: transient 0 from DO does not lock out KV pa
   assert.equal(b.count, 0, 'DO count=0 is returned (KV not consulted when DO succeeds)');
 });
 
-test('P12.cache-nonzero-still-cached: count=1+ IS cached (regression guard)', async () => {
+test('P12.cache-nonzero-written-not-served: count=1+ is WRITTEN to fallback cache but /api/online still queries DO', async () => {
+  // ROOT CAUSE FIX: non-zero counts are still WRITTEN to the per-isolate
+  // fallback cache (so a later DO failure can serve a last-known-good
+  // value), but /api/online NEVER serves that cached value in the normal
+  // path — it always queries the DO for freshness. This prevents the
+  // "stuck at 1" bug where a stale count=1 from one isolate was served
+  // while the DO actually had 3.
   const PresenceDO = loadPresenceDOClass();
   const doBinding = createMockPresenceDOBinding(PresenceDO);
   const repo = createMockSessionRepo();
@@ -1232,14 +1255,16 @@ test('P12.cache-nonzero-still-cached: count=1+ IS cached (regression guard)', as
   // Seed a user via heartbeat (count=1, non-zero)
   await handlers.handleHeartbeat(makeMockRequest('POST', '/api/sessions/heartbeat'), env);
 
-  // Online call → cache miss → hits DO, returns 1, caches 1
+  // Online call → queries DO, returns 1, writes the fallback cache to 1
   await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
   const callsAfter1 = doBinding._getFetchCount();
 
-  // Second online call → cache hit (count=1, non-zero, within TTL) → must NOT hit DO
-  await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  // Second online call → MUST also query the DO (NOT served from cache).
+  const r2 = await handlers.handleOnline(makeMockRequest('GET', '/api/sessions/online'), env);
+  const b2 = await r2.json();
+  assert.equal(b2.count, 1, 'second call must return the fresh DO count of 1');
   const callsAfter2 = doBinding._getFetchCount();
-  assert.equal(callsAfter2, callsAfter1, 'count=1 must be cached (non-zero counts are cached normally)');
+  assert.ok(callsAfter2 > callsAfter1, 'second /api/online MUST hit DO (cache is fallback-only — count=1 is NOT served stale)');
 });
 
 // ============================================================================
