@@ -3570,7 +3570,7 @@ const alertEconomyRepo = createAlertEconomyRepository({
 });
 
 // ── Wallet + Economy (must be created BEFORE alertHandlers which debits tokens) ──
-const walletRepo = createWalletRepository({ queryDb, queryDbTransaction });
+const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect });
 const economyService = createEconomyService({ walletRepo, queryDb });
 
 // ── Membership Module — Phase 3: created here so handlers can inject

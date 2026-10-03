@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createWalletRepository(deps) {
-  const { queryDb, queryDbTransaction } = deps;
+  const { queryDb, queryDbTransaction, queryDbDirect } = deps;
 
   let _schemaVerified = false;
 
@@ -140,9 +140,20 @@ export function createWalletRepository(deps) {
    * Get full wallet state: balance, tier info, and recent transactions.
    */
   async function getWalletState(env, userId) {
+    if (typeof queryDbDirect !== 'function') {
+      const err = new Error(
+        '[walletRepo.getWalletState] queryDbDirect is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'direct read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'DIRECT_DB_NOT_INJECTED';
+      throw err;
+    }
     await ensureSchema(env).catch(() => {});
-    // Single query with CTE to avoid multiple Pool creations (CPU limit)
-    const result = await queryDb(
+    // Single query with CTE to avoid multiple Pool creations (CPU limit).
+    // Routes through queryDbDirect (bypasses Hyperdrive cache) for
+    // read-after-write consistency — balance reflects the latest credit.
+    const result = await queryDbDirect(
       env,
       `
         WITH bal AS (
@@ -202,6 +213,15 @@ export function createWalletRepository(deps) {
    * @param {object} filters - { type: string|null, status: string|null }
    */
   async function getTransactionHistory(env, userId, offset = 0, limit = 20, filters = {}) {
+    if (typeof queryDbDirect !== 'function') {
+      const err = new Error(
+        '[walletRepo.getTransactionHistory] queryDbDirect is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'direct read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'DIRECT_DB_NOT_INJECTED';
+      throw err;
+    }
     await ensureSchema(env).catch(() => {});
     const params = [String(userId)];
     let whereClause = 'WHERE user_id = $1';
@@ -216,7 +236,9 @@ export function createWalletRepository(deps) {
       params.push(filters.status);
     }
 
-    const countResult = await queryDb(
+    // Both queries route through queryDbDirect (bypasses Hyperdrive cache)
+    // so a newly-credited transaction appears immediately in history.
+    const countResult = await queryDbDirect(
       env,
       `SELECT COUNT(*) as total FROM token_transactions ${whereClause}`,
       params,
@@ -224,7 +246,7 @@ export function createWalletRepository(deps) {
     const total = Number(countResult.rows[0]?.total || 0);
 
     params.push(Number(limit), Number(offset));
-    const historyResult = await queryDb(
+    const historyResult = await queryDbDirect(
       env,
       `
         SELECT id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at
@@ -959,10 +981,21 @@ export function createWalletRepository(deps) {
    * Statistics: total_earned, total_spent, transaction_count, by_type breakdown.
    */
   async function getWalletSummary(env, userId) {
+    if (typeof queryDbDirect !== 'function') {
+      const err = new Error(
+        '[walletRepo.getWalletSummary] queryDbDirect is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'direct read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'DIRECT_DB_NOT_INJECTED';
+      throw err;
+    }
     await ensureSchema(env).catch(() => {});
     const uid = String(userId);
 
-    const result = await queryDb(
+    // Routes through queryDbDirect (bypasses Hyperdrive cache) for
+    // read-after-write consistency — balance + stats reflect the latest credit.
+    const result = await queryDbDirect(
       env,
       `
         WITH bal AS (
@@ -1012,9 +1045,24 @@ export function createWalletRepository(deps) {
 
   /**
    * Get just the current balance (lightweight, no transactions).
+   *
+   * RCA FIX (Option C — mirrors notification bypass 2026-09-10):
+   *   Routes through queryDbDirect (direct Supabase primary via per-call
+   *   pg.Pool, bypassing Hyperdrive's edge SELECT cache) to guarantee
+   *   read-after-write consistency. A GET following a credit never returns
+   *   a stale cached balance. See worker-proxy.js queryDbDirect.
    */
   async function getBalance(env, userId) {
-    const result = await queryDb(
+    if (typeof queryDbDirect !== 'function') {
+      const err = new Error(
+        '[walletRepo.getBalance] queryDbDirect is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'direct read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'DIRECT_DB_NOT_INJECTED';
+      throw err;
+    }
+    const result = await queryDbDirect(
       env,
       'SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1',
       [String(userId)],

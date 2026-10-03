@@ -12187,6 +12187,14 @@ function switchTab(pageId, btn) {
             loadUser(); // loadUser internally calls loadReferralStats + WalletApp.loadProfileCard
             fetchOnlineCount('profile');
             tabLoaded.profile = true;
+        } else {
+            // P1 FIX (F-FE-02): on Profile revisit, refresh the balance lightweight
+            // (GET /api/wallet/balance) instead of re-running full loadProfileCard().
+            // Server-side cron credits have no push — this catches up the balance
+            // display when the user returns to the Profile tab. Dedup'd by apiFetch.
+            if (window.WalletApp && typeof window.WalletApp.refreshWalletBalance === 'function') {
+                try { window.WalletApp.refreshWalletBalance(); } catch (_) {}
+            }
         }
     }
 }
@@ -13250,6 +13258,12 @@ document.addEventListener('visibilitychange', () => {
         if (!_pageHiddenAt) _pageHiddenAt = Date.now();
     } else {
         _startAllPolling();
+        // P1 FIX (F-FE-01): immediately refresh wallet balance on foreground —
+        // don't wait up to 60s for the next poll tick (server-side cron credits
+        // have no push mechanism). Dedup'd by apiFetch GET-by-path + _walletMutationSeq.
+        if (window.WalletApp && typeof window.WalletApp.refreshWalletBalance === 'function') {
+            try { window.WalletApp.refreshWalletBalance(); } catch (_) {}
+        }
         // Retry bootstrap if app returned to foreground and bootstrap hasn't completed
         _notifyAuthStateChange();
         if (!bootstrapComplete) {
@@ -13338,6 +13352,12 @@ window.addEventListener('pageshow', (event) => {
         // before any heartbeat could re-register.
         _appVisible = true;
         _startAllPolling();
+        // P1 FIX (F-FE-01): immediately refresh wallet balance on bfcache restore —
+        // same rationale as visibilitychange (server-side cron credits have no push).
+        // Dedup'd by apiFetch GET-by-path + _walletMutationSeq.
+        if (window.WalletApp && typeof window.WalletApp.refreshWalletBalance === 'function') {
+            try { window.WalletApp.refreshWalletBalance(); } catch (_) {}
+        }
         ensureTelegramAuthReady(8000).then(() => {
             if (!_appVisible) return;
             sendSessionHeartbeat('pageshow');
