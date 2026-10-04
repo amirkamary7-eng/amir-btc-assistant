@@ -6561,6 +6561,11 @@ export default {
       // If a phase is "started" but never "complete", the Worker was killed
       // (exceededCpu) during that phase.
       if (request.method === 'GET' && url.pathname === '/api/cron-monitor') {
+        // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         // Read from KV (persists across isolates)
         let kvEntries = [];
         try {
@@ -6651,6 +6656,11 @@ export default {
       // Public (no auth) — same policy as /api/cron-monitor.
       // Use to verify: queue is draining, no permanent 'pending', retries working.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-monitor') {
+        // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         try {
           const monitoring = await getNewsAIMonitoring(env);
           return jsonResponse({ status: 'success', ...monitoring }, {}, env);
@@ -6665,6 +6675,11 @@ export default {
       // RSS → Enqueue → Summary Start → Summary Complete
       // Plus avg/max/min for each phase + per-provider breakdown.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-timing') {
+        // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         try {
           const timing = await getE2ETimingStats(env);
           return jsonResponse({ status: 'success', ...timing }, {}, env);
@@ -6680,6 +6695,11 @@ export default {
       //   last_error, last_attempt, kv_exists, api_serves
       // Use to instantly identify which layer has the issue if pending persists.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-pending') {
+        // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
+        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
+        if (_isProd) {
+          return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
+        }
         try {
           // Read current news list from KV
           let articles = [];
@@ -7010,6 +7030,14 @@ export default {
       // Auth: public (same as /api/start-diag, /api/cron-monitor) — no secrets
       // are returned, so no auth needed.
       if (request.method === 'GET' && url.pathname === '/api/admin-diag') {
+        // ARCH-BATCH3: Require admin auth for this diagnostic endpoint.
+        // Uses the same authenticateTelegramRequest + isAdminTelegramId pattern
+        // as /api/admin/trigger-alerts (inline admin auth). No new auth logic.
+        const _diagAuth = await authenticateTelegramRequest(request, env);
+        if (_diagAuth.error) return _diagAuth.error;
+        if (!isAdminTelegramId(env, String(_diagAuth.user.id))) {
+          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+        }
         const adminIds = getAdminIds(env);
         const primaryRaw = String(env.ADMIN_TELEGRAM_ID || '').trim();
         const extraRaw = String(env.ADMIN_TELEGRAM_IDS || '').trim();
