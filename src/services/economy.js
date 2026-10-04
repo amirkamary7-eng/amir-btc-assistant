@@ -155,6 +155,15 @@ export function createEconomyService(deps) {
     }
 
     // 3. Credit via wallet service (idempotent via refId)
+    // ARCH-BATCH2: wire request_id from env._requestId (set by the fetch
+    // handler's trace context) into the wallet-audit-credit log. Zero-cost —
+    // no DB/subrequest/IO, just an object spread. For cron-credited rewards
+    // (referral/wheel/mission/refund retries), env._requestId is undefined →
+    // request_id remains null (correct: cron is system-initiated).
+    const _fullAuditInfo = {
+      ...auditInfo,
+      request_id: auditInfo.request_id || env?._requestId || null,
+    };
     const result = await walletRepo.creditTokens(
       env,
       String(userId),
@@ -163,7 +172,7 @@ export function createEconomyService(deps) {
       description || rewardType,
       refId || null,
       metadata,
-      auditInfo,
+      _fullAuditInfo,
     );
 
     // 4. Emit event
@@ -204,6 +213,11 @@ export function createEconomyService(deps) {
       });
     }
 
+    // ARCH-BATCH2: wire request_id (same pattern as grantReward above).
+    const _fullAuditInfo = {
+      ...auditInfo,
+      request_id: auditInfo.request_id || env?._requestId || null,
+    };
     const result = await walletRepo.debitTokens(
       env,
       String(userId),
@@ -212,7 +226,7 @@ export function createEconomyService(deps) {
       description || debitType,
       refId || null,
       metadata,
-      auditInfo,
+      _fullAuditInfo,
     );
 
     const event = emit('WalletDebited', {
