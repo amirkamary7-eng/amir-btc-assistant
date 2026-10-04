@@ -3598,6 +3598,8 @@ const alertHandlers = createAlertHandlers({
   membershipAuthority,
   // BUG 4 FIX: queryDb for persisting failed refunds to pending_refunds table
   queryDb,
+  // ARCH-AUDIT-01: rate-limit helper for POST /api/alerts abuse prevention
+  isUserRateLimited,
 });
 const watchlistRepo = createWatchlistRepository({ queryDb, queryDbTransaction, ensureUserRow });
 const watchlistHandlers = createWatchlistHandlers({
@@ -3920,7 +3922,7 @@ const ticketHandlers = createTicketHandlers({
 const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOptionalString });
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
 // checks the DB admins table to detect DB-added admins (not just env super admin).
-const adminRepo = createAdminRepository({ queryDb, queryDbDirect, normalizeOptionalString });
+const adminRepo = createAdminRepository({ queryDb, queryDbDirect, normalizeOptionalString, isAdminTelegramId });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MembershipGateway — central membership decision authority.
@@ -5073,53 +5075,62 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
       // If Worker crashes before dedup write, next tick's INSERT is no-op
       // (rows already exist) → no duplicates.
       // created_at omitted → relies on DB DEFAULT NOW() (same as processBroadcastFull).
+      //
+      // ARCH-AUDIT-05: Batch the INSERT in chunks of CALENDAR_BROADCAST_BATCH_SIZE
+      // (500 users) so a very large joined-user base does not create a single
+      // unnest() array with 10K+ elements (which stresses Postgres work_mem +
+      // WAL + lock duration). ALL users are still processed (no drop) — they're
+      // just chunked across multiple INSERTs within the same tick. The dedup key
+      // is written AFTER all batches, preserving crash-recovery. Each batch is
+      // idempotent (ON CONFLICT DO NOTHING) so a mid-batch crash retries cleanly
+      // on the next tick.
+      const CALENDAR_BROADCAST_BATCH_SIZE = 500;
       let notifInsertOk = true;
       if (miniAppUsers.length > 0) {
-        try {
-          const notifIds = miniAppUsers.map(buildNotifId);
-          const userIdsArr = miniAppUsers.map(String);
-          const typesArr = miniAppUsers.map(() => 'calendar');
-          const titlesArr = miniAppUsers.map(() => title);
-          const messagesArr = miniAppUsers.map(() => message);
-          const metadataArr = miniAppUsers.map(() => metadataJson);
-          const readStatusArr = miniAppUsers.map(() => false);
-          const prioritiesArr = miniAppUsers.map(() => 'medium');
-          const categoriesArr = miniAppUsers.map(() => 'calendar');
-          // channel column: 'both' if user is also in telegramUsers (i.e., has
-          // 'both' preference), else 'mini_app'.
-          // Matches sendNotification INSERT at notification_platform.js:1193:
-          //   deliverToTelegram ? 'both' : 'mini_app'
-          const channelsArr = miniAppUsers.map(uid =>
-            telegramUsers.includes(uid) ? 'both' : 'mini_app'
-          );
-          const statusArr = miniAppUsers.map(() => 'delivered');
+        for (let bi = 0; bi < miniAppUsers.length; bi += CALENDAR_BROADCAST_BATCH_SIZE) {
+          const batch = miniAppUsers.slice(bi, bi + CALENDAR_BROADCAST_BATCH_SIZE);
+          try {
+            const notifIds = batch.map(buildNotifId);
+            const userIdsArr = batch.map(String);
+            const typesArr = batch.map(() => 'calendar');
+            const titlesArr = batch.map(() => title);
+            const messagesArr = batch.map(() => message);
+            const metadataArr = batch.map(() => metadataJson);
+            const readStatusArr = batch.map(() => false);
+            const prioritiesArr = batch.map(() => 'medium');
+            const categoriesArr = batch.map(() => 'calendar');
+            const channelsArr = batch.map(uid =>
+              telegramUsers.includes(uid) ? 'both' : 'mini_app'
+            );
+            const statusArr = batch.map(() => 'delivered');
 
-          await queryDb(env, `
-            INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status)
-            SELECT * FROM unnest(
-              $1::text[],
-              $2::text[],
-              $3::text[],
-              $4::text[],
-              $5::text[],
-              $6::jsonb[],
-              $7::boolean[],
-              $8::text[],
-              $9::text[],
-              $10::text[],
-              $11::text[]
-            )
-            ON CONFLICT (id) DO NOTHING
-          `, [
-            notifIds, userIdsArr, typesArr, titlesArr, messagesArr,
-            metadataArr, readStatusArr, prioritiesArr, categoriesArr, channelsArr, statusArr,
-          ], 1, pool).catch((e) => {
-            console.warn('[CALENDAR] Bulk INSERT notifications failed:', e?.message);
+            await queryDb(env, `
+              INSERT INTO notifications (id, user_id, type, title, message, metadata, read_status, priority, category, channel, status)
+              SELECT * FROM unnest(
+                $1::text[],
+                $2::text[],
+                $3::text[],
+                $4::text[],
+                $5::text[],
+                $6::jsonb[],
+                $7::boolean[],
+                $8::text[],
+                $9::text[],
+                $10::text[],
+                $11::text[]
+              )
+              ON CONFLICT (id) DO NOTHING
+            `, [
+              notifIds, userIdsArr, typesArr, titlesArr, messagesArr,
+              metadataArr, readStatusArr, prioritiesArr, categoriesArr, channelsArr, statusArr,
+            ], 1, pool).catch((e) => {
+              console.warn('[CALENDAR] Bulk INSERT notifications batch failed:', e?.message);
+              notifInsertOk = false;
+            });
+          } catch (e) {
+            console.warn('[CALENDAR] Mini-app notification batch failed:', e?.message);
             notifInsertOk = false;
-          });
-        } catch (e) {
-          console.warn('[CALENDAR] Mini-app notification bulk failed:', e?.message);
-          notifInsertOk = false;
+          }
         }
       }
 
@@ -5134,37 +5145,40 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
       // created_at omitted → relies on DB DEFAULT NOW() (same as processBroadcastFull).
       let queueInsertOk = true;
       if (telegramUsers.length > 0) {
-        try {
-          const queueNotifIds = telegramUsers.map(buildNotifId);
-          const userIdsArr = telegramUsers.map(String);
-          const channelsArr = telegramUsers.map(() => 'telegram');
-          const prioritiesArr = telegramUsers.map(() => 'medium');
-          const statusArr = telegramUsers.map(() => 'pending');
-          const payloadsArr = telegramUsers.map(() => JSON.stringify({
-            title,
-            message,
-          }));
+        for (let qi = 0; qi < telegramUsers.length; qi += CALENDAR_BROADCAST_BATCH_SIZE) {
+          const batch = telegramUsers.slice(qi, qi + CALENDAR_BROADCAST_BATCH_SIZE);
+          try {
+            const queueNotifIds = batch.map(buildNotifId);
+            const userIdsArr = batch.map(String);
+            const channelsArr = batch.map(() => 'telegram');
+            const prioritiesArr = batch.map(() => 'medium');
+            const statusArr = batch.map(() => 'pending');
+            const payloadsArr = batch.map(() => JSON.stringify({
+              title,
+              message,
+            }));
 
-          await queryDb(env, `
-            INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload)
-            SELECT * FROM unnest(
-              $1::text[],
-              $2::text[],
-              $3::text[],
-              $4::text[],
-              $5::text[],
-              $6::jsonb[]
-            )
-            ON CONFLICT (notification_id, user_id) DO NOTHING
-          `, [
-            queueNotifIds, userIdsArr, channelsArr, prioritiesArr, statusArr, payloadsArr,
-          ], 1, pool).catch((e) => {
-            console.warn('[CALENDAR] Bulk INSERT queue failed:', e?.message);
+            await queryDb(env, `
+              INSERT INTO notification_queue (notification_id, user_id, channel, priority, status, payload)
+              SELECT * FROM unnest(
+                $1::text[],
+                $2::text[],
+                $3::text[],
+                $4::text[],
+                $5::text[],
+                $6::jsonb[]
+              )
+              ON CONFLICT (notification_id, user_id) DO NOTHING
+            `, [
+              queueNotifIds, userIdsArr, channelsArr, prioritiesArr, statusArr, payloadsArr,
+            ], 1, pool).catch((e) => {
+              console.warn('[CALENDAR] Bulk INSERT queue batch failed:', e?.message);
+              queueInsertOk = false;
+            });
+          } catch (e) {
+            console.warn('[CALENDAR] Telegram queue batch failed:', e?.message);
             queueInsertOk = false;
-          });
-        } catch (e) {
-          console.warn('[CALENDAR] Telegram queue bulk failed:', e?.message);
-          queueInsertOk = false;
+          }
         }
       }
 

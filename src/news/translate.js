@@ -313,11 +313,23 @@ async function translateToFarsi(text, env) {
     const cbTranslation = await shouldAttemptProvider(env, 'translation-workers-ai');
     if (cbTranslation.attempt) {
       try {
-        const response = await env.AI.run('@cf/meta/m2m100-1.2b', {
-          text,
-          source_lang: 'english',
-          target_lang: 'persian',
-        });
+        // ARCH-AUDIT-04: 15s hard timeout on the m2m100 Workers AI binding call.
+        // Without this, a hanging AI.run() could block the request until the
+        // Worker wall-clock limit kills it. The timeout rejection falls to the
+        // catch block below → recorded as retryable failure → Google Translate
+        // fallback. The underlying AI.run() continues in the background but is
+        // harmless (stateless fetch — no persistent background work).
+        // Mirrors the providers.js Workers AI chat timeout pattern (15s Promise.race).
+        const response = await Promise.race([
+          env.AI.run('@cf/meta/m2m100-1.2b', {
+            text,
+            source_lang: 'english',
+            target_lang: 'persian',
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('m2m100 timeout (15s)')), 15000),
+          ),
+        ]);
         const translated = response?.translated_text;
         if (translated && typeof translated === 'string' && translated.trim()) {
           result = translated.trim();
