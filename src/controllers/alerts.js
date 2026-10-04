@@ -26,6 +26,8 @@ export function createAlertHandlers(deps) {
     membershipAuthority,
     // BUG 4 FIX: queryDb for persisting failed refunds to pending_refunds table
     queryDb,
+    // ARCH-AUDIT-01: rate-limit helper for POST /api/alerts abuse prevention
+    isUserRateLimited,
   } = deps;
 
   /**
@@ -73,6 +75,18 @@ export function createAlertHandlers(deps) {
           message: 'Database not configured',
         },
         { status: 503 }, env);
+    }
+
+    // ARCH-AUDIT-01: Rate limit alert creation (10 requests / 60s per user).
+    // Uses the project's existing isUserRateLimited helper (KV-backed sliding
+    // window with write coalescing). This is INDEPENDENT of the alert economy
+    // (quota / token debit) — it only bounds the request rate to prevent
+    // abuse and cron-evaluation saturation. Economy/quota behavior is unchanged.
+    if (isUserRateLimited && env.RATE_LIMITS &&
+        await isUserRateLimited(env, String(authState.user.id), 'alert-create', 10, 60)) {
+      return jsonResponse(
+        { status: 'error', message: 'Too many requests. Please wait.', code: 'RATE_LIMITED' },
+        { status: 429 }, env);
     }
 
     const bodyResult = await readJsonBody(request, 102400, env);

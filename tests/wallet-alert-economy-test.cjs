@@ -132,12 +132,15 @@ function makeAlertStack({ getTehranDateString } = {}) {
       'jsonResponse', 'authenticateTelegramRequest', 'readJsonBody', 'safeDbErrorResponse',
       'safeError', 'buildBodyFieldValidationError', 'isDatabaseConfigured',
       'alertRepo', 'alertEconomyRepo', 'economyService', 'membershipAuthority',
+      'isUserRateLimited',
       wrapped);
+    const isUserRateLimited = async () => false;
     evaluator(mod, mod.exports,
       jsonResponse, authenticateTelegramRequest, readJsonBody, safeDbErrorResponse,
       safeError, buildBodyFieldValidationError, () => true,
       repoOverride || alertRepo, ecoOverride || ecoRepo,
-      stack.economyService, membershipAuthority);
+      stack.economyService, membershipAuthority,
+      isUserRateLimited);
     return mod.exports.handleCreate;
   }
 

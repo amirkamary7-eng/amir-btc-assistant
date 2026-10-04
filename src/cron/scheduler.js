@@ -160,24 +160,49 @@ export async function runScheduled(controller, env, ctx, deps) {
         console.error(JSON.stringify({ scope: 'cron-unhandled', cron: '* * * * *', errType: e?.constructor?.name, errMsg: String(e?.message || '').slice(0, 300), stack: String(e?.stack || '').slice(0, 500) }));
       }));
 
-      // ── HOURLY RETRY (inside 1-min cron, gated to UTC minute === 0) ──
+      // ── HOURLY RETRY (inside 1-min cron, gated to UTC minute === 1) ──
       // CPU FIX: These retry jobs were previously on the */15 cron, where they
       // competed with processNewsAIBatch for CPU/subrequest budget and caused
       // exceededResources on Workers Free plan. They are now run from the
-      // every-minute cron but ONLY at the top of each hour (UTC minute 0).
-      // This gives them their own invocation with a full CPU budget, without
-      // needing a 4th cron trigger (Free Plan limit: 3 triggers).
+      // every-minute cron but ONLY at UTC minute 1 (one minute AFTER the
+      // top of the hour).
       //
-      // Idempotency: Each retry function uses LIMIT 20 + per-item idempotency
-      // (ON CONFLICT DO NOTHING for token_transactions). Running hourly is
-      // safe — backlogs drain at 20 items per function per hour (60 total).
+      // ARCH-BATCH2 (Hourly Retry Isolation): Previously gated to minute 0,
+      // which is the HEAVIEST minute — all 3 crons (1-min + 5-min + 15-min)
+      // fire simultaneously, causing triple DB contention. Adding the 4 retry
+      // jobs to the 1-min invocation at minute 0 pushed the CPU to ~17.5ms
+      // (exceeds 10ms Free Plan limit) → exceededCpu → alert work abandoned.
+      //
+      // Moving to minute 1:
+      //   - Minute 1 is a SINGLE-cron minute (only * * * * * fires; 1 is not
+      //     divisible by 5 or 15) → DB under SINGLE pressure, not triple.
+      //   - The 1-min cron's alert + queue work is the SAME as any other
+      //     minute (~10.5ms worst case) — but WITHOUT the triple-cron DB
+      //     contention, the DB I/O resolves faster.
+      //   - Minute 0 (the critical triple-cron minute) is now free of retry
+      //     overhead → the 1-min invocation at minute 0 drops to ~10.5ms
+      //     (at the edge, but without the +8ms retry burden).
+      //   - Retries are in SEPARATE ctx.waitUntil calls — they do NOT block
+      //     the alert evaluation (separate promises). If retries are
+      //     abandoned due to exceededCpu, they retry on the NEXT hour
+      //     (idempotent via refId UNIQUE index — safe to repeat).
+      //
+      // This is a TIME SHIFT + DB contention reduction, NOT a full CPU
+      // separation. True separation would require a 4th cron trigger (Free
+      // Plan limit: 3) or a Durable Object (out of scope).
+      //
+      // Idempotency: Each retry function uses per-item idempotency
+      // (ON CONFLICT DO NOTHING for token_transactions via UNIQUE partial
+      // index idx_token_tx_user_type_ref). Running hourly is safe —
+      // backlogs drain at LIMIT-per-function per hour
+      // (referral=1, wheel=1, mission=3, refund=1 = 6 total/hour).
       //
       // Failure isolation: Each retry runs in its own ctx.waitUntil — a failure
       // in one does NOT cancel the alerts/queue work above (already committed
       // via its own ctx.waitUntil). env._reqPool is nulled before each retry
       // to prevent stale-pool I/O errors.
       const _hourlyMinute = new Date().getUTCMinutes();
-      if (_hourlyMinute === 0) {
+      if (_hourlyMinute === 1) {
         const _savedReqPoolForRetry = env._reqPool;
         env._reqPool = null;
         ctx.waitUntil((async () => {

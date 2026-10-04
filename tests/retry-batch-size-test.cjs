@@ -3,6 +3,8 @@
  *
  * Background:
  *   The H5 audit identified that the 1-min cron at minute===0 runs 4 retry
+ *   jobs (referral/wheel/mission/refund). ARCH-BATCH2 moved the gate from
+ *   minute 0 to minute 1 to isolate retries from the triple-cron overlap.
  *   jobs in separate `ctx.waitUntil` calls. Each retry job had `LIMIT 20`.
  *   In worst case (each retry finds 20 items × ~5 DB queries per item),
  *   the combined invocation could consume 4 × 101 = ~404 subrequests —
@@ -302,12 +304,15 @@ test('H5-CRIT-14: admin /api/start-diag activeAlerts query still uses LIMIT 20 (
 // GROUP 5 — Sanity: 4 retry functions still wired into cron (no changes to call sites)
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('H5-CRIT-15: all 4 retry functions are still called from the 1-min cron (minute===0 hourly branch)', () => {
+test('H5-CRIT-15: all 4 retry functions are still called from the 1-min cron (minute===1 hourly branch)', () => {
   // H5-CRITICAL fix only changed LIMIT inside the retry queries. The call
   // sites in scheduled() must remain unchanged (still 4 ctx.waitUntil calls,
-  // still gated by _hourlyMinute === 0).
-  assert.ok(SCHEDULER_SRC.includes('_hourlyMinute === 0'),
-    '1-min cron must still gate hourly retries by _hourlyMinute === 0');
+  // still gated by _hourlyMinute === 1 — moved from 0 to 1 by ARCH-BATCH2
+  // to isolate retries from the triple-cron overlap at minute 0).
+  assert.ok(SCHEDULER_SRC.includes('_hourlyMinute === 1'),
+    '1-min cron must gate hourly retries by _hourlyMinute === 1 (moved from 0 by ARCH-BATCH2)');
+  assert.ok(!SCHEDULER_SRC.includes('_hourlyMinute === 0'),
+    '1-min cron must NOT gate hourly retries by _hourlyMinute === 0 (moved to 1)');
 
   // Verify all 4 retry calls are still inside ctx.waitUntil blocks
   for (const fnCall of [

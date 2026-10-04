@@ -7,7 +7,7 @@
  * Dependencies are injected via the factory function to avoid circular imports.
  */
 export function createAdminRepository(deps) {
-  const { queryDb, queryDbDirect, normalizeOptionalString } = deps;
+  const { queryDb, queryDbDirect, normalizeOptionalString, isAdminTelegramId } = deps;
 
   let _schemaVerified = false;
 
@@ -287,8 +287,19 @@ export function createAdminRepository(deps) {
   // ---------------------------------------------------------------------------
   // 6. isSuperAdmin
   // ---------------------------------------------------------------------------
-
+  // ARCH-AUDIT-03 FIX: previously checked ONLY env.ADMIN_TELEGRAM_ID, while
+  // the bootstrap/bypass path (worker-proxy.js isAdminTelegramId) checks BOTH
+  // ADMIN_TELEGRAM_ID and ADMIN_TELEGRAM_IDS. An admin listed in
+  // ADMIN_TELEGRAM_IDS but not ADMIN_TELEGRAM_ID would pass bootstrap admin
+  // detection but 403 on admin-panel routes (BUG-1). Now delegates to the
+  // shared isAdminTelegramId helper (same source of truth) — no duplicated
+  // authorization logic. Falls back to the legacy single-env-var check only if
+  // the helper is not injected (defensive — should never happen in production).
   function isSuperAdmin(env, telegramId) {
+    if (typeof isAdminTelegramId === 'function') {
+      return isAdminTelegramId(env, telegramId);
+    }
+    // Defensive fallback (old worker bundle without the injection).
     const envAdmin = normalizeOptionalString(env.ADMIN_TELEGRAM_ID);
     if (!envAdmin) return false;
     return String(envAdmin) === String(telegramId);

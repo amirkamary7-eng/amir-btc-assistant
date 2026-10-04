@@ -298,11 +298,11 @@ async function retryFailedReferralRewards(env) {
     // than 24h with channel_verified=TRUE and rewarded=FALSE were permanently
     // lost (no other recovery path exists).
     //
-    // Safety: LIMIT 20 + ORDER BY created_at ASC ensures:
-    //   1. Bounded batch — max 20 retries per cron tick (every 15 min)
+    // Safety: LIMIT 1 + ORDER BY created_at ASC ensures:
+    //   1. Bounded batch — max 1 retry per cron tick (hourly at UTC minute 1)
     //   2. Oldest first — referrals waiting longest get priority
     //   3. Idempotent — creditTokens UNIQUE constraint prevents double-credit
-    //   4. Subrequest budget — ~21 subrequests for 20 retries (under 50 limit)
+    //   4. Subrequest budget — ~2 subrequests for 1 retry (well under 50 limit)
     //   5. No starvation — next tick continues from where this one left off
     //      (processed referrals get rewarded=TRUE, so they're excluded next time)
     // H5 Layer 2: LIMIT reduced 3 → 1 to bound subrequest budget in the
@@ -424,7 +424,7 @@ async function retryFailedWheelRewards(env) {
  * Idempotent: creditTokens' UNIQUE constraint on (user_id, tx_type, ref_id)
  * prevents double-credit even if this runs concurrently with a bootstrap.
  *
- * Bounded: LIMIT 20 per cron tick (every 15 min), oldest first.
+ * Bounded: LIMIT 3 per cron tick (hourly at UTC minute 1), oldest first.
  * Window: daily_date >= CURRENT_DATE - 2 (today + 2 days back, timezone safety)
  *
  * Follows the same pattern as retryFailedWheelRewards above.
