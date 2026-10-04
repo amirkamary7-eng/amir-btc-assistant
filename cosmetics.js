@@ -17,11 +17,29 @@
   }
 
   function apiFetch(path, options) {
+    // F5 FIX: delegate to window.apiFetch (app.js) when available, which
+    // provides three safety features the previous local bare fetch lacked:
+    //   - 15s timeout (AbortSignal.timeout) — prevents infinite spinner
+    //   - auth-wait (waitForApiReady 8s) — ensures initData is ready before
+    //     fetch, avoiding 401 from a not-yet-ready Telegram SDK
+    //   - GET dedup (_requestInFlight) — avoids duplicate in-flight requests
+    // Behavior is identical to the previous local fetch: throws on non-2xx,
+    // returns parsed JSON on success. All call sites use try/catch, so the
+    // error-message shape change (now includes response detail) is safe.
+    if (typeof window.apiFetch === 'function') {
+      return window.apiFetch(path, options);
+    }
+    // Fallback (early load before app.js, or non-Telegram env): local fetch
+    // with bounded timeout. Preserves the original throw-on-non-2xx shape
+    // so callers work identically with or without window.apiFetch.
     options = options || {};
     options.headers = options.headers || {};
     options.headers['Content-Type'] = 'application/json';
     options.headers['X-Telegram-Init-Data'] = getInitData();
     options.headers['Cache-Control'] = 'no-store';
+    if (!options.signal) {
+      try { options.signal = AbortSignal.timeout(15000); } catch (_) {}
+    }
     return fetch(API_BASE + path, options).then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();

@@ -81,6 +81,18 @@
     options.headers['Content-Type'] = 'application/json';
     options.headers['X-Telegram-Init-Data'] = getInitData();
     options.headers['Cache-Control'] = 'no-store';
+    // F5 FIX: add 15s bounded timeout. Without this, a hanging Worker causes
+    // an infinite spinner (membership badge / popup loading forever). The
+    // enriched-object response shape (ok/_httpStatus/body, never throws on
+    // non-2xx) is preserved so all callers checking res.ok are unchanged.
+    // Auth-wait/dedup are NOT added here because window.apiFetch throws on
+    // non-2xx (different shape) — delegating would change error handling
+    // and break the phase7b-rules-acceptance-ui-test assertions. The 15s
+    // ceiling is the critical safety net; auth failures still return fast
+    // (401 from backend) and caller catch-blocks render fallback UI.
+    if (!options.signal) {
+      try { options.signal = AbortSignal.timeout(15000); } catch (_) {}
+    }
     return fetch(API_BASE + path, options).then(function (res) {
       // Always parse JSON if possible, even on error responses, so callers
       // can read structured error fields (code, active_version, details, etc.).
