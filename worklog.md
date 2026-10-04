@@ -2307,3 +2307,147 @@ Stage Summary:
 - Ready for PR (NO merge, NO deploy — awaiting user review)
 
 ---
+
+---
+Task ID: Batch-A
+Agent: Main Orchestrator
+Task: Batch A — F1 (Wallet Countdown freeze at Sat 00:00 Tehran), F4+F6 (stale localStorage wallet cache), F5 (local apiFetch without timeout/auth-wait/dedup)
+
+Phase 1 — READ-ONLY PRE-CHECK Findings:
+
+Git state:
+- Created fresh branch batch-a/wallet-countdown-cache-apifetch from origin/main @ 7b177ef
+- Working tree CLEAN. Diff de1d688 vs origin/main = EMPTY (squash-merge identical tree).
+
+F1 — _startWeeklyCountdown (wallet.js:1895-1951):
+- Recursion at line 1932: `if (diff <= 0) { el.textContent=''; _startWeeklyCountdown(); return; }`
+- Trigger window: Saturday 00:00:00–00:00:59 Tehran (browser tz = Tehran).
+  At 00:00:0X: weekday='Sat'→daysToSaturday=0; tehranHour=0,tehranMinute=0 →
+  +7 branch NOT taken → target==now (midnight local) → diff<=0 → recursion.
+  _startWeeklyCountdown() clears timer, calls update() synchronously (line 1949) →
+  same conditions → infinite synchronous recursion → stack overflow → tab freeze.
+  At 00:01:00: tehranMinute=1 → +7 taken → diff>0 → no recursion (window ends).
+- Stack overflow risk: REAL (no tail-call optimization in browsers).
+- Fix: replace recursive call with bounded advance (target.setDate(+7), recompute diff).
+  Weekly calculation logic UNCHANGED. No new timer, no synchronous recursion.
+
+F4+F6 — wallet_state_cache localStorage (wallet.js):
+- invalidateWalletCache() (1008-1015): nulls _walletCache.* but NOT localStorage.
+- closeWallet() (1274-1277): nulls _walletCache.wallet but NOT localStorage.
+- loadProfileCard() (1194-1220): reads localStorage → instant-renders stale →
+  fetchWallet returns fresh → re-render → visible JUMP (F4).
+- Write path CORRECT: localStorage write only on fetchWallet success (1218, 1345);
+  on failure NOT written (previous valid value preserved). Authoritative balance
+  guard applies at write site (fetchWallet line 1068 overwrites data.balance with
+  _authoritativeBalance before return). ✓
+- Fix: add `localStorage.removeItem('wallet_state_cache')` to invalidateWalletCache()
+  and closeWallet(). No change to _walletMutationSeq/_authoritativeBalance/_loadWalletSeq,
+  read path, write path, or TTL.
+
+F5 — local apiFetch (membership-user.js:78-97, cosmetics.js:19-29):
+- Missing: 15s timeout (infinite spinner risk), auth-wait (waitForApiReady 8s),
+  GET dedup (_requestInFlight).
+- window.apiFetch (app.js:3656-3717): has all 3. Throws on non-2xx, returns JSON.
+- cosmetics.js local apiFetch: throws on non-2xx, returns JSON. SAME behavior as
+  window.apiFetch (error message differs but callers don't inspect). → DELEGATE
+  to window.apiFetch (behavior-preserving, gains 3 features).
+- membership-user.js local apiFetch: returns enriched {ok,_httpStatus,...body},
+  NEVER throws on non-2xx. DIFFERENT behavior. Callers check res.ok.
+  phase7b-rules-acceptance-ui-test.cjs asserts: must NOT throw on non-2xx, must
+  include `return res.json()`, `_httpStatus`, `enriched.ok = res.ok`,
+  `.catch(function ()`, `'HTTP ' + res.status`. → DO NOT delegate (would change
+  error handling + break tests). Add 15s timeout ONLY (critical safety net).
+
+Constraint verification:
+- ALERT ENGINE / ECONOMY / WALLET ATOMICITY: untouched ✓
+- _walletMutationSeq/_authoritativeBalance/_loadWalletSeq: untouched ✓
+- _onlineCountSeq/_notifReqSeq: untouched ✓
+- No contradictions with prior audit. Proceeding to Phase 2.
+
+Phase 2 — IMPLEMENT MINIMAL FIX (complete):
+
+F1 (wallet.js _startWeeklyCountdown):
+- Replaced recursive `_startWeeklyCountdown()` call (line 1932) with bounded
+  advance: `target.setDate(target.getDate() + 7); diff = recompute;`.
+- Added defensive 2nd `diff <= 0` check → `el.textContent=''; return;` (no recursion).
+- Weekly calculation logic (weekdayMap, daysToSaturday, +7 branch) UNCHANGED.
+- `const diff` → `let diff` (reassigned in bounded advance).
+
+F4/F6 (wallet.js invalidateWalletCache + closeWallet):
+- invalidateWalletCache(): added `localStorage.removeItem('wallet_state_cache')`
+  after the existing in-memory nulling. Canonical invalidation now clears
+  both layers.
+- closeWallet(): added `localStorage.removeItem('wallet_state_cache')` after
+  the existing `_walletCache.wallet = null`. Next loadProfileCard fetches
+  fresh (no stale instant-render → no jump).
+- Read path, write path, TTL, _walletMutationSeq, _authoritativeBalance,
+  _loadWalletSeq: all UNCHANGED.
+
+F5 (cosmetics.js + membership-user.js):
+- cosmetics.js apiFetch: DELEGATES to window.apiFetch when available (gains
+  15s timeout + auth-wait + GET dedup). Fallback keeps local fetch WITH
+  15s AbortSignal.timeout. Behavior preserved (throw on non-2xx, return JSON).
+- membership-user.js apiFetch: ADDED 15s AbortSignal.timeout only (NOT
+  delegated — enriched-object shape differs from window.apiFetch's throw
+  behavior; delegating would break phase7b-rules-acceptance-ui-test).
+  Enriched {ok,_httpStatus,...body} shape preserved, never throws on non-2xx.
+
+Phase 3 — TESTS (complete):
+- tests/wallet-countdown-freeze-regression-test.cjs (F1): 11 tests
+  - F1-01..04 source-level (recursion removed, bounded advance, defensive
+    check, weekly logic unchanged)
+  - F1-05..10 behavioral (Sat 00:00:00/:30/:59/00:01 Tehran + Wed + no-hang)
+  - F1-11 setInterval exactly once (no timer thrash)
+- tests/wallet-cache-invalidation-regression-test.cjs (F4/F6): 14 tests
+  - F4-01..02 localStorage invalidation added
+  - F4-03..06 read/write/TTL path unchanged
+  - F4-07..09 _walletMutationSeq/_authoritativeBalance/_loadWalletSeq unchanged
+  - F4-10..14 behavioral (invalidate→null, authoritative stored, failure
+    preserved, closeWallet→no stale render, stale can't overwrite fresh)
+- tests/local-apifetch-timeout-regression-test.cjs (F5): 16 tests
+  - F5-01..03 membership timeout + enriched shape + phase7b compatibility
+  - F5-04..07 cosmetics delegation + fallback timeout + throw preserved
+  - F5-08 window.apiFetch has timeout+auth-wait+dedup
+  - F5-09..15 behavioral (auth-pending, timeout fires, success, failure
+    both variants, dedup, fallback, delegated success)
+- Total: 41 new tests, ALL PASS.
+
+Phase 4 — REGRESSION (complete):
+1. New Batch A tests: 41/41 pass.
+2. Related wallet/profile/membership/cosmetics/alert tests (30 files, 585
+   tests): 585/585 pass, 0 fail.
+3. Existing alert/economy/wallet tests: included in #2, all pass.
+4. `npm test` (full CI suite, 70 files): 2162 tests / 2160 pass / 0 fail /
+   2 skip (pre-existing). Count went 2121 → 2162 = +41 (exact match for
+   new tests). ZERO new failures. ZERO regression.
+
+Phase 5 — READ-ONLY DIFF AUDIT (complete):
+- `git diff --check`: clean (no whitespace errors).
+- Files changed: cosmetics.js (+18), membership-user.js (+12), wallet.js
+  (+28/-2), package.json (+1/-1, adds 3 tests to npm test), worklog.md
+  (+56, this log). Total: +115/-3 across 5 files (4 source + worklog).
+- Scope verification:
+  - No backend files (src/, worker-proxy.js) modified → alert engine,
+    economy, wallet atomicity, CAS/idempotency ALL UNTOUCHED. ✓
+  - No +/- lines touch _walletMutationSeq, _authoritativeBalance,
+    _authoritativeBalanceSeq, _loadWalletSeq, _onlineCountSeq, _notifReqSeq
+    declarations (context-only). ✓
+  - _walletCache.wallet=null / walletAt=0 (in-memory nulling) UNCHANGED
+    (context lines); only ADDED localStorage.removeItem after them. ✓
+  - Only F1/F4/F6/F5 logic changed; nothing else. ✓
+- Exact behavior changed:
+  - F1: Saturday 00:00:00-00:00:59 Tehran no longer freezes (bounded advance
+    instead of infinite recursion). Countdown shows ~7d (next Saturday).
+  - F4/F6: closeWallet + invalidateWalletCache now clear localStorage
+    wallet_state_cache → next loadProfileCard fetches fresh (no stale
+    instant-render, no balance jump). Successful refresh still stores
+    authoritative balance; API failure still preserves previous value.
+  - F5: cosmetics.js apiFetch gains 15s timeout + auth-wait + GET dedup
+    (delegates to window.apiFetch); membership-user.js apiFetch gains 15s
+    timeout (enriched shape preserved). No infinite spinner on hanging Worker.
+- Regression risk: MINIMAL. All 2162 CI tests pass. The 3 fixes are
+  behavior-preserving (bounded advance, cache invalidation extension,
+  timeout ceiling). No alert/economy/wallet-atomicity surface touched.
+
+COMMIT RULE: per user instruction, NO commit / push / PR / merge / deploy.
+Awaiting user review of diff + test results.

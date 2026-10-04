@@ -1012,6 +1012,11 @@ const WalletApp = (() => {
     _walletCache.walletAt = 0;
     _walletCache.claimAt = 0;
     _walletCache.summaryAt = 0;
+    // F4/F6 FIX: also invalidate the localStorage wallet_state_cache. Without
+    // this, the next loadProfileCard reads a stale localStorage balance and
+    // instant-renders it, then jumps when fetchWallet returns fresh data.
+    // Mirrors the closeWallet localStorage invalidation.
+    try { localStorage.removeItem('wallet_state_cache'); } catch (_) {}
   }
 
   // FA-15 FIX: inject a non-blocking retry banner at the top of the wallet
@@ -1275,6 +1280,14 @@ const WalletApp = (() => {
       _walletCache.wallet = null;
       _walletCache.walletAt = 0;
     }
+    // F4/F6 FIX: also invalidate the localStorage wallet_state_cache. The
+    // in-memory _walletCache invalidation above is insufficient — on the next
+    // loadProfileCard, the stale localStorage balance would be instant-rendered
+    // and then overwritten by fetchWallet's fresh response, causing a visible
+    // balance jump. Removing localStorage here forces a clean skeleton+fetch
+    // on next open (no stale-render, no jump). This complements the canonical
+    // invalidation in invalidateWalletCache() (called after mutations).
+    try { localStorage.removeItem('wallet_state_cache'); } catch (_) {}
     // Still render the profile card (from walletData if available, or skeleton)
     // so the UI doesn't flash empty while the next fetch is in-flight.
     if (walletData) {
@@ -1926,10 +1939,23 @@ const WalletApp = (() => {
         }
       }
 
-      const diff = target.getTime() - now.getTime();
+      let diff = target.getTime() - now.getTime();
+      // F1 FIX: previous code recursively called _startWeeklyCountdown() here
+      // when diff <= 0. At Saturday 00:00:00-00:00:59 Tehran, the +7-day
+      // branch above is NOT taken (tehranHour=0, tehranMinute=0), so target
+      // == now → diff <= 0 → _startWeeklyCountdown() → update() synchronously
+      // → same conditions → infinite synchronous recursion → stack overflow
+      // → tab freeze for the full 60s window. Replace the recursion with a
+      // bounded advance: move target to next Saturday and recompute. The
+      // weekly calculation logic above is unchanged.
+      if (diff <= 0) {
+        target.setDate(target.getDate() + 7);
+        diff = target.getTime() - now.getTime();
+      }
+      // Defensive: if still non-positive after +7d (clock skew), hide to
+      // avoid rendering a negative/broken countdown. No recursion.
       if (diff <= 0) {
         el.textContent = '';
-        _startWeeklyCountdown(); // Recalculate
         return;
       }
 
