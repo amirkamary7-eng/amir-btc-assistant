@@ -278,14 +278,48 @@ test('F5-09: membership apiFetch — auth pending path: local fetch with empty i
   });
 });
 
-test('F5-10: membership apiFetch — timeout fires (AbortSignal rejects fetch)', async () => {
+test('F5-10: membership apiFetch — timeout/abort mechanism rejects fetch (deterministic, no real timer)', async () => {
+  // F5-10 FIX (test harness only): the previous version used
+  // `AbortSignal.timeout(100)` — a REAL 100ms timer — and awaited
+  // assert.rejects on a promise that only settled after the timer fired.
+  // In CI, the Node.js test runner detected the test's pending promise +
+  // an idle event loop (no other queued work) and cancelled it with
+  // "Promise resolution is still pending but the event loop has already
+  // resolved" (failureType: cancelledByParent, ERR_TEST_FAILURE). This
+  // cascaded: F5-11..F5-15 were cancelledByParent too, failing the whole
+  // "Run Worker Tests" job and blocking the deploy.
+  //
+  // Root cause was the TEST HARNESS (real-timer dependency), NOT production
+  // code. Production `membership-user.js` apiFetch correctly uses
+  // `AbortSignal.timeout(15000)` and passes `options.signal` to `fetch()`
+  // — the standard, correct pattern (verified by F5-01 source-level).
+  //
+  // Fix: use a controllable `AbortController` (standard API, no real timer).
+  // We abort SYNCHRONOUSLY after the fetch has started (listener attached),
+  // proving the exact same mechanism end-to-end:
+  //   1. apiFetch creates/passes a signal → reaches fetch (signalCaught)
+  //   2. fetch attaches an abort listener (abortListenerAttached)
+  //   3. when the signal aborts → fetch rejects with a TimeoutError
+  //   4. apiFetch propagates the rejection (assert.rejects) — no infinite spinner
+  // controller.abort() fires the abort event SYNCHRONOUSLY (verified), so
+  // the reject happens immediately with no idle-loop gap.
+  const controller = new AbortController();
   let signalCaught = null;
+  let abortListenerAttached = false;
   const mockFetch = async (path, options) => {
+    signalCaught = options.signal;
     return new Promise((_, reject) => {
-      // Simulate a hanging Worker — never resolves. The AbortSignal fires
-      // after 15s. We simulate by listening to the signal and rejecting.
-      signalCaught = options.signal;
+      // Defensive: if the signal is already aborted (shouldn't happen with
+      // our synchronous flow, but mirrors how real fetch handles it), reject
+      // immediately.
+      if (options.signal && options.signal.aborted) {
+        const e = new Error('The operation was aborted');
+        e.name = 'TimeoutError';
+        reject(e);
+        return;
+      }
       if (options.signal) {
+        abortListenerAttached = true;
         options.signal.addEventListener('abort', () => {
           const e = new Error('The operation was aborted');
           e.name = 'TimeoutError';
@@ -295,15 +329,20 @@ test('F5-10: membership apiFetch — timeout fires (AbortSignal rejects fetch)',
     });
   };
   const apiFetch = makeMembershipApiFetch(mockFetch);
-  // Use a short timeout for the test (don't wait 15s)
-  // Re-implement with a short signal to keep the test fast
-  const shortSignal = AbortSignal.timeout(100);
+  // Start the fetch — mockFetch runs synchronously up to the returned
+  // Promise, attaches the abort listener, then returns a pending promise.
+  // apiFetch suspends at `await mockFetch(...)`.
+  const p = apiFetch('/api/membership/requirement', { signal: controller.signal });
+  // Abort synchronously — the listener fires immediately (no real timer),
+  // the fetch rejects, apiFetch propagates. Deterministic; no idle-loop gap.
+  controller.abort();
   await assert.rejects(
-    apiFetch('/api/membership/requirement', { signal: shortSignal }),
+    p,
     /aborted|TimeoutError/i,
-    'timeout must reject the fetch (no infinite spinner)'
+    'timeout/abort must reject the fetch (no infinite spinner)'
   );
-  assert.ok(signalCaught, 'signal must be passed to fetch');
+  assert.ok(signalCaught, 'signal must be passed to fetch (proves timeout signal reaches fetch)');
+  assert.ok(abortListenerAttached, 'abort listener must be attached (proves fetch wires the signal)');
 });
 
 test('F5-11: membership apiFetch — API success returns enriched object with ok=true', async () => {
