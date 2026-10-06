@@ -353,3 +353,432 @@ test('WL-MSG-09: message selection logic — Free picks Free variant', () => {
     'Free user must get watchlist_limit');
 });
 
+// ============================================================================
+// PROBLEM C — Search-only Watchlist coins disappear after reload
+// ============================================================================
+// ROOT CAUSE: a coin found via /api/market/search (the 1700+ MEXC index) lives
+// OUTSIDE the Top-200 allCoins list. toggleWatchlist persists it fine, but
+// renderWatchlist() built watchCoins ONLY from allCoins + allForexPairs — so
+// after every reload the card silently vanished.
+//
+// FIX (behavior-preserving): renderWatchlist() stays synchronous (all 13 call
+// sites untouched) and merges a THIRD source — search-only watched coins —
+// read from the existing `search_coin_{SYMBOL}` cache; misses are hydrated
+// via the existing public /api/market/search endpoint with in-flight dedup,
+// a 120s failure backoff, and a single batched re-render.
+//
+// The behavioral tests below extract the REAL functions from app.js and run
+// them in a sandbox (fake grid, mock fetch, deterministic clock) — they do NOT
+// mirror the logic, they execute it.
+//
+// Scenario coverage map (12 requested scenarios):
+//   WL-SO-04  → #1  search-only coin renders
+//   WL-SO-05  → #2  Top-200 + search-only together (order preserved)
+//   WL-SO-06  → #3  backend persistence kept
+//   WL-SO-10  → #4  cache hit → zero requests
+//   WL-SO-11  → #5  cache miss → Search API fetch + re-render
+//   WL-SO-16  → #5b expired cache → Search API again
+//   WL-SO-12  → #6  no duplicate request per symbol (+ #12 renders)
+//   WL-SO-13  → #7  one failure never breaks the others
+//   WL-SO-07  → #8  remove works
+//   WL-SO-17  → #9  Free/Premium limits stay 7/20
+//   WL-SO-09  → #10 Top-200-only behavior unchanged
+//   WL-SO-14  → #11 no search-only → zero extra requests
+// ============================================================================
+
+// --- helpers --------------------------------------------------------------
+
+function sliceFnFromApp(name) {
+  const idx = APP_SRC.indexOf(`function ${name}(`);
+  assert.notEqual(idx, -1, `app.js must define function ${name}()`);
+  let depth = 0;
+  let i = APP_SRC.indexOf('{', idx);
+  for (; i < APP_SRC.length; i++) {
+    if (APP_SRC[i] === '{') depth++;
+    else if (APP_SRC[i] === '}') {
+      depth--;
+      if (depth === 0) return APP_SRC.slice(idx, i + 1);
+    }
+  }
+  assert.fail(`unbalanced braces while extracting ${name}() from app.js`);
+}
+
+const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0)); };
+
+function buildWatchlistSandbox(opts = {}) {
+  const state = {
+    allCoins: opts.allCoins || [],
+    allForexPairs: opts.allForexPairs || [],
+    watchlist: opts.watchlist || [],
+  };
+  const fetchCalls = [];
+  let now = opts.now !== undefined ? opts.now : 1700000000000;
+
+  // Cache stub — same semantics as the real app.js Cache (TTL in seconds)
+  const Cache = {
+    storage: {},
+    set(key, data, ttl) { this.storage[key] = { data, expiry: now + ttl * 1000 }; },
+    get(key) {
+      const c = this.storage[key];
+      if (!c) return null;
+      if (now > c.expiry) { delete this.storage[key]; return null; }
+      return c.data;
+    },
+  };
+  if (opts.searchCache) {
+    for (const [sym, coin] of Object.entries(opts.searchCache)) {
+      Cache.set(`search_coin_${sym}`, coin,
+        opts.searchCacheTtl !== undefined ? opts.searchCacheTtl : 300);
+    }
+  }
+
+  const _searchOnlyInflight = {};
+  const _searchOnlyFailUntil = {};
+  const fakeDate = { now: () => now }; // deterministic clock for Date.now() calls
+
+  const fetchImpl = opts.fetch || ((url) => {
+    fetchCalls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ results: [] }) });
+  });
+
+  // Minimal fake DOM grid: captures innerHTML paints + rendered symbols
+  const grid = { _html: '', _paints: 0 };
+  Object.defineProperty(grid, 'innerHTML', {
+    get() { return this._html; },
+    set(v) { this._html = v; this._paints++; },
+    configurable: true,
+  });
+  grid.querySelector = () => null;   // no skeleton/empty-state markers
+  grid.querySelectorAll = () => [];   // no existing cards → full render path
+  grid.insertAdjacentHTML = () => {};
+
+  const factory = new Function(
+    'allCoins', 'allForexPairs', 'watchlist', 'Cache',
+    '_searchOnlyInflight', '_searchOnlyFailUntil', 'Date',
+    'API_BASE', 'fetch', '$', 't', 'escapeHtml', 'formatWatchPrice',
+    'buildWatchTrendSVG', 'buildAddCoinCardHTML', 'getMaxWatchlist',
+    `${sliceFnFromApp('getSearchOnlyWatchSymbols')}
+     ${sliceFnFromApp('ensureSearchOnlyCoinsHydrated')}
+     ${sliceFnFromApp('renderWatchlist')}
+     return {
+       getSearchOnlyWatchSymbols: getSearchOnlyWatchSymbols,
+       ensureSearchOnlyCoinsHydrated: ensureSearchOnlyCoinsHydrated,
+       renderWatchlist: renderWatchlist,
+     };`
+  );
+
+  const fns = factory(
+    state.allCoins, state.allForexPairs, state.watchlist, Cache,
+    _searchOnlyInflight, _searchOnlyFailUntil, fakeDate,
+    'https://api.example.com', fetchImpl,
+    (id) => (id === 'watchlist-grid' ? grid : null),
+    (k) => k,
+    (s) => String(s),
+    (p) => (typeof p === 'number' && isFinite(p) ? p.toFixed(2) : '--'),
+    () => '<svg></svg>',
+    () => '<div class="watch-card-add"></div>',
+    () => 20
+  );
+
+  return {
+    ...fns,
+    state, grid, fetchCalls, CacheObj: Cache,
+    inflight: _searchOnlyInflight,
+    failUntil: _searchOnlyFailUntil,
+    advanceClock(ms) { now += ms; },
+    paints: () => grid._paints,
+    renderedSymbols() {
+      const out = [];
+      for (const m of grid._html.matchAll(/data-symbol="([^"]+)"/g)) {
+        if (!out.includes(m[1])) out.push(m[1]);
+      }
+      return out;
+    },
+  };
+}
+
+// --- contract tests --------------------------------------------------------
+
+test('WL-SO-01: renderWatchlist stays synchronous (no async signature change)', () => {
+  // Static: must NOT be declared async — all 13 call sites are fire-and-forget.
+  assert.ok(!/async\s+function\s+renderWatchlist/.test(APP_SRC),
+    'renderWatchlist must not be async');
+  // Behavioral: calling it must not return a Promise.
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }], watchlist: ['BTC'],
+  });
+  const r = sb.renderWatchlist();
+  assert.strictEqual(r, undefined, 'renderWatchlist() must return undefined, not a Promise');
+});
+
+test('WL-SO-02: renderWatchlist merges the third source (search-only) after crypto + forex', () => {
+  // Static: the merge line must append searchOnlyWatch AFTER crypto + forex.
+  assert.ok(APP_SRC.includes('const watchCoins = [...cryptoWatch, ...forexWatch, ...searchOnlyWatch];'),
+    'watchCoins must merge crypto, forex, then search-only (in that order)');
+  // Behavioral order check happens in WL-SO-05.
+});
+
+test('WL-SO-03: existing search-tab cache write is unchanged (same key + TTL)', () => {
+  // The search tab's own cache write (line ~4920) must be untouched.
+  assert.ok(APP_SRC.includes('Cache.set(`search_coin_${c.symbol}`, coinData, 300);'),
+    'search tab must still cache with key search_coin_{SYMBOL} and TTL 300');
+  // The hydration path must write the SAME key and the SAME TTL.
+  assert.ok(APP_SRC.includes('Cache.set(`search_coin_${sym}`, {'),
+    'hydration must write the same search_coin_{SYMBOL} cache key');
+  assert.ok(/Cache\.set\(`search_coin_\$\{sym\}`, \{[\s\S]*?\}, 300\); \/\/ 5 min/.test(APP_SRC),
+    'hydration must use the same 5-minute TTL as the search tab');
+});
+
+test('WL-SO-04: search-only coin in the watchlist renders from cache (scenario 1)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['FLOKI'],
+    searchCache: { FLOKI: { symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1 } },
+  });
+  sb.renderWatchlist();
+  assert.deepEqual(sb.renderedSymbols(), ['FLOKI'],
+    'the search-only watched coin must render from the existing cache');
+  assert.equal(sb.fetchCalls.length, 0, 'cache hit → zero network requests');
+});
+
+test('WL-SO-05: Top-200 + Forex + search-only render together, order preserved (scenario 2)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }, { symbol: 'ETH' }],
+    allForexPairs: [{ symbol: 'EURUSD', price: 1.08, change: -0.2, name: 'Euro Dollar' }],
+    watchlist: ['ETH', 'EURUSD', 'BTC', 'FLOKI'],
+    searchCache: { FLOKI: { symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1 } },
+  });
+  sb.renderWatchlist();
+  // Existing order contract: crypto (allCoins order) → forex → search-only.
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'ETH', 'EURUSD', 'FLOKI'],
+    'Top-200 first, then Forex, then search-only — existing order untouched');
+  assert.equal(sb.fetchCalls.length, 0, 'everything cached → zero requests');
+});
+
+test('WL-SO-06: search-only symbol still persisted to the backend (scenario 3)', () => {
+  // toggleWatchlist must keep pushing ANY symbol (Top-200 or not) and persist.
+  const toggleBody = sliceFnFromApp('toggleWatchlist');
+  assert.ok(toggleBody.includes('watchlist.push(symbol);'),
+    'toggleWatchlist must still push the symbol unconditionally');
+  assert.ok(toggleBody.includes('persistWatchlist();'),
+    'toggleWatchlist must still call persistWatchlist()');
+  const persistBody = sliceFnFromApp('persistWatchlist');
+  assert.ok(persistBody.includes("'/api/watchlist'") && persistBody.includes('method: \'PUT\''),
+    'persistWatchlist must still PUT the whole watchlist to /api/watchlist');
+  // renderWatchlist itself must never mutate the watchlist.
+  const renderBody = sliceFnFromApp('renderWatchlist');
+  assert.ok(!/\bwatchlist\s*(?:=[^=]|\.splice|\.push|\.pop|\.shift)/.test(renderBody),
+    'renderWatchlist must never add/remove watchlist entries');
+});
+
+test('WL-SO-07: removing a search-only coin removes its card (scenario 8)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI'],
+    searchCache: { FLOKI: { symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1 } },
+  });
+  sb.renderWatchlist();
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'FLOKI'], 'both cards before removal');
+  // Same mutation toggleWatchlist performs: splice + re-render.
+  sb.state.watchlist.splice(sb.state.watchlist.indexOf('FLOKI'), 1);
+  sb.renderWatchlist();
+  assert.deepEqual(sb.renderedSymbols(), ['BTC'],
+    'removing the search-only coin must remove its card');
+  assert.equal(sb.fetchCalls.length, 0, 'removal must not trigger any request');
+});
+
+test('WL-SO-08: toggleWatchlist removal flow unchanged (splice + persist + render)', () => {
+  const toggleBody = sliceFnFromApp('toggleWatchlist');
+  assert.ok(toggleBody.includes('watchlist.splice(idx, 1);'),
+    'removal path must still splice by index');
+  assert.ok(toggleBody.includes('persistWatchlist();') && toggleBody.includes('renderWatchlist();'),
+    'removal path must still persist then re-render');
+});
+
+test('WL-SO-09: Top-200-only watchlist renders exactly as before (scenario 10)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }, { symbol: 'ETH' }, { symbol: 'SOL' }],
+    watchlist: ['ETH', 'BTC'],
+  });
+  sb.renderWatchlist();
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'ETH'],
+    'Top-200-only rendering is unchanged (allCoins order, as before)');
+  assert.equal(sb.fetchCalls.length, 0, 'no search-only coins → zero extra requests');
+  assert.equal(sb.paints(), 1, 'exactly one render paint — no hydration re-render needed');
+});
+
+test('WL-SO-10: cached search-only coin → zero Search API requests (scenario 4)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI'],
+    searchCache: { FLOKI: { symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1 } },
+  });
+  sb.ensureSearchOnlyCoinsHydrated();
+  assert.equal(sb.fetchCalls.length, 0,
+    'cache hit → the Search API must not be called');
+});
+
+test('WL-SO-11: cache miss → /api/market/search fetch, cache write, re-render (scenario 5)', async () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI'],
+    fetch: (url) => {
+      sb.fetchCalls.push(url);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          results: [{ symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1, volume: 12345, rank: 0 }],
+        }),
+      });
+    },
+  });
+  sb.renderWatchlist(); // paint #1: BTC only (FLOKI not cached yet)
+  const inflight = Object.values(sb.inflight);
+  assert.equal(inflight.length, 1, 'exactly one symbol to hydrate');
+  await Promise.allSettled(inflight);
+  await settle(); // batched re-render fires
+  assert.equal(sb.fetchCalls.length, 1, 'exactly one fetch');
+  assert.ok(sb.fetchCalls[0] === 'https://api.example.com/api/market/search?q=FLOKI',
+    'must call the existing /api/market/search endpoint with the symbol as q');
+  assert.ok(sb.CacheObj.get('search_coin_FLOKI'),
+    'result must be cached under the existing search_coin_{SYMBOL} key');
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'FLOKI'],
+    'after hydration the card must appear (the reload-survival path)');
+  assert.equal(sb.paints(), 2, 'initial paint + exactly one batched re-render');
+  // The re-render's own hydration must be a no-op (cache now hits).
+  await settle();
+  assert.equal(sb.fetchCalls.length, 1, 'no loop — re-render does not fetch again');
+});
+
+test('WL-SO-12: repeated renders never duplicate a symbol request (scenarios 6 + 12)', async () => {
+  let unblock;
+  const gate = new Promise(r => { unblock = r; });
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI', 'PEPE'],
+    fetch: (url) => {
+      sb.fetchCalls.push(url);
+      return gate.then(() => ({ ok: true, json: () => Promise.resolve({ results: [] }) }));
+    },
+  });
+  // Three concurrent render/hydration passes while the fetches are still pending.
+  sb.ensureSearchOnlyCoinsHydrated();
+  sb.ensureSearchOnlyCoinsHydrated();
+  sb.ensureSearchOnlyCoinsHydrated();
+  assert.equal(sb.fetchCalls.length, 2,
+    'three renders → still exactly one request per symbol (in-flight dedup)');
+  unblock();
+  await Promise.allSettled(Object.values(sb.inflight));
+  await settle();
+  assert.equal(sb.paints(), 1,
+    'a single batched re-render — not one per render call (no request/render storm)');
+  assert.equal(sb.fetchCalls.length, 2,
+    'the re-render must not fire additional requests');
+});
+
+test('WL-SO-13: one search-only coin failing never breaks the others (scenario 7)', async () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI', 'PEPE'],
+    fetch: (url) => {
+      sb.fetchCalls.push(url);
+      if (url.includes('q=PEPE')) return Promise.reject(new Error('network down'));
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          results: [{ symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1, volume: 12345, rank: 0 }],
+        }),
+      });
+    },
+  });
+  sb.renderWatchlist();
+  const inflight = Object.values(sb.inflight);
+  await Promise.allSettled(inflight);
+  await settle();
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'FLOKI'],
+    'the successful coin renders; the failed one is skipped, not shown broken');
+  assert.deepEqual(sb.state.watchlist, ['BTC', 'FLOKI', 'PEPE'],
+    'the failure must NOT remove or mutate the watchlist');
+  assert.equal(sb.fetchCalls.length, 2, 'one attempt per symbol, no retry storm');
+  // Backoff: within the window, no new request for the failed symbol.
+  sb.ensureSearchOnlyCoinsHydrated();
+  assert.equal(sb.fetchCalls.length, 2, 'backoff window → no immediate refetch');
+  // After the 120s window expires, exactly one bounded retry for the failed symbol.
+  sb.advanceClock(120001);
+  sb.ensureSearchOnlyCoinsHydrated();
+  assert.equal(sb.fetchCalls.length, 3,
+    'after backoff expiry: exactly one retry — and only for the failed symbol (FLOKI stays cached)');
+});
+
+test('WL-SO-14: no search-only coins → zero Search API requests (scenario 11)', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }, { symbol: 'ETH' }],
+    allForexPairs: [{ symbol: 'EURUSD', price: 1.08, change: -0.2, name: 'Euro Dollar' }],
+    watchlist: ['ETH', 'EURUSD', 'BTC'],
+  });
+  sb.renderWatchlist();
+  sb.ensureSearchOnlyCoinsHydrated();
+  assert.equal(sb.fetchCalls.length, 0,
+    'watchlist fully covered by Top-200 + Forex → zero extra requests (behavior unchanged)');
+});
+
+test('WL-SO-15: market data not loaded yet → no premature search fetches', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [], // Top-200 not loaded — symbols cannot be classified yet
+    watchlist: ['FLOKI', 'PEPE'],
+  });
+  sb.renderWatchlist();
+  assert.ok(sb.grid.innerHTML.includes('watchlist-skeleton'),
+    'skeleton path still taken when market data is missing');
+  assert.equal(sb.fetchCalls.length, 0,
+    'must not fetch through the search path before Top-200 is loaded');
+  assert.equal(Object.keys(sb.inflight).length, 0, 'nothing in-flight');
+});
+
+test('WL-SO-16: expired cache falls back to the Search API again (scenario 5b)', async () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }],
+    watchlist: ['BTC', 'FLOKI'],
+    searchCache: { FLOKI: { symbol: 'FLOKI', name: 'Floki', priceUsd: 0.0002, changePercent24Hr: 5.1 } },
+    searchCacheTtl: 300, // same as production
+  });
+  sb.renderWatchlist();
+  assert.deepEqual(sb.renderedSymbols(), ['BTC', 'FLOKI'], 'fresh cache renders the card');
+  assert.equal(sb.fetchCalls.length, 0);
+  // Let the 5-minute cache expire.
+  sb.advanceClock(300001);
+  sb.renderWatchlist();
+  const inflight = Object.values(sb.inflight);
+  assert.equal(inflight.length, 1, 'expired cache → exactly one symbol re-hydrates');
+  await Promise.allSettled(inflight);
+  await settle();
+  assert.equal(sb.fetchCalls.length, 1,
+    'expired cache → the Search API is hit again (once)');
+});
+
+test('WL-SO-17: free/premium limits stay exactly 7/20 (scenario 9)', () => {
+  // The gate in toggleWatchlist must still use the dynamic premium-aware limit.
+  assert.ok(APP_SRC.includes('watchlist.length >= getMaxWatchlist()'),
+    'add gate unchanged: watchlist.length >= getMaxWatchlist()');
+  const maxBody = sliceFnFromApp('getMaxWatchlist');
+  assert.ok(maxBody.includes('return 20') && maxBody.includes('return 7'),
+    'getMaxWatchlist still returns 20 (Premium) / 7 (Free)');
+  // The add-card condition inside renderWatchlist must be untouched too.
+  const renderBody = sliceFnFromApp('renderWatchlist');
+  assert.ok(renderBody.includes('watchlist.length < getMaxWatchlist()'),
+    'add-card condition unchanged: watchlist.length < getMaxWatchlist()');
+});
+
+test('WL-SO-18: getSearchOnlyWatchSymbols classifies symbols correctly', () => {
+  const sb = buildWatchlistSandbox({
+    allCoins: [{ symbol: 'BTC' }, { symbol: 'ETH' }],
+    allForexPairs: [{ symbol: 'EURUSD', price: 1, change: 0, name: 'EUR' }],
+    watchlist: ['BTC', 'EURUSD', 'FLOKI', '', null, 0, 'ETH'],
+  });
+  assert.deepEqual(sb.getSearchOnlyWatchSymbols(), ['FLOKI'],
+    'only symbols outside Top-200 + Forex are search-only; junk entries are ignored');
+  const empty = buildWatchlistSandbox({ allCoins: [], watchlist: ['FLOKI'] });
+  assert.deepEqual(empty.getSearchOnlyWatchSymbols(), [],
+    'before Top-200 loads nothing can be classified — returns [] (no premature fetch)');
+});
+
