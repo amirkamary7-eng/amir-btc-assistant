@@ -2240,8 +2240,39 @@ async function processNewsAIBatch(env, pool = null) {
     // (e.g., 48 raw → 10 filtered → only 1-2 survivors = AI failure), we still
     // publish the survivors (merge, not overwrite) so new valid news appears,
     // BUT the previous feed is NOT destroyed. The merge keeps old articles.
-    const MAX_NEWS_ARTICLES = 12;
-    const trimmed = deduped.slice(0, MAX_NEWS_ARTICLES);
+    //
+    // ── RESOURCE-BUDGET FIX (exceededResources RCA) ──
+    // Cap articles processed per */15 tick. The */5 cron processes
+    // MAX_SUMMARIES_PER_TICK=2 summaries per non-overlap tick (8 non-overlap
+    // ticks/hour) = 16 summaries/hour. Setting the */15 enqueue cap to 4/tick
+    // × 4 = 16/hour MATCHES the processing rate exactly — in sustained high
+    // volume the queue does NOT grow (enqueue = drain), so the circuit
+    // breaker (queue > 40) never triggers via queue growth and there is no
+    // CB cliff cycle. This is the zero-growth steady state.
+    // Excess articles are NOT dropped: they reappear in RSS next tick (15 min)
+    // and publishArticleToFarsiNews/enqueueForSummary dedup by canonical URL
+    // (already-processed ones are no-ops). No article is lost.
+    // Per-tick work bounded:
+    //   - batch translate JSON size (4 vs 10 headlines)
+    //   - batch analyze JSON size (4 vs 10 headlines)
+    //   - publish KV read-modify-write ops (4 vs 10)
+    //   - enqueue KV ops (4 vs 10)
+    //   - fallback-translate worst-case subrequests (4×2=8 vs 10×2=20 if Groq 429)
+    const MAX_NEWS_ARTICLES = 12; // feed display cap (unchanged — merge trims to this)
+    const MAX_ARTICLES_PER_15MIN_TICK = 4; // per-tick processing budget — matches */5 drain rate (4×4=16/h = 16/h process)
+    const trimmed = deduped.slice(0, Math.min(MAX_NEWS_ARTICLES, MAX_ARTICLES_PER_15MIN_TICK));
+    const deferredArticleCount = deduped.length - trimmed.length;
+    if (deferredArticleCount > 0) {
+      stepLog('ARTICLES_DEFERRED', {
+        processed: trimmed.length,
+        deferred: deferredArticleCount,
+        total_deduped: deduped.length,
+        budget_cap: MAX_ARTICLES_PER_15MIN_TICK,
+        reason: 'per_tick_budget_cap',
+        note: 'Deferred articles reappear in RSS next tick (15min) and are deduped by canonical URL — no drop',
+      });
+      console.log(`[NEWS-AI-BUDGET] Processing ${trimmed.length}/${deduped.length} articles this tick (cap=${MAX_ARTICLES_PER_15MIN_TICK}). ${deferredArticleCount} deferred to next tick.`);
+    }
 
     // Publish each survivor via MERGE (not overwrite).
     // publishArticleToFarsiNews reads existing list, dedup by URL, prepends new,
@@ -2262,7 +2293,7 @@ async function processNewsAIBatch(env, pool = null) {
     // It's a diagnostic log so operators can see when AI failures are shrinking
     // the INCOMING batch (without shrinking the FEED).
     if (trimmed.length < deduped.length) {
-      console.warn(`[NEWS-AI] Partial batch: ${trimmed.length} survivors from ${deduped.length} deduped (AI failure). Feed preserved via merge.`);
+      console.warn(`[NEWS-AI] Partial batch: ${trimmed.length} survivors from ${deduped.length} deduped${deferredArticleCount > 0 ? ' (budget cap deferred ' + deferredArticleCount + ')' : ''}. Feed preserved via merge.`);
     }
 
     // ── STEP 7: BATCH AI ANALYSIS (1 AI call for all articles) ──
@@ -2384,30 +2415,32 @@ async function processNewsAIBatch(env, pool = null) {
     }
 
     // ── STEP 11: DB RETENTION CLEANUP (4-day retention) ──
-    // P2 FIX: Delete news_articles older than 4 days to keep DB size stable.
-    // Safe — no FK references to news_articles (verified in 00-migrate.sql).
-    // Runs on every */15 tick (96×/day) — DELETE is idempotent and cheap
-    // when there's nothing to delete. Best-effort: failures are non-fatal.
-    if (newsArticleRepo && typeof newsArticleRepo.cleanupOld === 'function') {
+    // P2 FIX: Delete news_articles older than 4 days. Safe (no FK refs). Best-effort.
+    // RESOURCE-BUDGET FIX: throttle to hourly (:00 tick only). Was 96×/day, now 24×/day.
+    // Saves 3 DB subrequests on 3 of 4 */15 ticks (72 fewer DB roundtrips/day).
+    const _runHourlyCleanup = new Date().getUTCMinutes() < 15; // :00 tick (of :00/:15/:30/:45)
+    if (_runHourlyCleanup) {
+      if (newsArticleRepo && typeof newsArticleRepo.cleanupOld === 'function') {
+        try {
+          const deletedCount = await newsArticleRepo.cleanupOld(env, 4, pool);
+          if (deletedCount > 0) {
+            stepLog('DB_RETENTION_cleanup', { deleted: deletedCount, retention_days: 4, cadence: 'hourly' });
+          }
+        } catch (cleanupErr) {
+          console.warn('[NEWS-AI-CRON] DB retention cleanup failed (non-fatal):', cleanupErr?.message);
+        }
+      }
+      // OPTION 1: Telemetry table retention (4-day, best-effort, mirrors cleanupOld).
+      // Runs alongside news_articles cleanup on the :00 tick (hourly). Failures non-fatal.
       try {
-        const deletedCount = await newsArticleRepo.cleanupOld(env, 4, pool);
-        if (deletedCount > 0) {
-          stepLog('DB_RETENTION_cleanup', { deleted: deletedCount, retention_days: 4 });
+        const tickDeleted = await cleanupTickLog(env, 4);
+        const e2eDeleted = await cleanupE2ETimingLog(env, 4);
+        if (tickDeleted > 0 || e2eDeleted > 0) {
+          stepLog('TELEMETRY_RETENTION_cleanup', { tick_deleted: tickDeleted, e2e_deleted: e2eDeleted, retention_days: 4, cadence: 'hourly' });
         }
       } catch (cleanupErr) {
-        console.warn('[NEWS-AI-CRON] DB retention cleanup failed (non-fatal):', cleanupErr?.message);
+        console.warn('[NEWS-AI-CRON] telemetry retention cleanup failed (non-fatal):', cleanupErr?.message);
       }
-    }
-    // OPTION 1: Telemetry table retention (4-day, best-effort, mirrors cleanupOld pattern).
-    // Runs alongside news_articles cleanup on every */15 tick. Failures are non-fatal.
-    try {
-      const tickDeleted = await cleanupTickLog(env, 4);
-      const e2eDeleted = await cleanupE2ETimingLog(env, 4);
-      if (tickDeleted > 0 || e2eDeleted > 0) {
-        stepLog('TELEMETRY_RETENTION_cleanup', { tick_deleted: tickDeleted, e2e_deleted: e2eDeleted, retention_days: 4 });
-      }
-    } catch (cleanupErr) {
-      console.warn('[NEWS-AI-CRON] telemetry retention cleanup failed (non-fatal):', cleanupErr?.message);
     }
 
     // ── FINISH ──
