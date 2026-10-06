@@ -20,6 +20,10 @@
 // ============================================================
 
 const TIER_DATA = {
+  // starter: REFERRAL LEVEL ONLY (Starter 0–2 active referrals). The Wallet
+  // tier ladder never returns 'Starter' — backend wallet tiers start at
+  // Bronze. Additive entry: the original 5 tiers are unchanged.
+  starter:  { hex: '#8E9BAE', rgb: '142, 155, 174' },
   bronze:   { hex: '#CD7F32', rgb: '205, 127, 50' },
   silver:   { hex: '#C0C0C0', rgb: '192, 192, 192' },
   gold:     { hex: '#FFD700', rgb: '255, 215, 0' },
@@ -35,6 +39,10 @@ function getTierKey(name) {
   if (n.includes('gold')) return 'gold';
   if (n.includes('silver')) return 'silver';
   if (n.includes('bronze')) return 'bronze';
+  // REFERRAL LEVEL ONLY: 'Starter' exists solely in the Referral level
+  // ladder (0–2 active referrals). Wallet never passes 'Starter' here —
+  // the wallet backend ladder starts at Bronze.
+  if (n.includes('starter')) return 'starter';
   return 'bronze';
 }
 
