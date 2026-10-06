@@ -19,8 +19,16 @@
   --w-text-dim: #6B7A8D;
   --w-green: #00C896;
   --w-red: #FF4D4D;
-  --w-tier-color: #CD7F32;
-  --w-tier-rgb: 205, 127, 50;
+  /* TIER-AWARE (RC-1 FIX): bridge the wallet-scoped tier vars to the runtime
+     --tier-color / --tier-rgb custom properties set by shared-utils.js
+     applyTierVars() on #wallet-preview-card and #wallet-full-page.
+     Previously these were hardcoded to Bronze (#CD7F32) — the Wallet visuals
+     stayed Bronze at every tier because wallet.css never consumed the vars
+     that applyTierVars() sets (unlike referral.css, which has this bridge).
+     Fallback keeps the exact pre-fix Bronze appearance when no runtime tier
+     is applied (skeleton, guest, pre-hydration). */
+  --w-tier-color: var(--tier-color, #CD7F32);
+  --w-tier-rgb: var(--tier-rgb, 205, 127, 50);
   --w-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --w-skeleton: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
 }

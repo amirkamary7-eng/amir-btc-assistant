@@ -5803,7 +5803,9 @@ async function completeMission(missionId, targetId) {
 
             if (data.is_new_completion) {
                 showMissionRewardPopup(data.reward_label, data.reward_amount);
-                refreshWalletAfterMission(data.new_balance);
+                // PHASE 2 (TIER FRESHNESS): pass the post-mission tier through
+                // so the tier badge updates together with the balance.
+                refreshWalletAfterMission(data.new_balance, data.new_tier);
             }
 
             updateMissionCards();
@@ -5874,7 +5876,7 @@ function fireMissionEvent(eventType) { MissionBus.fire(eventType); }
  * invalidate the cache (idempotent), both update the balance display (last
  * write wins, which is correct since the later mutation has the newer balance).
  */
-function refreshWalletAfterMutation(newBalance) {
+function refreshWalletAfterMutation(newBalance, newTier) {
     // 1. Invalidate wallet cache so next fetch hits the API (no stale data)
     if (window.WalletApp && typeof window.WalletApp._invalidateCache === 'function') {
         try { window.WalletApp._invalidateCache(); } catch (_) {}
@@ -5884,11 +5886,12 @@ function refreshWalletAfterMutation(newBalance) {
     if (window.WalletApp && typeof window.WalletApp._incrementMutationSeq === 'function') {
         try { window.WalletApp._incrementMutationSeq(); } catch (_) {}
     }
-    // AUTHORITATIVE BALANCE GUARD: record the authoritative balance so
-    // background fetchWallet cannot overwrite it with stale DB data.
+    // AUTHORITATIVE BALANCE GUARD: record the authoritative balance (and the
+    // post-mutation tier, when the endpoint provided new_tier) so background
+    // fetchWallet cannot overwrite them with stale DB data.
     if (typeof newBalance === 'number' && window.WalletApp &&
         typeof window.WalletApp._setAuthoritativeBalance === 'function') {
-        try { window.WalletApp._setAuthoritativeBalance(newBalance); } catch (_) {}
+        try { window.WalletApp._setAuthoritativeBalance(newBalance, newTier || null); } catch (_) {}
     }
 
     // 2. Update balance display immediately
@@ -5967,14 +5970,14 @@ window.refreshWalletAfterMutation = refreshWalletAfterMutation;
  * PHASE UX-V2: Uses new_balance from API response directly — no extra _refreshWalletData call.
  * FA-2: Now delegates to refreshWalletAfterMutation for consistency.
  */
-function refreshWalletAfterMission(newBalance) {
+function refreshWalletAfterMission(newBalance, newTier) {
     // FA-2: delegate to the generic refreshWalletAfterMutation helper.
     // Previously this function had its own inline implementation (invalidate
     // cache + animateBalanceChange + loadProfileCard + updateNotifBadge).
     // The generic helper does the same thing PLUS refreshes the wallet full
     // page if it's open (tier/history/summary). This ensures mission rewards
     // and other mutations (wheel, cosmetics) use the EXACT same refresh path.
-    refreshWalletAfterMutation(newBalance);
+    refreshWalletAfterMutation(newBalance, newTier);
 }
 
 /**

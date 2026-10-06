@@ -2073,7 +2073,9 @@ const ReferralApp = (() => {
         // started before the spin could resolve DURING the animation and overwrite
         // the fresh balance with stale data (4.9s unguarded window).
         if (typeof window.refreshWalletAfterMutation === 'function') {
-          try { window.refreshWalletAfterMutation(spinResult.new_balance); } catch (_) {}
+          // PHASE 2 (TIER FRESHNESS): pass the post-spin tier through so the
+          // tier badge updates together with the balance (same response).
+          try { window.refreshWalletAfterMutation(spinResult.new_balance, spinResult.new_tier); } catch (_) {}
         }
       } else {
         throw new Error(data?.message || 'Spin failed');

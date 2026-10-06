@@ -161,11 +161,19 @@ export function createWalletHandlers(deps) {
     const authState = await authenticateTelegramRequest(request, env);
     if (authState.error) return authState.error;
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', balance: 0 }, {}, env);
+      return jsonResponse(
+        // PHASE 2 (TIER FRESHNESS): tier travels with balance on the lightweight
+        // endpoint too — refreshWalletBalance() can sync badge/color/progress
+        // without a full /api/wallet call.
+        { status: 'success', balance: 0, tier: { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 } },
+        {}, env,
+      );
     }
     try {
       const balance = await walletRepo.getBalance(env, authState.user.id);
-      return jsonResponse({ status: 'success', balance }, {}, env);
+      // PHASE 2 (TIER FRESHNESS): same canonical ladder as /api/wallet and
+      // /api/wallet/summary — computed from the same balance value returned.
+      return jsonResponse({ status: 'success', balance, tier: walletRepo.getTierForBalance(balance) }, {}, env);
     } catch (error) {
       console.warn(safeError('get-balance', error));
       return safeDbErrorResponse(error, {}, env);
@@ -361,6 +369,9 @@ export function createWalletHandlers(deps) {
       return jsonResponse({
         status: 'success',
         ...result,
+        // PHASE 2 (TIER FRESHNESS): the post-claim tier so the frontend can
+        // update the badge/progress immediately (claimDaily RC-4 fix).
+        new_tier: result.newTier ?? null,
         // PHASE UX-V2: include streak_rewards array for frontend UI rendering.
         // PREMIUM-DISPLAY FIX: return the EFFECTIVE per-day amounts (base for
         // Free, ceil(base × 1.5) for Premium) — the exact amounts that
@@ -585,6 +596,9 @@ export function createWalletHandlers(deps) {
       // 4. If completed and not yet rewarded → grant reward
       let rewardGranted = false;
       let newBalance = null;
+      // PHASE 2 (TIER FRESHNESS): post-mission tier (from the repo's canonical
+      // ladder) — returned to the frontend as new_tier alongside new_balance.
+      let newTier = null;
 
       if (progress.completed && !progress.rewarded) {
         // Mark as rewarded FIRST (atomic CAS — prevents double-reward)
@@ -612,6 +626,7 @@ export function createWalletHandlers(deps) {
 
           rewardGranted = result.success && !result.idempotent;
           newBalance = result.newBalance;
+          newTier = result.newTier ?? null;
 
           // Dispatch notification via NotificationService
           // PERF FIX (Mission Completion Latency): notification is fire-and-forget —
@@ -652,6 +667,8 @@ export function createWalletHandlers(deps) {
         completed: progress.completed,
         is_new_completion: rewardGranted,
         new_balance: newBalance,
+        // PHASE 2 (TIER FRESHNESS): post-mission tier (null on idempotent path).
+        new_tier: newTier,
       }, {}, env);
     } catch (error) {
       console.warn(safeError('wallet-mission-complete', error));

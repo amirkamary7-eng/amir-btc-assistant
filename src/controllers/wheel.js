@@ -225,6 +225,9 @@ export function createWheelHandlers(deps) {
         spin_type: spinResult.spin_type,
         reward: spinResult.reward,
         new_balance: rewardResult.newBalance,
+        // PHASE 2 (TIER FRESHNESS): post-spin tier from the repo's canonical
+        // ladder — lets the frontend update the tier badge with the new balance.
+        new_tier: rewardResult?.newTier ?? null,
         tx_id: rewardResult.txId,
       }, {}, env);
     } catch (error) {

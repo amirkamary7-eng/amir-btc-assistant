@@ -445,6 +445,9 @@ export function createRewardPurchaseHandlers(deps) {
       const newBalance = debitResult && typeof debitResult.newBalance === 'number'
         ? debitResult.newBalance
         : null;
+      // PHASE 2 (TIER FRESHNESS): post-purchase tier from the same debit
+      // result — a large debit can drop the user a tier.
+      const newTier = debitResult && debitResult.newTier ? debitResult.newTier : null;
 
       return jsonResponse({
         status: 'success',
@@ -462,6 +465,7 @@ export function createRewardPurchaseHandlers(deps) {
           created_at: purchase.created_at,
         },
         new_balance: newBalance,
+        new_tier: newTier,
       }, { status: 201 }, env);
     } catch (e) {
       console.warn(safeError('vpn-purchase', e));

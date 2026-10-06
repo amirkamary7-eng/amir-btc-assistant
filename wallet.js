@@ -365,15 +365,25 @@ const WalletApp = (() => {
   // accept the rest of the wallet data (tier, history).
   let _authoritativeBalanceSeq = 0;
   let _authoritativeBalance = null;
+  // PHASE 2 (TIER FRESHNESS): the authoritative (balance, tier) pair. The
+  // tier is recorded together with the balance from the same mutation
+  // response — they are always from the same DB snapshot, so the guard in
+  // fetchWallet can never mix a fresh balance with a stale tier (RC-3 fix).
+  let _authoritativeTier = null;
 
-  // Call this after ANY successful mutation (POST) that returns newBalance.
-  // It records the authoritative balance + the mutation seq at the time of
-  // the response. Background fetchWallet calls that started at or before
-  // this seq will have their balance overwritten with the authoritative value
-  // (protecting against Neon read replica lag returning a stale snapshot).
-  function _setAuthoritativeBalance(newBalance) {
+  // Call this after ANY successful mutation (POST) that returns newBalance
+  // (+ new_tier when the endpoint provides it). It records the authoritative
+  // balance/tier + the mutation seq at the time of the response. Background
+  // fetchWallet calls that started at or before this seq will have their
+  // balance AND tier overwritten with the authoritative values (protecting
+  // against Neon read replica lag returning a stale snapshot).
+  function _setAuthoritativeBalance(newBalance, newTier) {
     if (typeof newBalance === 'number' && newBalance >= 0) {
       _authoritativeBalance = newBalance;
+      // Pair rule: a caller that has a fresh balance but NO tier must not
+      // leave an older authoritative tier behind — that would re-create the
+      // exact mixed state (new balance + old tier) this guard prevents.
+      _authoritativeTier = (newTier && newTier.current) ? newTier : null;
       _authoritativeBalanceSeq = _walletMutationSeq;
     }
   }
@@ -579,6 +589,76 @@ const WalletApp = (() => {
       const fill = card.querySelector('.wallet-progress-fill');
       if (fill) fill.style.width = `${tier.progress || 0}%`;
     });
+  }
+
+  // PHASE 2 (TIER FRESHNESS): targeted DOM sync of every tier visual — badge
+  // texts, tier CSS vars (colors/borders/glows via the wallet.css --w-tier-*
+  // bridge), progress bars/ring/labels — WITHOUT a full page re-render. Used
+  // by refreshWalletBalance() and claimDaily() so a tier change is visible
+  // immediately on BOTH surfaces (Profile preview card + open Wallet page).
+  // Selectors mirror renderProfileCard and buildWalletHTML; every query is
+  // null-guarded because either surface may not be in the DOM at call time
+  // (e.g., tier sync while the wallet page is closed).
+  function _syncTierVisuals(tier) {
+    if (!tier || !tier.current) return;
+    const tierName = displayTier(tier.current);
+    const progressPct = tier.progress != null ? Number(tier.progress).toFixed(0) : '0';
+    const progressText = tier.next
+      ? `${progressPct}% ${WT('progress_to')} ${displayTier(tier.next)}`
+      : WT('max_tier');
+
+    // ── Profile preview card (#wallet-preview-card) ──
+    const card = document.getElementById('wallet-preview-card');
+    if (card) {
+      applyTierVars(card, tier.current);
+      const badge = card.querySelector('.tier-badge');
+      if (badge) badge.textContent = tierName;
+      const progressLabel = card.querySelector('.progress-info span');
+      if (progressLabel) progressLabel.textContent = progressText;
+      const progressPctEl = card.querySelector('.progress-pct');
+      if (progressPctEl) progressPctEl.textContent = `${progressPct}%`;
+      const fill = card.querySelector('.wallet-progress-fill');
+      if (fill) fill.style.width = `${tier.progress || 0}%`;
+    }
+
+    // ── Wallet full page (#wallet-full-page) ──
+    const page = document.getElementById('wallet-full-page');
+    if (page) {
+      applyTierVars(page, tier.current);
+      // Header chip is "<span><span class='tier-dot'></span> NAME</span>" —
+      // update the text node that follows the dot (the dot itself is CSS-only).
+      const dot = page.querySelector('.wallet-page-header-text .tier-dot');
+      if (dot && dot.nextSibling) dot.nextSibling.textContent = ` ${tierName}`;
+      const heroBadge = page.querySelector('.hero-tier-badge');
+      if (heroBadge) heroBadge.textContent = tierName;
+      const miniBadge = page.querySelector('.mini-tier-badge');
+      if (miniBadge) miniBadge.textContent = tierName;
+      // Progress ring (only rendered when tier.next exists)
+      const ring = page.querySelector('.tier-progress-ring-fill');
+      if (ring) {
+        ring.setAttribute('stroke', getTierColor(tier.current));
+        const r = parseFloat(ring.getAttribute('r')) || 26;
+        const c = 2 * Math.PI * r;
+        ring.style.strokeDasharray = c;
+        ring.style.strokeDashoffset = c * (1 - (tier.progress || 0) / 100);
+      }
+      const ringPct = page.querySelector('.ring-pct');
+      if (ringPct) ringPct.textContent = `${progressPct}%`;
+      if (tier.next) {
+        const progressHeader = page.querySelector('.tier-progress-header span');
+        if (progressHeader) progressHeader.textContent = `${WT('progress_to')} ${displayTier(tier.next)}`;
+        const remaining = page.querySelector('.tier-remaining');
+        if (remaining) remaining.textContent = `${formatNumber(tier.remaining)} ${WT('ab_remaining')}`;
+      }
+      const barFill = page.querySelector('.tier-bar-fill');
+      if (barFill) barFill.style.width = `${tier.progress || 0}%`;
+      const bannerP = page.querySelector('.wallet-smart-banner p');
+      if (bannerP) {
+        bannerP.innerHTML = tier.next
+          ? `${esc(WT('ab_remaining'))}: <strong>${formatNumber(tier.remaining)} AB</strong>`
+          : esc(WT('max_tier'));
+      }
+    }
   }
 
   function renderProfileCardSkeleton() {
@@ -1071,10 +1151,18 @@ const WalletApp = (() => {
           console.warn('[WALLET] fetchWallet: stale balance rejected (authoritative balance from mutation seq', _authoritativeBalanceSeq, 'overrides GET seq', myMutationSeq, ')');
           // Overwrite balance in the response with authoritative value
           data.balance = _authoritativeBalance;
+          // PHASE 2 (TIER FRESHNESS — RC-3 fix): the GET snapshot is stale for
+          // balance, so its tier is stale by the same token. Overwrite tier
+          // with the authoritative pair value so a fresh balance can never be
+          // rendered next to a pre-mutation tier.
+          if (_authoritativeTier && _authoritativeTier.current) {
+            data.tier = _authoritativeTier;
+          }
         } else {
           // GET is fresh enough — clear authoritative guard so future
           // GETs (without intervening mutations) can update normally
           _authoritativeBalance = null;
+          _authoritativeTier = null;
         }
         walletData = data;
         _walletCache.wallet = data;
@@ -1497,13 +1585,23 @@ const WalletApp = (() => {
           // P0-3 FIX: update _lastKnownBalance so VPN modal and other consumers
           // see the fresh balance immediately — not stale pre-claim value.
           _lastKnownBalance = result.newBalance;
-          // AUTHORITATIVE BALANCE GUARD: record this balance as authoritative
-          // so background fetchWallet cannot overwrite it with stale DB data.
-          _setAuthoritativeBalance(result.newBalance);
+          // AUTHORITATIVE BALANCE GUARD: record this balance (and the post-claim
+          // tier from the same response) as authoritative so background
+          // fetchWallet cannot overwrite them with stale DB data.
+          _setAuthoritativeBalance(result.newBalance, result.new_tier || null);
           if (walletData) {
             walletData.balance = result.newBalance;
-            _walletCache.wallet = walletData;
-            _walletCache.walletAt = Date.now();
+            // RC-4 FIX: the claim response now carries new_tier. Patch it onto
+            // the in-memory walletData BEFORE re-caching, and ONLY re-cache when
+            // we actually have a fresh tier — re-caching the pre-claim object
+            // (old tier) under a fresh timestamp is exactly the stale-tier bug
+            // this fixes. Without a tier, leave the cache invalidated so the
+            // next fetchWallet() pulls fresh data from the API.
+            if (result.new_tier && result.new_tier.current) {
+              walletData.tier = result.new_tier;
+              _walletCache.wallet = walletData;
+              _walletCache.walletAt = Date.now();
+            }
           }
           // DOM-FIX: add .balance-value (Profile preview card) so the claim
           // also updates the Profile tab's balance, not just the Wallet hero.
@@ -1516,6 +1614,9 @@ const WalletApp = (() => {
               balanceEl.textContent = result.newBalance.toLocaleString('en-US');
             }
           }
+          // RC-4 FIX (visual): sync badge/colors/progress on both surfaces right
+          // away when the claim crossed a tier boundary (e.g., 999 → 1000+).
+          _syncTierVisuals(result.new_tier);
         }
 
         // PERF FIX: refreshWalletAfterMutation fires _refreshWalletData which
@@ -2179,8 +2280,9 @@ const WalletApp = (() => {
         if (typeof resp.new_balance === 'number') {
           _lastKnownBalance = resp.new_balance;
           // AUTHORITATIVE BALANCE GUARD: protect against stale GET overwriting
-          // the post-purchase balance with a pre-purchase DB snapshot.
-          _setAuthoritativeBalance(resp.new_balance);
+          // the post-purchase balance with a pre-purchase DB snapshot. The
+          // post-purchase tier (new_tier) travels with the same response.
+          _setAuthoritativeBalance(resp.new_balance, resp.new_tier || null);
           // DOM-FIX: target the real balance elements (.balance-value /
           // .wallet-hero-balance-value) — see refreshWalletBalance for the
           // canonical selector list. getElementById('wallet-balance-amount')
@@ -2190,10 +2292,17 @@ const WalletApp = (() => {
           // FA-6 FIX: keep walletData.balance in sync with the authoritative
           // server response so closeWallet's profile card render (which uses
           // walletData when _walletCache.wallet is fresh) shows the new
-          // balance immediately, not the stale pre-purchase value.
+          // balance immediately, not the stale pre-purchase value. The tier is
+          // patched from the same response so the pair stays coherent.
           if (walletData) {
             walletData.balance = resp.new_balance;
+            if (resp.new_tier && resp.new_tier.current) {
+              walletData.tier = resp.new_tier;
+            }
           }
+          // PHASE 2 (TIER FRESHNESS): a large debit can DROP a tier — sync the
+          // badge/colors/progress immediately on both surfaces.
+          _syncTierVisuals(resp.new_tier);
         }
         // FA-6 FIX: invalidate the wallet cache BEFORE refreshWalletBalance.
         // Without this, _walletCache.wallet retains the OLD balance for up
@@ -2338,6 +2447,33 @@ const WalletApp = (() => {
         // (Wallet hero). Legacy selectors are retained for compatibility.
         const el = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
         if (el) el.textContent = Number(resp.balance).toLocaleString('en-US');
+        // PHASE 2 (TIER FRESHNESS — RC-2 fix): /api/wallet/balance now returns
+        // the tier computed from the SAME balance value above. Sync badge,
+        // tier color vars, progress AND the in-memory/localStorage caches so
+        // this lightweight path (foreground return, bfcache, Profile revisit)
+        // can no longer leave a new balance rendered next to an old tier.
+        if (resp.tier && resp.tier.current) {
+          if (walletData) {
+            walletData.balance = Number(resp.balance) || 0;
+            walletData.tier = resp.tier;
+          }
+          if (_walletCache.wallet) {
+            _walletCache.wallet.balance = Number(resp.balance) || 0;
+            _walletCache.wallet.tier = resp.tier;
+          }
+          try {
+            const raw = localStorage.getItem('wallet_state_cache');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && parsed.data) {
+                parsed.data.balance = Number(resp.balance) || 0;
+                parsed.data.tier = resp.tier;
+                localStorage.setItem('wallet_state_cache', JSON.stringify(parsed));
+              }
+            }
+          } catch (_) { /* bad/unavailable cache — ignore */ }
+          _syncTierVisuals(resp.tier);
+        }
       }
     } catch (_) {}
   }
