@@ -986,7 +986,9 @@ test('P1: _setAuthoritativeBalance function exists', () => {
 test('P2: _setAuthoritativeBalance records balance + mutation seq', () => {
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('function _setAuthoritativeBalance');
-  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 300);
+  // PHASE 2 (TIER FRESHNESS): the function grew (newTier pair param + pair
+  // rule comments) — window widened; the recorded guarantees are unchanged.
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 900);
   assert.ok(fnBody.includes('_authoritativeBalance = newBalance'),
     'sets _authoritativeBalance from newBalance');
   assert.ok(fnBody.includes('_authoritativeBalanceSeq = _walletMutationSeq'),
@@ -996,7 +998,8 @@ test('P2: _setAuthoritativeBalance records balance + mutation seq', () => {
 test('P3: fetchWallet checks _authoritativeBalance before accepting GET balance', () => {
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
-  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // PHASE 2 (TIER FRESHNESS): guard also patches data.tier — window widened.
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 4000);
   assert.ok(fnBody.includes('_authoritativeBalance !== null'),
     'fetchWallet checks if authoritative balance exists');
   assert.ok(fnBody.includes('myMutationSeq <= _authoritativeBalanceSeq'),
@@ -1011,14 +1014,17 @@ test('P4: claimDaily calls _setAuthoritativeBalance after successful claim', () 
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('async function claimDaily()');
   const fnBody = WALLET_SRC.substring(fnStart, fnStart + 8000);
-  assert.ok(fnBody.includes('_setAuthoritativeBalance(result.newBalance)'),
-    'claimDaily calls _setAuthoritativeBalance with POST response newBalance');
+  // PHASE 2 (TIER FRESHNESS): the call now passes the (balance, tier) pair
+  // from the claim response — newBalance alone is no longer the full contract.
+  assert.ok(fnBody.includes('_setAuthoritativeBalance(result.newBalance, result.new_tier || null)'),
+    'claimDaily calls _setAuthoritativeBalance with the POST response (balance, tier) pair');
 });
 
 test('P5: VPN purchase calls _setAuthoritativeBalance after successful purchase', () => {
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
-  assert.ok(WALLET_SRC.includes('_setAuthoritativeBalance(resp.new_balance)'),
-    'VPN purchase calls _setAuthoritativeBalance with POST response new_balance');
+  // PHASE 2 (TIER FRESHNESS): pair call — a big debit can also drop a tier.
+  assert.ok(WALLET_SRC.includes('_setAuthoritativeBalance(resp.new_balance, resp.new_tier || null)'),
+    'VPN purchase calls _setAuthoritativeBalance with the POST response (balance, tier) pair');
 });
 
 test('P6: refreshWalletAfterMutation (app.js) calls _setAuthoritativeBalance', () => {
@@ -1057,7 +1063,9 @@ test('P8: Race scenario — POST newBalance=Y, stale GET returns X, walletData s
 
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
-  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // PHASE 2 (TIER FRESHNESS): guard grew (tier patch) — window widened to
+  // cover the whole function; the pinned guarantees are unchanged.
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 4000);
 
   // Verify the guard uses <= (not <), so equal seq is also protected
   assert.ok(fnBody.includes('myMutationSeq <= _authoritativeBalanceSeq'),
@@ -1075,7 +1083,8 @@ test('P9: Guard cleared when fresh GET arrives (no intervening mutation)', () =>
   // was in between), the guard is cleared so future GETs work normally.
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
-  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // PHASE 2 (TIER FRESHNESS): window widened (tier patch grew the guard).
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 4000);
   // The else branch clears the guard
   assert.ok(fnBody.includes('_authoritativeBalance = null'),
     'fetchWallet clears _authoritativeBalance when GET is fresh (else branch)');
@@ -1088,7 +1097,8 @@ test('P10: Guard works for debit mutations too (VPN purchase balance decreases)'
   // This works because the guard checks seq, not numeric comparison.
   const WALLET_SRC = fs.readFileSync(path.join(__dirname, '..', 'wallet.js'), 'utf8');
   const fnStart = WALLET_SRC.indexOf('async function fetchWallet');
-  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 2000);
+  // PHASE 2 (TIER FRESHNESS): window widened (tier patch grew the guard).
+  const fnBody = WALLET_SRC.substring(fnStart, fnStart + 4000);
   // Verify the guard does NOT compare balances numerically
   assert.ok(!fnBody.includes('data.balance > ') && !fnBody.includes('data.balance < '),
     'fetchWallet does NOT use numeric balance comparison (guard is seq-based, works for debits too)');

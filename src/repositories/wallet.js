@@ -583,10 +583,14 @@ export function createWalletRepository(deps) {
       timestamp: new Date().toISOString(),
     }));
 
+    // PHASE 2 (TIER FRESHNESS): newTier travels with newBalance so every
+    // caller (controller → API response → frontend) can show the post-claim
+    // tier immediately instead of a stale pre-claim tier.
     return {
       claimed: true,
       amount: amt,
       newBalance,
+      newTier: newBalance !== null ? getTierForBalance(newBalance) : null,
       txId,
       streak_day: newStreakDay,
       cycle_complete: cycleComplete,
@@ -712,8 +716,8 @@ export function createWalletRepository(deps) {
         [uid, txType, refId],
       );
       if (existing.rows.length > 0) {
-        // Already credited — return idempotent success
-        return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+        // Already credited — return idempotent success (no balance change → no tier change)
+        return { success: true, newBalance: null, newTier: null, txId: existing.rows[0].id, idempotent: true };
       }
     }
 
@@ -773,7 +777,7 @@ export function createWalletRepository(deps) {
         `SELECT id, amount FROM token_transactions WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed' LIMIT 1`,
         [uid, txType, refId],
       );
-      return { success: true, newBalance: null, txId: existing.rows[0]?.id, idempotent: true };
+      return { success: true, newBalance: null, newTier: null, txId: existing.rows[0]?.id, idempotent: true };
     }
 
     if (!txId) throw new Error('Failed to record transaction');
@@ -795,7 +799,10 @@ export function createWalletRepository(deps) {
       timestamp: new Date().toISOString(),
     }));
 
-    return { success: true, newBalance, txId };
+    // PHASE 2 (TIER FRESHNESS): newTier computed from the post-credit balance
+    // using the SAME canonical ladder (getTierForBalance) the read endpoints
+    // use — a single source of truth, no duplicate thresholds.
+    return { success: true, newBalance, newTier: getTierForBalance(newBalance), txId };
   }
 
   /**
@@ -850,7 +857,7 @@ export function createWalletRepository(deps) {
         [uid, txType, refId],
       );
       if (existing.rows.length > 0) {
-        return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+        return { success: true, newBalance: null, newTier: null, txId: existing.rows[0].id, idempotent: true };
       }
     }
 
@@ -902,7 +909,7 @@ export function createWalletRepository(deps) {
           [uid, txType, refId],
         );
         if (existing.rows.length > 0) {
-          return { success: true, newBalance: null, txId: existing.rows[0].id, idempotent: true };
+          return { success: true, newBalance: null, newTier: null, txId: existing.rows[0].id, idempotent: true };
         }
       }
       throw e;
@@ -950,7 +957,9 @@ export function createWalletRepository(deps) {
       timestamp: new Date().toISOString(),
     }));
 
-    return { success: true, newBalance, txId };
+    // PHASE 2 (TIER FRESHNESS): newTier travels with the post-debit balance
+    // (a debit can drop the user a tier — the UI must reflect that too).
+    return { success: true, newBalance, newTier: newBalance !== null ? getTierForBalance(newBalance) : null, txId };
   }
 
   /**
