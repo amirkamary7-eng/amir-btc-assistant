@@ -14,6 +14,48 @@ export function createReferralRepository(deps) {
 
   let _schemaVerified = false;
 
+  // ── REFERRAL LEVEL (independent from Wallet tier) ─────────────────────────
+  // Canonical Referral Level ladder. Basis: ACTIVE successful referrals
+  // (referrals with channel_verified = TRUE — the invitee actually joined).
+  // Deliberately independent from the Wallet tier ladder (Bronze/Silver/Gold/
+  // Diamond by AB balance in src/repositories/wallet.js TIERS): the two
+  // systems must never share a source. Platinum exists ONLY here (and in the
+  // shared display palette); the Wallet ladder stays 4-tier.
+  const REFERRAL_LEVELS = [
+    { name: 'Starter',  min: 0 },
+    { name: 'Bronze',   min: 3 },
+    { name: 'Silver',   min: 10 },
+    { name: 'Gold',    min: 25 },
+    { name: 'Platinum', min: 50 },
+    { name: 'Diamond',  min: 100 },
+  ];
+
+  /**
+   * Pure function: map an ACTIVE referral count to a Referral Level
+   * ({ current, next, progress, remaining }). Mirrors the trusted
+   * getTierForBalance shape/contract from the wallet repository — runtime
+   * calculation only, nothing persisted, no DB access.
+   *
+   *   Starter 0–2 · Bronze 3–9 · Silver 10–24 · Gold 25–49
+   *   Platinum 50–99 · Diamond 100+
+   */
+  function getReferralLevelForCount(activeCount) {
+    const count = Math.max(0, Math.floor(Number(activeCount) || 0));
+    for (let i = REFERRAL_LEVELS.length - 1; i >= 0; i--) {
+      if (count >= REFERRAL_LEVELS[i].min) {
+        const current = REFERRAL_LEVELS[i];
+        const next = REFERRAL_LEVELS[i + 1] || null;
+        return {
+          current: current.name,
+          next: next ? next.name : null,
+          progress: next ? Math.min(100, ((count - current.min) / (next.min - current.min)) * 100) : 100,
+          remaining: next ? Math.max(0, next.min - count) : 0,
+        };
+      }
+    }
+    return { current: 'Starter', next: 'Bronze', progress: 0, remaining: 3 };
+  }
+
   /**
    * Ensure referrals table has all required columns for future features.
    * Adds: status, metadata, updated_at, source, campaign_id.
@@ -125,13 +167,18 @@ export function createReferralRepository(deps) {
     );
     const row = result.rows[0] || {};
     const rewardPerInvite = Number(row.reward_per_invite || 0);
+    // REFERRAL LEVEL: derived at runtime from THIS query's active count
+    // (channel_verified = TRUE) via the canonical ladder above — zero extra
+    // queries, zero persistence. Independent from the wallet balance tier.
+    const activeCount = Number(row.active || 0);
     return {
       total: Number(row.total || 0),
-      active: Number(row.active || 0),
+      active: activeCount,
       rewarded: Number(row.rewarded || 0),
       flagged: Number(row.flagged || 0),
       reversed: Number(row.reversed || 0),
       pending: Number(row.total || 0) - Number(row.rewarded || 0),
+      level: getReferralLevelForCount(activeCount),
       // Use DB value if > 0, otherwise fall back to env var (no extra query)
       reward_per_invite: rewardPerInvite > 0 ? rewardPerInvite : Math.max(getNumericEnv(env, 'REFERRAL_TOKENS_PER_INVITE', 3), 0),
     };
@@ -221,5 +268,6 @@ export function createReferralRepository(deps) {
     getStats,
     getHistory,
     getLeaderboard,
+    getReferralLevelForCount,
   });
 }

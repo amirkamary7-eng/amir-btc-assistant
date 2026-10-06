@@ -69,7 +69,10 @@ export function createReferralHandlers(deps) {
     const isPremium = await _isPremiumSafe(env, authState.user.id);
     const rewardPerInvite = _getEffectiveReferralReward(isPremium);
     if (!isDatabaseConfigured(env)) {
-      return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, pending: 0, flagged: 0, reversed: 0, reward_per_invite: rewardPerInvite }, {}, env);
+      // REFERRAL LEVEL: no-DB fallback carries the canonical Starter level
+      // (0 active referrals) via the same pure ladder function as the DB
+      // branch — the response shape (level field) stays identical.
+      return jsonResponse({ status: 'success', total: 0, active: 0, rewarded: 0, pending: 0, flagged: 0, reversed: 0, reward_per_invite: rewardPerInvite, level: referralRepo.getReferralLevelForCount(0) }, {}, env);
     }
     try {
       const stats = await referralRepo.getStats(env, authState.user.id);

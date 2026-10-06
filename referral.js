@@ -15,7 +15,6 @@ const ReferralApp = (() => {
   let historyOffset = 0;
   let historyLoading = false;
   let wheelStatus = null;
-  let walletSummary = null; // for tier + league progress
   let _tokenLogo = null;
   // Wheel Modal state
   let wheelModalOpen = false;
@@ -141,6 +140,7 @@ const ReferralApp = (() => {
     invite_status: 'وضعیت دعوت',
     join_date: 'تاریخ عضویت',
     // League / Tier
+    tier_starter: 'استارتر',
     tier_bronze: 'برنز',
     tier_silver: 'نقره',
     tier_gold: 'طلایی',
@@ -270,6 +270,7 @@ const ReferralApp = (() => {
     conversion_rate: 'Conversion Rate',
     invite_status: 'Invite Status',
     join_date: 'Join Date',
+    tier_starter: 'Starter',
     tier_bronze: 'Bronze',
     tier_silver: 'Silver',
     tier_gold: 'Gold',
@@ -455,13 +456,12 @@ const ReferralApp = (() => {
     return 0;
   }
 
-  async function fetchWalletSummary() {
-    try {
-      const data = await window.apiFetch('/api/wallet/summary');
-      if (data && data.status === 'success') { walletSummary = data; return data; }
-    } catch (e) { console.warn('ReferralApp: fetchWalletSummary error', e); }
-    return null;
-  }
+  // REFERRAL LEVEL (independent from Wallet tier): the displayed balance
+  // comes from the referral's own lightweight path (/api/wallet/balance via
+  // fetchBalance below). The Level itself comes from /api/referrals/stats
+  // (stats.level — computed backend-side from the user's OWN active referral
+  // count). fetchWalletSummary()/summary.tier were REMOVED: the Referral
+  // "League" must never mirror the wallet AB-balance tier again.
 
   async function fetchWheelHistory() {
     try {
@@ -518,7 +518,9 @@ const ReferralApp = (() => {
     const totalEarned = (stats?.total_earned != null) ? stats.total_earned : (rewarded * rewardPerInvite);
     const conversionRate = totalInvites > 0 ? Math.round((activeInvites / totalInvites) * 100) : 0;
 
-    const tier = tierData || { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 };
+    // REFERRAL LEVEL default (pre-data fallback): Starter — NOT the wallet
+    // Bronze default. The level ladder starts at Starter (0 active referrals).
+    const tier = tierData || { current: 'Starter', next: 'Bronze', progress: 0, remaining: 3 };
     const tierKey = getTierKey(tier.current);
     const progressPct = tier.progress != null ? Math.max(0, Math.min(100, Number(tier.progress))) : 0;
     const progressText = tier.next
@@ -1258,7 +1260,7 @@ const ReferralApp = (() => {
       // are set directly to their final value (no from-0 animation).
       referralData = data;
       if (data.wheel) wheelStatus = data.wheel;
-      applyTierVars(page, data.tier?.current || 'Bronze');
+      applyTierVars(page, data.tier?.current || 'Starter');
       try {
         updateDataOnly(data);
       } catch (e) {
@@ -1275,7 +1277,7 @@ const ReferralApp = (() => {
 
     // Initial render (force=true): full DOM build + entry animations
     // Apply tier vars on the page wrapper for tier-aware coloring
-    applyTierVars(page, data.tier?.current || 'Bronze');
+    applyTierVars(page, data.tier?.current || 'Starter');
 
     page.innerHTML = buildPage(data);
 
@@ -1333,9 +1335,9 @@ const ReferralApp = (() => {
     // Tier (data-tier attribute + league name + progress bar + progress text)
     if (tier) {
       const heroEl = page.querySelector('.rc-hero');
-      if (heroEl) heroEl.setAttribute('data-tier', getTierKey(tier.current || 'Bronze'));
+      if (heroEl) heroEl.setAttribute('data-tier', getTierKey(tier.current || 'Starter'));
       const leagueNameEl = page.querySelector('.rc-hero-league-name');
-      if (leagueNameEl) leagueNameEl.textContent = displayTier(tier.current || 'Bronze');
+      if (leagueNameEl) leagueNameEl.textContent = displayTier(tier.current || 'Starter');
       const progressPct = tier.progress != null ? Math.max(0, Math.min(100, Number(tier.progress))) : 0;
       const progressFill = page.querySelector('.rc-hero-progress-fill');
       if (progressFill) progressFill.style.width = progressPct + '%';
@@ -1643,7 +1645,7 @@ const ReferralApp = (() => {
     if (_referralOpen) return;
     _referralOpen = true;
     applyDir(page);
-    applyTierVars(page, 'Bronze'); // default until summary loads
+    applyTierVars(page, 'Starter'); // REFERRAL LEVEL default until stats load
     page.classList.add('open');
     document.body.style.overflow = 'hidden';
 
@@ -1726,7 +1728,7 @@ const ReferralApp = (() => {
         fetchLeaderboard(),
         fetchWheelStatus(),
         fetchHistory(0),
-        fetchWalletSummary(),
+        fetchBalance(),
         fetchWheelHistory(),
       ]);
 
@@ -1738,11 +1740,16 @@ const ReferralApp = (() => {
       const leaderboard = results[1].status === 'fulfilled' ? results[1].value : null;
       const wheel = results[2].status === 'fulfilled' ? results[2].value : null;
       const historyRes = results[3].status === 'fulfilled' ? results[3].value : null;
-      const summary = results[4].status === 'fulfilled' ? results[4].value : null;
+      const balanceRes = results[4].status === 'fulfilled' ? results[4].value : null;
       const lastPrize = results[5].status === 'fulfilled' ? results[5].value : null;
 
-      const tier = summary?.tier || { current: 'Bronze', next: 'Silver', progress: 0, remaining: 1000 };
-      const balance = summary?.balance ?? 0;
+      // REFERRAL LEVEL (independent from Wallet tier): the level comes ONLY
+      // from the referral domain — stats.level, computed backend-side from
+      // the user's active referral count (channel_verified = TRUE). It must
+      // NEVER be sourced from /api/wallet/summary again: that was the bug
+      // where the Referral "League" mirrored the AB-balance wallet tier.
+      const tier = stats?.level || { current: 'Starter', next: 'Bronze', progress: 0, remaining: 3 };
+      const balance = Number(balanceRes) || 0;
 
       const data = {
         stats: stats || { total: 0, active: 0, rewarded: 0, pending: 0, reward_per_invite: 0, total_earned: 0 },
