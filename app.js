@@ -6208,6 +6208,105 @@ function buildWatchTrendSVG(changePercent, symbol) {
     </svg>`;
 }
 
+// ============================================================================
+// WATCHLIST SEARCH-ONLY COINS (render survival after reload)
+// ============================================================================
+// ROOT CAUSE: a coin found via /api/market/search (the 1700+ MEXC index)
+// lives OUTSIDE the Top-200 `allCoins` list. It IS persisted to the backend
+// watchlist (persistWatchlist → PUT /api/watchlist), but renderWatchlist()
+// built `watchCoins` ONLY from allCoins + allForexPairs — so after every
+// reload/render the card silently disappeared even though the backend still
+// stores the symbol.
+//
+// FIX (behavior-preserving): renderWatchlist() keeps its synchronous
+// contract (all 13 existing call sites stay untouched) and merges a THIRD
+// source — search-only watched coins — read instantly from the existing
+// `search_coin_{SYMBOL}` cache (the same cache the search tab populates).
+// Any watched symbol that is in neither Top-200 nor Forex nor the cache is
+// hydrated asynchronously through the EXISTING public /api/market/search
+// endpoint, and renderWatchlist() is re-invoked once the batch settles —
+// the exact re-render pattern already used after allCoins/allForexPairs
+// finish loading (see the loadMarketData/loadForexData .then() chains).
+//
+// Request-safety rules (covered by tests/watchlist-detail-chart-test.cjs):
+// - Zero requests when no search-only coin is watched (behavior unchanged).
+// - One in-flight request per symbol — duplicates across renders collapse.
+// - Failed/unknown symbols back off 120s (no request storm; honors the
+//   endpoint's MKT-010 rate limiting and the 60s market polling).
+// - A single coin failing never removes or blocks the other watch items.
+// - Top-200/Forex coins are never fetched through this path.
+// - Stale responses cannot overwrite newer state: rendering always re-reads
+//   allCoins/allForexPairs/watchlist/Cache at re-render time.
+const _searchOnlyInflight = {};   // symbol -> Promise (in-flight request dedup)
+const _searchOnlyFailUntil = {}; // symbol -> epoch ms (failure backoff)
+
+/**
+ * Watched symbols that live outside Top-200 + Forex (search-only coins).
+ * Returns [] until Top-200 data has loaded — before that a Top-200 coin
+ * cannot be told apart from a search-only coin, and fetching Top-200 coins
+ * through the search endpoint is forbidden.
+ */
+function getSearchOnlyWatchSymbols() {
+    if (!allCoins.length) return [];
+    const known = new Set(allCoins.map(c => c.symbol));
+    for (const f of allForexPairs) known.add(f.symbol);
+    return watchlist.filter(sym => typeof sym === 'string' && sym && !known.has(sym));
+}
+
+/**
+ * Hydrate search-only watched coins into the existing `search_coin_{SYMBOL}`
+ * cache. Cache first — /api/market/search is only hit on cache miss/expiry,
+ * once per symbol, and only for symbols that are actually in the watchlist.
+ * Fire-and-forget: safe to call from every renderWatchlist() invocation.
+ */
+function ensureSearchOnlyCoinsHydrated() {
+    const missing = getSearchOnlyWatchSymbols().filter(sym =>
+        !Cache.get(`search_coin_${sym}`)                    // already cached → no request
+        && !_searchOnlyInflight[sym]                       // already in-flight → dedup
+        && Date.now() >= (_searchOnlyFailUntil[sym] || 0)  // failure backoff window
+    );
+    if (!missing.length) return; // no search-only coins → zero extra requests
+    for (const sym of missing) {
+        _searchOnlyInflight[sym] = (async () => {
+            try {
+                // PUBLIC endpoint — plain fetch, exactly like the search tab
+                // (apiFetch requires Telegram auth; search must work for guests).
+                const res = await fetch(`${API_BASE}/api/market/search?q=${encodeURIComponent(sym)}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error(`market search HTTP ${res.status}`);
+                const data = await res.json();
+                const hit = (data && Array.isArray(data.results))
+                    ? data.results.find(c => c.symbol === sym) // exact symbol match only
+                    : null;
+                if (!hit) { _searchOnlyFailUntil[sym] = Date.now() + 120000; return; } // unknown symbol — back off
+                // Same coin shape the search tab already caches (see its
+                // /api/market/search result mapping) so openCoinDetail's
+                // search-cache fallback keeps working for these coins too.
+                Cache.set(`search_coin_${sym}`, {
+                    symbol: hit.symbol,
+                    name: hit.name || hit.symbol,
+                    priceUsd: hit.priceUsd || 0,
+                    changePercent24Hr: hit.changePercent24Hr || 0,
+                    volumeUsd24Hr: hit.volume || 0,
+                    marketCapUsd: 0, // MEXC doesn't provide market cap
+                    rank: hit.rank || 0,
+                    image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(hit.symbol).toLowerCase()}@2x.png`,
+                    _type: 'crypto',
+                }, 300); // 5 min — same TTL as the search tab's cache
+            } catch (_) {
+                _searchOnlyFailUntil[sym] = Date.now() + 120000; // transient failure — retry on a later render
+            } finally {
+                delete _searchOnlyInflight[sym];
+            }
+        })();
+    }
+    // Re-render once, from CURRENT state, after this batch settles. A stale
+    // fetch result can never overwrite newer state: renderWatchlist() always
+    // re-reads allCoins/allForexPairs/watchlist/Cache at call time.
+    Promise.allSettled(Object.values(_searchOnlyInflight)).then(() => {
+        renderWatchlist();
+    });
+}
+
 function renderWatchlist() {
     const grid = $('watchlist-grid');
     if (!grid) return;
@@ -6223,8 +6322,21 @@ function renderWatchlist() {
         image: null, // Forex uses letter-based icon fallback
         _isForex: true,
     }));
-    // Merge: crypto first, then forex, no limit (horizontal scroll handles overflow)
-    const watchCoins = [...cryptoWatch, ...forexWatch];
+    // SEARCH-ONLY FIX: coins added via /api/market/search live OUTSIDE
+    // Top-200 + Forex. Read them instantly from the existing
+    // `search_coin_{SYMBOL}` cache, and hydrate — fire-and-forget — any
+    // watched symbol that has no data yet (see ensureSearchOnlyCoinsHydrated
+    // above). renderWatchlist() itself stays synchronous: no call-site
+    // changes, and the post-hydration re-render reuses the same pattern as
+    // the allCoins/allForexPairs load callbacks.
+    ensureSearchOnlyCoinsHydrated();
+    const searchOnlyWatch = getSearchOnlyWatchSymbols()
+        .map(sym => Cache.get(`search_coin_${sym}`))
+        .filter(Boolean);
+
+    // Merge: crypto first, then forex, then search-only coins (existing
+    // Top-200/Forex display order is untouched), no limit (horizontal scroll handles overflow)
+    const watchCoins = [...cryptoWatch, ...forexWatch, ...searchOnlyWatch];
 
     if (!allCoins.length && !allForexPairs.length) {
         // Market data not loaded yet — show skeleton (preserve CLS)
