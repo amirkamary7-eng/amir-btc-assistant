@@ -1,10 +1,10 @@
 /**
- * H3 Fix — start-diag Production Gate — Regression Tests
+ * H3 Fix — start-diag Dev-Only Gate — Regression Tests
  *
- * Verifies that /api/start-diag (both GET and POST) is gated behind
- * non-production (returns 404 when APP_ENV=production), while remaining
- * accessible in development. Mirrors the H2 fix pattern for
- * /api/notif-diag-report and /api/notif-trace-results.
+ * Verifies that /api/start-diag (both GET and POST) is gated by
+ * !isDevMode(env) (returns 404 for staging AND production), while remaining
+ * accessible only in APP_ENV=development. Unknown/unset APP_ENV fails CLOSED.
+ * (AP-2, Security Batch 2 — superseded the earlier production-only gate.)
  *
  * Run: node --test start-diag-gate-test.cjs
  */
@@ -30,13 +30,12 @@ test('H3-02: /api/start-diag POST route exists', () => {
     'POST route must exist');
 });
 
-test('H3-03: production gate exists (returns 404 in production)', () => {
+test('H3-03: dev-only gate exists (returns 404 outside development)', () => {
   const routeIdx = SRC.indexOf("url.pathname === '/api/start-diag'");
   assert.ok(routeIdx > -1, 'route must exist');
   // The gate is in a separate if block checking ONLY pathname (before method checks)
   const gateBlock = SRC.slice(routeIdx, routeIdx + 500);
-  assert.ok(gateBlock.includes('_isProd'), 'must have _isProd variable');
-  assert.ok(gateBlock.includes("'production'"), 'must check APP_ENV === production');
+  assert.ok(gateBlock.includes('!isDevMode(env)'), 'must use the !isDevMode(env) gate');
   assert.ok(gateBlock.includes('status: 404'), 'must return 404');
   assert.ok(gateBlock.includes('Not available in production'),
     'must return the standard not-available message');
@@ -96,11 +95,11 @@ test('H3-10: gate mirrors H2 (/api/notif-diag-report) pattern', () => {
   const h2Gate = SRC.indexOf('H2 FIX');
   const h3Gate = SRC.indexOf('H3 FIX');
   assert.ok(h2Gate > -1 && h3Gate > -1, 'both H2 and H3 gates exist');
-  // Both use the same pattern: _isProd + 404 + Not available in production
+  // Both use the same pattern: !isDevMode + 404 + Not available in production
   const h2Block = SRC.slice(h2Gate, h2Gate + 800);
   const h3Block = SRC.slice(h3Gate, h3Gate + 800);
-  assert.ok(h2Block.includes('_isProd') && h3Block.includes('_isProd'),
-    'both use _isProd pattern');
+  assert.ok(h2Block.includes('!isDevMode') && h3Block.includes('!isDevMode'),
+    'both use !isDevMode pattern');
   assert.ok(h2Block.includes('status: 404') && h3Block.includes('status: 404'),
     'both return 404');
 });
@@ -109,11 +108,17 @@ test('H3-10: gate mirrors H2 (/api/notif-diag-report) pattern', () => {
 // SECTION 2 — Behavioral simulations
 // ═══════════════════════════════════════════════════════════════════════════
 
+// isDevMode semantics (S-01 / AP-2): true ONLY for APP_ENV='development';
+// staging/production/unset all fail CLOSED.
+function isDevMode(env) {
+  const v = String(env.APP_ENV || '').trim().toLowerCase();
+  return v === 'development';
+}
+
 test('SIM-01: APP_ENV=production + GET /api/start-diag → 404', () => {
   const env = { APP_ENV: 'production' };
-  const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-  assert.ok(_isProd, 'production detected');
-  if (_isProd) {
+  assert.ok(!isDevMode(env), 'production — gate TRIGGERS');
+  if (!isDevMode(env)) {
     const response = { status: 'error', message: 'Not available in production' };
     assert.equal(404, 404, 'returns 404');
     assert.equal(response.message, 'Not available in production');
@@ -122,33 +127,31 @@ test('SIM-01: APP_ENV=production + GET /api/start-diag → 404', () => {
 
 test('SIM-02: APP_ENV=production + POST /api/start-diag → 404', () => {
   const env = { APP_ENV: 'production' };
-  const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-  assert.ok(_isProd, 'production detected');
+  assert.ok(!isDevMode(env), 'production — gate TRIGGERS');
   // The gate checks pathname ONLY (not method) — POST is also blocked
-  if (_isProd) {
+  if (!isDevMode(env)) {
     assert.equal(404, 404, 'POST also returns 404');
   }
 });
 
 test('SIM-03: APP_ENV=development + GET → handler accessible', () => {
   const env = { APP_ENV: 'development' };
-  const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-  assert.equal(_isProd, false, 'development — gate does NOT trigger');
-  assert.ok(!_isProd, 'GET handler runs');
+  assert.equal(isDevMode(env), true, 'development — gate does NOT trigger');
+  assert.ok(isDevMode(env), 'GET handler runs');
 });
 
 test('SIM-04: APP_ENV=development + POST → handler accessible', () => {
   const env = { APP_ENV: 'development' };
-  const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-  assert.equal(_isProd, false, 'development — gate does NOT trigger');
-  assert.ok(!_isProd, 'POST handler runs');
+  assert.equal(isDevMode(env), true, 'development — gate does NOT trigger');
+  assert.ok(isDevMode(env), 'POST handler runs');
 });
 
-test('SIM-05: APP_ENV unset → handler accessible (gate does NOT trigger)', () => {
+test('SIM-05: APP_ENV unset → gate TRIGGERS (fail-closed, AP-2)', () => {
   const env = {};
-  const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-  assert.equal(_isProd, false, 'unset env — gate does NOT trigger');
-  assert.ok(!_isProd, 'handler accessible');
+  assert.equal(isDevMode(env), false, 'unset env — isDevMode is false');
+  // AP-2 (Security Batch 2): unknown/unset APP_ENV must FAIL CLOSED —
+  // the endpoint returns 404 instead of exposing the diagnostics.
+  assert.ok(!isDevMode(env), 'gate triggers — endpoint NOT accessible');
 });
 
 test('SIM-06: gate is before both handlers (ordering)', () => {

@@ -6486,8 +6486,10 @@ export default {
           const expectedSecret = env.ALERTS_CRON_SHARED_SECRET || '';
           let authorized = false;
 
-          // Method 1: shared secret
-          if (expectedSecret && providedSecret === expectedSecret) {
+          // Method 1: shared secret (AP-3 FIX, Security Batch 2: timing-safe
+          // comparison via the canonical timingSafeEqualSecret helper — no
+          // length leak, same empty-secret semantics as the old === check).
+          if (expectedSecret && timingSafeEqualSecret(providedSecret, expectedSecret)) {
             authorized = true;
           }
 
@@ -6806,7 +6808,11 @@ export default {
       }
 
       // ── /api/start-diag — [START-E2E] diagnostic endpoint ──
-      // Public (no auth) — same policy as /api/cron-monitor, /api/news-ai-monitor.
+      // DEV-ONLY (AP-2 FIX, Security Batch 2): gated by !isDevMode(env) so both
+      // staging and production return 404. The GET handler exposes webhook
+      // info + config booleans and the POST handler triggers setWebhook —
+      // neither is authenticated, so they must not be reachable outside local
+      // development (wrangler tail / Cloudflare dashboard serve prod).
       // PURPOSE: Trace the /start path end-to-end WITHOUT wrangler tail.
       //
       // Returns:
@@ -6821,15 +6827,14 @@ export default {
       //      Shows the actual /start handler flow: command_detected →
       //      membership_resolved → reply_built → sendMessage_started →
       //      sendMessage_completed/failed → handler_complete/error.
-      // H3 FIX: Gate /api/start-diag behind non-production (mirrors H2 fix
+      // H3 FIX: Gate /api/start-diag behind dev-only mode (mirrors H2 fix
       // for /api/notif-diag-report and the /api/notif-trace-results pattern
       // at line 14399). The GET handler exposes webhook info + config booleans;
       // the POST handler triggers setWebhook. Both were unauthenticated. The
       // diagnostic endpoints are not needed in production — wrangler tail and
       // the Cloudflare dashboard serve the same purpose.
       if (url.pathname === '/api/start-diag') {
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        if (!isDevMode(env)) {
           return jsonResponse(
             { status: 'error', message: 'Not available in production' },
             { status: 404 },
@@ -7396,8 +7401,11 @@ export default {
       // The Worker still rate-limits by client IP (line 4149) so anonymous
       // access cannot be abused.
       const _DATA_PATHS = /^\/api\/(forex|analyses|farsi-news)(\/|$)/;
-      const _isProdEnv = String(env.APP_ENV || '').toLowerCase() === 'production';
-      if (_isProdEnv && _DATA_PATHS.test(url.pathname)) {
+      // AP-1 FIX (Security Batch 2): gate on !isDevMode(env) instead of the old
+      // prod-only check. isDevMode() is true ONLY for APP_ENV='development'
+      // (exact match, S-01 semantics), so staging is now gated like production and
+      // an unknown/unset APP_ENV FAILS CLOSED (gate active) rather than open.
+      if (!isDevMode(env) && _DATA_PATHS.test(url.pathname)) {
         const _dataAuth = await authenticateTelegramRequest(request, env);
         if (_dataAuth.error) return _dataAuth.error;
         const _dataJoinBlocked = await requireChannelJoin(_dataAuth.user, env);
@@ -7668,16 +7676,17 @@ export default {
       // ── NOTIF DIAG REPORT — temporary diagnostic endpoint for RCA ──
       // POST: stores the report in the DATABASE (KV quota is exhausted).
       // GET: returns the stored report.
-      // No auth required (the report contains only notification IDs + timestamps, no PII).
+      // DEV-ONLY (AP-2 FIX, Security Batch 2): gated by !isDevMode(env) — this
+      // endpoint was previously completely UNAUTHENTICATED (no auth, no
+      // body-size limit, no rate limit) and accepted arbitrary JSON writes.
+      // Staging and production both return 404.
       // TEMPORARY — will be removed after RCA is closed.
       if (url.pathname === '/api/notif-diag-report') {
-        // H2 FIX: Gate this diagnostic endpoint behind non-production (mirrors
-        // /api/notif-trace-results at line 15199). The RCA this endpoint served
+        // H2 FIX: Gate this diagnostic endpoint behind dev-only mode (mirrors
+        // /api/notif-trace-results). The RCA this endpoint served
         // (notification stale-read, Option C, commit 2745906) is closed and
-        // verified in production. The endpoint is no longer needed in production
-        // and was unauthenticated (no auth, no body-size limit, no rate limit).
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // verified in production. The endpoint is no longer needed in production.
+        if (!isDevMode(env)) {
           return jsonResponse(
             { status: 'error', message: 'Not available in production' },
             { status: 404 },
@@ -7764,9 +7773,11 @@ export default {
       //   - GET /api/membership/requirement (requirement config)
       //   - GET /api/calendar/events (public calendar data)
       const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
-      const _isProduction = String(env.APP_ENV || '').toLowerCase() === 'production';
 
-      if (_isProduction && PROTECTED_PATHS.test(url.pathname)) {
+      // AP-1 FIX (Security Batch 2): gate on !isDevMode(env) instead of the old
+      // prod-only check — staging is gated like production and an unknown/unset
+      // APP_ENV fails CLOSED (auth required) rather than bypassing auth.
+      if (!isDevMode(env) && PROTECTED_PATHS.test(url.pathname)) {
         const _authState = await authenticateTelegramRequest(request, env);
         if (_authState.error) return _authState.error;
         _protectedUser = _authState.user;
