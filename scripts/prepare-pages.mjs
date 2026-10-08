@@ -273,6 +273,21 @@ async function writeVersionJson(buildId) {
 }
 
 /**
+ * HD-5 FIX (Security Batch 3): the effective Worker API origin for CSP
+ * connect-src. Reads WORKER_API_URL from the build environment (same source
+ * injectApiBase uses); falls back to the hardcoded production Worker URL so
+ * `npm run cf:pages:prepare` works without env vars, and the CSP-RO
+ * connect-src always names a concrete origin.
+ */
+function effectiveWorkerApiOrigin() {
+  const workerApiUrl = process.env.WORKER_API_URL?.trim();
+  if (workerApiUrl) {
+    try { return new URL(workerApiUrl).origin; } catch { /* fall through */ }
+  }
+  return 'https://amir-btc-assistant-api-production.amirkamari9939.workers.dev';
+}
+
+/**
  * Write Cloudflare Pages _headers file with precise cache rules.
  * 
  * Key rules:
@@ -286,6 +301,29 @@ async function writeHeadersFile() {
   const headersContent = [
     '# Cloudflare Pages cache headers',
     '# See: https://developers.cloudflare.com/pages/platform/headers/',
+    '',
+    '# ============================================================',
+    '# HD-5/HD-4 (Security Batch 3): GLOBAL document-level security headers.',
+    '# Applies to every path. Cloudflare Pages merges matching rules, so this',
+    '# block deliberately sets NO Cache-Control — the 1-year immutable rules',
+    '# for hashed assets below stay untouched.',
+    '#  - nosniff: no MIME sniffing anywhere.',
+    '#  - Referrer-Policy: strict-origin-when-cross-origin.',
+    '#  - Permissions-Policy: deny unused powerful features; clipboard-write',
+    '#    is KEPT (self) — the copy-to-clipboard buttons need it.',
+    '#  - ENFORCED CSP: minimal, frame-ancestors only (self + Telegram web',
+    '#    clients t.me/web.telegram.org — mobile/desktop apps use a native',
+    '#    WebView top-level navigation, unaffected by frame-ancestors).',
+    '#    frame-ancestors is IGNORED in Report-Only, hence its own header.',
+    '#  - CSP-Report-Only: full policy for monitoring before enforcement',
+    '#    (inline handlers/scripts require a nonce/hash migration first).',
+    '# ============================================================',
+    '/*',
+    '  X-Content-Type-Options: nosniff',
+    '  Referrer-Policy: strict-origin-when-cross-origin',
+    '  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), midi=(), xr-spatial-tracking=(), idle-detection=(), clipboard-read=(), clipboard-write=(self), interest-cohort=()',
+    "  Content-Security-Policy: frame-ancestors 'self' https://web.telegram.org https://t.me",
+    `  Content-Security-Policy-Report-Only: object-src 'none'; base-uri 'self'; script-src 'self' 'unsafe-inline' https://telegram.org https://s3.tradingview.com; img-src 'self' data: https:; connect-src 'self' ${effectiveWorkerApiOrigin()} https://scanner.tradingview.com; frame-src https://*.tradingview.com; form-action 'self'; worker-src 'none'; manifest-src 'none'; media-src 'none'`,
     '',
     '# ============================================================',
     '# CRITICAL: index.html — NEVER cache',

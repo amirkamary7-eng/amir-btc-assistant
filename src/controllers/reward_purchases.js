@@ -77,6 +77,18 @@ export function createRewardPurchaseHandlers(deps) {
     catch { return new Date().toISOString().slice(0, 10); }
   }
 
+  // TG-1 FIX (Batch 1): Telegram HTML-escape for admin-supplied strings that are
+  // interpolated into parse_mode:'HTML' messages. Per the Telegram Bot API docs,
+  // only & < > must be escaped inside message text — quotes are inert there.
+  // Applied at the OUTPUT boundary only: fulfillPurchase() still stores the RAW
+  // vpn_link so DB behavior is unchanged.
+  function _escapeTelegramHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   async function _isPremiumSafe(env, userId) {
     if (!membershipAuthority) return false;
     try {
@@ -558,7 +570,7 @@ export function createRewardPurchaseHandlers(deps) {
       const trackingId = purchase.tracking_id;
       // Dynamic duration label from actual duration_days
       const durationLabel = purchase.duration_days >= 30 ? '۱ ماه' : '۷ روز';
-      const deliveryMsg = `🎉 اشتراک VPN شما آماده است\n\n📦 بسته: ${purchase.plan_name || `VPN ${purchase.vpn_gb}GB`}\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n🔗 لینک دریافت:\n${vpnLink}\n\n💙 از همراهی شما با Amir BTC ممنونیم.`;
+      const deliveryMsg = `🎉 اشتراک VPN شما آماده است\n\n📦 بسته: ${purchase.plan_name || `VPN ${purchase.vpn_gb}GB`}\n⏳ اعتبار: ${durationLabel}\n🆔 کد رهگیری: ${trackingId}\n\n🔗 لینک دریافت:\n${_escapeTelegramHtml(vpnLink)}\n\n💙 از همراهی شما با Amir BTC ممنونیم.`;
 
       // FIX 12: Send Telegram message FIRST, then mark fulfilled.
       // If Telegram fails, purchase stays pending → admin can retry.

@@ -891,10 +891,30 @@ export function createAssistantHandlers(deps) {
     return sanitized;
   }
 
-  function extractAssistantImageBase64(imageData) {
-    if (typeof imageData !== 'string' || !imageData) return null;
-    if (imageData.includes(',')) return imageData.split(',', 2)[1] || null;
-    return imageData;
+  // UP-8 FIX (Security Batch 6): MIME allowlist + structured parse for chat
+  // images. Previously the declared MIME was DISCARDED (first-comma split)
+  // and every image was hardcoded as image/jpeg downstream. Now the data-URI
+  // form is parsed with a strict regex, the MIME must be allowlisted, and
+  // the REAL declared MIME is forwarded to the provider. The legacy raw
+  // base64 form (no data: prefix, no comma) is still accepted and labeled
+  // image/jpeg — the pre-change behavior, preserved for old clients.
+  // Regex-only validation: no decode/processing is added server-side.
+  const ASSISTANT_IMAGE_MIME_ALLOWLIST = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+  function parseAssistantChatImage(imageData) {
+    if (typeof imageData !== 'string' || !imageData) return { ok: false, reason: 'image_invalid' };
+    // Data-URI form: data:<mime>;base64,<payload>
+    const m = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,(.+)$/i.exec(imageData);
+    if (m) {
+      const mime = m[1].toLowerCase();
+      if (!ASSISTANT_IMAGE_MIME_ALLOWLIST.has(mime)) return { ok: false, reason: 'image_type_unsupported' };
+      if (!m[2]) return { ok: false, reason: 'image_invalid' };
+      return { ok: true, base64: m[2], mime };
+    }
+    // A comma WITHOUT the data: prefix is malformed (not a data-URI, not raw base64)
+    if (imageData.includes(',')) return { ok: false, reason: 'image_invalid' };
+    // Legacy raw base64 (no prefix, no comma) — accepted, labeled image/jpeg
+    return { ok: true, base64: imageData, mime: 'image/jpeg' };
   }
 
   function sanitizeContextField(value) {
@@ -1041,11 +1061,12 @@ export function createAssistantHandlers(deps) {
   // FINAL AUDIT FIX: Gemini was completely removed in be0482d. This restores it
   // for Chat ONLY (text fallback + vision/image). News AI still has NO Gemini.
   // Gemini circuit key: 'chat-gemini' (isolated from News AI + Groq router).
-  async function callGeminiChat(env, prompt, imageBase64) {
+  async function callGeminiChat(env, prompt, imageBase64, imageMime = 'image/jpeg') {
     const parts = [{ text: prompt }];
     if (imageBase64) {
-      parts.push({ inline_data: { mime_type: 'image/jpeg', data: imageBase64 } });
-      console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} partsCount=${parts.length} model=gemini-3.5-flash`);
+      // UP-8: forward the REAL declared MIME (was hardcoded image/jpeg)
+      parts.push({ inline_data: { mime_type: imageMime, data: imageBase64 } });
+      console.log(`[ChatAI] Gemini vision request: hasImage=true imageBase64Len=${imageBase64.length} imageMime=${imageMime} partsCount=${parts.length} model=gemini-3.5-flash`);
     }
     const contents = [{ parts }];
     const systemInstruction = { parts: [{ text: ASSISTANT_SYSTEM_PROMPT }] };
@@ -1225,7 +1246,7 @@ export function createAssistantHandlers(deps) {
   // Chat AI v2 Fix 8: generateAssistantReply now receives userMessage so
   // validateChatResponse can detect explicit CJK-language questions and
   // skip CJK rejection for those (language-aware validation).
-  async function generateAssistantReply(env, prompt, imageBase64, historyLen, userMessage) {
+  async function generateAssistantReply(env, prompt, imageBase64, historyLen, userMessage, imageMime = 'image/jpeg') {
     // Chat AI v2 Fix 2: Validation runs INSIDE the provider loop, not after it.
     // If a provider's response fails validation, the next provider is tried.
     // This prevents "در دسترس نیست" when one provider returns bad output but
@@ -1233,7 +1254,7 @@ export function createAssistantHandlers(deps) {
     const hasImage = Boolean(imageBase64);
 
     const providers = hasImage ? [
-      ['gemini', () => callGeminiChat(env, prompt, imageBase64), true],
+      ['gemini', () => callGeminiChat(env, prompt, imageBase64, imageMime), true],
     ] : [
       ['groq', () => callGroqChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_GROQ', true) : true],
       ['openrouter', () => callOpenRouterChat(env, prompt), isNewsProviderEnabled ? isNewsProviderEnabled(env, 'NEWS_PROVIDER_OPENROUTER', true) : true],
@@ -2198,6 +2219,19 @@ export function createAssistantHandlers(deps) {
     if (typeof payload.image === 'string' && payload.image.length > 1400000) {
       return jsonResponse({ status: 'error', reason: 'image_too_large', message: 'حجم تصویر نباید بیشتر از ۱ مگابایت باشد' }, { status: 422 }, env);
     }
+    // UP-8: parse + validate the image payload BEFORE any quota accounting —
+    // rejected input must consume neither the daily message quota nor the
+    // daily image quota. Same 422 + reason + Persian message semantics as
+    // image_too_large above.
+    let parsedImage = null;
+    if (payload.image) {
+      parsedImage = parseAssistantChatImage(payload.image);
+      if (!parsedImage.ok) {
+        return jsonResponse({ status: 'error', reason: parsedImage.reason, message: parsedImage.reason === 'image_type_unsupported'
+          ? 'فرمت تصویر پشتیبانی نمی‌شود (فقط JPEG، PNG، WebP و GIF)'
+          : 'تصویر ارسالی نامعتبر است' }, { status: 422 }, env);
+      }
+    }
 
     const userId = String(auth.user.id);
     const hasImage = Boolean(payload.image);
@@ -2275,7 +2309,7 @@ export function createAssistantHandlers(deps) {
     await recordRateLimitUsage(env, userId, hasImage);
 
     try {
-      const imageBase64 = extractAssistantImageBase64(payload.image);
+      const imageBase64 = parsedImage ? parsedImage.base64 : null;
       const history = normalizeAssistantHistory(payload.history);
       const context = faqContext; // reuse already-parsed context (parsed before FAQ check)
       let articleContext = null;
@@ -2312,7 +2346,7 @@ export function createAssistantHandlers(deps) {
       console.log(`[ChatAI] userId=${userId} intent=${intent} historyEntries=${history.length} promptChars=${prompt.length} approxTokens=${Math.ceil(prompt.length / 3)} hasImage=${hasImage} imageBase64Len=${imageBase64?.length || 0} providerRouting=${hasImage ? 'vision' : 'text'}`);
       // Chat AI v2 Fix 8: pass userMessage so validateChatResponse can be
       // language-aware (skip CJK rejection when user asked about CJK).
-      const result = await generateAssistantReply(env, prompt, imageBase64, history.length, message);
+      const result = await generateAssistantReply(env, prompt, imageBase64, history.length, message, parsedImage ? parsedImage.mime : 'image/jpeg');
       console.log(`[ChatAI] responseReceived provider=${result.provider} replyLen=${result.reply?.length || 0} attachmentCleared=${hasImage}`);
 
       let reply = result.reply;

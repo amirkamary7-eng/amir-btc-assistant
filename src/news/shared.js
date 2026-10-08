@@ -69,15 +69,31 @@ export function extractFirstMatch(text, pattern) {
   return capturedValue ? decodeHtmlEntities(capturedValue.trim()) : '';
 }
 
+// EX-2 FIX (Security Batch 5): scheme validation for extracted news images.
+// The URL comes from third-party RSS content (img src / enclosure) and must
+// never reach the frontend as a javascript:/data:/blob:/vbscript:/file: or
+// relative URL. Only http(s) and protocol-relative // URLs pass; anything
+// else (plus anything over 2048 chars) falls back to the default image.
+// Self-contained ON PURPOSE: tests/news-behavioral-test.cjs evals this
+// function standalone from source.
+function _okScheme(u) {
+  if (!u || typeof u !== 'string') return false;
+  const s = u.trim();
+  if (!s || s.length > 2048) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  if (s.startsWith('//')) return true; // protocol-relative
+  return false;
+}
+
 export function extractImageUrl(descriptionHtml, itemBlock) {
   // 1. Check for <img src="..."> inside description HTML
   const imgMatch = String(descriptionHtml || '').match(/src="([^"]+)"/i);
-  if (imgMatch) return imgMatch[1];
+  if (imgMatch && _okScheme(imgMatch[1])) return imgMatch[1].trim();
 
   // 2. Check for <enclosure url="..."> (used by IRNA, ISNA, many Persian feeds)
   if (itemBlock) {
     const enclosureMatch = String(itemBlock).match(/<enclosure[^>]+url="([^"]+)"/i);
-    if (enclosureMatch) return enclosureMatch[1];
+    if (enclosureMatch && _okScheme(enclosureMatch[1])) return enclosureMatch[1].trim();
   }
 
   return 'https://images.cryptocompare.com/news/default/bitcoin.png';

@@ -27,6 +27,8 @@ export function createMembershipHandlers(deps) {
     notificationService,
     sendTelegramMessage,
     resolveWebAppUrl,
+    // HD-6 FIX (Security Batch 3): withCors for CSV export headers.
+    withCors,
     // PHASE 5: Optional cosmetics repo for active cosmetic in status response
     cosmeticsRepo,
     // PHASE 7A: MembershipAuthority — entitlement cache invalidation.
@@ -683,15 +685,23 @@ export function createMembershipHandlers(deps) {
         const now = new Date().toISOString();
         const txQueries = [];
 
-        // Update user
-        const userSets = [`membership_status = '${newStatus}'`, 'updated_at = NOW()'];
-        if (newLevel) userSets.unshift(`membership_level = '${newLevel}'`);
-        if (newSource) userSets.unshift(`membership_source = '${newSource}'`);
-        if (action === 'approve') { userSets.push(`approved_by = '${auth.user.id}'`); userSets.push(`approved_at = '${now}'`); userSets.push('expire_at = NULL'); }
-        if (action === 'expire') userSets.push(`expire_at = '${now}'`);
+        // Update user (DB-1: fully parameterized SET build — same column
+        // order as before: source?, level?, status, updated_at, extras)
+        const sb = newSetBuilder();
+        if (newSource) sb.addParam('membership_source', newSource);
+        if (newLevel) sb.addParam('membership_level', newLevel);
+        sb.addParam('membership_status', newStatus);
+        sb.addLiteral('updated_at', 'NOW()');
+        if (action === 'approve') {
+          sb.addParam('approved_by', String(auth.user.id));
+          sb.addParam('approved_at', now);
+          sb.addLiteral('expire_at', 'NULL');
+        }
+        if (action === 'expire') sb.addParam('expire_at', now);
+        sb.params.push(req.telegram_id);
         txQueries.push({
-          sql: `UPDATE membership_users SET ${userSets.join(', ')} WHERE telegram_id = $1`,
-          params: [req.telegram_id],
+          sql: `UPDATE membership_users SET ${sb.sql()} WHERE telegram_id = $${sb.params.length}`,
+          params: sb.params,
         });
 
         // Update request (for approve/reject/suspend/reactivate)
@@ -827,17 +837,23 @@ export function createMembershipHandlers(deps) {
             const newSource = action === 'approve' ? 'EXCHANGE' : (user?.membership_source || 'MANUAL');
 
             const txQueries = [];
-            const userSets = [`membership_status = '${newStatus}'`, 'updated_at = NOW()'];
+            // DB-1: fully parameterized SET build (same column order as before)
+            const sb = newSetBuilder();
             if (action === 'approve') {
-              userSets.unshift(`membership_level = 'VIP'`);
-              userSets.unshift(`membership_source = 'EXCHANGE'`);
-              userSets.push(`approved_by = '${auth.user.id}'`);
-              userSets.push(`approved_at = '${now}'`);
-              userSets.push('expire_at = NULL');
+              sb.addParam('membership_source', 'EXCHANGE');
+              sb.addParam('membership_level', 'VIP');
             }
+            sb.addParam('membership_status', newStatus);
+            sb.addLiteral('updated_at', 'NOW()');
+            if (action === 'approve') {
+              sb.addParam('approved_by', String(auth.user.id));
+              sb.addParam('approved_at', now);
+              sb.addLiteral('expire_at', 'NULL');
+            }
+            sb.params.push(req.telegram_id);
             txQueries.push({
-              sql: `UPDATE membership_users SET ${userSets.join(', ')} WHERE telegram_id = $1`,
-              params: [req.telegram_id],
+              sql: `UPDATE membership_users SET ${sb.sql()} WHERE telegram_id = $${sb.params.length}`,
+              params: sb.params,
             });
             txQueries.push({
               sql: `UPDATE membership_requests SET status = $1, admin_note = $2, reviewed_at = $3, reviewed_by = $4, updated_at = NOW() WHERE id = $5`,
@@ -937,16 +953,22 @@ export function createMembershipHandlers(deps) {
 
         const now = new Date().toISOString();
         const txQueries = [];
-        const userSets = [`membership_status = '${newStatus}'`, `membership_level = '${finalLevel}'`, 'updated_at = NOW()'];
+        // DB-1: fully parameterized SET build (same column order as before)
+        const sb = newSetBuilder();
+        sb.addParam('membership_status', newStatus);
+        sb.addParam('membership_level', finalLevel);
+        sb.addLiteral('updated_at', 'NOW()');
         if (action === 'set-level') {
-          userSets.push(`approved_by = '${auth.user.id}'`);
-          if (levelBefore === 'FREE' && newLevel !== 'FREE') userSets.push(`approved_at = '${now}'`);
-          userSets.push(newLevel === 'FREE' ? `expire_at = '${now}'` : 'expire_at = NULL');
+          sb.addParam('approved_by', String(auth.user.id));
+          if (levelBefore === 'FREE' && newLevel !== 'FREE') sb.addParam('approved_at', now);
+          if (newLevel === 'FREE') sb.addParam('expire_at', now);
+          else sb.addLiteral('expire_at', 'NULL');
         }
-        if (action === 'expire') userSets.push(`expire_at = '${now}'`);
+        if (action === 'expire') sb.addParam('expire_at', now);
+        sb.params.push(tgId);
         txQueries.push({
-          sql: `UPDATE membership_users SET ${userSets.join(', ')} WHERE telegram_id = $1`,
-          params: [tgId],
+          sql: `UPDATE membership_users SET ${sb.sql()} WHERE telegram_id = $${sb.params.length}`,
+          params: sb.params,
         });
         txQueries.push({
           sql: `INSERT INTO membership_audit_logs (admin_id, admin_username, target_telegram_id, action, level_before, level_after, status_before, status_after, detail, ip)
@@ -999,6 +1021,46 @@ export function createMembershipHandlers(deps) {
     return /[",\n]/.test(s) ? `"${s}"` : s;
   }
 
+  // HD-6 FIX (Security Batch 3): security headers for the CSV exports.
+  // These files carry PII (Telegram IDs, names, exchange UIDs, IPs) and are
+  // downloaded cross-origin by membership-admin.js (raw fetch + Telegram
+  // initData), so they need: ACAO (via withCors) for the download to work,
+  // no-store so no intermediate/browser cache retains PII, and nosniff.
+  function csvSecurityHeaders(filename, env) {
+    const headers = withCors({ 'Content-Type': 'text/csv; charset=utf-8' }, env);
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    headers.set('X-Content-Type-Options', 'nosniff');
+    return headers;
+  }
+
+  // DB-1 FIX (Security Batch 6): parameterized SET-clause builder for
+  // membership_users UPDATEs. Previously the SET fragments were built by
+  // string interpolation; the interpolated values were whitelist/literal
+  // guarded (never attacker-controlled quote-bearing strings), so this is
+  // defense-in-depth, not an exploitable-SQLi fix. addParam() binds a value
+  // as $n; addLiteral() permits ONLY the two safe SQL literals NOW()/NULL.
+  // Column order is identical to the previous string-built output, and the
+  // WHERE telegram_id value stays parameterized as the LAST parameter.
+  function newSetBuilder() {
+    const params = [];
+    const sets = [];
+    return {
+      params,
+      addParam(column, value) {
+        params.push(value);
+        sets.push(`${column} = $${params.length}`);
+      },
+      addLiteral(column, literal) {
+        if (literal !== 'NOW()' && literal !== 'NULL') {
+          throw new Error(`newSetBuilder: SQL literal not allowed: ${literal}`);
+        }
+        sets.push(`${column} = ${literal}`);
+      },
+      sql() { return sets.join(', '); },
+    };
+  }
+
   async function handleExportRequests(request, env) {
     const auth = await requireAdminUser(request, env);
     if (auth.error) return auth.error;
@@ -1010,7 +1072,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Telegram ID','Username','Name','Exchange','Exchange UID','Status','Level','Submitted At','Reviewed At','Reviewed By','Note','Admin Note'].join(',');
       const rows = result.items.map(r => [r.id, r.telegram_id, r.username, [r.first_name, r.last_name].filter(Boolean).join(' '), r.exchange_name, r.exchange_uid, r.status, r.membership_level, r.submitted_at, r.reviewed_at, r.reviewed_by, r.note, r.admin_note].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-requests.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-requests.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -1025,7 +1087,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Telegram ID','Username','First Name','Last Name','Level','Status','Source','Approved At','Expire At','Created At','Request Count'].join(',');
       const rows = result.items.map(u => [u.id, u.telegram_id, u.username, u.first_name, u.last_name, u.membership_level, u.membership_status, u.membership_source, u.approved_at, u.expire_at, u.created_at, u.request_count].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-users.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-users.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -1038,7 +1100,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Created At','Action','Admin ID','Admin Username','Target Telegram ID','Request ID','Level Before','Level After','Status Before','Status After','Detail','IP'].join(',');
       const rows = result.items.map(l => [l.id, l.created_at, l.action, l.admin_id, l.admin_username, l.target_telegram_id, l.request_id, l.level_before, l.level_after, l.status_before, l.status_after, l.detail, l.ip].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-audit-logs.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-audit-logs.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 

@@ -10596,7 +10596,7 @@ function renderNotifications() {
         // notifications which have empty metadata).
         const md = n.metadata || {};
         const imgHtml = (md.image_url) ? '<img class="notif-img" src="' + escapeHtml(md.image_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
-        const ctaHtml = (md.button_url && md.button_label) ? '<a class="notif-cta" href="' + escapeHtml(md.button_url) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">' + escapeHtml(md.button_label) + '</a>' : '';
+        const ctaHtml = (md.button_url && md.button_label) ? '<a class="notif-cta" href="' + escapeHtml(sanitizeNewsUrl(md.button_url)) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">' + escapeHtml(md.button_label) + '</a>' : '';
         return `
         <div class="notif-item ${n.read ? 'read' : 'unread'}" onclick="markNotifRead('${escapeHtml(n.id)}')">
             ${imgHtml}
@@ -11104,7 +11104,7 @@ function renderAboutContent(content) {
 
     // Version badge
     if (content.version) {
-        html += '<div class="content-version-badge"> ' + t('content_version') + ' ' + content.version + '</div>';
+        html += '<div class="content-version-badge"> ' + t('content_version') + ' ' + escapeHtml(content.version) + '</div>';
     }
 
     // Sections as cards
@@ -11857,7 +11857,7 @@ function renderTicketThread(replies) {
     if (!replies?.length) return '';
     return `<div class="ticket-thread">${replies.map(r => `
         <div class="ticket-reply ${r.from === 'admin' ? 'admin' : ''}">
-            ${r.message}
+            ${escapeHtml(r.message)}
             <div class="ticket-reply-meta">${r.from === 'admin' ? t('ticket_admin') : t('ticket_you')} • ${formatTicketDate(r.at)}</div>
         </div>
     `).join('')}</div>`;

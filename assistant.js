@@ -946,7 +946,7 @@ const AssistantUI = {
             <div class="ai-file-preview-header">
                 <div class="ai-file-preview-thumb"></div>
                 <div class="ai-file-preview-info">
-                    <div class="ai-file-preview-name">${file.name}</div>
+                    <div class="ai-file-preview-name">${escapeHtml(file.name)}</div>
                     <div class="ai-file-preview-size-row">
                         ${compressed ? `<span class="ai-file-size-original">${formatSize(originalSize)}</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg> <span class="ai-file-size-final">${formatSize(finalSize)}</span>` : `<span class="ai-file-size-final">${formatSize(finalSize)}</span>`}
                     </div>
@@ -1188,7 +1188,7 @@ const AssistantUI = {
             <div class="ai-file-preview-header">
                 <div class="ai-file-preview-thumb ai-file-preview-thumb-loading"></div>
                 <div class="ai-file-preview-info">
-                    <div class="ai-file-preview-name">${file.name}</div>
+                    <div class="ai-file-preview-name">${escapeHtml(file.name)}</div>
                     <div class="ai-file-compressing-text">${t('ai_compressing')}</div>
                 </div>
             </div>

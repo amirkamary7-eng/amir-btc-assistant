@@ -37,7 +37,7 @@ function loadWorker(pgOverride) {
 }
 function createMemoryKv(i={}) { const s=new Map(Object.entries(i)); return { async get(k){return s.has(k)?s.get(k):null;}, async put(k,v,o){s.set(k,v);}, async delete(k){s.delete(k);}, dump(){return Object.fromEntries(s.entries());} }; }
 function buildInitData(b,u) { const e=[['auth_date',String(Math.floor(Date.now()/1000))],['query_id','AAHdF6IQAAAAAN0XohDhrOrc'],['user',JSON.stringify(u)]]; const d=e.slice().sort(([l],[r])=>l.localeCompare(r)).map(([k,v])=>`${k}=${v}`).join('\n'); const sk=crypto.createHmac('sha256','WebAppData').update(b).digest(); const h=crypto.createHmac('sha256',sk).update(d).digest('hex'); return e.map(([k,v])=>`${k}=${encodeURIComponent(v)}`).concat([`hash=${h}`]).join('&'); }
-function createEnv(o={}) { return Object.assign({ TELEGRAM_BOT_TOKEN:'test-bot-token', REQUIRED_CHANNEL:'amir_btc_2024', ADMIN_TELEGRAM_ID:'831704732', DATABASE_URL:'', APP_ENV:'dev', BOT_USERNAME:'', APP_CACHE:createMemoryKv({'market:data:v3':JSON.stringify([{symbol:'BTC',priceUsd:97000,changePercent24Hr:-1.5}]),'market:overview:cmc':JSON.stringify({fearGreedValue:72})}), RATE_LIMITS:createMemoryKv(), JOIN_CACHE:createMemoryKv(), SESSION_CACHE:createMemoryKv(), AI_COOLDOWN_SECONDS:0, AI_DAILY_MESSAGE_LIMIT:50, AI_DAILY_IMAGE_LIMIT:3, OPENROUTER_API_KEY:'x', OPENAI_API_KEY:'x' }, o); }
+function createEnv(o={}) { return Object.assign({ TELEGRAM_BOT_TOKEN:'test-bot-token', REQUIRED_CHANNEL:'amir_btc_2024', ADMIN_TELEGRAM_ID:'831704732', DATABASE_URL:'', APP_ENV:'development', BOT_USERNAME:'', APP_CACHE:createMemoryKv({'market:data:v3':JSON.stringify([{symbol:'BTC',priceUsd:97000,changePercent24Hr:-1.5}]),'market:overview:cmc':JSON.stringify({fearGreedValue:72})}), RATE_LIMITS:createMemoryKv(), JOIN_CACHE:createMemoryKv(), SESSION_CACHE:createMemoryKv(), AI_COOLDOWN_SECONDS:0, AI_DAILY_MESSAGE_LIMIT:50, AI_DAILY_IMAGE_LIMIT:3, OPENROUTER_API_KEY:'x', OPENAI_API_KEY:'x' }, o); }
 async function sendRequest(w,e,m,p,o={}) { const u=p.startsWith('http')?p:`http://localhost${p}`; const h=new Headers(o.headers||{}); if(o.initData) h.set('X-Telegram-Init-Data',o.initData); const r={method:m,headers:h}; if(o.body!==undefined){ r.body=JSON.stringify(o.body); h.set('Content-Type','application/json'); h.set('Content-Length',String(Buffer.byteLength(r.body))); } const res=await w.fetch(new Request(u,r),e,{}); let b; try{b=await res.json();}catch{b=null;} return {status:res.status,body:b}; }
 
 // Mock pool with configurable Groq response + premium status
@@ -913,9 +913,9 @@ test('FILE-27: Backend contract — frontend sends image as Base64 string in pay
   // Backend: validates payload.image is string
   assert.ok(SRC.includes("typeof payload.image !== 'string'"),
     'Backend must validate image is string');
-  // Backend: extracts base64 from data URL
-  assert.ok(SRC.includes('extractAssistantImageBase64'),
-    'Backend must have extractAssistantImageBase64');
+  // Backend: parses the data-URI / raw-base64 image payload (UP-8, Batch 6)
+  assert.ok(SRC.includes('parseAssistantChatImage'),
+    'Backend must have parseAssistantChatImage');
 });
 
 console.log('✅ All Phase 12 attachment pipeline tests loaded.');
@@ -1609,7 +1609,7 @@ test('VISION-03: Gemini call receives imageBase64 (vision path)', () => {
 
 test('VISION-04: callGeminiChat passes imageBase64 as inline_data to Gemini API', () => {
   const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
-  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 600);
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 1200);
   assert.ok(fnBody.includes('inline_data'), 'Must use inline_data format');
   assert.ok(fnBody.includes('mime_type'), 'Must set mime_type');
   assert.ok(fnBody.includes('image/jpeg'), 'Must use image/jpeg MIME type');
@@ -1904,12 +1904,20 @@ test('VISION-PROD-03: Gemini vision request contains inline_data with base64', (
 
 test('VISION-PROD-04: Base64 data URL prefix is removed correctly by backend', () => {
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
-  const extractFn = SRC.indexOf('function extractAssistantImageBase64');
-  const fnBlock = SRC.slice(extractFn, extractFn + 200);
-  assert.ok(fnBlock.includes("split(',', 2)"),
-    'Must split on comma to remove data:image/...;base64, prefix');
-  assert.ok(fnBlock.includes('return imageData'),
-    'Must return raw base64 if no prefix');
+  // UP-8 (Security Batch 6): parseAssistantChatImage replaces the old
+  // extractAssistantImageBase64 — data-URI parsed via strict regex with
+  // MIME allowlist; legacy raw base64 still accepted (labeled image/jpeg).
+  const parseFn = SRC.indexOf('function parseAssistantChatImage');
+  assert.ok(parseFn > -1, 'parseAssistantChatImage must exist');
+  const fnBlock = SRC.slice(parseFn, parseFn + 900);
+  assert.ok(fnBlock.includes('data:'),
+    'Must parse the data-URI form');
+  assert.ok(fnBlock.includes('base64,'),
+    'Must strip the data:image/...;base64, prefix');
+  assert.ok(fnBlock.includes('return { ok: true, base64: m[2], mime }'),
+    'Data-URI payload is returned without the prefix, with its real MIME');
+  assert.ok(fnBlock.includes("return { ok: true, base64: imageData, mime: 'image/jpeg' }"),
+    'Legacy raw base64 (no prefix) still accepted and returned');
 });
 
 test('VISION-PROD-05: Correct MIME type (image/jpeg) sent for vision', () => {
@@ -2070,7 +2078,7 @@ test('VISION-DIAG-04: Circuit breaker state logged', () => {
 
 test('VISION-DIAG-05: Gemini error includes detail in thrown exception', () => {
   const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
-  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2800);
   assert.ok(fnBody.includes('Gemini failed: HTTP'), 'Must throw with HTTP status');
   assert.ok(fnBody.includes('_isProviderError: true'), 'Must mark as provider error');
 });
@@ -2276,7 +2284,7 @@ test('PROMPT-SCOPE-02: error log in attemptChatProvider only uses in-scope varia
 
 test('GEMINI-429-01: Gemini 429 returns clean error (no ReferenceError)', () => {
   const fnStart = ASSISTANT_SRC.indexOf('async function callGeminiChat(');
-  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2000);
+  const fnBody = ASSISTANT_SRC.substring(fnStart, fnStart + 2800);
   assert.ok(fnBody.includes('classifyHttpError'), 'Must classify HTTP error on 429');
   assert.ok(fnBody.includes('errorType'), 'Must set errorType');
   assert.ok(fnBody.includes('_isProviderError: true'), 'Must mark as provider error');

@@ -132,11 +132,12 @@ test('notif-trace-results still production-gated (H2 fix preserved)', () => {
   assert.match(routeBlock, /404/, 'notif-trace-results must still return 404');
 });
 
-test('start-diag still production-gated (H3 fix preserved)', () => {
+test('start-diag still gated (H3 fix preserved, strengthened by AP-2)', () => {
   const routeIdx = WORKER_SRC.indexOf("url.pathname === '/api/start-diag'");
   assert.ok(routeIdx > -1, 'start-diag route must exist');
   const routeBlock = WORKER_SRC.slice(routeIdx, Math.min(routeIdx + 500, WORKER_SRC.length));
-  assert.match(routeBlock, /_isProd/, 'start-diag must still have _isProd gate');
+  // AP-2 (Security Batch 2): dev-only gate — staging/unset APP_ENV also blocked
+  assert.match(routeBlock, /!isDevMode/, 'start-diag must still have the !isDevMode gate');
   assert.match(routeBlock, /404/, 'start-diag must still return 404');
 });
 
