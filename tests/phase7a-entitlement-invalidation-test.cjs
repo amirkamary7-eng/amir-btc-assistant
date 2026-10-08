@@ -387,17 +387,25 @@ test('SUSPEND-02: after suspend, isPremium() returns false (no stale true)', asy
   };
   const queryDbTransaction = async (e, queries) => {
     // Apply UPDATE membership_users mutations to the in-memory row.
+    // DB-1 (Security Batch 6): membership_users SET values are now bound
+    // parameters ($n), not SQL string literals — detect the target status by
+    // scanning q.params (STATUS_VALUES), not the SQL text.
+    const STATUS_VALUES = ['SUSPENDED', 'EXPIRED', 'INACTIVE', 'APPROVED'];
     for (const q of queries) {
       const s = (q.sql || '').toLowerCase();
       if (s.includes('update membership_users') && s.includes('set')) {
-        if (s.includes("'suspended'")) {
-          currentUserRow = { ...currentUserRow, membership_status: 'SUSPENDED' };
-        } else if (s.includes("'expired'")) {
-          currentUserRow = { ...currentUserRow, membership_status: 'EXPIRED' };
-        } else if (s.includes("'inactive'")) {
-          currentUserRow = { ...currentUserRow, membership_status: 'INACTIVE', membership_level: 'FREE' };
-        } else if (s.includes("'approved'")) {
-          currentUserRow = { ...currentUserRow, membership_status: 'APPROVED' };
+        const statusVal = (q.params || []).find((v) => STATUS_VALUES.includes(String(v).toUpperCase()));
+        if (statusVal) {
+          const st = String(statusVal).toUpperCase();
+          if (st === 'SUSPENDED') {
+            currentUserRow = { ...currentUserRow, membership_status: 'SUSPENDED' };
+          } else if (st === 'EXPIRED') {
+            currentUserRow = { ...currentUserRow, membership_status: 'EXPIRED' };
+          } else if (st === 'INACTIVE') {
+            currentUserRow = { ...currentUserRow, membership_status: 'INACTIVE', membership_level: 'FREE' };
+          } else if (st === 'APPROVED') {
+            currentUserRow = { ...currentUserRow, membership_status: 'APPROVED' };
+          }
         }
       }
     }

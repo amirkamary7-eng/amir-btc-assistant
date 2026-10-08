@@ -828,12 +828,16 @@ export function createAdvertisementsRepository(deps) {
    *   - Max 500 KB after base64 decode
    *   - Content-type must be image/jpeg|png|webp|gif|avif
    *   - Header magic bytes verified (defense in depth — don't trust Content-Type)
-   *   - Metadata is NOT stripped (Workers lack native image libs); instead we
-   *     enforce strict size + dimension limits. Documented in admin UI.
+   *   - Metadata is NOT stripped (Workers lack native image libs). Byte size
+   *     is capped (500KB) and the content-type is allowlisted — NOTE: NO
+   *     image dimension/pixel validation is performed (Workers cannot decode
+   *     images; decompression-bomb impact is client-side <img> decode only,
+   *     and the whole path is admin-gated).
    *
    * NOTE on "resize/compress": Cloudflare Workers do not have native sharp /
-   * ImageMagick. We enforce strict size + dimension limits instead. For
-   * external URLs, no fetch/resize is performed — only URL validation.
+   * ImageMagick, so only the byte-size cap + magic-byte type checks are
+   * enforced server-side. For external URLs, no fetch/resize is performed —
+   * only URL validation.
    */
   async function storeImage(env, dataUri, contentType) {
     if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.put !== 'function') {
@@ -896,12 +900,26 @@ export function createAdvertisementsRepository(deps) {
     }
     if (ct === 'image/webp') {
       // RIFF....WEBP
-      return b0 === 0x52 && b1 === 0x49 && b2 === 0x46 && b3 === 0x46;
+      // UP-2 FIX (Security Batch 6): check the container tag at bytes 8-11
+      // ('WEBP') in addition to the RIFF signature — previously ANY RIFF
+      // container (WAV/AVI/RMI) passed. Files shorter than 12 bytes fail via
+      // charCodeAt NaN comparison.
+      return b0 === 0x52 && b1 === 0x49 && b2 === 0x46 && b3 === 0x46 &&
+             bytes.charCodeAt(8) === 0x57 &&  // W
+             bytes.charCodeAt(9) === 0x45 &&  // E
+             bytes.charCodeAt(10) === 0x42 && // B
+             bytes.charCodeAt(11) === 0x50;   // P
     }
     if (ct === 'image/avif') {
-      // ftyp box — bytes 4-7 should be 'ftyp' for ISOBMFF (avif starts with ftyp)
+      // ftyp box — bytes 4-7 must be 'ftyp', and the major brand at bytes
+      // 8-11 must be avif/avis. UP-2 FIX (Security Batch 6): previously ANY
+      // ISOBMFF container (MP4/MOV/HEIC/3GP) passed the ftyp-only check.
+      const brandOk = (() => {
+        const brand = bytes.substr(8, 4);
+        return brand === 'avif' || brand === 'avis';
+      })();
       return bytes.charCodeAt(4) === 0x66 && bytes.charCodeAt(5) === 0x74 &&
-             bytes.charCodeAt(6) === 0x79 && bytes.charCodeAt(7) === 0x70;
+             bytes.charCodeAt(6) === 0x79 && bytes.charCodeAt(7) === 0x70 && brandOk;
     }
     return false;
   }
