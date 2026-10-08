@@ -3398,13 +3398,25 @@ const NEWS_RSS_SOURCES = [
 
 const EXTERNAL_FETCH_TIMEOUT_MS = 8000;
 
+// EX-3 FIX (Security Batch 5): size-bounded JSON fetch. The 8s timeout bounds
+// wall time but NOT body size — a compromised/huge upstream could exhaust
+// memory/CPU on parse. Bound the body BEFORE parsing: a declared
+// Content-Length pre-check (cancel the stream without reading when oversize)
+// plus a post-read length check for chunked responses.
+// FETCH_JSON_MAX_BYTES = 5MB — 5x headroom over the largest legit response
+// (~1MB, MEXC ticker) so nothing real is ever truncated. Optional third
+// parameter lets a caller pick a tighter bound; no current caller needs one.
+// Failure semantics are identical to a non-2xx response, so caller fallback
+// chains are unchanged.
+const FETCH_JSON_MAX_BYTES = 5 * 1024 * 1024;
+
 /**
- * fetchJson with a CUSTOM timeout (ms).
+ * fetchJson with a CUSTOM timeout (ms) and a body-size bound.
  * Used by price fetchers which need a shorter timeout (4s) than the
  * general 8s default — prevents cron timeout when multiple exchanges
  * are slow.
  */
-async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
+async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS, maxBytes = FETCH_JSON_MAX_BYTES) {
   const _t0 = Date.now();
   const _urlPreview = String(url).slice(0, 60);
   try {
@@ -3424,9 +3436,23 @@ async function fetchJsonWithTimeout(url, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) 
       return { ok: false, body: null };
     }
 
+    // EX-3: declared Content-Length pre-check — reject oversize WITHOUT
+    // reading the body (cancel the stream to free the connection).
+    const _declaredLength = Number(response.headers.get('Content-Length') || '0');
+    if (_declaredLength && _declaredLength > maxBytes) {
+      try { response.body?.cancel(); } catch {}
+      return { ok: false, body: null };
+    }
+
+    // EX-3: bound the actually-read body too (chunked responses carry no CL).
+    const _text = await response.text();
+    if (_text.length > maxBytes) {
+      return { ok: false, body: null };
+    }
+
     return {
       ok: true,
-      body: await response.json(),
+      body: JSON.parse(_text),
     };
   } catch {
     return { ok: false, body: null };
@@ -7164,6 +7190,22 @@ export default {
 
       // ── Market Overview (CMC-powered, no auth required) ──
       if (request.method === 'GET' && url.pathname === '/api/market/overview') {
+        // AP-6 FIX (Security Batch 5): public endpoint rate limit (MKT-010
+        // pattern — same as /api/market, /api/forex, /api/market/search).
+        // MUST run BEFORE the KV cache read: a cache outage (cold start,
+        // cron failure, persistent upstream failure) would otherwise turn
+        // every anonymous request into a fetchGlobalStats fan-out and burn
+        // the CMC F&G budget (30 credits/call vs 5760/month). Soft-auth uid
+        // extraction — anonymous requests share the IP-only bucket.
+        // Cron refresh path: scheduler.js calls
+        // marketOverviewSvc.refreshOverview(env) directly as a service —
+        // it NEVER routes through this HTTP endpoint — unaffected.
+        const _ovClientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+        const _ovAuth = await authenticateTelegramRequest(request, env);
+        const _ovUid = _ovAuth.user?.id || null;
+        if (await isMarketRateLimited(env, _ovClientIp, _ovUid)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
         const overview = await marketOverviewSvc.getCachedOverview(env);
         if (overview) {
           // PHASE 5 FIX: Enrich with Fear & Greed from CMC API
@@ -7520,6 +7562,21 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/market/prices') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
+
+        // AP-5 FIX (Security Batch 5): dedicated per-user rate limit for the
+        // batch price endpoint (15 symbols → up to 45 upstream subrequests
+        // per call under NEWSBE-020). 60 req/min is 15x the frontend alert
+        // polling cadence (every 15s = 4/min), so real users are unaffected,
+        // while a runaway client cannot fan out unbounded upstream load.
+        // DEDICATED 'market-prices' bucket — NOT shared with the generic
+        // mutation limiter. isUserRateLimited fails open on a missing KV, so
+        // a KV outage degrades the limit (not the endpoint).
+        // Alert cron path: the scheduled handler fetches prices via the
+        // internal service (fetchSpotPriceUsd directly) and NEVER routes
+        // through this HTTP endpoint — unaffected.
+        if (await isUserRateLimited(env, authState.user?.id, 'market-prices', 60, 60)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
 
         const symbolsParam = (url.searchParams.get('symbols') || '').toUpperCase().trim();
         if (!symbolsParam) {
