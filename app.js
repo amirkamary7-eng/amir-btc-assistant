@@ -4781,6 +4781,11 @@ function renderMarket() {
     // just update prices and change percentages — avoid full innerHTML rebuild
     const renderKey = `${currentMarketTab}|${searchTerm}|${watchlist.length}|${marketVisibleCount}`;
     if (!searchTerm && currentMarketTab !== 'forex' && _lastMarketRenderKey === renderKey && list.querySelector('.mkt-coin-row')) {
+        // SEARCH-ONLY MARKET FIX: on the Watchlist tab, search-only rows are
+        // not in allCoins — run the EXISTING hydration (cache-first, dedup,
+        // 120s backoff → zero requests while the 5-min cache is warm) and
+        // re-render this tab once fresh data lands. Other tabs: unchanged.
+        if (currentMarketTab === 'watchlist') ensureMarketWatchlistSearchOnly();
         const items = list.querySelectorAll('.mkt-coin-row');
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
@@ -4835,8 +4840,14 @@ function renderMarket() {
                 continue;
             }
 
-            // Standard crypto row diff
-            const coin = allCoins.find(c => c.symbol === symbol);
+            // Standard crypto row diff. SEARCH-ONLY MARKET FIX: search-only
+            // watched rows (Watchlist tab) are not in allCoins — fall back to
+            // the existing `search_coin_{SYMBOL}` cache so their price/change
+            // keeps updating here instead of going stale behind this fast
+            // path. (Rows on the other tabs are allCoins members, so the
+            // fallback is unreachable there — zero behavior change.)
+            const coin = allCoins.find(c => c.symbol === symbol)
+                || Cache.get(`search_coin_${symbol}`);
             if (!coin) continue;
 
             const priceEl = item.querySelector('.mkt-coin-price');
@@ -4994,12 +5005,24 @@ function renderMarket() {
         case 'watchlist':
             // Show both crypto AND forex symbols that are in the watchlist
             filtered = filtered.filter(c => watchlist.includes(c.symbol));
+            // SEARCH-ONLY MARKET FIX: coins added via /api/market/search live
+            // outside Top-200 + Forex. Merge them into the Market Watchlist
+            // tab through the SAME mechanism the Dashboard grid uses (PR #71):
+            // the existing `search_coin_{SYMBOL}` cache + existing hydration —
+            // no new cache, no new request path. Display order stays
+            // crypto → forex → search-only, exactly like the Dashboard grid.
+            ensureMarketWatchlistSearchOnly();
+            const searchOnlyItems = getSearchOnlyWatchSymbols()
+                .map(sym => Cache.get(`search_coin_${sym}`))
+                .filter(Boolean)
+                .map(c => ({ ...c, _type: 'crypto' }));
             // Also show forex symbols that are watchlisted
             const forexWatched = allForexPairs.filter(f => watchlist.includes(f.symbol));
-            if (forexWatched.length) {
+            if (forexWatched.length || searchOnlyItems.length) {
                 const cryptoItems = filtered.map(c => renderMarketItem({...c, _type: 'crypto'})).join('');
                 const forexItems = forexWatched.map(f => renderForexItem(f)).join('');
-                list.innerHTML = buildInfoBar(filtered.length + forexWatched.length, t('watchlist') || 'Watchlist') + cryptoItems + forexItems;
+                const searchOnlyHtml = searchOnlyItems.map(c => renderMarketItem(c)).join('');
+                list.innerHTML = buildInfoBar(filtered.length + forexWatched.length + searchOnlyItems.length, t('watchlist') || 'Watchlist') + cryptoItems + forexItems + searchOnlyHtml;
                 return;
             }
             break;
@@ -6307,6 +6330,32 @@ function ensureSearchOnlyCoinsHydrated() {
     // re-reads allCoins/allForexPairs/watchlist/Cache at call time.
     Promise.allSettled(Object.values(_searchOnlyInflight)).then(() => {
         renderWatchlist();
+    });
+}
+
+/**
+ * SEARCH-ONLY MARKET WATCHLIST — companion to the Dashboard fix above
+ * (PR #71). renderMarket()'s Watchlist tab merges the same third source
+ * (search-only watched coins), but it ALSO needs a Market-side re-render
+ * once a hydration batch settles — ensureSearchOnlyCoinsHydrated() only
+ * re-renders the Dashboard grid. This tiny, behavior-preserving helper:
+ *   1. runs the EXISTING hydration (cache-first, in-flight dedup, 120s
+ *      failure backoff → zero requests when nothing is missing);
+ *   2. watches the in-flight batch and re-renders the Market Watchlist tab
+ *      afterwards — ONLY if the user is still on it (currentMarketTab ===
+ *      'watchlist') and no search is active. The render key is invalidated
+ *      first so renderMarket() skips its price-only diff fast path (the
+ *      fast path cannot append the newly hydrated rows).
+ */
+function ensureMarketWatchlistSearchOnly() {
+    ensureSearchOnlyCoinsHydrated();
+    const hydrating = getSearchOnlyWatchSymbols().filter(sym => _searchOnlyInflight[sym]);
+    if (!hydrating.length) return; // nothing in flight → nothing to re-render
+    Promise.allSettled(hydrating.map(sym => _searchOnlyInflight[sym])).then(() => {
+        if (currentMarketTab === 'watchlist' && !searchTerm) {
+            _lastMarketRenderKey = null; // bypass the price-only fast path
+            renderMarket();
+        }
     });
 }
 
