@@ -27,6 +27,8 @@ export function createMembershipHandlers(deps) {
     notificationService,
     sendTelegramMessage,
     resolveWebAppUrl,
+    // HD-6 FIX (Security Batch 3): withCors for CSV export headers.
+    withCors,
     // PHASE 5: Optional cosmetics repo for active cosmetic in status response
     cosmeticsRepo,
     // PHASE 7A: MembershipAuthority — entitlement cache invalidation.
@@ -999,6 +1001,19 @@ export function createMembershipHandlers(deps) {
     return /[",\n]/.test(s) ? `"${s}"` : s;
   }
 
+  // HD-6 FIX (Security Batch 3): security headers for the CSV exports.
+  // These files carry PII (Telegram IDs, names, exchange UIDs, IPs) and are
+  // downloaded cross-origin by membership-admin.js (raw fetch + Telegram
+  // initData), so they need: ACAO (via withCors) for the download to work,
+  // no-store so no intermediate/browser cache retains PII, and nosniff.
+  function csvSecurityHeaders(filename, env) {
+    const headers = withCors({ 'Content-Type': 'text/csv; charset=utf-8' }, env);
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    headers.set('X-Content-Type-Options', 'nosniff');
+    return headers;
+  }
+
   async function handleExportRequests(request, env) {
     const auth = await requireAdminUser(request, env);
     if (auth.error) return auth.error;
@@ -1010,7 +1025,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Telegram ID','Username','Name','Exchange','Exchange UID','Status','Level','Submitted At','Reviewed At','Reviewed By','Note','Admin Note'].join(',');
       const rows = result.items.map(r => [r.id, r.telegram_id, r.username, [r.first_name, r.last_name].filter(Boolean).join(' '), r.exchange_name, r.exchange_uid, r.status, r.membership_level, r.submitted_at, r.reviewed_at, r.reviewed_by, r.note, r.admin_note].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-requests.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-requests.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -1025,7 +1040,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Telegram ID','Username','First Name','Last Name','Level','Status','Source','Approved At','Expire At','Created At','Request Count'].join(',');
       const rows = result.items.map(u => [u.id, u.telegram_id, u.username, u.first_name, u.last_name, u.membership_level, u.membership_status, u.membership_source, u.approved_at, u.expire_at, u.created_at, u.request_count].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-users.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-users.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 
@@ -1038,7 +1053,7 @@ export function createMembershipHandlers(deps) {
       const header = ['ID','Created At','Action','Admin ID','Admin Username','Target Telegram ID','Request ID','Level Before','Level After','Status Before','Status After','Detail','IP'].join(',');
       const rows = result.items.map(l => [l.id, l.created_at, l.action, l.admin_id, l.admin_username, l.target_telegram_id, l.request_id, l.level_before, l.level_after, l.status_before, l.status_after, l.detail, l.ip].map(csvEscape).join(','));
       const csv = '\ufeff' + [header, ...rows].join('\n');
-      return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="membership-audit-logs.csv"' } });
+      return new Response(csv, { status: 200, headers: csvSecurityHeaders('membership-audit-logs.csv', env) });
     } catch (e) { return safeDbErrorResponse(e, {}, env); }
   }
 

@@ -199,6 +199,29 @@ export function createAdvertisementsHandlers(deps) {
    * Serves an uploaded image from KV. Public (no auth) so <img src> can load it.
    * Returns 404 for invalid IDs or missing images.
    */
+  // HD-8 FIX (Security Batch 3): fail-closed Access-Control-Allow-Origin for
+  // the PUBLIC unauthenticated ad-image endpoint. Previously
+  // `String(env.WEBAPP_URL || '*')` — an unset/malformed WEBAPP_URL produced
+  // the wildcard '*'. Now: localhost/127.0.0.1 dev origins echo back, the
+  // configured WEBAPP_URL contributes its ORIGIN only, and anything else
+  // (unset/malformed/non-http scheme) yields NO ACAO header at all — the
+  // browser then blocks the cross-origin read (fail-closed).
+  function _adImageAcao(request, env) {
+    try {
+      const origin = (request.headers.get('Origin') || '').trim();
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+        return origin; // local development echo
+      }
+      const webapp = String(env.WEBAPP_URL || '').trim();
+      if (/^https?:\/\//i.test(webapp)) {
+        try { return new URL(webapp).origin; } catch { return ''; }
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
   async function handleServeImage(request, env, imageId) {
     if (!/^[A-Za-z0-9_-]{8,40}$/.test(String(imageId || ''))) {
       return new Response('Not Found', { status: 404 });
@@ -211,13 +234,15 @@ export function createAdvertisementsHandlers(deps) {
       try { bytes = atob(img.base64); } catch { return new Response('Not Found', { status: 404 }); }
       const buf = new Uint8Array(bytes.length);
       for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+      const _acao = _adImageAcao(request, env);
       return new Response(buf, {
         status: 200,
         headers: {
           'Content-Type': img.contentType,
           'Cache-Control': 'public, max-age=86400, immutable',
           'X-Content-Type-Options': 'nosniff',
-          'Access-Control-Allow-Origin': String(env.WEBAPP_URL || '*'),
+          // HD-8: header present ONLY when a valid origin is known (fail-closed).
+          ...(_acao ? { 'Access-Control-Allow-Origin': _acao } : {}),
         },
       });
     } catch (e) {
