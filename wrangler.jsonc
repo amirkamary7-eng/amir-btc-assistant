@@ -148,6 +148,13 @@
                                         "binding": "HYPERDRIVE",
                                         "id": "417477e0da0d44a4a8d464399e39e072"
                                 }
+                        ],
+                        "ratelimits": [
+                                {
+                                        "name": "MARKET_RATE_LIMITER",
+                                        "namespace_id": "amirbtc-market-rate-limit-staging",
+                                        "simple": { "limit": 30, "period": 60 }
+                                }
                         ]
                 },
                 "production": {
@@ -224,6 +231,13 @@
                                 {
                                         "binding": "HYPERDRIVE",
                                         "id": "f4b69c06c1e84d98b7c4b5720efe4b41"
+                                }
+                        ],
+                        "ratelimits": [
+                                {
+                                        "name": "MARKET_RATE_LIMITER",
+                                        "namespace_id": "amirbtc-market-rate-limit-production",
+                                        "simple": { "limit": 30, "period": 60 }
                                 }
                         ]
                 }

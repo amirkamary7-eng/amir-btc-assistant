@@ -100,7 +100,21 @@ AS $function$
         $function$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- Grant execute to the application role (anon/authenticated if used by Worker)
--- The Worker connects via the service role / postgres user, which has access.
+-- F-02 (security fix): do NOT grant execute to PUBLIC on this SECURITY DEFINER
+-- function. The original `GRANT ... TO PUBLIC` allowed anon/authenticated
+-- (PostgREST callers holding the publishable anon key) to invoke the Groq
+-- WAF-bypass relay with a caller-supplied key. Execution is restricted to the
+-- Worker's DB role instead (service_role / postgres already hold EXECUTE).
+-- NOTE: this file is historical (not CI-wired); the live source of truth is
+-- scripts/00-migrate.sql, which carries the same fix.
 -- ═══════════════════════════════════════════════════════════════════════════
-GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) FROM PUBLIC;
+DO $f02perm$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'amirbtc_worker') THEN
+    GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO amirbtc_worker;
+  ELSE
+    RAISE NOTICE 'F-02: role amirbtc_worker not present — skipping EXECUTE grant';
+  END IF;
+END
+$f02perm$;
