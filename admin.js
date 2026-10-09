@@ -4282,6 +4282,15 @@ var VPN_ICONS = {
   shield: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
 };
 
+// SECURITY (F-01): user display names come from attacker-controlled Telegram
+// profile fields. They must never enter JS-string / attribute / markup
+// contexts — only textContent.
+function vpnUserDisplay(p) {
+    return p.username ? '@' + p.username : (p.display_name || p.user_id);
+}
+
+var _vpnPurchaseRowMap = {};
+
 function renderVpnPurchases(purchases) {
     const tbody = document.getElementById('vpn-purchases-body');
     if (!tbody) return;
@@ -4295,15 +4304,21 @@ function renderVpnPurchases(purchases) {
         cancelled: { label: 'لغو شده',        cls: 'vpn-st-cancelled' },
         failed:    { label: 'خطا / Retry',   cls: 'vpn-st-failed' },
     };
+    var rowMap = {};
     tbody.innerHTML = purchases.map(function (p) {
-        var userDisplay = p.username ? '@' + p.username : (p.display_name || p.user_id);
+        var userDisplay = vpnUserDisplay(p);
         var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
         var durationLabel = p.duration_days >= 30 ? '۱ ماه' : '۷ روز';
         var st = statusConfig[p.status] || { label: p.status, cls: '' };
         var statusHtml = '<span class="vpn-status-pill ' + st.cls + '">' + st.label + '</span>';
         var actionHtml = '';
         if (p.status === 'pending') {
-            actionHtml = '<button class="adm-action-btn adm-action-fulfill" onclick="openVpnSendModal(' + p.id + ', \'' + escapeHtmlAdmin(String(p.tracking_id || '')) + '\', \'' + escapeHtmlAdmin(String(p.plan_name || '')) + '\', ' + (p.cost_ab || 0) + ', \'' + escapeHtmlAdmin(String(userDisplay)) + '\', \'' + durationLabel + '\')">' + VPN_ICONS.send + ' ارسال لینک</button>';
+            rowMap[String(p.id)] = p;
+            // SECURITY (F-01): no inline onclick — the button addresses its
+            // purchase by numeric id only; the delegated listener below passes
+            // the purchase OBJECT to openVpnSendModal, so user data never
+            // enters a JS-string or attribute context.
+            actionHtml = '<button class="adm-action-btn adm-action-fulfill" data-vpn-purchase-id="' + Number(p.id) + '">' + VPN_ICONS.send + ' ارسال لینک</button>';
         } else if (p.status === 'fulfilled') {
             actionHtml = '<span class="vpn-status-pill vpn-st-fulfilled">' + VPN_ICONS.check + ' ارسال شد</span>';
         }
@@ -4318,45 +4333,124 @@ function renderVpnPurchases(purchases) {
             '<td>' + actionHtml + '</td>' +
             '</tr>';
     }).join('');
+    _vpnPurchaseRowMap = rowMap;
+    // SECURITY (F-01): one delegated click listener per tbody (guarded against
+    // duplicate binding on re-renders). Handlers are bound with addEventListener —
+    // never through inline onclick attributes.
+    if (!tbody.__vpnClickDelegated) {
+        tbody.__vpnClickDelegated = true;
+        tbody.addEventListener('click', function (ev) {
+            var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-vpn-purchase-id]') : null;
+            if (!btn) return;
+            var id = btn.getAttribute('data-vpn-purchase-id');
+            var p = _vpnPurchaseRowMap && _vpnPurchaseRowMap[String(id)];
+            if (p && p.status === 'pending') openVpnSendModal(p);
+        });
+    }
 }
 
 // ── VPN Send Link Modal ──
 var _vpnModalPurchaseId = null;
 
-function openVpnSendModal(purchaseId, trackingId, planName, costAb, userDisplay, durationLabel) {
-    _vpnModalPurchaseId = purchaseId;
+// SECURITY (F-01, stored XSS fix): the modal is built exclusively with
+// document.createElement; EVERY user-derived value (display name, plan name,
+// tracking id, cost, duration) is rendered via textContent; all handlers are
+// bound with addEventListener. User data never enters innerHTML, JS strings
+// or inline handlers. innerHTML is used only for the static, developer-authored
+// VPN_ICONS svg constants and the static close-button svg.
+function openVpnSendModal(purchase) {
+    if (!purchase) return;
+    _vpnModalPurchaseId = purchase.id;
     var existing = document.getElementById('vpn-send-modal');
     if (existing) existing.remove();
-    var modal = document.createElement('div');
+
+    var userDisplay = vpnUserDisplay(purchase);
+    var planName = String(purchase.plan_name || '');
+    var trackingId = String(purchase.tracking_id || '');
+    var costAb = purchase.cost_ab || 0;
+    var durationLabel = purchase.duration_days >= 30 ? '۱ ماه' : '۷ روز';
+
+    function el(tag, className) {
+        var e = document.createElement(tag);
+        if (className) e.className = className;
+        return e;
+    }
+    // <span> label containing only the static icon constant + static Persian text
+    function iconLabel(iconKey, text) {
+        var s = el('span');
+        s.innerHTML = VPN_ICONS[iconKey] + ' ' + text; // static trusted constants only
+        return s;
+    }
+
+    var modal = el('div');
     modal.id = 'vpn-send-modal';
     modal.className = 'daily-checkin-modal';
     modal.setAttribute('dir', 'rtl');
-    modal.innerHTML = `
-        <div class="dcm-overlay" onclick="closeVpnSendModal()"></div>
-        <div class="dcm-sheet vpn-confirm-sheet">
-            <div class="dcm-header">
-                <h3>ارسال VPN</h3>
-                <button class="dcm-close" onclick="closeVpnSendModal()" aria-label="Close">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-            </div>
-            <div class="vpn-confirm-body">
-                <div class="vpn-confirm-row"><span>${VPN_ICONS.user} کاربر:</span><strong>${userDisplay}</strong></div>
-                <div class="vpn-confirm-row"><span>${VPN_ICONS.shield} بسته:</span><strong>${planName}</strong></div>
-                <div class="vpn-confirm-row"><span>${VPN_ICONS.cost} هزینه:</span><strong>${costAb} AB</strong></div>
-                <div class="vpn-confirm-row"><span>${VPN_ICONS.clock} اعتبار:</span><strong>${durationLabel}</strong></div>
-                <div class="vpn-confirm-row"><span>${VPN_ICONS.tracking} کد رهگیری:</span><strong>${trackingId}</strong></div>
-                <div style="margin-top:12px;width:100%;">
-                    <label style="font-size:12px;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;">${VPN_ICONS.send} لینک VPN:</label>
-                    <input type="text" id="vpn-link-input" placeholder="https://..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:14px;box-sizing:border-box;" />
-                </div>
-            </div>
-            <div class="vpn-confirm-actions">
-                <button class="vpn-cancel-btn" onclick="closeVpnSendModal()">انصراف</button>
-                <button class="vpn-confirm-btn" onclick="sendVpnLink()">${VPN_ICONS.send} ارسال برای کاربر</button>
-            </div>
-        </div>
-    `;
+
+    var overlay = el('div', 'dcm-overlay');
+    overlay.addEventListener('click', closeVpnSendModal);
+
+    var sheet = el('div', 'dcm-sheet vpn-confirm-sheet');
+
+    var header = el('div', 'dcm-header');
+    var title = el('h3');
+    title.textContent = 'ارسال VPN';
+    header.appendChild(title);
+    var closeBtn = el('button', 'dcm-close');
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    closeBtn.addEventListener('click', closeVpnSendModal);
+    header.appendChild(closeBtn);
+
+    var bodyWrap = el('div', 'vpn-confirm-body');
+    function fieldRow(iconKey, labelText) {
+        var r = el('div', 'vpn-confirm-row');
+        r.appendChild(iconLabel(iconKey, labelText + ':'));
+        var v = el('strong');
+        r.appendChild(v);
+        bodyWrap.appendChild(r);
+        return v;
+    }
+    var userValue = fieldRow('user', 'کاربر');
+    var planValue = fieldRow('shield', 'بسته');
+    var costValue = fieldRow('cost', 'هزینه');
+    var durationValue = fieldRow('clock', 'اعتبار');
+    var trackingValue = fieldRow('tracking', 'کد رهگیری');
+    userValue.textContent = String(userDisplay);
+    planValue.textContent = planName;
+    costValue.textContent = costAb + ' AB';
+    durationValue.textContent = durationLabel;
+    trackingValue.textContent = trackingId;
+
+    var linkWrap = el('div');
+    linkWrap.setAttribute('style', 'margin-top:12px;width:100%;');
+    var linkLabel = el('label');
+    linkLabel.setAttribute('style', 'font-size:12px;color:rgba(255,255,255,0.5);display:block;margin-bottom:6px;');
+    linkLabel.innerHTML = VPN_ICONS.send + ' لینک VPN:'; // static constant
+    var linkInput = el('input');
+    linkInput.setAttribute('type', 'text');
+    linkInput.id = 'vpn-link-input';
+    linkInput.setAttribute('placeholder', 'https://...');
+    linkInput.setAttribute('style', 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:14px;box-sizing:border-box;');
+    linkWrap.appendChild(linkLabel);
+    linkWrap.appendChild(linkInput);
+    bodyWrap.appendChild(linkWrap);
+
+    var actions = el('div', 'vpn-confirm-actions');
+    var cancelBtn = el('button', 'vpn-cancel-btn');
+    cancelBtn.textContent = 'انصراف';
+    cancelBtn.addEventListener('click', closeVpnSendModal);
+    var sendBtn = el('button', 'vpn-confirm-btn');
+    sendBtn.innerHTML = VPN_ICONS.send + ' ارسال برای کاربر'; // static constant
+    sendBtn.addEventListener('click', sendVpnLink);
+    actions.appendChild(cancelBtn);
+    actions.appendChild(sendBtn);
+
+    sheet.appendChild(header);
+    sheet.appendChild(bodyWrap);
+    sheet.appendChild(actions);
+    modal.appendChild(overlay);
+    modal.appendChild(sheet);
     document.body.appendChild(modal);
     requestAnimationFrame(function() { modal.classList.add('visible'); });
 }
