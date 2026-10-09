@@ -1678,7 +1678,29 @@ AS $function$
         END;
         $function$;
 
-GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO PUBLIC;
+-- F-02 (security fix): SECURITY DEFINER functions must NOT be executable by
+-- PUBLIC. The previous unconditional `GRANT ... TO PUBLIC` here re-asserted
+-- world-executable access on EVERY deploy, which meant anon/authenticated
+-- (PostgREST callers holding the publishable anon key) could invoke the Groq
+-- WAF-bypass relay with a caller-supplied key — quota abuse from Supabase's
+-- egress IP pool. Execution is now restricted to the roles that need it:
+--   * amirbtc_worker — the production Worker's DB role (EXECUTE already
+--     verified in production; the grant below re-asserts it idempotently and
+--     is guarded so fresh environments without the role don't break the
+--     migration).
+--   * service_role / postgres — already hold EXECUTE and are NOT affected by
+--     REVOKE FROM PUBLIC.
+-- Both statements are idempotent and safe to re-run on existing databases.
+REVOKE EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) FROM PUBLIC;
+DO $f02perm$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'amirbtc_worker') THEN
+    GRANT EXECUTE ON FUNCTION public.groq_generate_with_key(text, jsonb, text, integer, double precision) TO amirbtc_worker;
+  ELSE
+    RAISE NOTICE 'F-02: role amirbtc_worker not present — skipping EXECUTE grant';
+  END IF;
+END
+$f02perm$;
 
 
 -- Migration complete

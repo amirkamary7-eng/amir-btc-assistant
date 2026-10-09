@@ -1680,6 +1680,24 @@ async function isCallbackRateLimited(env, userId) {
  * `mrl:anon:<ip>` key so the existing IP-only protection still works for
  * anonymous callers.
  *
+ * F-03/S4 — cross-isolate KV-propagation bypass: Workers KV is eventually
+ * consistent ACROSS edge locations (Cloudflare documents up to 60 seconds of
+ * propagation — a FULL rate-limit window), and each isolate counts unflushed
+ * requests in a private in-memory delta. Two isolates that cannot see each
+ * other's KV writes EACH allow up to the full limit within the same window
+ * (reproduced on this code in tests/market-rate-limit-multi-isolate-test.cjs:
+ * 19+19=38, worst case 30+30=60=2× limit; N isolates → N× limit). The fix:
+ * when the native Workers "ratelimits" BINDING is configured (wrangler.jsonc
+ * → env.MARKET_RATE_LIMITER, simple {limit: 30, period: 60} — keep in sync
+ * with MARKET_RATE_LIMIT_MAX), its per-datacenter counter is SHARED by every
+ * isolate in that datacenter and is consulted BEFORE the KV limiter. A
+ * binding BLOCK is an early 429 with ZERO KV operations; a binding ALLOW (or
+ * an absent/erroring binding) falls through to the KV sliding-window
+ * limiter, which remains BOTH the fallback AND the second layer (it preserves
+ * rolling-window semantics if the binding's own windowing is coarser). The
+ * binding only guards the 4 public market endpoints — cron handlers and the
+ * auth-gated price paths (isUserRateLimited) are untouched.
+ *
  * Returns true if rate limited, false if allowed.
  *
  * @param {object} env
@@ -1689,6 +1707,22 @@ async function isCallbackRateLimited(env, userId) {
 async function isMarketRateLimited(env, ip, userId) {
   const uid = userId ? String(userId) : 'anon';
   const key = `${MARKET_RATE_LIMIT_KEY_PREFIX}${uid}:${ip}`;
+  // F-03/S4: consult the shared per-datacenter counter FIRST — it is the only
+  // state every isolate in the datacenter sees consistently (KV is not).
+  const shared = env && env.MARKET_RATE_LIMITER;
+  if (shared && typeof shared.limit === 'function') {
+    try {
+      const verdict = await shared.limit({ key });
+      if (verdict && verdict.success === false) {
+        // Blocked by the shared counter — early 429, no KV work needed.
+        return true;
+      }
+    } catch (e) {
+      // Binding failure (platform issue / unsupported environment): degrade
+      // gracefully to the KV limiter — the market endpoints must not break.
+      console.warn('market rate-limit binding failed (falling back to KV limiter):', e && e.message ? e.message : e);
+    }
+  }
   return _checkRateLimitCoalesced(env, key, MARKET_RATE_LIMIT_MAX, MARKET_RATE_LIMIT_WINDOW);
 }
 
@@ -1792,18 +1826,21 @@ function _getRlCoalesceState(key, windowIndex) {
 }
 
 function _parseRlValue(raw, currentWindowIndex) {
-  // Backward-compatible parse: new JSON {c, w} format OR legacy plain-string count.
-  if (!raw) return { count: 0, winIdx: currentWindowIndex };
+  // Backward-compatible parse: JSON {c, w, p} format OR legacy plain-string count.
+  //   c = raw count of window w (only that window's own requests)
+  //   w = window index (epoch-aligned)
+  //   p = final count of the PREVIOUS window (w-1) — sliding-carry source (F-03)
+  if (!raw) return { count: 0, winIdx: currentWindowIndex, prev: 0 };
   let parsed = null;
   try { parsed = JSON.parse(raw); } catch { parsed = null; }
   if (parsed && typeof parsed === 'object' && parsed !== null && Number.isFinite(parsed.c)) {
-    return { count: (parsed.c | 0), winIdx: (parsed.w | 0) };
+    return { count: (parsed.c | 0), winIdx: (parsed.w | 0), prev: (parsed.p | 0) };
   }
   // Legacy plain-string count (no windowIndex). Since the KV TTL == window,
   // a legacy entry is at most one window old. Treat conservatively as
   // current-window (may over-count slightly → safe / blocking direction).
   const n = parseInt(raw, 10);
-  return { count: Number.isFinite(n) ? n : 0, winIdx: currentWindowIndex };
+  return { count: Number.isFinite(n) ? n : 0, winIdx: currentWindowIndex, prev: 0 };
 }
 
 async function _checkRateLimitCoalesced(env, key, limit, windowSeconds) {
@@ -1821,19 +1858,36 @@ async function _checkRateLimitCoalesced(env, key, limit, windowSeconds) {
 
   // Read KV (cheap — reads are not the quota bottleneck).
   let kvCount = 0;
+  let prevCount = 0;
   try {
     const raw = await env.RATE_LIMITS.get(key);
     const p = _parseRlValue(raw, windowIndex);
     if (p.winIdx === windowIndex) {
       kvCount = p.count;
+      prevCount = p.prev || 0;
+    } else if (p.winIdx === windowIndex - 1) {
+      // Entry from the immediately preceding window: its count IS the
+      // previous-window count — the sliding-carry source (F-03).
+      prevCount = p.count;
     }
-    // else: stale window → treat as 0 (window rolled over).
+    // else: older than one window → treat both as 0 (window rolled over).
   } catch (e) {
     // KV read failure — kvCount stays 0; rely on in-memory delta for this isolate.
     console.warn('rate-limit KV read failed (using in-memory delta):', e && e.message ? e.message : e);
   }
 
-  const effective = kvCount + st.delta;
+  // F-03 (sliding window): carry the previous window's count into the
+  // current window, decaying linearly to zero as the current window
+  // progresses. This closes the tumbling-window bypass where a client could
+  // spend the full limit at the end of window N and the full limit again at
+  // the start of window N+1 (up to 2×limit within ~1s of wall time). The
+  // nominal limit "N per W seconds" is now enforced on a rolling basis
+  // instead of per calendar window. carry is rounded UP (blocking-safe).
+  const windowStartMs = windowIndex * winMs;
+  const elapsedRatio = Math.min(1, Math.max(0, (now - windowStartMs) / winMs));
+  const carry = Math.ceil(prevCount * (1 - elapsedRatio));
+
+  const effective = kvCount + carry + st.delta;
   if (effective >= limitNum) {
     // BLOCKED — no KV write. The block decision is read-only.
     return true;
@@ -1859,19 +1913,35 @@ async function _checkRateLimitCoalesced(env, key, limit, windowSeconds) {
     // avoids the lost-update problem (last-write-wins would discard other
     // isolates' increments).
     let freshCount = 0;
+    let freshPrev = prevCount; // default: carry source derived from the first read
+    let reReadOk = false;
     try {
       const freshRaw = await env.RATE_LIMITS.get(key);
       const fp = _parseRlValue(freshRaw, windowIndex);
-      if (fp.winIdx === windowIndex) freshCount = fp.count;
+      if (fp.winIdx === windowIndex) {
+        freshCount = fp.count;
+        freshPrev = fp.prev || 0;
+      } else if (fp.winIdx === windowIndex - 1) {
+        freshPrev = fp.count;
+      }
+      // else: older → keep the first read's derivation (best effort).
+      reReadOk = true;
     } catch (e) {
       // KV read failed on re-read — best effort: use the first kvCount.
       freshCount = kvCount;
     }
+    // F-03 (error-path hardening): only flush when the re-read SUCCEEDED —
+    // otherwise the merge basis is stale and a successful write would reset
+    // our delta while missing other isolates' counts (read-only KV failure
+    // would then degrade to fail-open instead of per-isolate limiting).
     const merged = freshCount + st.delta;
     let writeOk = false;
-    if (typeof env.RATE_LIMITS.put === 'function') {
+    if (reReadOk && typeof env.RATE_LIMITS.put === 'function') {
       try {
-        await env.RATE_LIMITS.put(key, JSON.stringify({ c: merged, w: windowIndex }), { expirationTtl: ttlSec });
+        // F-03: 'p' preserves the previous window's final count so later
+        // readers (any isolate) can apply the sliding carry after this entry
+        // overwrites the previous-window record.
+        await env.RATE_LIMITS.put(key, JSON.stringify({ c: merged, w: windowIndex, p: freshPrev }), { expirationTtl: ttlSec });
         writeOk = true;
       } catch (e) {
         // KV write failure (quota exhausted / transient). Delta is NOT reset
