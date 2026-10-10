@@ -6358,15 +6358,28 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         });
       }
 
-      // ── STEP 7: KV invalidation (single delete at end of bulk processing) ──
+      // ── STEP 7: Cache invalidation (BOTH layers, single delete each) ──
       // Only invalidate if at least one alert was claimed (status changed to
       // 'triggered'). If no alerts were claimed (all already triggered by
       // another cron), no cache invalidation needed.
       // Was 2 × N per-alert KV deletes in original markTriggered (alerts.js:313-314).
       // Now: 2 single deletes at end of bulk processing.
+      // MK-12 FIX: the module-level isolate cache (_alertsIsolateCache, 60s
+      // TTL) is cleared too — previously only the KV keys were invalidated,
+      // so within the cron-jitter window (<60s) a next tick on the SAME
+      // isolate re-processed just-triggered alerts (wasted OHLC subrequests +
+      // no-op CAS/INSERTs). Symmetric two-layer invalidation means the next
+      // tick reads the fresh DB list (triggered alerts are excluded by the
+      // status='active' filter). Re-activation/overwrite remains impossible:
+      // the CAS writes triggered_at/last_trigger_price only while
+      // status='active' (markTriggeredBulk WHERE clause, pinned by tests).
       if (claimedAlerts.length > 0) {
         try { env.APP_CACHE?.delete?.('alerts:active-list'); } catch {}
         try { env.APP_CACHE?.delete?.('alerts:active-exists'); } catch {}
+        // MK-12: also drop the in-isolate copy so the next tick (which may
+        // run seconds later due to cron jitter) does not see the stale list.
+        _alertsIsolateCache = null;
+        _alertsIsolateCacheAt = 0;
       }
     }
 
