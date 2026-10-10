@@ -13513,7 +13513,9 @@ function _startAllPolling() {
     // PHASE B FIX (FE-1): Increased from 15s to 30s to halve API load.
     // 15s polling × 20 symbols = 240 req/hour → now 120 req/hour.
     // Alert price checks don't need 15s granularity — 30s is sufficient
-    // for price alert triggers (backend cron runs every 5 min anyway).
+    // for price alert triggers (the backend cron runs every minute; this
+    // 30s frontend check only speeds up the IN-APP display, Telegram
+    // delivery is owned by the backend queue).
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         checkAlerts();

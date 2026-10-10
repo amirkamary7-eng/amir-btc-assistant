@@ -5611,33 +5611,32 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
 }
 
 /**
- * CRON TASK: Price Alert Checker
+ * CRON TASK: Price Alert Checker (runScheduledAlertsBaseline)
  *
- * Runs every 5 minutes. For each active price_alert:
- *   1. Fetch current price for the alert's symbol (batched by symbol)
- *   2. Apply cross-detection logic:
- *      - direction='above': trigger if previous price was below target AND current >= target
- *        (or no previous price: trigger if current >= target)
- *      - direction='below': trigger if previous price was above target AND current <= target
- *        (or no previous price: trigger if current <= target)
- *   3. Update last_price + last_checked_at (always — even if not triggered)
- *   4. If triggered:
- *      a. Atomically mark status='triggered' (prevents duplicate triggers)
- *      b. Send via notificationPlatformRepo.dispatch() with category='price_alert'
- *         - channel='both' → in-app notification + Telegram queue
- *      c. ALSO directly send Telegram (belt-and-suspenders, in case queue is delayed)
+ * Runs every MINUTE (1-min cron; the */5 cron only drains the notification
+ * queue via processQueue(15)). Architecture: H5-HIGH bulk processing —
+ * for the active alert list (listActiveForCron, ≤500, 3-layer cache):
+ *   1. Batch-fetch 1-minute OHLC per symbol (cached-exchange-first fallback
+ *      chain: bybit → okx → mexc — Binance is IP-blocked in the deploy
+ *      region; forex/gold/stocks route via FOREX_YAHOO_MAP, see MK-06)
+ *   2. Apply cross-detection per alert (candleHigh/candleLow vs prevPrice
+ *      vs target — see the STEP comments below)
+ *   3. Bulk UPDATE working columns (last_price/last_checked_at)
+ *   4. Triggered alerts: bulk INSERT in-app notifs + Telegram queue rows
+ *      (deterministic ids + ON CONFLICT DO NOTHING), then the CAS
+ *      markTriggeredBulk (WHERE status='active' RETURNING) claims them;
+ *      delivery channels follow the user's ch_price_alert setting
+ *      ('none' → skipped_pref_disabled). Messages show BOTH the user's
+ *      target and the observed price, distinctly labeled (MK-02), with
+ *      the correct unit per symbol class (MK-06).
+ *   5. STEP 7 invalidates BOTH cache layers on claim: the KV active-list /
+ *      active-exists keys AND the module isolate cache (MK-12).
  *
- * BUGS FIXED IN v2 (2026-07-25):
- *   - BUG #1: processQueue was never called → Telegram messages stuck in queue forever
- *     FIX: Direct sendTelegramMessage alongside dispatch (queue is backup, not primary)
- *   - BUG #2: dispatch used category='market' but pref check used 'price_alert' (mismatch)
- *     FIX: Both use category='price_alert' now
- *   - BUG #3: No cross-detection — price could jump over target between cron runs and
- *     the alert would never fire if price reversed before next cron tick
- *     FIX: last_price column + cross-detection logic
- *   - BUG #4: Sequential price fetch with 8s timeout per exchange = 64s worst case
- *     FIX: Promise.any with 4s timeout — fastest valid exchange wins, but only check
- *     top 3 exchanges (Binance > Bybit > OKX) for speed
+ * Historical v2 note (2026-07-25): an earlier design dispatched via
+ * notificationPlatformRepo.dispatch() plus a direct belt-and-suspenders
+ * Telegram send, with a Binance-first sequential fetch chain. The current
+ * architecture (H5-HIGH) replaces both: queue INSERTs + processQueue own
+ * Telegram delivery; the parallel bybit/okx/mexc chain owns price fetch.
  *
  * LOGGING: Every alert logs {alert_id, user_id, symbol, target_price, prev_price,
  *   current_price, direction, triggered, reason, latency_ms} for full audit trail.
@@ -7626,11 +7625,13 @@ export default {
         return await handleForexData(env);
       }
 
-      // ── Real-time price for alert checking — independent from market cache ──
-      // Returns the FRESHEST price for a symbol, fetched directly from Binance.
-      // Used by frontend checkAlerts() to get real-time prices every 30s
-      // without waiting for the 60s market polling cycle.
-      // Auth required.
+      // ── Real-time price for a single symbol — independent from market cache ──
+      // Returns the FRESHEST price for a symbol via fetchSpotPriceUsd
+      // (cached-exchange-first fallback chain: bybit → okx → mexc; Binance is
+      // IP-blocked in the deploy region). Sole frontend consumer: the
+      // background fetch when opening a NON-Top-200 coin detail (checkAlerts
+      // uses the batch /api/market/prices endpoint instead). Rate limited
+      // (MK-04: 30/min per user). Auth required.
       if (request.method === 'GET' && url.pathname === '/api/market/price') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
