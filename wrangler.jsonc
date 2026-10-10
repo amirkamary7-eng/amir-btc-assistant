@@ -152,7 +152,7 @@
                         "ratelimits": [
                                 {
                                         "name": "MARKET_RATE_LIMITER",
-                                        "namespace_id": "amirbtc-market-rate-limit-staging",
+                                        "namespace_id": "731001",
                                         "simple": { "limit": 30, "period": 60 }
                                 }
                         ]
@@ -236,7 +236,7 @@
                         "ratelimits": [
                                 {
                                         "name": "MARKET_RATE_LIMITER",
-                                        "namespace_id": "amirbtc-market-rate-limit-production",
+                                        "namespace_id": "731002",
                                         "simple": { "limit": 30, "period": 60 }
                                 }
                         ]
