@@ -4362,6 +4362,41 @@ async function loadMarketOverview() {
     }
 }
 
+/**
+ * MK-08 FIX: surface data-degradation states in the Market header.
+ * The server /api/market contract is:
+ *   dataSource 'coingecko' (fresh) or 'cache' (normal <=120s KV cache)
+ *     → within the designed freshness envelope → NO indicator ('ok').
+ *   dataSource 'stale_cache' with stale:true (ALL providers failed, serving
+ *     last good cache) → 'warn'.
+ *   live fallback providers ('coincap+cmc' / 'binance+cmc' / 'mexc+cmc')
+ *     → 'info' (live prices, not the primary source).
+ *   fetch failed while retained (<=5 min hydrated) data stays on screen
+ *     → 'offline' (warn styling). The hard no-data failure keeps using the
+ *     existing market_error empty state — it never claims to be live.
+ * Element is display:none by default → zero layout impact when healthy.
+ */
+function setMarketDataStatus(mode) {
+    const el = document.getElementById('mkt-data-status');
+    if (!el) return;
+    if (mode === 'warn') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_stale');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'offline') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_offline');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'info') {
+        el.className = 'mkt-data-status mkt-info';
+        el.textContent = t('market_status_fallback');
+        el.setAttribute('aria-live', 'polite');
+    } else {
+        el.className = 'mkt-data-status';
+        el.textContent = '';
+    }
+}
+
 async function loadMarketData(force = false) {
     console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
     const listEl = document.getElementById('coin-list-rows');
@@ -4386,6 +4421,9 @@ async function loadMarketData(force = false) {
                 // the DOM rewrite if data is unchanged).
                 renderMarketTicker();
                 renderDashboardMarketStatus();
+                // MK-08: in-memory cache (<=120s old) is within the designed
+                // freshness envelope — clear any previous degradation badge.
+                setMarketDataStatus('ok');
                 return;
             }
         }
@@ -4429,6 +4467,17 @@ async function loadMarketData(force = false) {
                         if (c) console.log('[MARKET]', s, 'price:', c.priceUsd, 'changePercent24Hr:', c.changePercent24Hr, 'hasImage:', !!c.image);
                     });
                     allCoins = res.data;
+                    // MK-08: surface degraded data states per the /api/market
+                    // contract: stale cache (all providers failed) → warn;
+                    // live fallback providers → info; fresh CoinGecko or the
+                    // normal (<=120s) server cache → no indicator.
+                    if (res.stale === true) {
+                        setMarketDataStatus('warn');
+                    } else if (res.dataSource && res.dataSource !== 'coingecko' && res.dataSource !== 'cache') {
+                        setMarketDataStatus('info');
+                    } else {
+                        setMarketDataStatus('ok');
+                    }
                     // ROOT CAUSE FIX: Don't overwrite CMC data with less authoritative
                     // sources. loadMarketOverview() sets globalMarketData from CMC (the
                     // industry standard). Previously, loadMarketData() would OVERWRITE
@@ -4480,6 +4529,11 @@ async function loadMarketData(force = false) {
         renderDashboardMarketStatus();
     } catch (e) {
         console.error('❌ Market load error:', e);
+        // MK-08: fetch failed but retained (<=5 min hydrated) data is still on
+        // screen — say so instead of silently showing old prices as if live.
+        if (allCoins.length) {
+            setMarketDataStatus('offline');
+        }
         if (listEl && !allCoins.length) {
             listEl.innerHTML = `<div class="empty-state">${t('market_error')}</div>`;
         }

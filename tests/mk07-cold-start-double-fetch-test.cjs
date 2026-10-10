@@ -120,6 +120,7 @@ function createLoadSandbox(opts = {}) {
     'const renderMarketTicker = __g.noop("renderMarketTicker");',
     'const renderDashboardMarketStatus = __g.noop("renderDashboardMarketStatus");',
     'const prefetchTopChartSymbols = () => {};',
+    'const setMarketDataStatus = () => {}; // MK-08 dependency (behavior pinned by mk08 test)',
     'const setTimeout = (fn) => { try { fn(); } catch (_) {} return 0; };',
     'const requestIdleCallback = undefined;',
     'const console = { log: () => {}, warn: () => {}, error: () => {} };',

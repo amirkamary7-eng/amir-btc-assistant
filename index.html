@@ -364,6 +364,12 @@
                 <div class="mkt-header-text">
                     <h2 class="mkt-title" data-i18n="market">بازار</h2>
                     <p class="mkt-subtitle" data-i18n="market_subtitle">مشاهده بازارهای جهانی و فرصت‌های معاملاتی</p>
+                    <!-- MK-08: data health indicator. Hidden by default (zero layout
+                         impact when healthy); shown only via setMarketDataStatus() when
+                         the server reports degraded data (stale cache / fallback
+                         providers) or a fetch failed while retained data is displayed.
+                         role=status + aria-live announce the change to screen readers. -->
+                    <p class="mkt-data-status" id="mkt-data-status" role="status" aria-live="polite"></p>
                 </div>
             </div>
             <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">

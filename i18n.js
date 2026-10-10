@@ -354,6 +354,10 @@ const i18n = {
         chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
         alert_trigger_msg: '🔔 هشدار قیمت فعال شد\nقیمت {symbol} به سطح هدف {target} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: {observed} {unit}.',
         alert_trigger_title: '🔔 هشدار قیمت {symbol}',
+        // ── MK-08: market data health indicator ──
+        market_status_stale: 'داده‌ها ممکن است قدیمی باشند — آخرین قیمت‌های ذخیره‌شده نمایش داده می‌شود',
+        market_status_fallback: 'قیمت‌ها از منبع جایگزین دریافت می‌شود',
+        market_status_offline: 'به‌روزرسانی ناموفق — قیمت‌های قبلی نمایش داده می‌شود',
         // ── i18n AUDIT: analysis form ──
         af_chart_image: 'لینک تصویر چارت',
         af_support_opt: 'حمایت (اختیاری)',
@@ -1704,6 +1708,10 @@ const i18n = {
         chart_unavailable_sub: 'Please try again later or check another symbol.',
         alert_trigger_msg: '🔔 Price alert triggered\n{symbol} reached your target price of {target}.\nObserved price at trigger time: {observed} {unit}.',
         alert_trigger_title: '🔔 Price Alert: {symbol}',
+        // ── MK-08: market data health indicator ──
+        market_status_stale: 'Data may be stale — showing last saved prices',
+        market_status_fallback: 'Prices from a fallback source',
+        market_status_offline: 'Update failed — showing previous prices',
         // ── i18n AUDIT EN: analysis form ──
         af_chart_image: 'Chart Image URL',
         af_support_opt: 'Support (optional)',
