@@ -3243,6 +3243,39 @@ async function fetchKlines1m(exchangeKey, symbol) {
   }
 }
 
+// MK-06 FIX: single source of truth for non-crypto symbol routing.
+// Was duplicated as local consts inside BOTH fetchOhlc1m and fetchSpotPriceUsd
+// (identical entries) — any drift between the two copies would route a symbol
+// one way for OHLC evaluation and another for spot price. Hoisted to module
+// scope; entries and routing conditions unchanged.
+const FOREX_YAHOO_MAP = {
+  'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
+  'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
+  'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
+  'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
+  'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+  'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
+  'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+  'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
+  'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
+};
+
+// MK-06 FIX: derive the price UNIT label for an alert symbol from the SAME
+// routing table the evaluation path uses (FOREX_YAHOO_MAP), so the unit shown
+// in trigger messages can never drift from how the alert was evaluated:
+//   - Yahoo '=X' FX pairs → the quote currency (e.g. USDJPY → JPY, EURGBP → GBP)
+//   - Futures/stocks (gold, silver, equities) → USD
+//   - Everything else → crypto quoted in USDT
+function getAlertUnitLabel(symbol) {
+  const s = String(symbol || '').trim().toUpperCase();
+  const mapped = FOREX_YAHOO_MAP[s];
+  if (mapped) {
+    if (mapped.endsWith('=X')) return s.slice(3); // quote currency
+    return 'USD';                                 // futures / equities
+  }
+  return 'USDT';                                   // crypto
+}
+
 /**
  * Fetch OHLC 1m for a symbol using the same exchange cache pattern as fetchSpotPriceUsd.
  * Tries cached exchange first, falls back to all 3 exchanges in parallel.
@@ -3253,17 +3286,6 @@ async function fetchOhlc1m(env, symbol) {
   if (!normalizedSymbol) return null;
 
   // Forex symbols don't have crypto klines — fall back to spot price
-  const FOREX_YAHOO_MAP = {
-    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
-    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
-    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
-    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
-    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
-    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
-    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
-    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
-    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
-  };
   if (FOREX_YAHOO_MAP[normalizedSymbol]) {
     // For forex, use spot price as high=low=close (no kline available)
     const spot = await fetchSpotPriceUsd(env, normalizedSymbol);
@@ -3324,17 +3346,6 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
   // For non-crypto symbols (EURUSD, XAUUSD, DXY, SPX, etc.), use Yahoo Finance
   // instead of crypto exchanges (Bybit, OKX). Crypto exchanges only have
   // ${symbol}USDT pairs — forex symbols like EURUSD would fail silently.
-  const FOREX_YAHOO_MAP = {
-    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
-    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
-    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
-    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
-    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
-    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
-    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
-    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
-    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
-  };
   if (FOREX_YAHOO_MAP[normalizedSymbol]) {
     try {
       const yahooSym = FOREX_YAHOO_MAP[normalizedSymbol];
@@ -5600,33 +5611,32 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
 }
 
 /**
- * CRON TASK: Price Alert Checker
+ * CRON TASK: Price Alert Checker (runScheduledAlertsBaseline)
  *
- * Runs every 5 minutes. For each active price_alert:
- *   1. Fetch current price for the alert's symbol (batched by symbol)
- *   2. Apply cross-detection logic:
- *      - direction='above': trigger if previous price was below target AND current >= target
- *        (or no previous price: trigger if current >= target)
- *      - direction='below': trigger if previous price was above target AND current <= target
- *        (or no previous price: trigger if current <= target)
- *   3. Update last_price + last_checked_at (always — even if not triggered)
- *   4. If triggered:
- *      a. Atomically mark status='triggered' (prevents duplicate triggers)
- *      b. Send via notificationPlatformRepo.dispatch() with category='price_alert'
- *         - channel='both' → in-app notification + Telegram queue
- *      c. ALSO directly send Telegram (belt-and-suspenders, in case queue is delayed)
+ * Runs every MINUTE (1-min cron; the 5-minute cron only drains the
+ * notification queue via processQueue(15)). Architecture: H5-HIGH bulk processing —
+ * for the active alert list (listActiveForCron, ≤500, 3-layer cache):
+ *   1. Batch-fetch 1-minute OHLC per symbol (cached-exchange-first fallback
+ *      chain: bybit → okx → mexc — Binance is IP-blocked in the deploy
+ *      region; forex/gold/stocks route via FOREX_YAHOO_MAP, see MK-06)
+ *   2. Apply cross-detection per alert (candleHigh/candleLow vs prevPrice
+ *      vs target — see the STEP comments below)
+ *   3. Bulk UPDATE working columns (last_price/last_checked_at)
+ *   4. Triggered alerts: bulk INSERT in-app notifs + Telegram queue rows
+ *      (deterministic ids + ON CONFLICT DO NOTHING), then the CAS
+ *      markTriggeredBulk (WHERE status='active' RETURNING) claims them;
+ *      delivery channels follow the user's ch_price_alert setting
+ *      ('none' → skipped_pref_disabled). Messages show BOTH the user's
+ *      target and the observed price, distinctly labeled (MK-02), with
+ *      the correct unit per symbol class (MK-06).
+ *   5. STEP 7 invalidates BOTH cache layers on claim: the KV active-list /
+ *      active-exists keys AND the module isolate cache (MK-12).
  *
- * BUGS FIXED IN v2 (2026-07-25):
- *   - BUG #1: processQueue was never called → Telegram messages stuck in queue forever
- *     FIX: Direct sendTelegramMessage alongside dispatch (queue is backup, not primary)
- *   - BUG #2: dispatch used category='market' but pref check used 'price_alert' (mismatch)
- *     FIX: Both use category='price_alert' now
- *   - BUG #3: No cross-detection — price could jump over target between cron runs and
- *     the alert would never fire if price reversed before next cron tick
- *     FIX: last_price column + cross-detection logic
- *   - BUG #4: Sequential price fetch with 8s timeout per exchange = 64s worst case
- *     FIX: Promise.any with 4s timeout — fastest valid exchange wins, but only check
- *     top 3 exchanges (Binance > Bybit > OKX) for speed
+ * Historical v2 note (2026-07-25): an earlier design dispatched via
+ * notificationPlatformRepo.dispatch() plus a direct belt-and-suspenders
+ * Telegram send, with a Binance-first sequential fetch chain. The current
+ * architecture (H5-HIGH) replaces both: queue INSERTs + processQueue own
+ * Telegram delivery; the parallel bybit/okx/mexc chain owns price fetch.
  *
  * LOGGING: Every alert logs {alert_id, user_id, symbol, target_price, prev_price,
  *   current_price, direction, triggered, reason, latency_ms} for full audit trail.
@@ -6137,12 +6147,17 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       };
 
       // Helper: build notification message text (was inline per-alert in original).
-      const buildMessage = (t) => {
-        const priceFmt = t.candleClose >= 1
-          ? Number(t.candleClose).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : Number(t.candleClose).toFixed(6);
-        return `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به ${priceFmt} USDT رسید.`;
-      };
+      // MK-02 FIX: show BOTH the user's target price and the observed price at
+      // detection time, distinctly labeled. The observed candle close is NOT the
+      // exact crossing price (the 1-min cron evaluates the forming candle) and can
+      // legitimately differ from the target (e.g. target 62,000 → observed 62,200)
+      // — both numbers are now transparent instead of the observed value
+      // masquerading as "the price reached". Formatting rules unchanged
+      // (>=1 → 2-dp locale, <1 → fixed(6)).
+      const fmtPrice = (v) => v >= 1
+        ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(v).toFixed(6);
+      const buildMessage = (t) => `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به سطح هدف ${fmtPrice(t.targetPrice)} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: ${fmtPrice(t.candleClose)} ${getAlertUnitLabel(t.symbol)}`;
 
       // Helper: build notificationId (preserves dedupKey → notif_id pattern).
       // Original: `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`
@@ -6342,15 +6357,28 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         });
       }
 
-      // ── STEP 7: KV invalidation (single delete at end of bulk processing) ──
+      // ── STEP 7: Cache invalidation (BOTH layers, single delete each) ──
       // Only invalidate if at least one alert was claimed (status changed to
       // 'triggered'). If no alerts were claimed (all already triggered by
       // another cron), no cache invalidation needed.
       // Was 2 × N per-alert KV deletes in original markTriggered (alerts.js:313-314).
       // Now: 2 single deletes at end of bulk processing.
+      // MK-12 FIX: the module-level isolate cache (_alertsIsolateCache, 60s
+      // TTL) is cleared too — previously only the KV keys were invalidated,
+      // so within the cron-jitter window (<60s) a next tick on the SAME
+      // isolate re-processed just-triggered alerts (wasted OHLC subrequests +
+      // no-op CAS/INSERTs). Symmetric two-layer invalidation means the next
+      // tick reads the fresh DB list (triggered alerts are excluded by the
+      // status='active' filter). Re-activation/overwrite remains impossible:
+      // the CAS writes triggered_at/last_trigger_price only while
+      // status='active' (markTriggeredBulk WHERE clause, pinned by tests).
       if (claimedAlerts.length > 0) {
         try { env.APP_CACHE?.delete?.('alerts:active-list'); } catch {}
         try { env.APP_CACHE?.delete?.('alerts:active-exists'); } catch {}
+        // MK-12: also drop the in-isolate copy so the next tick (which may
+        // run seconds later due to cron jitter) does not see the stale list.
+        _alertsIsolateCache = null;
+        _alertsIsolateCacheAt = 0;
       }
     }
 
@@ -7597,14 +7625,31 @@ export default {
         return await handleForexData(env);
       }
 
-      // ── Real-time price for alert checking — independent from market cache ──
-      // Returns the FRESHEST price for a symbol, fetched directly from Binance.
-      // Used by frontend checkAlerts() to get real-time prices every 30s
-      // without waiting for the 60s market polling cycle.
-      // Auth required.
+      // ── Real-time price for a single symbol — independent from market cache ──
+      // Returns the FRESHEST price for a symbol via fetchSpotPriceUsd
+      // (cached-exchange-first fallback chain: bybit → okx → mexc; Binance is
+      // IP-blocked in the deploy region). Sole frontend consumer: the
+      // background fetch when opening a NON-Top-200 coin detail (checkAlerts
+      // uses the batch /api/market/prices endpoint instead). Rate limited
+      // (MK-04: 30/min per user). Auth required.
       if (request.method === 'GET' && url.pathname === '/api/market/price') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
+
+        // MK-04 FIX: dedicated per-user rate limit (30 req/min). This endpoint
+        // fetches live spot prices with up to 3 upstream subrequests per call
+        // on cache miss (bybit/okx/mexc) and previously had NO limit. The only
+        // frontend consumer is the background fetch when opening a non-Top-200
+        // coin detail (1 request per open; fast browsing ≈ 6-12/min), so
+        // 30/min gives 2.5-5× real-usage headroom. DEDICATED 'market-price'
+        // bucket — NOT shared with the public IP bucket or the batch
+        // 'market-prices' bucket. isUserRateLimited fails open on a KV
+        // outage. The alert cron and all internal paths fetch via
+        // fetchSpotPriceUsd directly and never route through this HTTP
+        // endpoint — unaffected.
+        if (await isUserRateLimited(env, authState.user?.id, 'market-price', 30, 60)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
 
         const symbol = (url.searchParams.get('symbol') || '').toUpperCase().trim();
         if (!symbol) {

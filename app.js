@@ -475,6 +475,17 @@ let currentMainTab = 'crypto';   // crypto | forex | watchlist
 let currentSubTab = 'top';       // top | gainers | losers
 let searchTerm = '';
 let _lastSearchTerm = ''; // Track last search term to prevent stale async results
+
+// MK-10 FIX: query-keyed market search result cache. Re-typing a recently
+// searched term re-fetched byte-identical data (the backend already caches
+// the MEXC index per query for 5 min server-side, so repeat frontend calls
+// were pure waste). Bounded to 20 entries with a 60s TTL; the oldest entry is
+// evicted by insertion order, so memory growth is capped. ONLY successful
+// index responses are cached — degraded fallback renders and errors are
+// never cached. The stale-response guard and the input debounce are unchanged.
+const _SEARCH_RESULT_CACHE_TTL_MS = 60 * 1000;
+const _SEARCH_RESULT_CACHE_MAX = 20;
+let _searchResultCache = new Map();
 let _lastMarketRenderKey = ''; // Track render state for price-only diffing
 let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-independent)
 let sliderInterval = null;
@@ -4362,6 +4373,41 @@ async function loadMarketOverview() {
     }
 }
 
+/**
+ * MK-08 FIX: surface data-degradation states in the Market header.
+ * The server /api/market contract is:
+ *   dataSource 'coingecko' (fresh) or 'cache' (normal <=120s KV cache)
+ *     → within the designed freshness envelope → NO indicator ('ok').
+ *   dataSource 'stale_cache' with stale:true (ALL providers failed, serving
+ *     last good cache) → 'warn'.
+ *   live fallback providers ('coincap+cmc' / 'binance+cmc' / 'mexc+cmc')
+ *     → 'info' (live prices, not the primary source).
+ *   fetch failed while retained (<=5 min hydrated) data stays on screen
+ *     → 'offline' (warn styling). The hard no-data failure keeps using the
+ *     existing market_error empty state — it never claims to be live.
+ * Element is display:none by default → zero layout impact when healthy.
+ */
+function setMarketDataStatus(mode) {
+    const el = document.getElementById('mkt-data-status');
+    if (!el) return;
+    if (mode === 'warn') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_stale');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'offline') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_offline');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'info') {
+        el.className = 'mkt-data-status mkt-info';
+        el.textContent = t('market_status_fallback');
+        el.setAttribute('aria-live', 'polite');
+    } else {
+        el.className = 'mkt-data-status';
+        el.textContent = '';
+    }
+}
+
 async function loadMarketData(force = false) {
     console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
     const listEl = document.getElementById('coin-list-rows');
@@ -4386,6 +4432,9 @@ async function loadMarketData(force = false) {
                 // the DOM rewrite if data is unchanged).
                 renderMarketTicker();
                 renderDashboardMarketStatus();
+                // MK-08: in-memory cache (<=120s old) is within the designed
+                // freshness envelope — clear any previous degradation badge.
+                setMarketDataStatus('ok');
                 return;
             }
         }
@@ -4429,6 +4478,17 @@ async function loadMarketData(force = false) {
                         if (c) console.log('[MARKET]', s, 'price:', c.priceUsd, 'changePercent24Hr:', c.changePercent24Hr, 'hasImage:', !!c.image);
                     });
                     allCoins = res.data;
+                    // MK-08: surface degraded data states per the /api/market
+                    // contract: stale cache (all providers failed) → warn;
+                    // live fallback providers → info; fresh CoinGecko or the
+                    // normal (<=120s) server cache → no indicator.
+                    if (res.stale === true) {
+                        setMarketDataStatus('warn');
+                    } else if (res.dataSource && res.dataSource !== 'coingecko' && res.dataSource !== 'cache') {
+                        setMarketDataStatus('info');
+                    } else {
+                        setMarketDataStatus('ok');
+                    }
                     // ROOT CAUSE FIX: Don't overwrite CMC data with less authoritative
                     // sources. loadMarketOverview() sets globalMarketData from CMC (the
                     // industry standard). Previously, loadMarketData() would OVERWRITE
@@ -4480,6 +4540,11 @@ async function loadMarketData(force = false) {
         renderDashboardMarketStatus();
     } catch (e) {
         console.error('❌ Market load error:', e);
+        // MK-08: fetch failed but retained (<=5 min hydrated) data is still on
+        // screen — say so instead of silently showing old prices as if live.
+        if (allCoins.length) {
+            setMarketDataStatus('offline');
+        }
         if (listEl && !allCoins.length) {
             listEl.innerHTML = `<div class="empty-state">${t('market_error')}</div>`;
         }
@@ -4889,7 +4954,57 @@ function renderMarket() {
     // The search calls /api/market/search (public, no auth needed) which
     // queries a 1700+ coin index from MEXC API. Results are rendered
     // directly without depending on allCoins.
+    // MK-10: applySearchData is the single render path shared by the
+    // query-keyed cache hit and the fresh network response.
+    function applySearchData(data, searchTerm) {
+        if (!data || !data.results || data.results.length === 0) {
+            const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+            list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+            return;
+        }
+
+        // Map search results to the format expected by renderMarketItem
+        // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
+        const searchResults = data.results.map(c => {
+            const coinData = {
+                symbol: c.symbol,
+                name: c.name || c.symbol,
+                priceUsd: c.priceUsd || 0,
+                changePercent24Hr: c.changePercent24Hr || 0,
+                volumeUsd24Hr: c.volume || 0,
+                marketCapUsd: 0, // MEXC doesn't provide market cap
+                rank: c.rank || 0,
+                image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
+                _type: 'crypto',
+            };
+            // Cache each coin for openCoinDetail to find later
+            Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
+            return { ...coinData, _fromSearch: true };
+        });
+
+        // Also check forex pairs (instant, from memory)
+        const forexResults = allForexPairs.filter(f =>
+            f.symbol.toLowerCase().includes(searchTerm) ||
+            f.name.toLowerCase().includes(searchTerm) ||
+            (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
+        ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
+
+        const allResults = [...searchResults, ...forexResults];
+        list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+    }
+
     if (searchTerm) {
+        // MK-10: cache-first. A hit re-renders instantly with zero network.
+        const cachedResult = _searchResultCache.get(searchTerm);
+        if (cachedResult) {
+            if (Date.now() - cachedResult.ts < _SEARCH_RESULT_CACHE_TTL_MS) {
+                _lastSearchTerm = searchTerm;
+                applySearchData(cachedResult.data, searchTerm);
+                return;
+            }
+            _searchResultCache.delete(searchTerm); // expired — evict
+        }
+
         // Show skeleton immediately while search runs
         list.innerHTML = '<div class="empty-state" style="padding:20px;">' + t('loading_search') + '</div>';
 
@@ -4908,39 +5023,17 @@ function renderMarket() {
                 if (currentSearch !== _lastSearchTerm) return;
 
                 if (!data || !data.results || data.results.length === 0) {
-                    const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
-                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+                    applySearchData(data, searchTerm);
                     return;
                 }
 
-                // Map search results to the format expected by renderMarketItem
-                // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
-                const searchResults = data.results.map(c => {
-                    const coinData = {
-                        symbol: c.symbol,
-                        name: c.name || c.symbol,
-                        priceUsd: c.priceUsd || 0,
-                        changePercent24Hr: c.changePercent24Hr || 0,
-                        volumeUsd24Hr: c.volume || 0,
-                        marketCapUsd: 0, // MEXC doesn't provide market cap
-                        rank: c.rank || 0,
-                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                        _type: 'crypto',
-                    };
-                    // Cache each coin for openCoinDetail to find later
-                    Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
-                    return { ...coinData, _fromSearch: true };
-                });
-
-                // Also check forex pairs (instant, from memory)
-                const forexResults = allForexPairs.filter(f =>
-                    f.symbol.toLowerCase().includes(searchTerm) ||
-                    f.name.toLowerCase().includes(searchTerm) ||
-                    (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
-                ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
-
-                const allResults = [...searchResults, ...forexResults];
-                list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+                // MK-10: cache ONLY successful index responses (never the
+                // degraded fallback, never errors) with bounded size.
+                _searchResultCache.set(searchTerm, { data, ts: Date.now() });
+                if (_searchResultCache.size > _SEARCH_RESULT_CACHE_MAX) {
+                    _searchResultCache.delete(_searchResultCache.keys().next().value);
+                }
+                applySearchData(data, searchTerm);
             })
             .catch(() => {
                 if (currentSearch !== _lastSearchTerm) return;
@@ -9602,6 +9695,40 @@ async function setPriceAlert() {
     const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
 
+    // ── MK-05 (user decision): registration gate on notification settings ──
+    // While the user has price-alert notifications disabled (ch_price_alert
+    // === 'none'), new price-alert registration is STOPPED: the alert would
+    // never deliver its trigger notification, so registering it silently would
+    // mislead the user. The REAL current state is read from the authoritative
+    // source (GET /api/notifications/platform/settings) on EVERY registration
+    // attempt — never from the in-memory settings cache (_nsSettingsCache),
+    // localStorage or defaults — so a just-changed setting is honored
+    // immediately. Nothing may be registered while disabled: no optimistic UI,
+    // no server sync, no Telegram receipt. The message points the user to the
+    // existing notification-settings path (Settings → notification settings),
+    // where they can re-enable alerts and then re-register.
+    // Guests keep the current local-only behavior (no server-side settings
+    // exist for them; nothing here changes their flow).
+    // Unknown state (settings unreadable/malformed): registration requires a
+    // KNOWN-enabled state — fail closed rather than register silently.
+    if (API_BASE && !UserContext.isGuest()) {
+        let chPriceAlert = null;
+        try {
+            const data = await apiFetch('/api/notifications/platform/settings');
+            if (data && data.status === 'success' && data.settings) {
+                chPriceAlert = data.settings.ch_price_alert;
+            }
+        } catch (e) { /* fall through — unknown state handled below */ }
+        if (chPriceAlert !== 'mini_app' && chPriceAlert !== 'telegram' && chPriceAlert !== 'both') {
+            if (chPriceAlert === 'none') {
+                alert(t('price_alert_notif_disabled'));
+            } else {
+                alert(t('price_alert_notif_check_failed'));
+            }
+            return;
+        }
+    }
+
     // ── OPTIMISTIC UI: add alert to local list + render IMMEDIATELY ──
     // The user sees the alert in the list within <1ms. The server sync happens
     // in the background. If it fails, we roll back (remove from list + toast error).
@@ -9668,6 +9795,26 @@ async function removeAlert(id) {
  * ورودی: پارامترهای `alert, currentPrice` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+// MK-06 FIX: frontend mirror of the backend unit derivation (worker-proxy.js
+// getAlertUnitLabel over FOREX_YAHOO_MAP): Yahoo '=X' FX pairs → quote
+// currency, futures/stocks → USD, everything else → crypto USDT. Kept in sync
+// with the backend by tests/mk06-alert-price-units-test.cjs (both sides pinned
+// equal). Backend delivery remains authoritative.
+const ALERT_NON_CRYPTO_UNITS = {
+    'XAUUSD': 'USD', 'XAGUSD': 'USD',
+    'AAPL': 'USD', 'MSFT': 'USD', 'NVDA': 'USD', 'AMZN': 'USD',
+    'GOOGL': 'USD', 'META': 'USD', 'TSLA': 'USD', 'NFLX': 'USD',
+    'AMD': 'USD', 'INTC': 'USD', 'COIN': 'USD', 'MSTR': 'USD',
+    'EURUSD': 'USD', 'GBPUSD': 'USD', 'USDJPY': 'JPY',
+    'USDCHF': 'CHF', 'AUDUSD': 'USD', 'USDCAD': 'CAD',
+    'NZDUSD': 'USD', 'EURJPY': 'JPY', 'GBPJPY': 'JPY',
+    'EURGBP': 'GBP', 'AUDJPY': 'JPY', 'EURCHF': 'CHF',
+    'GBPCAD': 'CAD', 'AUDNZD': 'NZD', 'EURCAD': 'CAD',
+};
+function getAlertUnitLabel(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    return ALERT_NON_CRYPTO_UNITS[s] || 'USDT';
+}
 async function triggerAlert(alert, currentPrice) {
     // CRITICAL FIX: Frontend trigger only shows IN-APP notification + popup.
     // Do NOT send to Telegram from frontend — the backend cron handles Telegram
@@ -9695,10 +9842,23 @@ async function triggerAlert(alert, currentPrice) {
     // alert to local state (it's still 'active' in backend until cron runs).
     _lastAlertSyncTs = Date.now();
     // Clean, short notification — same format as backend.
-    const priceStr = currentPrice >= 1
-        ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        : Number(currentPrice).toFixed(6);
-    const msg = t('alert_trigger_msg', { symbol: alert.symbol, price: priceStr });
+    // MK-02 FIX: show BOTH the user's target and the observed live price,
+    // distinctly labeled. They can legitimately differ — the observed value is
+    // sampled when this 30s frontend check fires, not at the exact crossing
+    // moment, so it must never masquerade as the target the user set.
+    // MK-06 FIX: unit label mirrors the backend derivation (worker-proxy.js
+    // getAlertUnitLabel over FOREX_YAHOO_MAP) — FX pairs → quote currency,
+    // futures/stocks → USD, crypto → USDT — so the in-app message never labels
+    // a gold/forex/stock price as USDT.
+    const fmtTriggerPrice = (v) => v >= 1
+        ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(v).toFixed(6);
+    const msg = t('alert_trigger_msg', {
+        symbol: alert.symbol,
+        target: fmtTriggerPrice(alert.price),
+        observed: fmtTriggerPrice(currentPrice),
+        unit: getAlertUnitLabel(alert.symbol),
+    });
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('alert_trigger_title', { symbol: alert.symbol }), msg, { sendToTelegram: false, playSound: true });
     getTg()?.showPopup?.({ title: t('alert_trigger_title', { symbol: alert.symbol }), message: msg, buttons: [{ type: 'ok' }] });
@@ -9854,12 +10014,11 @@ function addNotification(title, body, options = true) {
     // P0-4 FIX: compute badge locally
     _updateBadgeFromLocal();
 
-    if (opts.sendToTelegram) {
-        const userId = getUserId();
-        if (!String(userId).startsWith('guest_')) {
-            notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
-        }
-    }
+    // MK-01 FIX: do NOT send Telegram directly here. NotificationCenter.add()
+    // above already owns the Telegram send (with its 10s dedup + guest gating),
+    // so a second direct notifyTelegram() here caused every registration receipt
+    // to be sent TWICE (two near-simultaneous /api/notify POSTs that the backend
+    // KV burst lock cannot de-duplicate). Exactly one send path remains.
     if (opts.playSound) playAlertSound();
 }
 /**
@@ -13354,7 +13513,9 @@ function _startAllPolling() {
     // PHASE B FIX (FE-1): Increased from 15s to 30s to halve API load.
     // 15s polling × 20 symbols = 240 req/hour → now 120 req/hour.
     // Alert price checks don't need 15s granularity — 30s is sufficient
-    // for price alert triggers (backend cron runs every 5 min anyway).
+    // for price alert triggers (the backend cron runs every minute; this
+    // 30s frontend check only speeds up the IN-APP display, Telegram
+    // delivery is owned by the backend queue).
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         checkAlerts();
@@ -14143,20 +14304,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     //     before globalMarketData is loaded.
     if (API_BASE) {
         // PERF FIX: Use force=false (cache-first) for initial load. If cached
-        // data exists in memory Cache, it renders instantly. Then a background
-        // refresh (force=true) fires 2s later to get fresh prices.
-        // Previously force=true ALWAYS hit the API, adding 200-500ms even when
-        // fresh cached data was available from a recent session.
+        // data exists in memory Cache, it renders instantly.
+        // MK-07 FIX: the deferred force-refresh that used to fire 2s after
+        // the initial load was REMOVED. It duplicated every cold-start's
+        // /api/market request: the in-memory Cache('market') is always empty on
+        // a fresh page load (localStorage hydration populates allCoins but NOT
+        // the Cache), so call #1 fetches; call #2 then hit the same server-side
+        // KV market cache (TTL 120s) on ~98% of loads — fresher only in the
+        // ~2% where the KV TTL expired inside the 2s window, so it bought
+        // almost nothing while doubling cold-start market traffic.
+        // Freshness is preserved WITHOUT it by the existing system:
+        //   1. 60s visibility-gated market polling (starts after initial load),
+        //   2. 120s in-memory Cache TTL (steady-state dedup),
+        //   3. localStorage hydration (instant paint, <=5 min old),
+        //   4. bfcache recovery (page returns from back/forward cache).
         loadMarketData(false).then(() => {
             renderMarketTicker();
             renderDashboardMarketStatus();
             renderWatchlist(); // Re-render watchlist now that allCoins is populated
-            // Background refresh — get truly fresh prices after initial paint
-            setTimeout(() => loadMarketData(true).then(() => {
-                renderMarketTicker();
-                renderDashboardMarketStatus();
-                renderWatchlist();
-            }).catch(() => {}), 2000);
         }).catch(e => {
             console.warn('[TICKER] Market fetch failed:', e?.message || e);
         });
