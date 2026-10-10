@@ -7622,6 +7622,21 @@ export default {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
 
+        // MK-04 FIX: dedicated per-user rate limit (30 req/min). This endpoint
+        // fetches live spot prices with up to 3 upstream subrequests per call
+        // on cache miss (bybit/okx/mexc) and previously had NO limit. The only
+        // frontend consumer is the background fetch when opening a non-Top-200
+        // coin detail (1 request per open; fast browsing ≈ 6-12/min), so
+        // 30/min gives 2.5-5× real-usage headroom. DEDICATED 'market-price'
+        // bucket — NOT shared with the public IP bucket or the batch
+        // 'market-prices' bucket. isUserRateLimited fails open on a KV
+        // outage. The alert cron and all internal paths fetch via
+        // fetchSpotPriceUsd directly and never route through this HTTP
+        // endpoint — unaffected.
+        if (await isUserRateLimited(env, authState.user?.id, 'market-price', 30, 60)) {
+          return jsonResponse({ status: 'error', message: 'Rate limited' }, { status: 429 }, env);
+        }
+
         const symbol = (url.searchParams.get('symbol') || '').toUpperCase().trim();
         if (!symbol) {
           return jsonResponse({ status: 'error', message: 'Missing symbol' }, { status: 422 }, env);
