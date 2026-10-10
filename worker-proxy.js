@@ -3243,6 +3243,39 @@ async function fetchKlines1m(exchangeKey, symbol) {
   }
 }
 
+// MK-06 FIX: single source of truth for non-crypto symbol routing.
+// Was duplicated as local consts inside BOTH fetchOhlc1m and fetchSpotPriceUsd
+// (identical entries) — any drift between the two copies would route a symbol
+// one way for OHLC evaluation and another for spot price. Hoisted to module
+// scope; entries and routing conditions unchanged.
+const FOREX_YAHOO_MAP = {
+  'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
+  'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
+  'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
+  'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
+  'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
+  'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
+  'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+  'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
+  'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
+};
+
+// MK-06 FIX: derive the price UNIT label for an alert symbol from the SAME
+// routing table the evaluation path uses (FOREX_YAHOO_MAP), so the unit shown
+// in trigger messages can never drift from how the alert was evaluated:
+//   - Yahoo '=X' FX pairs → the quote currency (e.g. USDJPY → JPY, EURGBP → GBP)
+//   - Futures/stocks (gold, silver, equities) → USD
+//   - Everything else → crypto quoted in USDT
+function getAlertUnitLabel(symbol) {
+  const s = String(symbol || '').trim().toUpperCase();
+  const mapped = FOREX_YAHOO_MAP[s];
+  if (mapped) {
+    if (mapped.endsWith('=X')) return s.slice(3); // quote currency
+    return 'USD';                                 // futures / equities
+  }
+  return 'USDT';                                   // crypto
+}
+
 /**
  * Fetch OHLC 1m for a symbol using the same exchange cache pattern as fetchSpotPriceUsd.
  * Tries cached exchange first, falls back to all 3 exchanges in parallel.
@@ -3253,17 +3286,6 @@ async function fetchOhlc1m(env, symbol) {
   if (!normalizedSymbol) return null;
 
   // Forex symbols don't have crypto klines — fall back to spot price
-  const FOREX_YAHOO_MAP = {
-    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
-    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
-    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
-    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
-    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
-    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
-    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
-    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
-    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
-  };
   if (FOREX_YAHOO_MAP[normalizedSymbol]) {
     // For forex, use spot price as high=low=close (no kline available)
     const spot = await fetchSpotPriceUsd(env, normalizedSymbol);
@@ -3324,17 +3346,6 @@ async function fetchSpotPriceUsd(env, symbol, options = {}) {
   // For non-crypto symbols (EURUSD, XAUUSD, DXY, SPX, etc.), use Yahoo Finance
   // instead of crypto exchanges (Bybit, OKX). Crypto exchanges only have
   // ${symbol}USDT pairs — forex symbols like EURUSD would fail silently.
-  const FOREX_YAHOO_MAP = {
-    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F',
-    'AAPL': 'AAPL', 'MSFT': 'MSFT', 'NVDA': 'NVDA', 'AMZN': 'AMZN',
-    'GOOGL': 'GOOGL', 'META': 'META', 'TSLA': 'TSLA', 'NFLX': 'NFLX',
-    'AMD': 'AMD', 'INTC': 'INTC', 'COIN': 'COIN', 'MSTR': 'MSTR',
-    'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X', 'USDJPY': 'USDJPY=X',
-    'USDCHF': 'USDCHF=X', 'AUDUSD': 'AUDUSD=X', 'USDCAD': 'USDCAD=X',
-    'NZDUSD': 'NZDUSD=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
-    'EURGBP': 'EURGBP=X', 'AUDJPY': 'AUDJPY=X', 'EURCHF': 'EURCHF=X',
-    'GBPCAD': 'GBPCAD=X', 'AUDNZD': 'AUDNZD=X', 'EURCAD': 'EURCAD=X',
-  };
   if (FOREX_YAHOO_MAP[normalizedSymbol]) {
     try {
       const yahooSym = FOREX_YAHOO_MAP[normalizedSymbol];
@@ -6147,7 +6158,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       const fmtPrice = (v) => v >= 1
         ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : Number(v).toFixed(6);
-      const buildMessage = (t) => `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به سطح هدف ${fmtPrice(t.targetPrice)} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: ${fmtPrice(t.candleClose)} USDT`;
+      const buildMessage = (t) => `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به سطح هدف ${fmtPrice(t.targetPrice)} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: ${fmtPrice(t.candleClose)} ${getAlertUnitLabel(t.symbol)}`;
 
       // Helper: build notificationId (preserves dedupKey → notif_id pattern).
       // Original: `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`

@@ -9668,6 +9668,26 @@ async function removeAlert(id) {
  * ورودی: پارامترهای `alert, currentPrice` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+// MK-06 FIX: frontend mirror of the backend unit derivation (worker-proxy.js
+// getAlertUnitLabel over FOREX_YAHOO_MAP): Yahoo '=X' FX pairs → quote
+// currency, futures/stocks → USD, everything else → crypto USDT. Kept in sync
+// with the backend by tests/mk06-alert-price-units-test.cjs (both sides pinned
+// equal). Backend delivery remains authoritative.
+const ALERT_NON_CRYPTO_UNITS = {
+    'XAUUSD': 'USD', 'XAGUSD': 'USD',
+    'AAPL': 'USD', 'MSFT': 'USD', 'NVDA': 'USD', 'AMZN': 'USD',
+    'GOOGL': 'USD', 'META': 'USD', 'TSLA': 'USD', 'NFLX': 'USD',
+    'AMD': 'USD', 'INTC': 'USD', 'COIN': 'USD', 'MSTR': 'USD',
+    'EURUSD': 'USD', 'GBPUSD': 'USD', 'USDJPY': 'JPY',
+    'USDCHF': 'CHF', 'AUDUSD': 'USD', 'USDCAD': 'CAD',
+    'NZDUSD': 'USD', 'EURJPY': 'JPY', 'GBPJPY': 'JPY',
+    'EURGBP': 'GBP', 'AUDJPY': 'JPY', 'EURCHF': 'CHF',
+    'GBPCAD': 'CAD', 'AUDNZD': 'NZD', 'EURCAD': 'CAD',
+};
+function getAlertUnitLabel(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    return ALERT_NON_CRYPTO_UNITS[s] || 'USDT';
+}
 async function triggerAlert(alert, currentPrice) {
     // CRITICAL FIX: Frontend trigger only shows IN-APP notification + popup.
     // Do NOT send to Telegram from frontend — the backend cron handles Telegram
@@ -9699,6 +9719,10 @@ async function triggerAlert(alert, currentPrice) {
     // distinctly labeled. They can legitimately differ — the observed value is
     // sampled when this 30s frontend check fires, not at the exact crossing
     // moment, so it must never masquerade as the target the user set.
+    // MK-06 FIX: unit label mirrors the backend derivation (worker-proxy.js
+    // getAlertUnitLabel over FOREX_YAHOO_MAP) — FX pairs → quote currency,
+    // futures/stocks → USD, crypto → USDT — so the in-app message never labels
+    // a gold/forex/stock price as USDT.
     const fmtTriggerPrice = (v) => v >= 1
         ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : Number(v).toFixed(6);
@@ -9706,6 +9730,7 @@ async function triggerAlert(alert, currentPrice) {
         symbol: alert.symbol,
         target: fmtTriggerPrice(alert.price),
         observed: fmtTriggerPrice(currentPrice),
+        unit: getAlertUnitLabel(alert.symbol),
     });
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('alert_trigger_title', { symbol: alert.symbol }), msg, { sendToTelegram: false, playSound: true });

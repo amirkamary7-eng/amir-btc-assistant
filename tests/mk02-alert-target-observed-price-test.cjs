@@ -50,11 +50,15 @@ function extractLines(src, startRe, endPred) {
   throw new Error(`end not found for ${startRe}`);
 }
 
-// Real buildMessage + fmtPrice (arrow consts inside runScheduledAlertsBaseline)
+// Real buildMessage + fmtPrice (arrow consts inside runScheduledAlertsBaseline).
+// MK-06 note: buildMessage now derives the unit via getAlertUnitLabel — that
+// dependency is INJECTED here as a stub (units are pinned separately by
+// tests/mk06-alert-price-units-test.cjs); the extraction stops at the closing
+// backtick of the template literal.
 const BUILD_MESSAGE_SRC = extractLines(
   WORKER_SRC,
   /const fmtPrice = \(v\) =>/,
-  (l) => /USDT`;$/.test(l)
+  (l) => /`\s*;\s*$/.test(l)
 );
 
 // Real triggerAlert (top-level async function in app.js)
@@ -94,6 +98,7 @@ const EN_TEMPLATE = extractTemplate('en');
 function createBackendSandbox() {
   const wrapper = [
     'const console = { warn: () => {} };',
+    'const getAlertUnitLabel = (sym) => "USDT";', // injected stub (units pinned by mk06 test)
     BUILD_MESSAGE_SRC,
     'return { buildMessage, fmtPrice };',
   ].join('\n');
@@ -107,6 +112,7 @@ function createFrontendSandbox(alertObj, currentPrice) {
     'let alerts = __g.alerts;',
     'let _lastAlertSyncTs = 0;',
     'const localStorage = __g.localStorage;',
+    'const getAlertUnitLabel = (sym) => "USDT";', // injected stub (units pinned by mk06 test)
     'const t = (key, params) => { __g.captured.tCalls.push({ key, params }); return "T(" + key + ")"; };',
     'const getTg = () => ({ HapticFeedback: { notificationOccurred: () => {} }, showPopup: (p) => { __g.captured.popup = p; } });',
     'const addNotification = (title, body, opts) => { __g.captured.addNotification.push({ title, body, opts }); };',
@@ -198,13 +204,14 @@ test('MK-02 S5: i18n fa+en templates use {target}+{observed} and no legacy {pric
     assert.ok(!tpl.includes('{price}'), `${lang} template must NOT contain legacy {price}`);
   }
   // Real t() renders both values through the real interpolation
+  // (unit param provided by getAlertUnitLabel — pinned separately by the mk06 test)
   const sbFa = createI18nSandbox('fa');
-  const out = sbFa.t('alert_trigger_msg', { symbol: 'BTC', target: '62,000.00', observed: '62,200.00' });
+  const out = sbFa.t('alert_trigger_msg', { symbol: 'BTC', target: '62,000.00', observed: '62,200.00', unit: 'USDT' });
   assert.match(out, /62,000\.00/);
   assert.match(out, /62,200\.00/);
   assert.ok(!out.includes('{target}') && !out.includes('{observed}'), 'placeholders fully interpolated');
   const sbEn = createI18nSandbox('en');
-  const outEn = sbEn.t('alert_trigger_msg', { symbol: 'BTC', target: '62,000.00', observed: '62,200.00' });
+  const outEn = sbEn.t('alert_trigger_msg', { symbol: 'BTC', target: '62,000.00', observed: '62,200.00', unit: 'USDT' });
   assert.match(outEn, /target price of 62,000\.00/);
   assert.match(outEn, /Observed price at trigger time: 62,200\.00 USDT/);
 });
