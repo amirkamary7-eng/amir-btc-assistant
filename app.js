@@ -14175,20 +14175,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     //     before globalMarketData is loaded.
     if (API_BASE) {
         // PERF FIX: Use force=false (cache-first) for initial load. If cached
-        // data exists in memory Cache, it renders instantly. Then a background
-        // refresh (force=true) fires 2s later to get fresh prices.
-        // Previously force=true ALWAYS hit the API, adding 200-500ms even when
-        // fresh cached data was available from a recent session.
+        // data exists in memory Cache, it renders instantly.
+        // MK-07 FIX: the deferred force-refresh that used to fire 2s after
+        // the initial load was REMOVED. It duplicated every cold-start's
+        // /api/market request: the in-memory Cache('market') is always empty on
+        // a fresh page load (localStorage hydration populates allCoins but NOT
+        // the Cache), so call #1 fetches; call #2 then hit the same server-side
+        // KV market cache (TTL 120s) on ~98% of loads — fresher only in the
+        // ~2% where the KV TTL expired inside the 2s window, so it bought
+        // almost nothing while doubling cold-start market traffic.
+        // Freshness is preserved WITHOUT it by the existing system:
+        //   1. 60s visibility-gated market polling (starts after initial load),
+        //   2. 120s in-memory Cache TTL (steady-state dedup),
+        //   3. localStorage hydration (instant paint, <=5 min old),
+        //   4. bfcache recovery (page returns from back/forward cache).
         loadMarketData(false).then(() => {
             renderMarketTicker();
             renderDashboardMarketStatus();
             renderWatchlist(); // Re-render watchlist now that allCoins is populated
-            // Background refresh — get truly fresh prices after initial paint
-            setTimeout(() => loadMarketData(true).then(() => {
-                renderMarketTicker();
-                renderDashboardMarketStatus();
-                renderWatchlist();
-            }).catch(() => {}), 2000);
         }).catch(e => {
             console.warn('[TICKER] Market fetch failed:', e?.message || e);
         });
