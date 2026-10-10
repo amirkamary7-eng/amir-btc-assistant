@@ -9854,12 +9854,11 @@ function addNotification(title, body, options = true) {
     // P0-4 FIX: compute badge locally
     _updateBadgeFromLocal();
 
-    if (opts.sendToTelegram) {
-        const userId = getUserId();
-        if (!String(userId).startsWith('guest_')) {
-            notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
-        }
-    }
+    // MK-01 FIX: do NOT send Telegram directly here. NotificationCenter.add()
+    // above already owns the Telegram send (with its 10s dedup + guest gating),
+    // so a second direct notifyTelegram() here caused every registration receipt
+    // to be sent TWICE (two near-simultaneous /api/notify POSTs that the backend
+    // KV burst lock cannot de-duplicate). Exactly one send path remains.
     if (opts.playSound) playAlertSound();
 }
 /**
