@@ -475,6 +475,17 @@ let currentMainTab = 'crypto';   // crypto | forex | watchlist
 let currentSubTab = 'top';       // top | gainers | losers
 let searchTerm = '';
 let _lastSearchTerm = ''; // Track last search term to prevent stale async results
+
+// MK-10 FIX: query-keyed market search result cache. Re-typing a recently
+// searched term re-fetched byte-identical data (the backend already caches
+// the MEXC index per query for 5 min server-side, so repeat frontend calls
+// were pure waste). Bounded to 20 entries with a 60s TTL; the oldest entry is
+// evicted by insertion order, so memory growth is capped. ONLY successful
+// index responses are cached — degraded fallback renders and errors are
+// never cached. The stale-response guard and the input debounce are unchanged.
+const _SEARCH_RESULT_CACHE_TTL_MS = 60 * 1000;
+const _SEARCH_RESULT_CACHE_MAX = 20;
+let _searchResultCache = new Map();
 let _lastMarketRenderKey = ''; // Track render state for price-only diffing
 let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-independent)
 let sliderInterval = null;
@@ -4943,7 +4954,57 @@ function renderMarket() {
     // The search calls /api/market/search (public, no auth needed) which
     // queries a 1700+ coin index from MEXC API. Results are rendered
     // directly without depending on allCoins.
+    // MK-10: applySearchData is the single render path shared by the
+    // query-keyed cache hit and the fresh network response.
+    function applySearchData(data, searchTerm) {
+        if (!data || !data.results || data.results.length === 0) {
+            const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+            list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+            return;
+        }
+
+        // Map search results to the format expected by renderMarketItem
+        // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
+        const searchResults = data.results.map(c => {
+            const coinData = {
+                symbol: c.symbol,
+                name: c.name || c.symbol,
+                priceUsd: c.priceUsd || 0,
+                changePercent24Hr: c.changePercent24Hr || 0,
+                volumeUsd24Hr: c.volume || 0,
+                marketCapUsd: 0, // MEXC doesn't provide market cap
+                rank: c.rank || 0,
+                image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
+                _type: 'crypto',
+            };
+            // Cache each coin for openCoinDetail to find later
+            Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
+            return { ...coinData, _fromSearch: true };
+        });
+
+        // Also check forex pairs (instant, from memory)
+        const forexResults = allForexPairs.filter(f =>
+            f.symbol.toLowerCase().includes(searchTerm) ||
+            f.name.toLowerCase().includes(searchTerm) ||
+            (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
+        ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
+
+        const allResults = [...searchResults, ...forexResults];
+        list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+    }
+
     if (searchTerm) {
+        // MK-10: cache-first. A hit re-renders instantly with zero network.
+        const cachedResult = _searchResultCache.get(searchTerm);
+        if (cachedResult) {
+            if (Date.now() - cachedResult.ts < _SEARCH_RESULT_CACHE_TTL_MS) {
+                _lastSearchTerm = searchTerm;
+                applySearchData(cachedResult.data, searchTerm);
+                return;
+            }
+            _searchResultCache.delete(searchTerm); // expired — evict
+        }
+
         // Show skeleton immediately while search runs
         list.innerHTML = '<div class="empty-state" style="padding:20px;">' + t('loading_search') + '</div>';
 
@@ -4962,39 +5023,17 @@ function renderMarket() {
                 if (currentSearch !== _lastSearchTerm) return;
 
                 if (!data || !data.results || data.results.length === 0) {
-                    const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
-                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+                    applySearchData(data, searchTerm);
                     return;
                 }
 
-                // Map search results to the format expected by renderMarketItem
-                // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
-                const searchResults = data.results.map(c => {
-                    const coinData = {
-                        symbol: c.symbol,
-                        name: c.name || c.symbol,
-                        priceUsd: c.priceUsd || 0,
-                        changePercent24Hr: c.changePercent24Hr || 0,
-                        volumeUsd24Hr: c.volume || 0,
-                        marketCapUsd: 0, // MEXC doesn't provide market cap
-                        rank: c.rank || 0,
-                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                        _type: 'crypto',
-                    };
-                    // Cache each coin for openCoinDetail to find later
-                    Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
-                    return { ...coinData, _fromSearch: true };
-                });
-
-                // Also check forex pairs (instant, from memory)
-                const forexResults = allForexPairs.filter(f =>
-                    f.symbol.toLowerCase().includes(searchTerm) ||
-                    f.name.toLowerCase().includes(searchTerm) ||
-                    (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
-                ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
-
-                const allResults = [...searchResults, ...forexResults];
-                list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+                // MK-10: cache ONLY successful index responses (never the
+                // degraded fallback, never errors) with bounded size.
+                _searchResultCache.set(searchTerm, { data, ts: Date.now() });
+                if (_searchResultCache.size > _SEARCH_RESULT_CACHE_MAX) {
+                    _searchResultCache.delete(_searchResultCache.keys().next().value);
+                }
+                applySearchData(data, searchTerm);
             })
             .catch(() => {
                 if (currentSearch !== _lastSearchTerm) return;
