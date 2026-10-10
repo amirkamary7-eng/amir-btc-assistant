@@ -5613,8 +5613,8 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
 /**
  * CRON TASK: Price Alert Checker (runScheduledAlertsBaseline)
  *
- * Runs every MINUTE (1-min cron; the */5 cron only drains the notification
- * queue via processQueue(15)). Architecture: H5-HIGH bulk processing —
+ * Runs every MINUTE (1-min cron; the 5-minute cron only drains the
+ * notification queue via processQueue(15)). Architecture: H5-HIGH bulk processing —
  * for the active alert list (listActiveForCron, ≤500, 3-layer cache):
  *   1. Batch-fetch 1-minute OHLC per symbol (cached-exchange-first fallback
  *      chain: bybit → okx → mexc — Binance is IP-blocked in the deploy
