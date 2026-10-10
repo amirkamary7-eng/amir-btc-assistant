@@ -9695,6 +9695,40 @@ async function setPriceAlert() {
     const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
 
+    // ── MK-05 (user decision): registration gate on notification settings ──
+    // While the user has price-alert notifications disabled (ch_price_alert
+    // === 'none'), new price-alert registration is STOPPED: the alert would
+    // never deliver its trigger notification, so registering it silently would
+    // mislead the user. The REAL current state is read from the authoritative
+    // source (GET /api/notifications/platform/settings) on EVERY registration
+    // attempt — never from the in-memory settings cache (_nsSettingsCache),
+    // localStorage or defaults — so a just-changed setting is honored
+    // immediately. Nothing may be registered while disabled: no optimistic UI,
+    // no server sync, no Telegram receipt. The message points the user to the
+    // existing notification-settings path (Settings → notification settings),
+    // where they can re-enable alerts and then re-register.
+    // Guests keep the current local-only behavior (no server-side settings
+    // exist for them; nothing here changes their flow).
+    // Unknown state (settings unreadable/malformed): registration requires a
+    // KNOWN-enabled state — fail closed rather than register silently.
+    if (API_BASE && !UserContext.isGuest()) {
+        let chPriceAlert = null;
+        try {
+            const data = await apiFetch('/api/notifications/platform/settings');
+            if (data && data.status === 'success' && data.settings) {
+                chPriceAlert = data.settings.ch_price_alert;
+            }
+        } catch (e) { /* fall through — unknown state handled below */ }
+        if (chPriceAlert !== 'mini_app' && chPriceAlert !== 'telegram' && chPriceAlert !== 'both') {
+            if (chPriceAlert === 'none') {
+                alert(t('price_alert_notif_disabled'));
+            } else {
+                alert(t('price_alert_notif_check_failed'));
+            }
+            return;
+        }
+    }
+
     // ── OPTIMISTIC UI: add alert to local list + render IMMEDIATELY ──
     // The user sees the alert in the list within <1ms. The server sync happens
     // in the background. If it fails, we roll back (remove from list + toast error).

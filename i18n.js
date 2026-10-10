@@ -354,6 +354,9 @@ const i18n = {
         chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
         alert_trigger_msg: '🔔 هشدار قیمت فعال شد\nقیمت {symbol} به سطح هدف {target} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: {observed} {unit}.',
         alert_trigger_title: '🔔 هشدار قیمت {symbol}',
+        // ── MK-05: price-alert registration gate on notification settings (user decision) ──
+        price_alert_notif_disabled: 'اعلان‌های هشدار قیمت را غیرفعال کرده‌اید. در این حالت، اعلان فعال‌شدن قیمت برای شما ارسال نمی‌شود. ابتدا اعلان‌ها را فعال کنید و سپس هشدار قیمت را ثبت کنید.',
+        price_alert_notif_check_failed: 'امکان بررسی تنظیمات اعلان‌ها وجود ندارد. لطفاً اتصال خود را بررسی کرده و دوباره تلاش کنید.',
         // ── MK-08: market data health indicator ──
         market_status_stale: 'داده‌ها ممکن است قدیمی باشند — آخرین قیمت‌های ذخیره‌شده نمایش داده می‌شود',
         market_status_fallback: 'قیمت‌ها از منبع جایگزین دریافت می‌شود',
@@ -1708,6 +1711,9 @@ const i18n = {
         chart_unavailable_sub: 'Please try again later or check another symbol.',
         alert_trigger_msg: '🔔 Price alert triggered\n{symbol} reached your target price of {target}.\nObserved price at trigger time: {observed} {unit}.',
         alert_trigger_title: '🔔 Price Alert: {symbol}',
+        // ── MK-05: price-alert registration gate on notification settings (user decision) ──
+        price_alert_notif_disabled: 'You have disabled price alert notifications. In this state, you will not receive a notification when the price is reached. Please enable notifications first, then register your price alert.',
+        price_alert_notif_check_failed: 'Could not verify your notification settings. Please check your connection and try again.',
         // ── MK-08: market data health indicator ──
         market_status_stale: 'Data may be stale — showing last saved prices',
         market_status_fallback: 'Prices from a fallback source',
