@@ -352,7 +352,7 @@ const i18n = {
         chart_source_search: 'جستجوی منبع جایگزین',
         chart_unavailable_title: 'نمودار این دارایی در حال حاضر در دسترس نیست',
         chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
-        alert_trigger_msg: '🔔 هشدار قیمت فعال شد\nقیمت {symbol} به {price} USDT رسید.',
+        alert_trigger_msg: '🔔 هشدار قیمت فعال شد\nقیمت {symbol} به سطح هدف {target} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: {observed} USDT.',
         alert_trigger_title: '🔔 هشدار قیمت {symbol}',
         // ── i18n AUDIT: analysis form ──
         af_chart_image: 'لینک تصویر چارت',
@@ -1702,7 +1702,7 @@ const i18n = {
         chart_source_search: 'Searching alternative source',
         chart_unavailable_title: 'Chart for this asset is currently unavailable',
         chart_unavailable_sub: 'Please try again later or check another symbol.',
-        alert_trigger_msg: '🔔 Price alert triggered\n{symbol} reached {price} USDT.',
+        alert_trigger_msg: '🔔 Price alert triggered\n{symbol} reached your target price of {target}.\nObserved price at trigger time: {observed} USDT.',
         alert_trigger_title: '🔔 Price Alert: {symbol}',
         // ── i18n AUDIT EN: analysis form ──
         af_chart_image: 'Chart Image URL',

@@ -9695,10 +9695,18 @@ async function triggerAlert(alert, currentPrice) {
     // alert to local state (it's still 'active' in backend until cron runs).
     _lastAlertSyncTs = Date.now();
     // Clean, short notification — same format as backend.
-    const priceStr = currentPrice >= 1
-        ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        : Number(currentPrice).toFixed(6);
-    const msg = t('alert_trigger_msg', { symbol: alert.symbol, price: priceStr });
+    // MK-02 FIX: show BOTH the user's target and the observed live price,
+    // distinctly labeled. They can legitimately differ — the observed value is
+    // sampled when this 30s frontend check fires, not at the exact crossing
+    // moment, so it must never masquerade as the target the user set.
+    const fmtTriggerPrice = (v) => v >= 1
+        ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(v).toFixed(6);
+    const msg = t('alert_trigger_msg', {
+        symbol: alert.symbol,
+        target: fmtTriggerPrice(alert.price),
+        observed: fmtTriggerPrice(currentPrice),
+    });
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('alert_trigger_title', { symbol: alert.symbol }), msg, { sendToTelegram: false, playSound: true });
     getTg()?.showPopup?.({ title: t('alert_trigger_title', { symbol: alert.symbol }), message: msg, buttons: [{ type: 'ok' }] });

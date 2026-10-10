@@ -6137,12 +6137,17 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       };
 
       // Helper: build notification message text (was inline per-alert in original).
-      const buildMessage = (t) => {
-        const priceFmt = t.candleClose >= 1
-          ? Number(t.candleClose).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : Number(t.candleClose).toFixed(6);
-        return `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به ${priceFmt} USDT رسید.`;
-      };
+      // MK-02 FIX: show BOTH the user's target price and the observed price at
+      // detection time, distinctly labeled. The observed candle close is NOT the
+      // exact crossing price (the 1-min cron evaluates the forming candle) and can
+      // legitimately differ from the target (e.g. target 62,000 → observed 62,200)
+      // — both numbers are now transparent instead of the observed value
+      // masquerading as "the price reached". Formatting rules unchanged
+      // (>=1 → 2-dp locale, <1 → fixed(6)).
+      const fmtPrice = (v) => v >= 1
+        ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(v).toFixed(6);
+      const buildMessage = (t) => `🔔 هشدار قیمت فعال شد\nقیمت ${t.symbol} به سطح هدف ${fmtPrice(t.targetPrice)} رسید.\nقیمت مشاهده‌شده هنگام فعال‌شدن: ${fmtPrice(t.candleClose)} USDT`;
 
       // Helper: build notificationId (preserves dedupKey → notif_id pattern).
       // Original: `notif_${String(dedupKey).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}`
