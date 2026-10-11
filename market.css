@@ -30,6 +30,13 @@
     font-size: 11px; font-weight: 500; color: #6B7A8D; margin: 0;
     line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* MK-08: market data health indicator — hidden unless a state is active.
+   Added below the subtitle with zero impact on the existing layout when
+   healthy (display:none). -warn = stale/offline data (amber), -info = live
+   fallback providers in use (muted slate). */
+.mkt-data-status { display: none; font-size: 10px; font-weight: 600; margin: 0; line-height: 1.3; }
+.mkt-data-status.mkt-warn { display: block; color: #F5A623; }
+.mkt-data-status.mkt-info { display: block; color: #6B7A8D; }
 .mkt-refresh-btn {
     width: 36px; height: 36px; border-radius: 10px;
     background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.06);

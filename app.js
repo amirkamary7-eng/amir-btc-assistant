@@ -475,6 +475,17 @@ let currentMainTab = 'crypto';   // crypto | forex | watchlist
 let currentSubTab = 'top';       // top | gainers | losers
 let searchTerm = '';
 let _lastSearchTerm = ''; // Track last search term to prevent stale async results
+
+// MK-10 FIX: query-keyed market search result cache. Re-typing a recently
+// searched term re-fetched byte-identical data (the backend already caches
+// the MEXC index per query for 5 min server-side, so repeat frontend calls
+// were pure waste). Bounded to 20 entries with a 60s TTL; the oldest entry is
+// evicted by insertion order, so memory growth is capped. ONLY successful
+// index responses are cached — degraded fallback renders and errors are
+// never cached. The stale-response guard and the input debounce are unchanged.
+const _SEARCH_RESULT_CACHE_TTL_MS = 60 * 1000;
+const _SEARCH_RESULT_CACHE_MAX = 20;
+let _searchResultCache = new Map();
 let _lastMarketRenderKey = ''; // Track render state for price-only diffing
 let _currentDetailSymbol = ''; // Current coin detail symbol (reliable, locale-independent)
 let sliderInterval = null;
@@ -4362,6 +4373,41 @@ async function loadMarketOverview() {
     }
 }
 
+/**
+ * MK-08 FIX: surface data-degradation states in the Market header.
+ * The server /api/market contract is:
+ *   dataSource 'coingecko' (fresh) or 'cache' (normal <=120s KV cache)
+ *     → within the designed freshness envelope → NO indicator ('ok').
+ *   dataSource 'stale_cache' with stale:true (ALL providers failed, serving
+ *     last good cache) → 'warn'.
+ *   live fallback providers ('coincap+cmc' / 'binance+cmc' / 'mexc+cmc')
+ *     → 'info' (live prices, not the primary source).
+ *   fetch failed while retained (<=5 min hydrated) data stays on screen
+ *     → 'offline' (warn styling). The hard no-data failure keeps using the
+ *     existing market_error empty state — it never claims to be live.
+ * Element is display:none by default → zero layout impact when healthy.
+ */
+function setMarketDataStatus(mode) {
+    const el = document.getElementById('mkt-data-status');
+    if (!el) return;
+    if (mode === 'warn') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_stale');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'offline') {
+        el.className = 'mkt-data-status mkt-warn';
+        el.textContent = t('market_status_offline');
+        el.setAttribute('aria-live', 'assertive');
+    } else if (mode === 'info') {
+        el.className = 'mkt-data-status mkt-info';
+        el.textContent = t('market_status_fallback');
+        el.setAttribute('aria-live', 'polite');
+    } else {
+        el.className = 'mkt-data-status';
+        el.textContent = '';
+    }
+}
+
 async function loadMarketData(force = false) {
     console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
     const listEl = document.getElementById('coin-list-rows');
@@ -4386,6 +4432,9 @@ async function loadMarketData(force = false) {
                 // the DOM rewrite if data is unchanged).
                 renderMarketTicker();
                 renderDashboardMarketStatus();
+                // MK-08: in-memory cache (<=120s old) is within the designed
+                // freshness envelope — clear any previous degradation badge.
+                setMarketDataStatus('ok');
                 return;
             }
         }
@@ -4429,6 +4478,17 @@ async function loadMarketData(force = false) {
                         if (c) console.log('[MARKET]', s, 'price:', c.priceUsd, 'changePercent24Hr:', c.changePercent24Hr, 'hasImage:', !!c.image);
                     });
                     allCoins = res.data;
+                    // MK-08: surface degraded data states per the /api/market
+                    // contract: stale cache (all providers failed) → warn;
+                    // live fallback providers → info; fresh CoinGecko or the
+                    // normal (<=120s) server cache → no indicator.
+                    if (res.stale === true) {
+                        setMarketDataStatus('warn');
+                    } else if (res.dataSource && res.dataSource !== 'coingecko' && res.dataSource !== 'cache') {
+                        setMarketDataStatus('info');
+                    } else {
+                        setMarketDataStatus('ok');
+                    }
                     // ROOT CAUSE FIX: Don't overwrite CMC data with less authoritative
                     // sources. loadMarketOverview() sets globalMarketData from CMC (the
                     // industry standard). Previously, loadMarketData() would OVERWRITE
@@ -4480,6 +4540,11 @@ async function loadMarketData(force = false) {
         renderDashboardMarketStatus();
     } catch (e) {
         console.error('❌ Market load error:', e);
+        // MK-08: fetch failed but retained (<=5 min hydrated) data is still on
+        // screen — say so instead of silently showing old prices as if live.
+        if (allCoins.length) {
+            setMarketDataStatus('offline');
+        }
         if (listEl && !allCoins.length) {
             listEl.innerHTML = `<div class="empty-state">${t('market_error')}</div>`;
         }
@@ -4889,7 +4954,57 @@ function renderMarket() {
     // The search calls /api/market/search (public, no auth needed) which
     // queries a 1700+ coin index from MEXC API. Results are rendered
     // directly without depending on allCoins.
+    // MK-10: applySearchData is the single render path shared by the
+    // query-keyed cache hit and the fresh network response.
+    function applySearchData(data, searchTerm) {
+        if (!data || !data.results || data.results.length === 0) {
+            const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
+            list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+            return;
+        }
+
+        // Map search results to the format expected by renderMarketItem
+        // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
+        const searchResults = data.results.map(c => {
+            const coinData = {
+                symbol: c.symbol,
+                name: c.name || c.symbol,
+                priceUsd: c.priceUsd || 0,
+                changePercent24Hr: c.changePercent24Hr || 0,
+                volumeUsd24Hr: c.volume || 0,
+                marketCapUsd: 0, // MEXC doesn't provide market cap
+                rank: c.rank || 0,
+                image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
+                _type: 'crypto',
+            };
+            // Cache each coin for openCoinDetail to find later
+            Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
+            return { ...coinData, _fromSearch: true };
+        });
+
+        // Also check forex pairs (instant, from memory)
+        const forexResults = allForexPairs.filter(f =>
+            f.symbol.toLowerCase().includes(searchTerm) ||
+            f.name.toLowerCase().includes(searchTerm) ||
+            (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
+        ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
+
+        const allResults = [...searchResults, ...forexResults];
+        list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+    }
+
     if (searchTerm) {
+        // MK-10: cache-first. A hit re-renders instantly with zero network.
+        const cachedResult = _searchResultCache.get(searchTerm);
+        if (cachedResult) {
+            if (Date.now() - cachedResult.ts < _SEARCH_RESULT_CACHE_TTL_MS) {
+                _lastSearchTerm = searchTerm;
+                applySearchData(cachedResult.data, searchTerm);
+                return;
+            }
+            _searchResultCache.delete(searchTerm); // expired — evict
+        }
+
         // Show skeleton immediately while search runs
         list.innerHTML = '<div class="empty-state" style="padding:20px;">' + t('loading_search') + '</div>';
 
@@ -4908,39 +5023,17 @@ function renderMarket() {
                 if (currentSearch !== _lastSearchTerm) return;
 
                 if (!data || !data.results || data.results.length === 0) {
-                    const icon = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-sub)" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
-                    list.innerHTML = `<div class="empty-state">${icon}<br>${t('search_no_result')}</div>`;
+                    applySearchData(data, searchTerm);
                     return;
                 }
 
-                // Map search results to the format expected by renderMarketItem
-                // Search results from MEXC now include changePercent24Hr, volume, highPrice, lowPrice
-                const searchResults = data.results.map(c => {
-                    const coinData = {
-                        symbol: c.symbol,
-                        name: c.name || c.symbol,
-                        priceUsd: c.priceUsd || 0,
-                        changePercent24Hr: c.changePercent24Hr || 0,
-                        volumeUsd24Hr: c.volume || 0,
-                        marketCapUsd: 0, // MEXC doesn't provide market cap
-                        rank: c.rank || 0,
-                        image: `https://assets.coincap.io/assets/icons/${encodeURIComponent(c.symbol).toLowerCase()}@2x.png`,
-                        _type: 'crypto',
-                    };
-                    // Cache each coin for openCoinDetail to find later
-                    Cache.set(`search_coin_${c.symbol}`, coinData, 300); // 5 min cache
-                    return { ...coinData, _fromSearch: true };
-                });
-
-                // Also check forex pairs (instant, from memory)
-                const forexResults = allForexPairs.filter(f =>
-                    f.symbol.toLowerCase().includes(searchTerm) ||
-                    f.name.toLowerCase().includes(searchTerm) ||
-                    (f.tvSymbol && f.tvSymbol.toLowerCase().includes(searchTerm))
-                ).slice(0, 10).map(f => ({...f, _type: 'forex'}));
-
-                const allResults = [...searchResults, ...forexResults];
-                list.innerHTML = buildInfoBar(allResults.length, t('search_in_coins', { n: data.total_index || 1700 })) + allResults.map(item => renderMarketItem(item)).join('');
+                // MK-10: cache ONLY successful index responses (never the
+                // degraded fallback, never errors) with bounded size.
+                _searchResultCache.set(searchTerm, { data, ts: Date.now() });
+                if (_searchResultCache.size > _SEARCH_RESULT_CACHE_MAX) {
+                    _searchResultCache.delete(_searchResultCache.keys().next().value);
+                }
+                applySearchData(data, searchTerm);
             })
             .catch(() => {
                 if (currentSearch !== _lastSearchTerm) return;
@@ -8640,6 +8733,9 @@ function resetDetailState() {
 
     // ── Reset alert card ──
     setText('alert-current-price-value', '--');
+    // MK-11: reset the input unit prefix too — it is set per-asset when a
+    // detail view opens (openCoinDetail / openForexDetail).
+    setText('cd-alert-prefix', '$');
     const alertList = document.getElementById('active-alerts');
     if (alertList) alertList.innerHTML = '';
     setText('cd-alert-status-value', t('alert_inactive'));
@@ -8714,6 +8810,87 @@ function parseBtcPairSymbol(symbol) {
     // "BTC" itself is not a valid base (e.g. "BTCBTC" is meaningless)
     if (base === 'BTC') return null;
     return base;
+}
+
+// ── MK-11 FIX (Task 65, user decision): USDT-basis anchor for alert registration ──
+// The 1-min alert cron evaluates every crypto target against <SYM>USDT 1m
+// klines (bybit/okx/mexc — worker-proxy.js fetchOhlc1m). Before this fix the
+// alert card showed the CoinGecko USD price (≤120s stale), so the user's entry
+// was anchored on a DIFFERENT price stream than the one that triggers it
+// (worst ≈ ±0.15%: CG-vs-exchange deviation + USDT peg; "at current price"
+// entries could even fire spuriously on the first cron tick).
+//
+// setAlertInputUnit: the input prefix states the unit of the number being
+// entered — BTC for BTC-pair views, USDT for crypto (the evaluation basis),
+// and the MK-06 quote/USD unit for forex/gold/stocks. A hardcoded "$"
+// mislabeled all three.
+function setAlertInputUnit(symbol, isBtcPair) {
+    const prefixEl = document.getElementById('cd-alert-prefix');
+    if (!prefixEl) return;
+    const unit = isBtcPair ? 'BTC' : getAlertUnitLabel(symbol);
+    prefixEl.textContent = unit;
+    // Wider prefixes ('USDT' is 4 chars vs '$') must not overlap the typed
+    // digits: grow the input's right padding to fit the rendered prefix.
+    const inputEl = document.getElementById('alert-price');
+    if (inputEl) {
+        try { inputEl.style.paddingRight = Math.max(28, prefixEl.offsetWidth + 14) + 'px'; }
+        catch (_) {}
+    }
+}
+
+// fetchAlertBasisPrice: ONE-SHOT (never polled) live spot price for the alert
+// card — the same price family the cron evaluates against (batch
+// /api/market/prices → fetchSpotPriceUsd: bybit/okx/mexc <SYM>USDT tickers
+// for crypto — sharing the cron's `price:exchange:{SYM}` cache — and Yahoo for
+// gold/stocks via FOREX_YAHOO_MAP). Non-blocking and race-guarded (detail
+// token + current symbol). Outcomes:
+//   - success   → card = "<price> <unit>" (USDT for crypto, USD for
+//                 gold/stocks, "<base/BTC> BTC" for BTC pairs) — the unit is
+//                 derived from the SAME routing table the evaluation uses
+//   - failure   → keep the already-rendered CoinGecko value, which is labeled
+//                 with its TRUE unit ("USD") — a USDT label is never faked
+//                 (no silent basis substitution)
+//   - guests / 429 / offline → same honest fallback (their alerts are local-only
+//                 or not yet registered anyway)
+// updateHeader=true only for coins OUTSIDE the top-200 whose header price was
+// previously filled by the old single-symbol background fetch — that fetch
+// was folded into this one, so those opens make the SAME number of requests
+// as before (1), while top-200 opens add exactly 1 (the anchor).
+function fetchAlertBasisPrice(displaySymbol, baseSymbol, isBtcPair, token, updateHeader) {
+    if (!API_BASE) return;
+    const symbols = isBtcPair ? [baseSymbol, 'BTC'] : [baseSymbol];
+    apiFetch(`/api/market/prices?symbols=${encodeURIComponent(symbols.join(','))}`)
+        .then(data => {
+            if (token !== _detailLoadToken || _currentDetailSymbol !== displaySymbol) return;
+            if (!data || data.status !== 'success' || !data.prices) return;
+            const fmtBasis = (v) => v >= 1
+                ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : Number(v).toFixed(6);
+            const basePrice = Number(data.prices[baseSymbol] && data.prices[baseSymbol].price);
+            const btcPrice = Number(data.prices['BTC'] && data.prices['BTC'].price);
+            const el = document.getElementById('alert-current-price-value');
+            if (isBtcPair) {
+                // Pair anchor from live USDT spots: base spot / BTC spot is the
+                // BTC-denominated value on the same exchanges the cron reads.
+                if (basePrice > 0 && btcPrice > 0 && el) {
+                    el.textContent = fmtBasis(basePrice / btcPrice) + ' BTC';
+                }
+            } else if (basePrice > 0) {
+                // Unit label is derived from the SAME routing table the
+                // evaluation path uses (MK-06): USDT for crypto, USD for
+                // gold/stocks (Yahoo-basis price), so the card never claims
+                // a unit its number is not on.
+                if (el) el.textContent = fmtBasis(basePrice) + ' ' + getAlertUnitLabel(baseSymbol);
+                if (updateHeader) {
+                    // H1 (preserved): outside top-200 the anchor fetch is also
+                    // the header price source — the old single-symbol background
+                    // fetch was folded into this call (no extra request).
+                    const priceEl = document.getElementById('detail-coin-price');
+                    if (priceEl) priceEl.textContent = '$' + fmtBasis(basePrice);
+                }
+            }
+        })
+        .catch(() => { /* honest fallback already rendered (CoinGecko USD / '--') */ });
 }
 
 async function openCoinDetail(symbol) {
@@ -8806,25 +8983,16 @@ async function openCoinDetail(symbol) {
         };
         coinPriceUnknown = true;
 
-        // ── PERFORMANCE FIX: Fetch price in the BACKGROUND (non-blocking) ──
-        // Previously this was an AWAIT, blocking the chart by 200-500ms.
-        // Now we fire-and-forget: if the price arrives, we update the UI; if not,
-        // the chart still renders immediately.
-        fetch(`${API_BASE}/api/market/price?symbol=${encodeURIComponent(baseSymbol)}`, {
-            headers: { 'X-Telegram-Init-Data': getTelegramInitData() || '' }
-        }).then(r => r.ok ? r.json() : null).then(priceData => {
-            if (priceData && priceData.price && token === _detailLoadToken && _currentDetailSymbol === symbol) {
-                coin.priceUsd = priceData.price;
-                coinPriceUnknown = false;
-                const priceEl = document.getElementById('detail-coin-price');
-                if (priceEl) priceEl.textContent = '$' + (priceData.price > 1 ? priceData.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : priceData.price.toFixed(6));
-                const alertPriceVal = document.getElementById('alert-current-price-value');
-                if (alertPriceVal) alertPriceVal.textContent = '$' + priceData.price;
-            }
-        }).catch(e => console.warn('background price fetch failed:', e?.message));
+        // ── MK-11 (Task 65): the old single-symbol background price fetch was
+        // FOLDED INTO fetchAlertBasisPrice (called for every crypto detail
+        // open below) — the header price for coins outside the top-200 is now
+        // filled by the SAME request that anchors the alert card, so these
+        // opens make the SAME number of requests as before (1). No behavior
+        // lost: if the fetch lands, header + card update; if not, the chart
+        // still renders immediately and the card shows the honest '--'.
 
-        // Don't show the "price unavailable" toast anymore — the background fetch
-        // will fill it in silently if it succeeds.
+        // Don't show the "price unavailable" toast anymore — the anchor fetch
+        // will fill prices in silently if it succeeds.
     }
 
     // ── Top Bar: Icon, Title, Rank, Price, Change ──
@@ -8910,10 +9078,21 @@ async function openCoinDetail(symbol) {
 
     // ── Alert section: current price binding ──
     // CRITICAL: this must use the CURRENT coin's price, not a stale value from a previous call.
-    // For BTC pairs, show pair price in BTC; for regular coins, show USD price.
+    // MK-11 (Task 65): the card next to the alert input is the REGISTRATION ANCHOR —
+    // it must show the same basis the 1-min cron evaluates against. The synchronous
+    // value below is the CoinGecko USD price (≤120s stale), labeled with its TRUE
+    // unit ("USD" — it really is a USD price) so it never masquerades as the
+    // evaluation basis. fetchAlertBasisPrice() then replaces it (non-blocking,
+    // race-guarded) with the live USDT spot from the same bybit/okx/mexc chain
+    // the cron uses, labeled "USDT". For BTC pairs the displayed value is the
+    // base/BTC ratio — the USD-vs-USDT legs cancel in the ratio, so the "BTC"
+    // unit label is truthful either way; the anchor fetch refreshes it from
+    // live USDT spots.
     const alertPriceVal = document.getElementById('alert-current-price-value');
     if (alertPriceVal) {
-        alertPriceVal.textContent = isBtcPairDisplay ? (priceStr + ' BTC') : ('$' + priceStr);
+        alertPriceVal.textContent = isBtcPairDisplay
+            ? (priceStr + ' BTC')
+            : ((priceStr === '--' ? '--' : priceStr + ' USD'));
     }
 
     // ── Update watchlist button state ──
@@ -8924,6 +9103,19 @@ async function openCoinDetail(symbol) {
     const modal = document.getElementById('coin-detail-modal');
     if (!modal) return;
     modal.style.display = 'flex';
+
+    // ── MK-11 (Task 65): alert-basis wiring for detail views ──
+    // (a) the input prefix states the unit of the entered number (BTC pair →
+    //     BTC, crypto → USDT, gold/stocks → USD, FX → quote currency per
+    //     MK-06), and (b) fetchAlertBasisPrice anchors the card on the live
+    //     spot from the SAME chain the cron evaluates against (USDT for crypto
+    //     via bybit/okx/mexc, Yahoo for gold/stocks via FOREX_YAHOO_MAP).
+    //     Fetching is NOT gated on unit class: symbols reaching openCoinDetail
+    //     are crypto, search-cached, or placeholders (e.g. a gold/stock opened
+    //     before forex data loads) — the batch endpoint routes each correctly
+    //     server-side, and the card is labeled with its true unit either way.
+    setAlertInputUnit(baseSymbol, isBtcPair);
+    fetchAlertBasisPrice(symbol, baseSymbol, isBtcPair, token, !coin || coinPriceUnknown);
 
     // ── PERFORMANCE FIX: chartInfo was already resolved in PARALLEL with tv.js above ──
     // No need to call resolveChartSymbol again — it's cached in the `chartInfo` variable.
@@ -8936,11 +9128,17 @@ async function openCoinDetail(symbol) {
     // SAFETY: re-assert the alert price in case something overwrote it during the await.
     // This is the root-cause fix for "alert price stuck on BTC" — ensures the price always
     // matches _currentDetailSymbol, never a stale value from a previous call.
+    // MK-11 fix: the re-assert previously wrote '$' + priceStr unconditionally —
+    // for BTC-pair views priceStr is the PAIR price, so the correct "0.05 BTC"
+    // card was clobbered with a meaningless "$0.05" (pre-existing bug in the
+    // exact element MK-11 relies on). Now mirrors the initial binding's format.
     if (alertPriceVal && _currentDetailSymbol === symbol) {
-        alertPriceVal.textContent = '$' + priceStr;
+        alertPriceVal.textContent = isBtcPairDisplay
+            ? (priceStr + ' BTC')
+            : ((priceStr === '--' ? '--' : priceStr + ' USD'));
     }
     if (priceEl && _currentDetailSymbol === symbol) {
-        priceEl.textContent = '$' + priceStr;
+        priceEl.textContent = isBtcPairDisplay ? (priceStr + ' BTC') : ('$' + priceStr);
     }
 
     currentTvChartInfo = chartInfo;
@@ -9190,6 +9388,10 @@ async function openForexDetail(symbol) {
     modal.style.display = 'flex';
     modal.classList.remove('slide-down');
     modal.classList.add('slide-up');
+    // MK-11 (Task 65): forex/gold/stock entries use their MK-06 unit (quote
+    // currency for FX pairs, USD for gold/stocks) — matches the Yahoo basis
+    // the cron evaluates these alerts against (FOREX_YAHOO_MAP routing).
+    setAlertInputUnit(symbol, false);
     modal.addEventListener('animationend', function handler() {
         modal.classList.remove('slide-up');
         modal.removeEventListener('animationend', handler);
@@ -9271,9 +9473,15 @@ async function openForexDetail(symbol) {
     // ── BUG 1 FIX: Alert card current-price binding for forex/metals ──
     // MUST write the CURRENT asset's price so a stale crypto price never lingers
     // in the alert card after switching from a crypto asset to a forex/metal.
+    // MK-11 (Task 65): labeled with the TRUE unit per MK-06 (USD for gold/stocks,
+    // the quote currency for FX pairs) — the same basis the cron's Yahoo
+    // evaluation uses for these symbols. The old '$' prefix was wrong for
+    // non-USD-quoted pairs (e.g. USDJPY prices are in JPY).
     const alertPriceVal = document.getElementById('alert-current-price-value');
     if (alertPriceVal) {
-        alertPriceVal.textContent = pair.price > 0 ? '$' + forexPriceStr : '--';
+        alertPriceVal.textContent = pair.price > 0
+            ? (forexPriceStr + ' ' + getAlertUnitLabel(symbol))
+            : '--';
     }
 
     // ── Update watchlist button state (forex symbols can be watchlisted too) ──
@@ -9451,7 +9659,7 @@ function renderActiveAlerts(symbol) {
         <div class="cd-alert-item">
             <div class="cd-alert-item-dir ${dir}">${dirIcon}</div>
             <div class="cd-alert-item-info">
-                <span class="cd-alert-item-price">$${priceStr}</span>
+                <span class="cd-alert-item-price">${priceStr} ${getAlertUnitLabel(a.symbol)}</span>
                 <span class="cd-alert-item-meta">${escapeHtml(dirLabel)}${createdAt ? ' · ' + escapeHtml(createdAt) : ''}</span>
             </div>
             <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="Delete alert">
@@ -9587,20 +9795,99 @@ async function setPriceAlert() {
     const symbol = isBtcPair ? btcPairBase : rawSymbol;
     if (!price || price <= 0) { alert(t('invalid_price')); return; }
 
-    // Convert BTC pair price to USD for backend storage
-    let usdPrice = price;
-    if (isBtcPair) {
-        const btc = allCoins.find(c => c.symbol === 'BTC');
-        const btcPrice = btc?.priceUsd || 0;
-        if (btcPrice <= 0) {
-            alert(t('invalid_price') || 'Cannot set alert: BTC price unavailable');
-            return;
-        }
-        usdPrice = price * btcPrice;
-    }
+    // ── MK-11 FIX (Task 65): BTC-pair conversion moved AFTER the MK-05 gate ──
+    // (see the block after the gate) so a blocked registration performs no
+    // network fetch at all. Regular crypto entries need NO conversion: the
+    // entered number is stored exactly as typed and compared against the
+    // USDT evaluation stream directly.
 
     const direction = (currentAlertDirection === 'below' ? 'below' : 'above');
     const userId = getUserId();
+
+    // ── MK-05 (user decision): registration gate on notification settings ──
+    // While the user has price-alert notifications disabled (ch_price_alert
+    // === 'none'), new price-alert registration is STOPPED: the alert would
+    // never deliver its trigger notification, so registering it silently would
+    // mislead the user. The REAL current state is read from the authoritative
+    // source (GET /api/notifications/platform/settings) on EVERY registration
+    // attempt — never from the in-memory settings cache (_nsSettingsCache),
+    // localStorage or defaults — so a just-changed setting is honored
+    // immediately. Nothing may be registered while disabled: no optimistic UI,
+    // no server sync, no Telegram receipt. The message points the user to the
+    // existing notification-settings path (Settings → notification settings),
+    // where they can re-enable alerts and then re-register.
+    // Guests keep the current local-only behavior (no server-side settings
+    // exist for them; nothing here changes their flow).
+    // Unknown state (settings unreadable/malformed): registration requires a
+    // KNOWN-enabled state — fail closed rather than register silently.
+    if (API_BASE && !UserContext.isGuest()) {
+        let chPriceAlert = null;
+        try {
+            const data = await apiFetch('/api/notifications/platform/settings');
+            if (data && data.status === 'success' && data.settings) {
+                chPriceAlert = data.settings.ch_price_alert;
+            }
+        } catch (e) { /* fall through — unknown state handled below */ }
+        if (chPriceAlert !== 'mini_app' && chPriceAlert !== 'telegram' && chPriceAlert !== 'both') {
+            if (chPriceAlert === 'none') {
+                alert(t('price_alert_notif_disabled'));
+            } else {
+                alert(t('price_alert_notif_check_failed'));
+            }
+            return;
+        }
+    }
+
+    // ── MK-11 FIX (Task 65, user decision): BTC-pair conversion on the USDT evaluation basis ──
+    // The cron evaluates every server-synced crypto alert against <SYM>USDT 1m
+    // klines (bybit/okx/mexc). Converting the user's BTC-denominated entry with
+    // the CoinGecko USD BTC price (previous behavior, ≤120s stale) put the stored
+    // target on a DIFFERENT basis than the evaluation (compounded CG skew).
+    // Now the multiplier is the LIVE BTC USDT spot from the same chain the
+    // cron uses (batch /api/market/prices → fetchSpotPriceUsd, shared
+    // `price:exchange:BTC` exchange cache) → the stored target is USDT-basis
+    // by construction. FAIL-CLOSED: if the USDT spot is unavailable (all
+    // three exchanges failed / rate-limited / offline) registration is
+    // BLOCKED — the old CG price is NOT silently substituted, because a
+    // wrong-basis target would be a wrong alert. The user's input stays in
+    // the field so they can retry.
+    //
+    // LOCAL-ONLY exception (basis-consistent, not a substitution): guest /
+    // pending-telegram / no-API registrations never reach the cron —
+    // syncAlertToServer skips them — so their evaluation stream is the LOCAL
+    // checkAlerts priceMap built from CoinGecko data. For those alerts the
+    // CG conversion IS the matching basis, and using it preserves the
+    // pre-Task-65 behavior exactly (no auth is available for the batch fetch
+    // in these states anyway).
+    let usdPrice = price;
+    if (isBtcPair) {
+        const localOnly = !API_BASE
+            || isGuestUserId(String(userId))
+            || isPendingTelegramUserId(String(userId))
+            || (typeof UserContext !== 'undefined' && UserContext.isPending());
+        if (localOnly) {
+            const btc = allCoins.find(c => c.symbol === 'BTC');
+            const btcCg = btc?.priceUsd || 0;
+            if (!(btcCg > 0)) {
+                alert(t('price_alert_basis_unavailable'));
+                return;
+            }
+            usdPrice = price * btcCg;
+        } else {
+            let btcUsdtSpot = 0;
+            try {
+                const data = await apiFetch(`/api/market/prices?symbols=${encodeURIComponent('BTC')}`);
+                if (data && data.status === 'success' && data.prices && data.prices.BTC) {
+                    btcUsdtSpot = Number(data.prices.BTC.price) || 0;
+                }
+            } catch (e) { /* handled below — fail closed */ }
+            if (!(btcUsdtSpot > 0)) {
+                alert(t('price_alert_basis_unavailable'));
+                return;
+            }
+            usdPrice = price * btcUsdtSpot;
+        }
+    }
 
     // ── OPTIMISTIC UI: add alert to local list + render IMMEDIATELY ──
     // The user sees the alert in the list within <1ms. The server sync happens
@@ -9615,7 +9902,10 @@ async function setPriceAlert() {
     renderActiveAlerts(symbol); // immediate UI update
 
     const priceStr = usdPrice >= 1 ? usdPrice.toFixed(2) : usdPrice.toFixed(6);
-    addNotification(t('price_alert'), `${symbol} → $${priceStr}`);
+    // MK-11/MK-06: label the stored target with its evaluation unit (USDT for
+    // crypto — getAlertUnitLabel mirrors the backend derivation). A "$" label
+    // would claim the wrong basis for a number compared against USDT.
+    addNotification(t('price_alert'), `${symbol} → ${priceStr} ${getAlertUnitLabel(symbol)}`);
     getTg()?.HapticFeedback?.notificationOccurred('success');
 
     // ── Background sync to server (non-blocking) ──
@@ -9668,6 +9958,26 @@ async function removeAlert(id) {
  * ورودی: پارامترهای `alert, currentPrice` را دریافت می‌کند.
  * خروجی: یک `Promise` با نتیجه نهایی این عملیات برمی‌گرداند.
  */
+// MK-06 FIX: frontend mirror of the backend unit derivation (worker-proxy.js
+// getAlertUnitLabel over FOREX_YAHOO_MAP): Yahoo '=X' FX pairs → quote
+// currency, futures/stocks → USD, everything else → crypto USDT. Kept in sync
+// with the backend by tests/mk06-alert-price-units-test.cjs (both sides pinned
+// equal). Backend delivery remains authoritative.
+const ALERT_NON_CRYPTO_UNITS = {
+    'XAUUSD': 'USD', 'XAGUSD': 'USD',
+    'AAPL': 'USD', 'MSFT': 'USD', 'NVDA': 'USD', 'AMZN': 'USD',
+    'GOOGL': 'USD', 'META': 'USD', 'TSLA': 'USD', 'NFLX': 'USD',
+    'AMD': 'USD', 'INTC': 'USD', 'COIN': 'USD', 'MSTR': 'USD',
+    'EURUSD': 'USD', 'GBPUSD': 'USD', 'USDJPY': 'JPY',
+    'USDCHF': 'CHF', 'AUDUSD': 'USD', 'USDCAD': 'CAD',
+    'NZDUSD': 'USD', 'EURJPY': 'JPY', 'GBPJPY': 'JPY',
+    'EURGBP': 'GBP', 'AUDJPY': 'JPY', 'EURCHF': 'CHF',
+    'GBPCAD': 'CAD', 'AUDNZD': 'NZD', 'EURCAD': 'CAD',
+};
+function getAlertUnitLabel(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    return ALERT_NON_CRYPTO_UNITS[s] || 'USDT';
+}
 async function triggerAlert(alert, currentPrice) {
     // CRITICAL FIX: Frontend trigger only shows IN-APP notification + popup.
     // Do NOT send to Telegram from frontend — the backend cron handles Telegram
@@ -9695,10 +10005,23 @@ async function triggerAlert(alert, currentPrice) {
     // alert to local state (it's still 'active' in backend until cron runs).
     _lastAlertSyncTs = Date.now();
     // Clean, short notification — same format as backend.
-    const priceStr = currentPrice >= 1
-        ? Number(currentPrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        : Number(currentPrice).toFixed(6);
-    const msg = t('alert_trigger_msg', { symbol: alert.symbol, price: priceStr });
+    // MK-02 FIX: show BOTH the user's target and the observed live price,
+    // distinctly labeled. They can legitimately differ — the observed value is
+    // sampled when this 30s frontend check fires, not at the exact crossing
+    // moment, so it must never masquerade as the target the user set.
+    // MK-06 FIX: unit label mirrors the backend derivation (worker-proxy.js
+    // getAlertUnitLabel over FOREX_YAHOO_MAP) — FX pairs → quote currency,
+    // futures/stocks → USD, crypto → USDT — so the in-app message never labels
+    // a gold/forex/stock price as USDT.
+    const fmtTriggerPrice = (v) => v >= 1
+        ? Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(v).toFixed(6);
+    const msg = t('alert_trigger_msg', {
+        symbol: alert.symbol,
+        target: fmtTriggerPrice(alert.price),
+        observed: fmtTriggerPrice(currentPrice),
+        unit: getAlertUnitLabel(alert.symbol),
+    });
     getTg()?.HapticFeedback?.notificationOccurred('warning');
     addNotification(t('alert_trigger_title', { symbol: alert.symbol }), msg, { sendToTelegram: false, playSound: true });
     getTg()?.showPopup?.({ title: t('alert_trigger_title', { symbol: alert.symbol }), message: msg, buttons: [{ type: 'ok' }] });
@@ -9854,12 +10177,11 @@ function addNotification(title, body, options = true) {
     // P0-4 FIX: compute badge locally
     _updateBadgeFromLocal();
 
-    if (opts.sendToTelegram) {
-        const userId = getUserId();
-        if (!String(userId).startsWith('guest_')) {
-            notifyTelegram(`🔔 ${title}\n${body}`).catch(e => console.warn('notifyTelegram:', e));
-        }
-    }
+    // MK-01 FIX: do NOT send Telegram directly here. NotificationCenter.add()
+    // above already owns the Telegram send (with its 10s dedup + guest gating),
+    // so a second direct notifyTelegram() here caused every registration receipt
+    // to be sent TWICE (two near-simultaneous /api/notify POSTs that the backend
+    // KV burst lock cannot de-duplicate). Exactly one send path remains.
     if (opts.playSound) playAlertSound();
 }
 /**
@@ -13248,12 +13570,19 @@ function refreshOpenDetailPrice() {
         }
     }
 
-    // Update alert card current price — for BTC pairs show pair price in BTC
-    const alertPriceVal = document.getElementById('alert-current-price-value');
-    if (alertPriceVal) {
-        const alertDisplay = isBtcPair ? (priceStr + ' BTC') : ('$' + priceStr);
-        if (alertPriceVal.textContent !== alertDisplay) {
-            alertPriceVal.textContent = alertDisplay;
+    // Update alert card current price — MK-11 (Task 65): for crypto (incl.
+    // BTC pairs) the card is owned by the USDT-basis anchor fetched on open
+    // (fetchAlertBasisPrice) and must NEVER be overwritten by the CoinGecko
+    // market tick — the basis would silently flip mid-view. Forex/gold/stocks
+    // keep the periodic refresh here: their evaluation source (Yahoo via
+    // FOREX_YAHOO_MAP) is the same family this tick displays.
+    if (!isCrypto && !isBtcPair) {
+        const alertPriceVal = document.getElementById('alert-current-price-value');
+        if (alertPriceVal) {
+            const alertDisplay = priceStr + ' ' + getAlertUnitLabel(lookupSymbol);
+            if (alertPriceVal.textContent !== alertDisplay) {
+                alertPriceVal.textContent = alertDisplay;
+            }
         }
     }
 
@@ -13354,7 +13683,9 @@ function _startAllPolling() {
     // PHASE B FIX (FE-1): Increased from 15s to 30s to halve API load.
     // 15s polling × 20 symbols = 240 req/hour → now 120 req/hour.
     // Alert price checks don't need 15s granularity — 30s is sufficient
-    // for price alert triggers (backend cron runs every 5 min anyway).
+    // for price alert triggers (the backend cron runs every minute; this
+    // 30s frontend check only speeds up the IN-APP display, Telegram
+    // delivery is owned by the backend queue).
     _pollingIntervals.push(setInterval(() => {
         if (!_appVisible) return; // PERFORMANCE: skip when tab hidden
         checkAlerts();
@@ -14143,20 +14474,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     //     before globalMarketData is loaded.
     if (API_BASE) {
         // PERF FIX: Use force=false (cache-first) for initial load. If cached
-        // data exists in memory Cache, it renders instantly. Then a background
-        // refresh (force=true) fires 2s later to get fresh prices.
-        // Previously force=true ALWAYS hit the API, adding 200-500ms even when
-        // fresh cached data was available from a recent session.
+        // data exists in memory Cache, it renders instantly.
+        // MK-07 FIX: the deferred force-refresh that used to fire 2s after
+        // the initial load was REMOVED. It duplicated every cold-start's
+        // /api/market request: the in-memory Cache('market') is always empty on
+        // a fresh page load (localStorage hydration populates allCoins but NOT
+        // the Cache), so call #1 fetches; call #2 then hit the same server-side
+        // KV market cache (TTL 120s) on ~98% of loads — fresher only in the
+        // ~2% where the KV TTL expired inside the 2s window, so it bought
+        // almost nothing while doubling cold-start market traffic.
+        // Freshness is preserved WITHOUT it by the existing system:
+        //   1. 60s visibility-gated market polling (starts after initial load),
+        //   2. 120s in-memory Cache TTL (steady-state dedup),
+        //   3. localStorage hydration (instant paint, <=5 min old),
+        //   4. bfcache recovery (page returns from back/forward cache).
         loadMarketData(false).then(() => {
             renderMarketTicker();
             renderDashboardMarketStatus();
             renderWatchlist(); // Re-render watchlist now that allCoins is populated
-            // Background refresh — get truly fresh prices after initial paint
-            setTimeout(() => loadMarketData(true).then(() => {
-                renderMarketTicker();
-                renderDashboardMarketStatus();
-                renderWatchlist();
-            }).catch(() => {}), 2000);
         }).catch(e => {
             console.warn('[TICKER] Market fetch failed:', e?.message || e);
         });

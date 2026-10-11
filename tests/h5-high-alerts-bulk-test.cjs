@@ -653,7 +653,7 @@ test('H5HIGH-OPTD-05: normal flow — INSERT succeeds + mark succeeds → alerts
   const step4 = bulkBlock.indexOf('STEP 4: Bulk INSERT Telegram');
   const step5 = bulkBlock.indexOf('STEP 5: Bulk CAS markTriggered');
   const step6 = bulkBlock.indexOf('STEP 6: Count delivery');
-  const step7 = bulkBlock.indexOf('STEP 7: KV invalidation');
+  const step7 = bulkBlock.indexOf('STEP 7: Cache invalidation'); // MK-12: renamed (KV + isolate cache)
 
   assert.notEqual(step1, -1, 'STEP 1 must exist');
   assert.notEqual(step2, -1, 'STEP 2 must exist');
