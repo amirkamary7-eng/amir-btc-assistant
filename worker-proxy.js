@@ -5650,6 +5650,59 @@ let _alertsIsolateCache = null;
 let _alertsIsolateCacheAt = 0;
 const _ALERTS_ISOLATE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 
+// H6-STARVATION FIX (Task 70): per-isolate OHLC fetch-window selector.
+//
+// PROBLEM (characterized by tests/h6-starv-01-starvation-characterization-test.cjs,
+// AUDIT-DEEP-H6): the previous fixed `.slice(0, 14)` window combined with
+// listActiveForCron's deterministic ORDER BY created_at DESC meant that
+// whenever more than 14 unique symbols had active alerts, every unique
+// symbol ranked 15+ was PERMANENTLY starved — its alerts were never
+// evaluated (skipped_ohlc_unavailable every tick) and never fired. Alerts
+// do not expire, so starvation lasted until enough newer alerts triggered
+// or were deleted. The old code comment claimed "remaining symbols are
+// picked up on the next 1-min tick" — that was wrong (deterministic order).
+//
+// FIX: keep the same HARD CAP of 14 symbols per tick (the Cloudflare Free
+// 50-subrequest budget is unchanged), but pick the LEAST-RECENTLY-FETCHED
+// symbols first (per-isolate Map, no I/O):
+//   - Never-fetched symbols (a brand-new alert's symbol) are always
+//     prioritized → the immediate first-check trigger UX is preserved.
+//   - Every symbol is fetched at least once every ceil(n/14) ticks → no
+//     permanent starvation. (Isolates keep independent Maps — harmless:
+//     a symbol unfetched by any isolate stays top-priority everywhere.)
+//   - Ties break by list order (created_at DESC) → the first tick after a
+//     cold start behaves EXACTLY like the old fixed window (regression-
+//     safe), and selection is deterministic for a fresh module scope.
+//   - n ≤ 14 → returns all symbols (behavior identical to before).
+const _ohlcWindowLastFetched = new Map(); // symbol → tick when last fetched
+let _ohlcWindowTick = 0;
+
+function _selectOhlcWindow(symbols, windowSize) {
+  const list = [...new Set(Array.isArray(symbols) ? symbols.filter(Boolean) : [])];
+  const n = list.length;
+  if (n === 0) return [];
+  const size = Math.min(Math.max(1, (windowSize | 0) || 1), n);
+  _ohlcWindowTick += 1;
+  if (n <= size) {
+    for (const s of list) _ohlcWindowLastFetched.set(s, _ohlcWindowTick);
+    return list;
+  }
+  // Least-recently-fetched first (never fetched → t=0 → first of all);
+  // ties broken by list order (deterministic for a fresh module scope).
+  const ranked = list.map((s, i) => ({ s, i, t: _ohlcWindowLastFetched.get(s) || 0 }));
+  ranked.sort((a, b) => (a.t !== b.t ? (a.t < b.t ? -1 : 1) : a.i - b.i));
+  const picked = ranked.slice(0, size);
+  for (const o of picked) _ohlcWindowLastFetched.set(o.s, _ohlcWindowTick);
+  // Prune entries for symbols no longer alerted (keeps the Map bounded).
+  if (_ohlcWindowLastFetched.size > n * 2) {
+    const current = new Set(list);
+    for (const k of _ohlcWindowLastFetched.keys()) {
+      if (!current.has(k)) _ohlcWindowLastFetched.delete(k);
+    }
+  }
+  return picked.map(o => o.s);
+}
+
 async function runScheduledAlertsBaseline(controller, env, pool = null) {
   const t0 = Date.now();
   // Stage-by-stage latency tracking for performance monitoring
@@ -5849,9 +5902,23 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     // (klines endpoint instead of ticker/price endpoint). Same exchange cache.
     const symbolOhlcMap = new Map(); // symbol → { high, low, close, exchange }
     const symbolSourceMap = new Map();
-    const uniqueSymbols = [...new Set(
+    const uniqueSymbolsAll = [...new Set(
       alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-    )].slice(0, 14); // H6 FIX: Cap at 14 unique symbols per cron tick to stay within Cloudflare Workers Free 50-subrequest/Request limit. 14 symbols × 1-3 subrequests (exchange cache hit/miss) + 5 processQueue + 1 bulk UPDATE = max ~48 (2 subrequest safety margin), typically ~20 with cache hits. Remaining symbols are picked up on the next 1-min tick.
+    )];
+    // H6 FIX: Cap at 14 unique symbols per cron tick to stay within the
+    // Cloudflare Workers Free 50-subrequest/Request limit (14 × 1-3
+    // subrequests + 5 processQueue + 1 bulk UPDATE = max ~48, typically ~20
+    // with cache hits). H6-STARVATION FIX (Task 70): the previous fixed
+    // `.slice(0, 14)` window (with listActiveForCron's deterministic
+    // ORDER BY created_at DESC) permanently starved every unique symbol
+    // ranked 15+ whenever >14 unique symbols were active. _selectOhlcWindow
+    // keeps the identical hard cap but picks the least-recently-fetched
+    // symbols first: every symbol is evaluated at least once every
+    // ceil(n/14) ticks, and never-fetched symbols (a brand-new alert's
+    // symbol) are always prioritized. Alerts whose symbol falls outside
+    // this tick's window keep the existing skipped_ohlc_unavailable path
+    // (last_price/last_checked_at untouched — no silent loss).
+    const uniqueSymbols = _selectOhlcWindow(uniqueSymbolsAll, 14);
 
     const fetchOhlcWithTimeout = async (symbol) => {
       const tFetch = Date.now();
