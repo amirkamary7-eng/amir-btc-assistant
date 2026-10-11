@@ -7628,9 +7628,12 @@ export default {
       // ── Real-time price for a single symbol — independent from market cache ──
       // Returns the FRESHEST price for a symbol via fetchSpotPriceUsd
       // (cached-exchange-first fallback chain: bybit → okx → mexc; Binance is
-      // IP-blocked in the deploy region). Sole frontend consumer: the
-      // background fetch when opening a NON-Top-200 coin detail (checkAlerts
-      // uses the batch /api/market/prices endpoint instead). Rate limited
+      // IP-blocked in the deploy region). MK-11 (Task 65): NO in-app frontend
+      // consumer anymore — the detail-open background fetch was folded into
+      // the batch /api/market/prices anchor call (which shares the same
+      // fetchSpotPriceUsd chain + exchange cache). Kept as the public
+      // single-symbol real-time price API; the MK-04 30/min limit below stays
+      // as abuse protection for direct/external callers. Rate limited
       // (MK-04: 30/min per user). Auth required.
       if (request.method === 'GET' && url.pathname === '/api/market/price') {
         const authState = await authenticateTelegramRequest(request, env);
@@ -7638,10 +7641,11 @@ export default {
 
         // MK-04 FIX: dedicated per-user rate limit (30 req/min). This endpoint
         // fetches live spot prices with up to 3 upstream subrequests per call
-        // on cache miss (bybit/okx/mexc) and previously had NO limit. The only
-        // frontend consumer is the background fetch when opening a non-Top-200
-        // coin detail (1 request per open; fast browsing ≈ 6-12/min), so
-        // 30/min gives 2.5-5× real-usage headroom. DEDICATED 'market-price'
+        // on cache miss (bybit/okx/mexc) and previously had NO limit. Since
+        // Task 65 (MK-11) it has NO in-app frontend consumer (the detail-open
+        // fetch was folded into the batch endpoint's anchor call), so this
+        // bucket exists purely as abuse protection for direct API callers.
+        // DEDICATED 'market-price'
         // bucket — NOT shared with the public IP bucket or the batch
         // 'market-prices' bucket. isUserRateLimited fails open on a KV
         // outage. The alert cron and all internal paths fetch via
@@ -7676,6 +7680,10 @@ export default {
       // Frontend sends: GET /api/market/prices?symbols=BTC,ETH,SOL
       // Backend fetches all prices in parallel, returns { BTC: {price, exchange}, ETH: {...} }
       // This reduces 10 API calls to 1 for users with multiple alerts.
+      // MK-11 (Task 65): SECOND consumer — the one-shot alert-basis anchor
+      // fetch when opening a crypto coin detail (1 request per open; BTC-pair
+      // views fetch base+BTC in the same request). Same USDT-basis chain the
+      // alert cron evaluates against.
       if (request.method === 'GET' && url.pathname === '/api/market/prices') {
         const authState = await authenticateTelegramRequest(request, env);
         if (authState.error) return authState.error;
@@ -7683,8 +7691,9 @@ export default {
         // AP-5 FIX (Security Batch 5): dedicated per-user rate limit for the
         // batch price endpoint (15 symbols → up to 45 upstream subrequests
         // per call under NEWSBE-020). 60 req/min is 15x the frontend alert
-        // polling cadence (every 15s = 4/min), so real users are unaffected,
-        // while a runaway client cannot fan out unbounded upstream load.
+        // polling cadence (every 15s = 4/min); MK-11 (Task 65) adds the
+        // detail-open anchor fetch (1 per crypto detail open — human browsing
+        // ≈ 6-12/min), so real-usage stays ≤ ~16/min with ≈ 3.7× headroom.
         // DEDICATED 'market-prices' bucket — NOT shared with the generic
         // mutation limiter. isUserRateLimited fails open on a missing KV, so
         // a KV outage degrades the limit (not the endpoint).

@@ -95,6 +95,7 @@ function makeWorld(opts = {}) {
     'const t = (k) => __g.t(k);',
     'const localStorage = __g.localStorage;',
     'const renderActiveAlerts = (sym) => { __g.rendered.push(sym); };',
+    'const getAlertUnitLabel = (s) => "USDT"; // Task 65 (MK-11): receipt unit label leaf',
     'const addNotification = (title, body, options) => { __g.notifications.push({ title, body, options }); };',
     'const getTg = () => ({ HapticFeedback: { notificationOccurred: (k) => __g.haptics.push(k) }, showPopup: (p) => {} });',
     'const syncAlertToServer = async (a) => { if (__g.guest) return a; __g.syncs.push(a.symbol); a.serverId = __g.serverId; return a; };',

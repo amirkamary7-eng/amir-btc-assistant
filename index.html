@@ -1232,7 +1232,8 @@
                     <!-- Price input + create button -->
                     <div class="cd-alert-form">
                         <div class="cd-alert-input-wrap">
-                            <span class="cd-alert-prefix">$</span>
+                            <!-- MK-11: prefix states the unit of the entered number; set per-asset in openCoinDetail/openForexDetail -->
+                            <span class="cd-alert-prefix" id="cd-alert-prefix">$</span>
                             <input type="number" id="alert-price" placeholder="قیمت هدف را وارد کنید" class="cd-alert-input" step="any" min="0" data-i18n-placeholder="alert_target_ph">
                         </div>
                         <button type="button" class="cd-alert-btn" onclick="setPriceAlert()">

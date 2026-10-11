@@ -26,11 +26,27 @@
  *   is transparency: MK-02 shows the user's target AND the observed price in
  *   every trigger message, so any residual skew is visible.
  *
+ *   TASK 65 DECISION (user instruction — MK-11 USD/USDT consistency): the basis
+ *   is now UNIFIED for new registrations:
+ *     1. BTC-pair conversion uses the LIVE BTC USDT spot (batch
+ *        /api/market/prices → fetchSpotPriceUsd — the same bybit/okx/mexc
+ *        chain + `price:exchange:BTC` cache the cron's fetchOhlc1m reads),
+ *        FAIL-CLOSED when unavailable (no silent CG substitution).
+ *     2. The alert card (registration anchor) shows the live USDT-basis spot
+ *        for crypto (fetchAlertBasisPrice, ONE-SHOT per detail open) — so
+ *        entries are anchored on the evaluation basis. The entered number is
+ *        still stored EXACTLY as typed (no entry≠storage discrepancy).
+ *     3. All alert-context UI (input prefix, card, receipt, active list)
+ *        labels crypto numbers USDT (was "$" — a wrong unit claim).
+ *   LEGACY alerts: stored numbers are NOT migrated and NOT re-interpreted —
+ *   they keep the documented ±0.15% residual envelope (S4) with MK-02
+ *   transparency. The evaluation path itself is byte-identical.
+ *
  * This file pins: (1) the real parseBtcPairSymbol gate, (2) arithmetic +
- *   NUMERIC(24,8) precision safety of the conversion, (3) the structural
- *   mismatch in the real sources, (4) the quantified envelope vs 1-minute
- *   candle volatility, (5) the decision (no correction in code + transparency
- *   present).
+ *   NUMERIC(24,8) precision safety of the conversion, (3) the NEW USDT-basis
+ *   conversion in the real sources (fail-closed), (4) the quantified residual
+ *   envelope for LEGACY alerts, (5) the Task 65 decision state (anchor
+ *   unification present + one-shot, no polling; evaluation untouched).
  *
  * Run: node --test tests/mk11-btc-pair-conversion-basis-test.cjs
  */
@@ -90,8 +106,8 @@ test('MK-11 S2: conversion arithmetic is exact and NUMERIC(24,8)-safe', () => {
   assert.match(MIGRATE_SQL, /price\s+NUMERIC\(24,\s*8\)\s+NOT NULL/,
     'price_alerts.price must be NUMERIC(24,8)');
 
-  // Real conversion shape (setPriceAlert): usdPrice = price * btcPrice
-  // Typical magnitudes:
+  // Real conversion shape (setPriceAlert since Task 65): usdPrice = price ×
+  // live BTC USDT spot (btcUsdtSpot). Typical magnitudes:
   const cases = [
     { pairPrice: 0.05, btc: 100000 },    // ETHBTC ≈ 0.05, BTC $100k → $5000
     { pairPrice: 0.000012, btc: 100000 },// PEPEBTC → $0.0012
@@ -110,32 +126,63 @@ test('MK-11 S2: conversion arithmetic is exact and NUMERIC(24,8)-safe', () => {
   assert.equal(Number((0.05 * 100000).toFixed(8)), 5000);
 });
 
-test('MK-11 S3: structural mismatch pinned in real sources (CG-USD target vs USDT-kline evaluation)', () => {
+test('MK-11 S3: Task 65 conversion — live USDT spot basis, fail-closed (pinned in real sources)', () => {
   const strip = (src) => src.split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
   const app = strip(APP_SRC);
   const worker = strip(WORKER_SRC);
 
-  // TARGET side: setPriceAlert multiplies by CoinGecko-USD BTC price
+  // TARGET side (post-Task 65): setPriceAlert fetches the LIVE BTC USDT spot
+  // from the batch endpoint (same chain the cron evaluates against) and
+  // multiplies by it — the CoinGecko-USD conversion is GONE.
   const setPriceAlert = app.slice(app.indexOf('function setPriceAlert'), app.indexOf('\n}', app.indexOf('function setPriceAlert')));
   assert.match(setPriceAlert, /isBtcPair/, 'setPriceAlert must gate on isBtcPair');
-  assert.match(setPriceAlert, /usdPrice = price \* btcPrice/, 'conversion must be price × btcPrice');
-  assert.match(setPriceAlert, /priceUsd/, 'BTC price source is priceUsd (CoinGecko USD)');
+  assert.match(setPriceAlert, /apiFetch\(`\/api\/market\/prices\?symbols=\$\{encodeURIComponent\('BTC'\)\}`\)/,
+    'conversion multiplier must be fetched from the batch USDT-spot endpoint');
+  assert.match(setPriceAlert, /usdPrice = price \* btcUsdtSpot/,
+    'conversion must be price × the live USDT spot (not CoinGecko priceUsd)');
+  assert.ok(!/price \* btcPrice/.test(setPriceAlert), 'the old unconditional CoinGecko-USD conversion must NOT remain');
+  // The CG conversion is allowed ONLY inside the LOCAL-ONLY branch (guest /
+  // pending users never reach the cron — their local evaluation stream is the
+  // CoinGecko priceMap), never for server-synced registrations.
+  const localOnlyIdx = setPriceAlert.indexOf('const localOnly');
+  const cgIdx = setPriceAlert.indexOf('usdPrice = price * btcCg');
+  const usdtIdx = setPriceAlert.indexOf('usdPrice = price * btcUsdtSpot');
+  assert.ok(localOnlyIdx !== -1 && cgIdx !== -1 && localOnlyIdx < cgIdx,
+    'the CG conversion must sit inside the localOnly-guarded branch');
+  assert.ok(usdtIdx !== -1 && usdtIdx > cgIdx,
+    'the USDT conversion must be the server-synced path');
+  // FAIL-CLOSED: unavailable USDT spot blocks registration (no CG fallback)
+  assert.match(setPriceAlert, /price_alert_basis_unavailable/,
+    'unavailable USDT basis must show the dedicated message');
+  // The conversion sits AFTER the MK-05 gate (a blocked registration fetches
+  // nothing) but BEFORE every registration effect.
+  const gateIdx = setPriceAlert.indexOf('/api/notifications/platform/settings');
+  const convIdx = setPriceAlert.indexOf("encodeURIComponent('BTC')");
+  const pushIdx = setPriceAlert.indexOf('alerts.push(newAlert)');
+  assert.ok(gateIdx !== -1 && gateIdx < convIdx && convIdx < pushIdx,
+    'conversion fetch must sit after the MK-05 gate and before the optimistic UI');
 
-  // CoinGecko USD basis of that price
-  assert.match(MARKET_DATA_SRC, /coins\/markets\?vs_currency=usd/,
-    'market data price basis is CoinGecko USD');
-
-  // EVALUATION side: cron compares the raw stored target
+  // EVALUATION side (unchanged): cron compares the raw stored target
   assert.match(worker, /const targetPrice = Number\(alert\?\.price\)/,
     'cron must read the raw stored target (no basis correction)');
 
   // ...against USDT klines from bybit/okx/mexc
   const klineZone = worker.slice(worker.indexOf('const KLINE_CHECKERS'), worker.indexOf('const FOREX_YAHOO_MAP'));
   assert.match(klineZone, /USDT/, 'kline checkers query <SYM>USDT pairs');
+
+  // ANCHOR (registration basis display): the card is anchored on the same
+  // USDT chain — one-shot, race-guarded (no polling).
+  const anchor = app.slice(app.indexOf('function fetchAlertBasisPrice'), app.indexOf('\n}', app.indexOf('function fetchAlertBasisPrice')));
+  assert.match(anchor, /apiFetch\(`\/api\/market\/prices\?symbols=\$\{encodeURIComponent\(symbols\.join\(','\)\)\}`\)/,
+    'anchor fetch uses the same batch USDT-spot endpoint');
+  assert.match(anchor, /getAlertUnitLabel\(baseSymbol\)/,
+    'anchor card is labeled with the routing-table unit (USDT for crypto)');
+  assert.ok(!/setInterval|setTimeout|while\s*\(/.test(anchor), 'anchor is one-shot — no polling/timers');
 });
 
-test('MK-11 S4: quantified error envelope stays below 1-minute candle volatility', () => {
-  // Error budget (documented in the audit):
+test('MK-11 S4: quantified error envelope stays below 1-minute candle volatility (LEGACY-alert residual)', () => {
+  // Error budget for alerts registered BEFORE Task 65 (CoinGecko-USD basis,
+  // still active, NOT migrated):
   //   E1 CoinGecko-vs-exchange deviation ≈ ±0.10%
   //   E2 entry staleness (KV+memory cache ≤120s) — bounded by the same E1 band
   //   E3 USDT peg deviation ≈ ±0.05%
@@ -161,7 +208,7 @@ test('MK-11 S4: quantified error envelope stays below 1-minute candle volatility
   assert.ok(worstRelative < 0.002, 'worst relative skew < 0.2% hard bound');
 });
 
-test('MK-11 S5: DECISION PIN — no basis correction in code; transparency mitigation present', () => {
+test('MK-11 S5: DECISION PIN (Task 65) — anchor unification implemented; evaluation untouched; transparency present', () => {
   const strip = (src) => src.split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
   const app = strip(APP_SRC);
   const worker = strip(WORKER_SRC);
@@ -170,12 +217,19 @@ test('MK-11 S5: DECISION PIN — no basis correction in code; transparency mitig
   assert.ok(!/peg|PEG_CORRECTION|usdtAdjust/i.test(worker.slice(
     worker.indexOf('const targetPrice = Number(alert?.price)'),
     worker.indexOf('const targetPrice = Number(alert?.price)') + 2000)),
-    'evaluation path must contain no peg/basis correction (decision: none applied)');
+    'evaluation path must contain no peg/basis correction (target is now USDT-basis by construction)');
 
   // setPriceAlert still applies the SAME single conversion (no double correction)
   const setPriceAlert = app.slice(app.indexOf('function setPriceAlert'), app.indexOf('\n}', app.indexOf('function setPriceAlert')));
-  const conversions = (setPriceAlert.match(/price \* btcPrice/g) || []).length;
+  const conversions = (setPriceAlert.match(/price \* btcUsdtSpot/g) || []).length;
   assert.equal(conversions, 1, 'exactly one conversion in setPriceAlert (no compensating correction)');
+
+  // The registration anchor is wired into the detail view (ONE call site —
+  // counted on comment-stripped source, doc comments mention the name too)
+  const stripComments = (s) => s.split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  const openCoin = stripComments(app.slice(app.indexOf('async function openCoinDetail'), app.indexOf('async function openForexDetail')));
+  const anchorCalls = (openCoin.match(/fetchAlertBasisPrice\(/g) || []).length;
+  assert.equal(anchorCalls, 1, 'exactly one anchor fetch per detail open');
 
   // Transparency mitigation IS present (MK-02): both target and observed are
   // rendered in the trigger message — any residual skew is visible to the user.
