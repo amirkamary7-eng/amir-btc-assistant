@@ -7656,7 +7656,9 @@ export default {
           return jsonResponse({ status: 'error', message: 'Missing symbol' }, { status: 422 }, env);
         }
 
-        // Fetch fresh price directly from Binance (no cache)
+        // Fetch fresh price via fetchSpotPriceUsd — cached-exchange fast path
+        // with bybit/okx/mexc fallback chain (Binance is IP-blocked in the
+        // deploy region; see route doc above)
         const priceInfo = await fetchSpotPriceUsd(env, symbol);
         if (priceInfo && priceInfo.price) {
           return jsonResponse({
