@@ -24,20 +24,54 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8
 const APP_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const MARKET_DATA_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/market-data.js'), 'utf8');
 
+// ─── Real selector (Task 70: selection moved into _selectOhlcWindow) ───────
+// The SIM-* tests below exercise the REAL extracted code from
+// worker-proxy.js (brace-slicing, same technique as
+// tests/market-rate-limit-multi-isolate-test.cjs) instead of a local
+// replica of the old inline expression. Fresh module scope per call =
+// fresh per-isolate state (deterministic).
+function extractFn(srcText, name) {
+  const re = new RegExp('(?:^|\\n)[ \\t]*function ' + name + '\\s*\\(');
+  const m = re.exec(srcText);
+  if (!m) throw new Error('function not found: ' + name);
+  const braceStart = srcText.indexOf('{', m.index);
+  let depth = 0;
+  for (let j = braceStart; j < srcText.length; j++) {
+    if (srcText[j] === '{') depth++;
+    else if (srcText[j] === '}') { if (--depth === 0) return srcText.slice(m.index, j + 1).replace(/^\s+/, ''); }
+  }
+  throw new Error('unbalanced braces: ' + name);
+}
+function makeRealSelector() {
+  return new Function(
+    'const _ohlcWindowLastFetched = new Map();\n' +
+    'let _ohlcWindowTick = 0;\n' +
+    extractFn(SRC, '_selectOhlcWindow') +
+    '\nreturn _selectOhlcWindow;'
+  )();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION 1 — uniqueSymbols cap (H6)
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('H6-01: uniqueSymbols has .slice(0, 14) cap', () => {
-  assert.ok(SRC.includes('].slice(0, 14)'),
-    'uniqueSymbols must be capped with .slice(0, 14)');
+test('H6-01: uniqueSymbols capped at 14 via _selectOhlcWindow(uniqueSymbolsAll, 14)', () => {
+  assert.ok(SRC.includes('const uniqueSymbols = _selectOhlcWindow(uniqueSymbolsAll, 14);'),
+    'uniqueSymbols must be selected through _selectOhlcWindow with the hard cap of 14');
+  assert.ok(SRC.includes('function _selectOhlcWindow(symbols, windowSize)'),
+    'the _selectOhlcWindow helper must exist');
+  // Task 70 (H6-STARVATION): the old inline `].slice(0, 14)` fixed window
+  // permanently starved symbols ranked 15+; the cap itself is now enforced
+  // inside _selectOhlcWindow (least-recently-fetched-first fair coverage).
+  assert.ok(!SRC.includes('].slice(0, 14)'),
+    'the old fixed inline cap must be gone (fair coverage replaces it)');
 });
 
 test('H6-02: cap is applied AFTER the Set construction (order preserved)', () => {
-  // The pattern must be: [...new Set(...)].slice(0, 14)
+  // The pattern must be: [...new Set(...)] → _selectOhlcWindow(..., 14)
   // NOT: alerts.slice(0, 14).map(...)
   assert.ok(SRC.includes("[...new Set(\n      alerts.map"),
-    'Set construction must come BEFORE the slice (order = first 15 unique symbols)');
+    'Set construction must come BEFORE the window selection (order = first unique symbols by list order)');
 });
 
 test('H6-03: H6 FIX comments exist (2 occurrences: uniqueSymbols cap + market TTL)', () => {
@@ -150,20 +184,21 @@ test('FE-03: frontend /api/forex TTL = 60000 (60s, unchanged)', () => {
 // SECTION 4 — Behavioral simulations
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('SIM-01: 20 unique symbols → only 14 processed (first 14)', () => {
+test('SIM-01: 20 unique symbols → exactly 14 selected; cold start = list-order first 14', () => {
   const alerts = [];
   for (let i = 0; i < 20; i++) {
     alerts.push({ symbol: 'SYM' + i, id: 'a' + i, user_id: 'u' + i, price: 100, direction: 'above' });
   }
-  const uniqueSymbols = [...new Set(
+  const selectWindow = makeRealSelector();
+  const uniqueSymbols = selectWindow([...new Set(
     alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-  )].slice(0, 14);
+  )], 14);
 
   assert.equal(uniqueSymbols.length, 14, 'only 14 symbols processed');
-  assert.equal(uniqueSymbols[0], 'SYM0', 'first symbol preserved');
-  assert.equal(uniqueSymbols[13], 'SYM13', '13th symbol preserved');
-  assert.ok(!uniqueSymbols.includes('SYM14'), '13th symbol NOT included');
-  assert.ok(!uniqueSymbols.includes('SYM19'), '20th symbol NOT included');
+  assert.equal(uniqueSymbols[0], 'SYM0', 'first symbol preserved (cold start = list order)');
+  assert.equal(uniqueSymbols[13], 'SYM13', '14th symbol preserved');
+  assert.ok(!uniqueSymbols.includes('SYM14'), 'SYM14 NOT in this tick (picked on a later tick)');
+  assert.ok(!uniqueSymbols.includes('SYM19'), 'SYM19 NOT in this tick (picked on a later tick)');
 });
 
 test('SIM-02: 10 unique symbols → all 10 processed (cap does not reduce)', () => {
@@ -171,9 +206,10 @@ test('SIM-02: 10 unique symbols → all 10 processed (cap does not reduce)', () 
   for (let i = 0; i < 10; i++) {
     alerts.push({ symbol: 'SYM' + i, id: 'a' + i });
   }
-  const uniqueSymbols = [...new Set(
+  const selectWindow = makeRealSelector();
+  const uniqueSymbols = selectWindow([...new Set(
     alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-  )].slice(0, 14);
+  )], 14);
 
   assert.equal(uniqueSymbols.length, 10, 'all 10 symbols processed (cap=14 does not reduce)');
 });
@@ -183,9 +219,12 @@ test('SIM-03: duplicate symbols → dedup before cap', () => {
     { symbol: 'BTC' }, { symbol: 'BTC' }, { symbol: 'ETH' },
     { symbol: 'ETH' }, { symbol: 'SOL' }, { symbol: 'BTC' },
   ];
-  const uniqueSymbols = [...new Set(
+  // Same composition as the call site: Set construction (dedup) FIRST,
+  // then the selector (which also dedups defensively).
+  const selectWindow = makeRealSelector();
+  const uniqueSymbols = selectWindow([...new Set(
     alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-  )].slice(0, 14);
+  )], 14);
 
   assert.equal(uniqueSymbols.length, 3, 'duplicates deduped: 3 unique from 6 alerts');
   assert.equal(uniqueSymbols[0], 'BTC', 'order preserved after dedup');
@@ -195,9 +234,10 @@ test('SIM-03: duplicate symbols → dedup before cap', () => {
 
 test('SIM-04: 0 symbols → empty array (no error)', () => {
   const alerts = [];
-  const uniqueSymbols = [...new Set(
+  const selectWindow = makeRealSelector();
+  const uniqueSymbols = selectWindow([...new Set(
     alerts.map(a => String(a?.symbol || '').trim().toUpperCase()).filter(Boolean)
-  )].slice(0, 14);
+  )], 14);
 
   assert.equal(uniqueSymbols.length, 0, 'empty alerts → empty uniqueSymbols');
 });
