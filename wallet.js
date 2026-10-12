@@ -26,6 +26,10 @@ const WalletApp = (() => {
     claiming: 'در حال دریافت...',
     claim_success: 'جایزه روزانه با موفقیت دریافت شد!',
     claim_error: 'دریافت جایزه ناموفق بود',
+    // BE-102 fix (UX copy audit): map backend code ALREADY_CLAIMED (409) to a
+    // friendly message instead of leaking the raw English `result.message`
+    // ('Already claimed today') into the Persian popup.
+    already_claimed: 'جایزه امروز را قبلاً دریافت کرده‌اید. فردا دوباره سر بزنید.',
     referral_program: 'برنامه دعوت دوستان',
     ref_link: 'لینک دعوت',
     invited_users: 'دعوت‌شده‌ها',
@@ -167,6 +171,8 @@ const WalletApp = (() => {
     claiming: 'Claiming...',
     claim_success: 'Daily reward claimed successfully!',
     claim_error: 'Failed to claim daily reward',
+    // BE-102 fix (UX copy audit): ALREADY_CLAIMED (409) friendly message.
+    already_claimed: 'You have already claimed today’s reward. Come back tomorrow.',
     referral_program: 'Referral Program',
     ref_link: 'Referral Link',
     invited_users: 'Invited Users',
@@ -1726,7 +1732,11 @@ const WalletApp = (() => {
         if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
         const tg = window.getTg?.();
         try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
-        tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
+        // BE-102 fix (UX copy audit): map the known 409 code to a friendly
+        // localized message; unknown codes keep the previous behavior
+        // (server message, then generic claim_error).
+        const claimErrorMsg = (result.code === 'ALREADY_CLAIMED') ? WT('already_claimed') : (result.message || WT('claim_error'));
+        tg?.showPopup?.({ title: WT('error'), message: claimErrorMsg, buttons: [{ type: 'ok' }] });
       }
     } finally {
       // DAILY CHECK FIX: always reset the claiming flag so the user can retry
