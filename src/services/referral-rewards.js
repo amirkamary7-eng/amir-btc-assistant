@@ -157,11 +157,15 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       const referralCenterUrl = webAppUrl ? `${webAppUrl}?startapp=referral_center` : null;
       const myReferralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${inviterId}` : null;
 
+      // NT-005 fix (UX copy audit): unit unified to AB — the wallet, the
+      // referral_reward template ('شما +{amount} AB دریافت کردید.') and all
+      // other surfaces use AB; this rich message was the only 'Token' outlier,
+      // so the inviter saw two messages with two different units.
       const messageText =
         `🎉 تبریک!\n\n` +
         `👤 یک کاربر جدید با لینک دعوت شما وارد AMIRBTC Assistant شد.\n\n` +
-        `🎁 پاداش شما: +${amount} Token\n` +
-        `💎 موجودی جدید شما: ${newBalance} Token\n\n` +
+        `🎁 پاداش شما: +${amount} AB\n` +
+        `💎 موجودی جدید شما: ${newBalance} AB\n\n` +
         `از دعوت دوستان خود، توکن بیشتری دریافت کنید.`;
 
       // Build inline keyboard with two buttons
