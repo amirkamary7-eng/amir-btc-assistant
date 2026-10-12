@@ -942,12 +942,49 @@ const WalletApp = (() => {
     `;
   }
 
+  // NT-006/007/009/010 fix (UX copy audit): transaction descriptions are
+  // written by backend services in English ('Invite reward for user 123',
+  // 'Wheel reward: …', 'Extra price alert: …', 'Refund: …', raw type strings
+  // via the economy default) and were rendered verbatim in the Persian
+  // wallet history. Translation happens at RENDER time so old DB rows and
+  // new ones are covered alike; only our own deterministic description
+  // shapes are matched — Persian and unknown text passes through untouched.
+  // English UI keeps the originals.
+  function translateTxDesc(desc) {
+    if (!desc) return '';
+    if (detectLang() !== 'fa') return desc;
+    let m;
+    if (desc === 'Daily check-in reward') return 'جایزه چک‌این روزانه';
+    if (desc === 'Daily Reward') return 'جایزه روزانه';
+    if ((m = desc.match(/^Invite reward for user (\S+)$/))) return 'پاداش دعوت کاربر ' + m[1];
+    if ((m = desc.match(/^Wheel reward( \(retry\))?: (.*)$/))) return (m[1] ? 'پاداش گردونه (تلاش مجدد): ' : 'پاداش گردونه: ') + m[2];
+    if ((m = desc.match(/^Extra price alert: (.*)$/))) return 'هشدار قیمت اضافه: ' + m[1];
+    if ((m = desc.match(/^Purchase: (.*) \((common|rare|epic|legendary|mythic)\)$/))) {
+      const rarityFa = { common: 'معمولی', rare: 'کمیاب', epic: 'حماسی', legendary: 'افسانه‌ای', mythic: 'اسطوره‌ای' }[m[2]];
+      return 'خرید: ' + m[1] + ' (' + rarityFa + ')';
+    }
+    if ((m = desc.match(/^Refund: VPN (\d+)GB purchase failed$/))) return 'بازگشت وجه: خرید VPN ' + m[1] + ' گیگابایتی ناموفق بود';
+    if ((m = desc.match(/^Refund: VPN (\d+)GB already pending$/))) return 'بازگشت وجه: درخواست VPN ' + m[1] + ' گیگابایتی قبلاً در انتظار بوده است';
+    if ((m = desc.match(/^Refund: Cosmetic purchase failed \(.*\)$/))) return 'بازگشت وجه: خرید ظاهر ناموفق بود';
+    if ((m = desc.match(/^Refund: alert creation failed \((.*)\)$/))) return 'بازگشت وجه: ثبت هشدار ناموفق بود (' + m[1] + ')';
+    if ((m = desc.match(/^Refund: alert reactivated — concurrent paid request \((.*)\)$/))) return 'بازگشت وجه: هشدار مجدداً فعال شد — درخواست همزمان پرداخت‌شده (' + m[1] + ')';
+    if ((m = desc.match(/^Refund retry \((.*)\)$/))) return 'بازگشت وجه — تلاش مجدد (' + m[1] + ')';
+    if ((m = desc.match(/^Refund: (.*)$/))) return 'بازگشت وجه: ' + m[1];
+    // NT-010: economy default description is the raw reward/debit type string
+    // (description || rewardType) — map exactly-known types, never guess.
+    if (/^[a-z_]+$/.test(desc)) {
+      const known = ['daily_claim','referral_reward','mission_reward','purchase','redeem','airdrop','admin_credit','wheel_reward','bonus_reward','cosmetic_purchase','alert_debit','vpn_purchase','marketplace_refund','campaign_reward','event_reward'];
+      if (known.includes(desc)) return getTxLabel(desc);
+    }
+    return desc;
+  }
+
   function buildTxItemHTML(tx) {
     // FIX 4: guard against null/undefined/NaN — always show clean values
     const amount = Number(tx.amount) || 0;
     const isPositive = amount > 0;
     const type = tx.type || 'unknown';
-    const desc = (tx.description && String(tx.description).trim()) || '';
+    const desc = translateTxDesc((tx.description && String(tx.description).trim()) || '');
     const time = tx.created_at ? formatTime(tx.created_at) : '';
     const status = tx.status
       ? `<span class="tx-status status-${esc(tx.status)}">${esc(getTxStatusLabel(tx.status))}</span>`
