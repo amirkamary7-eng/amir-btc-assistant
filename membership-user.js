@@ -1165,8 +1165,21 @@
         return;
       }
 
-      // Other errors — show structured message.
-      var msg = (res && res.error) ? res.error : t('mem_err_submit_failed');
+      // BE-115 fix (UX copy audit): map known backend error codes to
+      // localized messages instead of showing the raw English `res.error`
+      // string ('Exchange UID already registered', 'Duplicate pending
+      // request', 'Exchange must be …', 'Cannot submit request from status …').
+      // Unknown codes fall back to the Persian generic so no raw English
+      // reaches the user; the raw payload is preserved in console.warn.
+      var submitErrKeyByCode = {
+        DUPLICATE_UID: 'mem_err_duplicate_uid',
+        DUPLICATE_REQUEST: 'mem_err_duplicate_request',
+        EXCHANGE_NOT_MATCHING_REQUIREMENT: 'mem_err_exchange_mismatch',
+        INVALID_TRANSITION: 'mem_err_invalid_transition'
+      };
+      var mappedKey = res && res.code ? submitErrKeyByCode[res.code] : null;
+      var msg = mappedKey ? t(mappedKey) : t('mem_err_submit_failed');
+      if (res && res.error) console.warn('membership submit error:', res.code || 'no-code', res.error);
       if (window.admToast) admToast(msg, 'error');
       else alert(msg);
       // Restore button to appropriate state based on rules acceptance.

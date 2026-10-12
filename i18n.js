@@ -796,6 +796,12 @@ const i18n = {
         mem_err_server: 'خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.',
         mem_err_rules_updated_request: 'قوانین عضویت به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه کرده و دوباره تأیید کنید.',
         mem_err_submit_failed: 'خطا در ثبت درخواست',
+        // BE-115 fix (UX copy audit): map backend submit error codes to
+        // localized messages instead of leaking raw English `res.error`.
+        mem_err_duplicate_uid: 'این شناسه صرافی قبلاً ثبت شده است.',
+        mem_err_duplicate_request: 'درخواست شما قبلاً ثبت شده و در انتظار بررسی است.',
+        mem_err_exchange_mismatch: 'صرافی انتخابی با الزام فعلی عضویت مطابقت ندارد. لطفاً از لیست مجدد انتخاب کنید.',
+        mem_err_invalid_transition: 'در وضعیت فعلی حساب، امکان ثبت درخواست جدید وجود ندارد.',
         mem_err_server_internet: 'خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.',
         mem_uid_label_default: 'شناسه کاربری {exchange} خود را وارد کنید',
         mem_register_btn: 'ثبت‌نام در {exchange}',
@@ -2156,6 +2162,11 @@ const i18n = {
         mem_err_server: 'Server connection error. Please try again.',
         mem_err_rules_updated_request: 'Membership rules have been updated. Please read and accept the new version.',
         mem_err_submit_failed: 'Failed to submit request',
+        // BE-115 fix (UX copy audit): localized submit error codes.
+        mem_err_duplicate_uid: 'This exchange UID has already been registered.',
+        mem_err_duplicate_request: 'Your request has already been submitted and is awaiting review.',
+        mem_err_exchange_mismatch: 'The selected exchange does not match the current membership requirement. Please choose again from the list.',
+        mem_err_invalid_transition: 'A new request cannot be submitted in your current account status.',
         mem_err_server_internet: 'Server connection error. Please check your internet connection.',
         mem_uid_label_default: 'Enter your {exchange} user ID',
         mem_register_btn: 'Sign up on {exchange}',
