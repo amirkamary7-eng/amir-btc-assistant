@@ -5090,6 +5090,18 @@ function formatEventTimeTehran(ts) {
   }
 }
 
+// TG-019 edge (Task 74 note): all-day/tentative events carry a PLACEHOLDER
+// timestamp (12:00 UTC — see parseEventTime in src/services/calendar.js), so
+// rendering formatEventTimeTehran for them shows a misleading specific
+// «ساعت ۱۵:۳۰». Show the localized label instead when the feed marked the
+// event All Day / Tentative. Display-only; used by the calendar alert body.
+function formatEventTimeForAlert(event) {
+  const rawTime = String(event?.time || '').trim();
+  if (rawTime === 'All Day') return 'تمام‌روز';
+  if (rawTime === 'Tentative') return 'زمان احتمالی';
+  return formatEventTimeTehran(event?.timestamp) || rawTime || '';
+}
+
 async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool = null) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
   if (!notificationPlatformRepo) return;
@@ -5169,7 +5181,8 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
       // TG-019 fix: event.time is the raw US-Eastern feed string — render the
       // event's absolute timestamp (RC-7 ET-corrected) in Tehran time instead.
-      const message = `${event.country} ${event.flag} — ${formatEventTimeTehran(event.timestamp) || event.time || ''}`;
+      // All-day/tentative events render their label (see formatEventTimeForAlert).
+      const message = `${event.country} ${event.flag} — ${formatEventTimeForAlert(event)}`;
       const metadataJson = JSON.stringify({
         event_title: event.title,
         event_date: event.date,

@@ -476,8 +476,12 @@ const AssistantUI = {
         const box = document.getElementById('ai-messages');
         if (!box) return;
 
-        // Action labels (Persian) — matches the action type
-        const ACTION_LABELS = {
+        // Action labels — matches the action type.
+        // MO P2 (UX copy audit): was Persian-only, so English users saw
+        // Persian quick-action chips. Dual-dictionary pattern (same as
+        // wallet WT / referral RT): pick by the global i18n language with a
+        // safe fallback to Persian.
+        const ACTION_LABELS_FA = {
             open_dashboard: '📊 مشاهده داشبورد',
             open_market: '📈 مشاهده بازار',
             open_news: '📰 مشاهده اخبار',
@@ -498,8 +502,32 @@ const AssistantUI = {
             open_calendar: '📅 مشاهده تقویم اقتصادی',
             open_forex_detail: '📈 مشاهده جزئیات فارکس',
         };
+        const ACTION_LABELS_EN = {
+            open_dashboard: '📊 View Dashboard',
+            open_market: '📈 View Market',
+            open_news: '📰 View News',
+            open_analysis: '🔍 View Analyses',
+            open_profile: '👤 View Profile',
+            open_wallet: '💰 View Wallet',
+            open_referral: '👥 View Referrals',
+            open_membership: '⭐ View Membership',
+            open_membership_rules: '📋 View Premium Rules',
+            open_about: 'ℹ️ View About Us',
+            open_terms: '📜 View Terms & Conditions',
+            open_privacy: '🔒 View Privacy Policy',
+            open_settings: '⚙️ View Settings',
+            open_language: '🌐 Change Language',
+            open_tickets: '🎫 View Support',
+            open_coin_detail: '🪙 View Coin Details',
+            open_news_category: '📰 View News',
+            open_calendar: '📅 View Economic Calendar',
+            open_forex_detail: '📈 View Forex Details',
+        };
+        const _actionLang = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'en' : 'fa';
+        const ACTION_LABELS = _actionLang === 'en' ? ACTION_LABELS_EN : ACTION_LABELS_FA;
 
-        const label = ACTION_LABELS[action.type] || '🔗 مشاهده';
+        const label = ACTION_LABELS[action.type] ||
+            (_actionLang === 'en' ? '🔗 View' : '🔗 مشاهده');
         const wrapper = document.createElement('div');
         wrapper.className = 'ai-msg-row ai-msg-assistant';
 
@@ -709,7 +737,10 @@ const AssistantUI = {
             if (options.canRetry && options.lastMessage) {
                 const retryBtn = document.createElement('button');
                 retryBtn.className = 'ai-msg-retry-btn';
-                retryBtn.textContent = '↻ تلاش مجدد';
+                // MO P2 (UX copy audit): retry button was Persian-only —
+                // language-aware like the ACTION_LABELS above.
+                retryBtn.textContent = (typeof currentLang !== 'undefined' && currentLang === 'en')
+                    ? '↻ Retry' : '↻ تلاش مجدد';
                 retryBtn.onclick = () => {
                     // Remove the error bubble wrapper (the assistant error bubble)
                     wrapper.remove();

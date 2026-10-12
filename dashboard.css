@@ -516,6 +516,9 @@
     z-index: 2;
 }
 .watch-card-remove:hover { background: rgba(239, 68, 68, 0.25); }
+/* A11y (UX copy audit): visible focus ring for keyboard users — the remove
+   control is now focusable (tabindex + Enter/Space activation). */
+.watch-card-remove:focus-visible { outline: 2px solid #EF4444; outline-offset: 2px; background: rgba(239, 68, 68, 0.25); }
 .watch-card-remove svg { width: 10px; height: 10px; }
 .watch-card-symbol {
     font-size: 13px;

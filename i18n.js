@@ -278,6 +278,13 @@ const i18n = {
         // ── i18n AUDIT: watchlist ──
         remove_from_watchlist: 'حذف از واچ‌لیست',
         add_to_watchlist: 'افزودن به واچ‌لیست',
+        // ── i18n AUDIT: coin-detail a11y aria-labels ──
+        cd_aria_dialog: 'جزئیات ارز',
+        cd_aria_watchlist: 'واچ‌لیست',
+        cd_aria_alert: 'هشدار قیمت',
+        cd_aria_close: 'بستن و بازگشت به بازار',
+        cd_aria_timeframe: 'بازهٔ نمودار',
+        cd_aria_direction: 'جهت هشدار',
         // ── i18n AUDIT: missions ──
         mission_completed_badge: '✓ دریافت شد',
         mission_complete_title: 'ماموریت کامل شد!',
@@ -1675,6 +1682,13 @@ const i18n = {
         // ── i18n AUDIT EN: watchlist ──
         remove_from_watchlist: 'Remove from watchlist',
         add_to_watchlist: 'Add to watchlist',
+        // ── i18n AUDIT EN: coin-detail a11y aria-labels ──
+        cd_aria_dialog: 'Coin detail',
+        cd_aria_watchlist: 'Watchlist',
+        cd_aria_alert: 'Price alert',
+        cd_aria_close: 'Close and return to Market',
+        cd_aria_timeframe: 'Chart timeframe',
+        cd_aria_direction: 'Alert direction',
         // ── i18n AUDIT EN: missions ──
         mission_completed_badge: '✓ Claimed',
         mission_complete_title: 'Mission Complete!',

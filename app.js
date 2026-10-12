@@ -5261,7 +5261,7 @@ function renderCryptoItem(c) {
             </div>
             <span class="mkt-coin-price">$${priceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? t('remove_from_watchlist') : t('add_to_watchlist')}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -5300,7 +5300,7 @@ function renderBtcPairItem(p, idx) {
             </div>
             <span class="mkt-coin-price">${pairPriceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? t('remove_from_watchlist') : t('add_to_watchlist')}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -6579,7 +6579,7 @@ function renderWatchlist() {
         <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="${isForex ? 'openForexDetail' : 'openCoinDetail'}(this.dataset.symbol)">
             <div class="watch-card-header">
                 ${iconHtml}
-                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="${escapeHtml(t('delete'))}" role="button">
+                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWatchlist(this.dataset.symbol,event);}" aria-label="${escapeHtml(t('delete'))}" role="button" tabindex="0">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
             </div>

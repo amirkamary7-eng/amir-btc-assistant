@@ -198,10 +198,26 @@ function adminFormatDate(iso) {
     if (!iso) return '—';
     try {
         const d = new Date(iso);
-        return d.toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
+        // AD P2 (UX copy audit): unify admin date rendering — previously the
+        // panel mixed en-US short dates (this helper, browser-local tz) with
+        // fa-IR solar dates elsewhere (e.g. VPN purchases table). Now ONE
+        // helper drives all admin dates: calendar follows the panel language
+        // (fa → Persian solar, en → Gregorian) and the timezone is pinned to
+        // Asia/Tehran — the app's canonical timezone (economy resets,
+        // calendar events, missions) — so timestamps no longer depend on the
+        // admin's browser locale/zone.
+        // currentLang guard: admin.js loads after i18n.js, but the date
+        // helper must never hard-crash if the dictionary failed to load.
+        const _fa = (typeof currentLang === 'undefined') || (currentLang === 'fa');
+        return _fa
+            ? d.toLocaleDateString('fa-IR', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran',
+            })
+            : d.toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran',
+            });
     } catch (e) {
         return String(iso);
     }
@@ -4312,7 +4328,7 @@ function renderVpnPurchases(purchases) {
     var rowMap = {};
     tbody.innerHTML = purchases.map(function (p) {
         var userDisplay = vpnUserDisplay(p);
-        var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
+        var dateStr = p.created_at ? adminFormatDate(p.created_at) : '—';
         var durationLabel = p.duration_days >= 30 ? '۱ ماه' : '۷ روز';
         var st = statusConfig[p.status] || { label: p.status, cls: '' };
         var statusHtml = '<span class="vpn-status-pill ' + st.cls + '">' + st.label + '</span>';

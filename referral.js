@@ -203,6 +203,7 @@ const ReferralApp = (() => {
     spinning: 'در حال چرخش...',
     spin_complete: 'چرخش کامل شد!',
     you_won: 'شما برنده شدید!',
+    no_reward_label: 'جایزه‌ای تنظیم نشده است',
     new_balance: 'موجودی جدید',
     connection_error: 'خطای اتصال',
     last_used: 'آخرین استفاده',
@@ -330,6 +331,7 @@ const ReferralApp = (() => {
     spinning: 'Spinning...',
     spin_complete: 'Spin complete!',
     you_won: 'You won!',
+    no_reward_label: 'No reward configured',
     new_balance: 'New balance',
     connection_error: 'Connection error',
     last_used: 'Last used',
@@ -2176,7 +2178,13 @@ const ReferralApp = (() => {
       // Haptic: success
       window.getTg?.()?.HapticFeedback?.notificationOccurred?.('success');
       // Show reward
-      const rewardLabel = reward.label || `+${amount} AB`;
+      // NT-025 (UX copy audit): the backend's empty-pool label is
+      // Persian-only (the spin endpoint has no language plumbing) —
+      // localize the no_reward sub-label render-time via the RT dictionary
+      // so English users no longer see Persian in the result card.
+      const rewardLabel = reward.type === 'no_reward'
+        ? RT('no_reward_label')
+        : (reward.label || `+${amount} AB`);
       const isJackpot = rewardType === 'jackpot' || amount >= 25;
       if (resultDiv) {
         resultDiv.innerHTML = `
