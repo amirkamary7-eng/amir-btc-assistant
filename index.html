@@ -217,7 +217,7 @@
              Renders instantly from cache on app load; skeleton placeholder
              when no cache; never empty. Single horizontal row, infinite loop,
              GPU-friendly transform: translateX. -->
-        <div class="market-ticker" id="market-ticker" role="marquee" aria-live="off" aria-label="Market prices ticker">
+        <div class="market-ticker" id="market-ticker" role="marquee" aria-live="off" aria-label="نوار متحرک قیمت‌های بازار" data-i18n-aria-label="market_ticker_aria">
             <div class="market-ticker-mask">
                 <div class="market-ticker-track" id="market-ticker-track">
                     <!-- Skeleton placeholder shown until JS hydrates with cache or fetch result.
@@ -372,7 +372,7 @@
                     <p class="mkt-data-status" id="mkt-data-status" role="status" aria-live="polite"></p>
                 </div>
             </div>
-            <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="Refresh">
+            <button class="mkt-refresh-btn" id="market-refresh-btn" onclick="refreshMarketData()" aria-label="بروزرسانی" data-i18n-aria-label="refresh">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
         </div>
@@ -384,7 +384,7 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 </div>
                 <div class="mkt-stat-content">
-                    <span class="mkt-stat-label">Market Cap</span>
+                    <span class="mkt-stat-label" data-i18n="summary_mcap">Market Cap</span>
                     <span class="mkt-stat-value" id="global-mcap">--</span>
                 </div>
             </div>
@@ -393,7 +393,7 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                 </div>
                 <div class="mkt-stat-content">
-                    <span class="mkt-stat-label">24H Volume</span>
+                    <span class="mkt-stat-label" data-i18n="summary_volume">24H Volume</span>
                     <span class="mkt-stat-value" id="global-volume">--</span>
                 </div>
             </div>
@@ -523,17 +523,17 @@
             <!-- Sticky Column Header (Rank | Coin | Price | 24H | ★) -->
             <div class="mkt-list-header" id="mkt-list-header" role="row">
                 <span class="mkt-lh-rank" role="columnheader">#</span>
-                <span class="mkt-lh-logo" role="columnheader" aria-label="Coin"></span>
+                <span class="mkt-lh-logo" role="columnheader" aria-label="ارز"></span>
                 <span class="mkt-lh-coin" role="columnheader" data-i18n="mkt_header_coin">ارز</span>
                 <span class="mkt-lh-price" role="columnheader" data-i18n="mkt_header_price">قیمت</span>
                 <span class="mkt-lh-change" role="columnheader">24H</span>
-                <span class="mkt-lh-star" role="columnheader" aria-label="Watchlist"></span>
+                <span class="mkt-lh-star" role="columnheader" aria-label="واچ‌لیست"></span>
             </div>
             <!-- Coin rows are appended here by renderMarket() -->
             <div class="mkt-coin-list-rows" id="coin-list-rows"></div>
         </div>
 
-        <button type="button" class="fab-add-watch fab-hidden" onclick="openAddCoinModal()" aria-label="Add to watchlist">
+        <button type="button" class="fab-add-watch fab-hidden" onclick="openAddCoinModal()" aria-label="افزودن به واچ‌لیست" data-i18n-aria-label="dashboard_add_coin">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
     </section>
@@ -577,7 +577,7 @@
             </div>
             <div class="at-search-wrap">
                 <svg class="at-search-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجو..." data-i18n-placeholder="search" autocomplete="off" />
+                <input type="text" id="analysis-search-input" class="at-search-input" placeholder="جستجوی تحلیل..." data-i18n-placeholder="analysis_search_ph" autocomplete="off" />
                 <button type="button" id="analysis-search-clear" class="at-search-clear" style="display:none;" aria-label="پاک کردن" data-i18n-aria-label="clear_input">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
                 </button>
@@ -1146,7 +1146,7 @@
     </div>
 
     <!-- مودال جزئیات کوین (Full Screen) -->
-    <div id="coin-detail-modal" style="display:none" class="cd-fullscreen" role="dialog" aria-modal="true" aria-label="Coin detail">
+    <div id="coin-detail-modal" style="display:none" class="cd-fullscreen" role="dialog" aria-modal="true" aria-label="Coin detail" data-i18n-aria-label="cd_aria_dialog">
         <!-- ═══ CD: Top Bar ═══ -->
         <div class="cd-top-bar">
             <div class="cd-identity">
@@ -1163,13 +1163,13 @@
                 </div>
             </div>
             <div class="cd-actions">
-                <button class="cd-action-btn" id="detail-watch-btn" onclick="toggleWatchlistFromDetail()" aria-label="Watchlist">
+                <button class="cd-action-btn" id="detail-watch-btn" onclick="toggleWatchlistFromDetail()" aria-label="Watchlist" data-i18n-aria-label="cd_aria_watchlist">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 </button>
-                <button class="cd-action-btn" onclick="document.getElementById('alert-price').focus()" aria-label="Alert">
+                <button class="cd-action-btn" onclick="document.getElementById('alert-price').focus()" aria-label="Alert" data-i18n-aria-label="cd_aria_alert">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                 </button>
-                <button class="cd-action-btn cd-close-btn" onclick="closeCoinDetail()" aria-label="Close and return to Market">
+                <button class="cd-action-btn cd-close-btn" onclick="closeCoinDetail()" aria-label="Close and return to Market" data-i18n-aria-label="cd_aria_close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
                 </button>
             </div>
@@ -1179,7 +1179,7 @@
         <div class="cd-content">
             <!-- ═══ CD: Chart Section ═══ -->
             <div class="cd-chart-section">
-                <div class="cd-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe">
+                <div class="cd-tf-bar" id="tv-tf-bar" role="group" aria-label="Chart timeframe" data-i18n-aria-label="cd_aria_timeframe">
                     <button type="button" class="cd-tf-btn" data-interval="15" onclick="switchTvTimeframe('15', this)">15M</button>
                     <button type="button" class="cd-tf-btn" data-interval="60" onclick="switchTvTimeframe('60', this)">1H</button>
                     <button type="button" class="cd-tf-btn" data-interval="240" onclick="switchTvTimeframe('240', this)">4H</button>
@@ -1218,7 +1218,7 @@
                     </div>
 
                     <!-- Direction toggle -->
-                    <div class="cd-alert-direction-group" role="group" aria-label="Alert direction">
+                    <div class="cd-alert-direction-group" role="group" aria-label="Alert direction" data-i18n-aria-label="cd_aria_direction">
                         <button type="button" class="cd-alert-dir-btn active" data-direction="above" onclick="selectCdAlertDirection('above', this)">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
                             <span data-i18n="alert_when_above">وقتی بالاتر رفت</span>

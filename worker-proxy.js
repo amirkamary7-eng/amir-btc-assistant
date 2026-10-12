@@ -5072,6 +5072,36 @@ async function handleTelegramWebhook(request, env) {
 
 const CALENDAR_ALERT_SENT_PREFIX = 'cal_alert:';
 
+// TG-019/TG-021 fix (UX copy audit): render event times in the Tehran
+// timezone with an explicit «(به وقت تهران)» label. Previously the alert
+// showed the raw US-Eastern feed string and the reminder rendered
+// toLocaleString('en-GB') (UTC on Workers) — both unlabeled, so Tehran
+// users misread the clock by ~3.5–8.5 hours. Text-only change: detection
+// windows, dedup keys, priorities and channels are untouched.
+function formatEventTimeTehran(ts) {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const datePart = d.toLocaleDateString('fa-IR-u-ca-gregory', { timeZone: 'Asia/Tehran', day: 'numeric', month: 'long' });
+    const timePart = d.toLocaleTimeString('fa-IR-u-ca-gregory', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' });
+    return `${datePart}، ساعت ${timePart} (به وقت تهران)`;
+  } catch (_) {
+    return '';
+  }
+}
+
+// TG-019 edge (Task 74 note): all-day/tentative events carry a PLACEHOLDER
+// timestamp (12:00 UTC — see parseEventTime in src/services/calendar.js), so
+// rendering formatEventTimeTehran for them shows a misleading specific
+// «ساعت ۱۵:۳۰». Show the localized label instead when the feed marked the
+// event All Day / Tentative. Display-only; used by the calendar alert body.
+function formatEventTimeForAlert(event) {
+  const rawTime = String(event?.time || '').trim();
+  if (rawTime === 'All Day') return 'تمام‌روز';
+  if (rawTime === 'Tentative') return 'زمان احتمالی';
+  return formatEventTimeTehran(event?.timestamp) || rawTime || '';
+}
+
 async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool = null) {
   if (!env.APP_CACHE || typeof env.APP_CACHE.get !== 'function') return;
   if (!notificationPlatformRepo) return;
@@ -5149,7 +5179,10 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
       if (allUserIds.length === 0) continue;
 
       const title = `🔔 رویداد مهم تقویم: ${event.title}`;
-      const message = `${event.country} ${event.flag} — ${event.time || ''}`;
+      // TG-019 fix: event.time is the raw US-Eastern feed string — render the
+      // event's absolute timestamp (RC-7 ET-corrected) in Tehran time instead.
+      // All-day/tentative events render their label (see formatEventTimeForAlert).
+      const message = `${event.country} ${event.flag} — ${formatEventTimeForAlert(event)}`;
       const metadataJson = JSON.stringify({
         event_title: event.title,
         event_date: event.date,
@@ -5434,7 +5467,8 @@ async function runCalendarAlertsCheck(env, { isEvery15Min = false } = {}, pool =
 
           // Helpers (preserve exact title/message/metadata/dedupKey from per-reminder path)
           const buildReminderTitle = (r) => `🔔 یادآوری رویداد: ${r.event_title || 'تقویم اقتصادی'}`;
-          const buildReminderMessage = (r) => `${r.event_country || ''} ${r.event_timestamp ? '— ' + new Date(r.event_timestamp).toLocaleString('en-GB') : ''}`;
+          // TG-021 fix: was toLocaleString('en-GB') = UTC on Workers, unlabeled.
+          const buildReminderMessage = (r) => `${r.event_country || ''} ${r.event_timestamp ? '— ' + formatEventTimeTehran(r.event_timestamp) : ''}`;
           const buildReminderMetadata = (r) => JSON.stringify({
             event_title: r.event_title,
             event_timestamp: r.event_timestamp,

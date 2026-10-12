@@ -2852,7 +2852,11 @@ function submitAnalysis() {
                             if (retryResult && retryResult.status === 'success') {
                                 _applySaveResult(retryResult, wasEditing);
                             } else {
-                                showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
+                                // DY-004 fix (UX copy audit): show the localized error only;
+                                // the raw server detail/message is English technical text
+                                // and is preserved in console.warn.
+                                if (retryResult?.detail || retryResult?.message) console.warn('[ANALYSIS] featured retry rejected:', retryResult?.detail || retryResult?.message);
+                                showToast(t('toast_analysis_save_error'));
                             }
                         },
                         () => {
@@ -2868,7 +2872,9 @@ function submitAnalysis() {
                                 if (retryResult && retryResult.status === 'success') {
                                     _applySaveResult(retryResult, wasEditing);
                                 } else {
-                                    showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
+                                    // DY-004 fix (UX copy audit): localized error only.
+                                    if (retryResult?.detail || retryResult?.message) console.warn('[ANALYSIS] featured retry rejected:', retryResult?.detail || retryResult?.message);
+                                    showToast(t('toast_analysis_save_error'));
                                 }
                             })();
                         }
@@ -2877,7 +2883,9 @@ function submitAnalysis() {
                 }
 
                 if (result.status !== 'success') {
-                    showToast(result.detail || result.message || t('toast_analysis_save_error'));
+                    // DY-004 fix (UX copy audit): localized error only; raw detail logged.
+                    if (result.detail || result.message) console.warn('[ANALYSIS] save rejected by server:', result.detail || result.message);
+                    showToast(t('toast_analysis_save_error'));
                     return;
                 }
 
@@ -2888,14 +2896,18 @@ function submitAnalysis() {
                 fetchAnalyses(true).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
-                showToast(t('toast_analysis_save_error_detail') + (e.message || 'Unknown'));
+                // DY-003 fix (UX copy audit): no longer appends the raw English
+                // exception to the Persian toast — full error stays in console.
+                showToast(t('toast_analysis_save_error_network'));
             } finally {
                 if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = wasEditing ? t('analysis_save_changes') : t('analysis_publish'); }
             }
         })();
     } catch (syncErr) {
         console.error('[ANALYSIS] submit sync error:', syncErr.message);
-        showToast(t('toast_unexpected_error') + (syncErr.message || 'Unknown'));
+        // DY-003 fix (UX copy audit): no longer appends the raw English
+        // exception to the Persian toast — full error stays in console.
+        showToast(t('toast_analysis_save_error_network'));
     }
 }
 
@@ -3000,7 +3012,9 @@ function executeDeleteAnalysis() {
                 return;
             }
             if (result.status !== 'success') {
-                showToast(result.detail || result.message || t('toast_analysis_delete_error'));
+                // DY-004 fix (UX copy audit): localized error only; raw detail logged.
+                if (result.detail || result.message) console.warn('[ANALYSIS] delete rejected by server:', result.detail || result.message);
+                showToast(t('toast_analysis_delete_error'));
                 return;
             }
 
@@ -5247,7 +5261,7 @@ function renderCryptoItem(c) {
             </div>
             <span class="mkt-coin-price">$${priceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? t('remove_from_watchlist') : t('add_to_watchlist')}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -5286,7 +5300,7 @@ function renderBtcPairItem(p, idx) {
             </div>
             <span class="mkt-coin-price">${pairPriceStr}</span>
             <span class="mkt-coin-change ${isPos ? 'up' : 'down'}">${changeStr}</span>
-            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? 'Remove from watchlist' : 'Add to watchlist'}">
+            <span class="mkt-coin-star ${inWatch ? 'active' : ''}" data-symbol="${safeSymbol}" data-action="toggle-watch" role="button" aria-label="${inWatch ? t('remove_from_watchlist') : t('add_to_watchlist')}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWatch ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </span>
         </div>
@@ -6565,7 +6579,7 @@ function renderWatchlist() {
         <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="${isForex ? 'openForexDetail' : 'openCoinDetail'}(this.dataset.symbol)">
             <div class="watch-card-header">
                 ${iconHtml}
-                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
+                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWatchlist(this.dataset.symbol,event);}" aria-label="${escapeHtml(t('delete'))}" role="button" tabindex="0">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
             </div>
@@ -9662,7 +9676,7 @@ function renderActiveAlerts(symbol) {
                 <span class="cd-alert-item-price">${priceStr} ${getAlertUnitLabel(a.symbol)}</span>
                 <span class="cd-alert-item-meta">${escapeHtml(dirLabel)}${createdAt ? ' · ' + escapeHtml(createdAt) : ''}</span>
             </div>
-            <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="Delete alert">
+            <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="${escapeHtml(t('delete'))}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
         </div>
@@ -10975,7 +10989,7 @@ function renderNotifications() {
             <div class="notif-body">${escapeHtml(n.body)}</div>
             ${ctaHtml}
             <div class="notif-date">${datePart} • ${timePart}</div>
-            <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="Delete">×</button>
+            <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="${escapeHtml(t('delete'))}">×</button>
         </div>`;
     }).join('');
 }
@@ -11331,7 +11345,12 @@ async function executeDeleteAccount() {
                 `;
             }, 1500);
         } else {
-            showMiniToast(t('error_prefix') + (data.message || data.error || t('unknown_error')));
+            // DY-class fix (UX copy audit re-derivation): was t('error_prefix') +
+            // (data.message || data.error || …) — appended the raw English backend
+            // message ('User not found', 'Database not configured', …) to a Persian
+            // prefix on a critical operation. Localized text; raw logged.
+            if (data.message || data.error) console.warn('[DELETE-ACCOUNT] rejected:', data.message || data.error);
+            showMiniToast(t('delete_account_error'));
             if (confirmBtn) confirmBtn.disabled = false;
             if (spinner) spinner.style.display = 'none';
             if (btnText) btnText.textContent = t('delete_account_confirm');
@@ -15220,7 +15239,10 @@ function showJoinStatusBar(state, opts = {}) {
             setJoinLockState('loading');
             bootstrapUser().catch(e => {
                 console.error('[JOIN-LOCK] Manual retry failed:', e.message);
-                setJoinLockState('error', e?.message || 'Retry failed');
+                // DY-class fix (UX copy audit re-derivation): was
+                // `e?.message || 'Retry failed'` — raw English exception on
+                // the app's front-door error card. Localized text; console keeps detail.
+                setJoinLockState('error', t('jl_connection_error'));
             });
         };
     }
@@ -15474,7 +15496,11 @@ async function recheckJoinMembership() {
             getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
     } catch (e) {
-        setJoinLockState('error', e?.message || 'Network error');
+        // DY-class fix (UX copy audit re-derivation): was `e?.message || 'Network error'`
+        // — raw English exception on the join-gate status card. Localized text;
+        // the raw error is preserved in console.
+        console.error('[JOIN-LOCK] Recheck failed:', e?.message || e);
+        setJoinLockState('error', t('jl_connection_error'));
         getTg()?.HapticFeedback?.notificationOccurred?.('error');
     } finally {
         _joinVerifying = false;

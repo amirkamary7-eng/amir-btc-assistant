@@ -255,11 +255,11 @@ export function createRewardCenterRepository(deps) {
       if (Number(missionCount.rows[0]?.cnt || 0) === 0) {
         await queryDb(env, `
           INSERT INTO mission_rewards (mission_id, mission_name, token_amount, is_enabled, sort_order, metadata) VALUES
-            ('daily_login', 'ورود روزانه', 5, TRUE, 1, '{"trigger":"daily_open","target_count":1,"description":"هر روز وارد اپ شو","icon":"calendar"}'),
-            ('read_news', 'خواندن یک خبر', 5, TRUE, 2, '{"trigger":"news_article_open","target_count":1,"description":"یک خبر مشخص را باز کن و بخوان","icon":"news"}'),
-            ('read_analysis', 'مطالعه یک تحلیل', 10, TRUE, 3, '{"trigger":"analysis_detail_open","target_count":1,"description":"جزئیات یک تحلیل مشخص را باز کن","icon":"chart"}'),
-            ('check_calendar', 'تقویم اقتصادی', 5, TRUE, 4, '{"trigger":"calendar_open","target_count":1,"description":"تقویم اقتصادی را بررسی کن","icon":"calendar"}'),
-            ('visit_market', 'بررسی جزئیات دارایی', 5, TRUE, 5, '{"trigger":"asset_detail_open","target_count":1,"description":"جزئیات یک دارایی مشخص را باز کن","icon":"market"}')
+            ('daily_login', 'ورود روزانه', 5, TRUE, 1, '{"trigger":"daily_open","target_count":1,"description":"هر روز وارد اپ شوید","icon":"calendar"}'),
+            ('read_news', 'خواندن یک خبر', 5, TRUE, 2, '{"trigger":"news_article_open","target_count":1,"description":"یک خبر مشخص را باز کنید و بخوانید","icon":"news"}'),
+            ('read_analysis', 'مطالعه یک تحلیل', 10, TRUE, 3, '{"trigger":"analysis_detail_open","target_count":1,"description":"جزئیات یک تحلیل مشخص را باز کنید","icon":"chart"}'),
+            ('check_calendar', 'تقویم اقتصادی', 5, TRUE, 4, '{"trigger":"calendar_open","target_count":1,"description":"تقویم اقتصادی را بررسی کنید","icon":"calendar"}'),
+            ('visit_market', 'بررسی جزئیات دارایی', 5, TRUE, 5, '{"trigger":"asset_detail_open","target_count":1,"description":"جزئیات یک دارایی مشخص را باز کنید","icon":"market"}')
           ON CONFLICT (mission_id) DO NOTHING
         `);
       }

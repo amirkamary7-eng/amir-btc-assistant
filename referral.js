@@ -86,7 +86,11 @@ const ReferralApp = (() => {
   // ═══════════════════════════════════════════════════════════
   const FA = {
     referral_center: 'مرکز دعوت',
-    brand_quote: 'AB Token Infinity — هر دعوت، آینده تو را می‌سازد',
+    // MO-026 fix (UX copy audit): was 'AB Token Infinity — هر دعوت، آینده تو را می‌سازد'
+    // — a brand name that exists nowhere in the product ('AB Token Infinity'),
+    // vague for recipients. Now names the real product and the real referral
+    // reward mechanism (same string serves the referral header + share text).
+    brand_quote: 'اپلیکیشن امیر BTC — تحلیل، اخبار و هشدار قیمت کریپتو؛ دوستانت را دعوت کن و پاداش بگیر',
     total_earned: 'کل پاداش‌های دریافتی',
     total_invites: 'کل دعوت‌ها',
     share_link: 'اشتراک‌گذاری لینک',
@@ -115,7 +119,9 @@ const ReferralApp = (() => {
     referral_history: 'تاریخچه دعوت‌ها',
     no_referrals: 'هنوز دعوتی ثبت نشده',
     start_inviting: 'با اشتراک لینک، دوستان خود را دعوت کنید',
-    load_more: 'باز کردن بیشتر',
+    // MO P2 fix (UX copy audit): was 'باز کردن بیشتر' — awkward phrasing;
+    // unified with the wallet module's 'بارگذاری بیشتر'.
+    load_more: 'بارگذاری بیشتر',
     joined: 'عضو شده',
     not_joined: 'در انتظار عضویت',
     rewarded: 'پاداش داده شده',
@@ -167,13 +173,15 @@ const ReferralApp = (() => {
     mission_progress: 'پیشرفت',
     mission_reward: 'پاداش',
     // Achievements
-    ach_bronze_referrer: 'ارجاع‌دهنده برنزی',
+    // MO P2 fix (UX copy audit): 'ارجاع‌دهنده' is a stiff calque of
+    // 'referrer'; the app's own vocabulary is دعوت (برنامه دعوت، دعوت دوستان).
+    ach_bronze_referrer: 'دعوت‌کننده برنزی',
     ach_bronze_referrer_desc: '۳ دعوت موفق',
-    ach_silver_referrer: 'ارجاع‌دهنده نقره‌ای',
+    ach_silver_referrer: 'دعوت‌کننده نقره‌ای',
     ach_silver_referrer_desc: '۱۰ دعوت موفق',
-    ach_gold_referrer: 'ارجاع‌دهنده طلایی',
+    ach_gold_referrer: 'دعوت‌کننده طلایی',
     ach_gold_referrer_desc: '۲۵ دعوت موفق',
-    ach_platinum_referrer: 'ارجاع‌دهنده پلاتینی',
+    ach_platinum_referrer: 'دعوت‌کننده پلاتینی',
     ach_platinum_referrer_desc: '۵۰ دعوت موفق',
     ach_elite_ambassador: 'سفیر ویژه (الماس)',
     ach_elite_ambassador_desc: '۱۰۰ دعوت موفق',
@@ -195,6 +203,7 @@ const ReferralApp = (() => {
     spinning: 'در حال چرخش...',
     spin_complete: 'چرخش کامل شد!',
     you_won: 'شما برنده شدید!',
+    no_reward_label: 'جایزه‌ای تنظیم نشده است',
     new_balance: 'موجودی جدید',
     connection_error: 'خطای اتصال',
     last_used: 'آخرین استفاده',
@@ -206,7 +215,7 @@ const ReferralApp = (() => {
     source_direct: 'مستقیم',
     source_campaign: 'کمپین',
     source_seasonal: 'فصلی',
-    top_referrers: 'برترین ارجاع‌دهندگان',
+    top_referrers: 'برترین دعوت‌کنندگان',
     your_rank: 'رتبه شما',
     not_ranked: 'رتبه‌بندی نشده',
     reward_earned: 'پاداش کسب شده',
@@ -217,7 +226,7 @@ const ReferralApp = (() => {
 
   const EN = {
     referral_center: 'Referral Center',
-    brand_quote: 'AB Token Infinity — Every Invite Builds Your Future',
+    brand_quote: 'Amir BTC — crypto analysis, news and price alerts. Invite friends and earn rewards',
     total_earned: 'Total Earned',
     total_invites: 'Total Invites',
     share_link: 'Share Link',
@@ -322,6 +331,7 @@ const ReferralApp = (() => {
     spinning: 'Spinning...',
     spin_complete: 'Spin complete!',
     you_won: 'You won!',
+    no_reward_label: 'No reward configured',
     new_balance: 'New balance',
     connection_error: 'Connection error',
     last_used: 'Last used',
@@ -1909,7 +1919,7 @@ const ReferralApp = (() => {
           qrImage.innerHTML = inlineSvg;
         } else {
           // CDN fallback — high-quality QR code generation
-          qrImage.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=ffffff&color=0B1220&margin=8&data=${encodeURIComponent(link)}" alt="QR Code" onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\\'color:#AEB7C2;font-size:11px;text-align:center;padding:20px;\\'>QR generation failed. Please use Copy Link instead.</div>'">`;
+          qrImage.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=ffffff&color=0B1220&margin=8&data=${encodeURIComponent(link)}" alt="QR Code" onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\\'color:#AEB7C2;font-size:11px;text-align:center;padding:20px;\\'>ساخت کد QR ناموفق بود. از دکمه «کپی لینک» استفاده کنید.</div>'">`;
         }
       }
     }
@@ -2168,7 +2178,13 @@ const ReferralApp = (() => {
       // Haptic: success
       window.getTg?.()?.HapticFeedback?.notificationOccurred?.('success');
       // Show reward
-      const rewardLabel = reward.label || `+${amount} AB`;
+      // NT-025 (UX copy audit): the backend's empty-pool label is
+      // Persian-only (the spin endpoint has no language plumbing) —
+      // localize the no_reward sub-label render-time via the RT dictionary
+      // so English users no longer see Persian in the result card.
+      const rewardLabel = reward.type === 'no_reward'
+        ? RT('no_reward_label')
+        : (reward.label || `+${amount} AB`);
       const isJackpot = rewardType === 'jackpot' || amount >= 25;
       if (resultDiv) {
         resultDiv.innerHTML = `

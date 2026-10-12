@@ -135,6 +135,14 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
           category: 'referral',
           priority: 'high',
           channel: 'both',
+          // NT-005 channel dedup (UX copy audit): the rich Telegram message below
+          // (dedupKey referral_rich_${referralId}) is the dedicated premium-UX
+          // Telegram delivery for this reward. Without skipTelegram, users whose
+          // ch_referral preference is 'telegram'/'both' received TWO Telegram
+          // messages for one reward (this plain template message + the rich
+          // one). skipTelegram keeps the in-app INSERT and suppresses only the
+          // redundant plain Telegram copy; it does not touch the reward itself.
+          skipTelegram: true,
           metadata: { amount: String(amount), referral_id: String(referralId), invitee_id: String(inviteeId) },
           dedupKey: `referral_reward_${referralId}`,
           enqueueOnly: true,
@@ -157,12 +165,16 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       const referralCenterUrl = webAppUrl ? `${webAppUrl}?startapp=referral_center` : null;
       const myReferralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${inviterId}` : null;
 
+      // NT-005 fix (UX copy audit): unit unified to AB — the wallet, the
+      // referral_reward template ('شما +{amount} AB دریافت کردید.') and all
+      // other surfaces use AB; this rich message was the only 'Token' outlier,
+      // so the inviter saw two messages with two different units.
       const messageText =
         `🎉 تبریک!\n\n` +
         `👤 یک کاربر جدید با لینک دعوت شما وارد AMIRBTC Assistant شد.\n\n` +
-        `🎁 پاداش شما: +${amount} Token\n` +
-        `💎 موجودی جدید شما: ${newBalance} Token\n\n` +
-        `از دعوت دوستان خود، توکن بیشتری دریافت کنید.`;
+        `🎁 پاداش شما: +${amount} AB\n` +
+        `💎 موجودی جدید شما: ${newBalance} AB\n\n` +
+        `از دعوت دوستان خود، AB بیشتری دریافت کنید.`;
 
       // Build inline keyboard with two buttons
       const inlineKeyboard = [];

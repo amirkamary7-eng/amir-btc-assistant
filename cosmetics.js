@@ -57,6 +57,20 @@
     return Number(n || 0).toLocaleString('en-US');
   }
 
+  // BE-112 fix (UX copy audit): window.apiFetch throws on non-2xx with the
+  // raw response body as e.message, so the old catch blocks showed
+  // 'خطا: {"status":"error","message":"Cosmetic not found",…}' — raw JSON
+  // to the user. This parses the thrown body and maps the backend codes to
+  // the intended Persian messages (the old else-branch mappings could never
+  // fire because those responses are 4xx and are thrown instead).
+  function parseThrownApiError(e) {
+    try {
+      var j = JSON.parse(e && e.message);
+      if (j && typeof j === 'object') return j;
+    } catch (_) {}
+    return null;
+  }
+
   var RARITY_LABELS = { common: 'معمولی', rare: 'کمیاب', epic: 'حماسی', legendary: 'افسانه‌ای', mythic: 'اسطوره‌ای' };
   var RARITY_COLORS = { common: '#9ca3af', rare: '#3b82f6', epic: '#a855f7', legendary: '#f59e0b', mythic: '#ef4444' };
 
@@ -92,7 +106,12 @@
         renderShopError('خطا در بارگذاری کاتالوگ');
       }
     } catch (e) {
-      renderShopError('خطا: ' + (e.message || 'نامشخص'));
+      // BE-112 family (UX copy audit): apiFetch throws on ALL non-2xx with the
+      // raw response body as e.message — never render it in the shop overlay.
+      // Log for support, show the generic catalog-load error (same text the
+      // non-throwing failure path above already uses).
+      console.warn('cosmetics catalog load error:', e && e.message);
+      renderShopError('خطا در بارگذاری کاتالوگ');
     }
   }
 
@@ -197,7 +216,15 @@
         if (window.admToast) admToast(msg, 'error'); else alert(msg);
       }
     } catch (e) {
-      if (window.admToast) admToast('خطا: ' + e.message, 'error'); else alert('خطا: ' + e.message);
+      // BE-118-pattern fix: map backend codes from the thrown body.
+      var j = parseThrownApiError(e);
+      var msg = 'خطا در خرید. لطفاً دوباره تلاش کنید.';
+      if (j && j.code === 'PREMIUM_REQUIRED') msg = 'برای خرید، عضویت Premium لازم است';
+      else if (j && j.code === 'ALREADY_OWNED') msg = 'این ظاهر قبلاً خریداری شده';
+      else if (j && j.code === 'PAYMENT_FAILED') msg = 'موجودی AB کافی نیست';
+      else if (j && j.code === 'NOT_FOUND') msg = 'این ظاهر یافت نشد';
+      console.warn('cosmetics purchase error:', e && e.message);
+      if (window.admToast) admToast(msg, 'error'); else alert(msg);
     }
   }
 
@@ -214,7 +241,14 @@
         if (window.admToast) admToast(msg, 'error'); else alert(msg);
       }
     } catch (e) {
-      if (window.admToast) admToast('خطا: ' + e.message, 'error'); else alert('خطا: ' + e.message);
+      // BE-118-pattern fix: map backend codes from the thrown body.
+      var j = parseThrownApiError(e);
+      var msg = 'خطا در فعال‌سازی. لطفاً دوباره تلاش کنید.';
+      if (j && j.code === 'NOT_OWNED') msg = 'ابتدا این ظاهر را خریداری کنید';
+      else if (j && j.code === 'PREMIUM_REQUIRED') msg = 'این بخش ویژه اعضای Premium است';
+      else if (j && j.code === 'NOT_FOUND') msg = 'این ظاهر یافت نشد';
+      console.warn('cosmetics activate error:', e && e.message);
+      if (window.admToast) admToast(msg, 'error'); else alert(msg);
     }
   }
 

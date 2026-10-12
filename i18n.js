@@ -64,7 +64,12 @@ const i18n = {
         ref_total: 'کل دعوت‌ها', ref_active: 'فعال', ref_reward: 'پاداش', coming_soon: 'بزودی',
         open_referral_center: 'باز کردن مرکز دعوت',
         ref_wheel: 'گردونه شانس و جوایز', ref_wheel_desc: 'سیستم پاداش در آپدیت بعدی فعال می‌شود.',
-        ticket_title: 'عنوان تیکت', ticket_body: 'متن پیام...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
+        ticket_title: 'عنوان تیکت',
+        // ST-002/ST-120 fix (UX copy audit): the i18n apply was replacing the
+        // helpful static textarea placeholder («مشکل یا سوال خود را با جزئیات
+        // توضیح دهید...») with this downgrade ('متن پیام...'). Key now carries
+        // the full guidance text so both sources agree.
+        ticket_body: 'مشکل یا سوال خود را با جزئیات توضیح دهید...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
         ticket_empty: 'تیکتی ثبت نشده است', ticket_pending: 'در انتظار', ticket_answered: 'پاسخ داده شده',
         ticket_reply_btn: 'ارسال پاسخ', ticket_delete: 'حذف تیکت', admin_tickets: 'مدیریت تیکت‌ها',
         ticket_error: 'خطا در ارسال تیکت. لطفاً دوباره تلاش کنید.',
@@ -85,6 +90,9 @@ const i18n = {
         sentiment_bullish: 'صعودی', sentiment_neutral: 'خنثی', sentiment_bearish: 'نزولی',
         fg_extreme_greed: 'طمع شدید', fg_greed: 'طمع', fg_neutral: 'خنثی', fg_fear: 'ترس', fg_extreme_fear: 'ترس شدید',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
+        // ST-001 fix (UX copy audit): the analysis search input was bound to
+        // the coin-search key `search` («جستجوی ارز...») — wrong page context.
+        analysis_search_ph: 'جستجوی تحلیل...',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
@@ -189,6 +197,9 @@ const i18n = {
         toast_fields_required: 'نام ارز و متن تحلیل الزامی است.',
         toast_no_server_response: 'خطا: پاسخی از سرور دریافت نشد.',
         toast_analysis_save_error: 'خطا در ذخیره تحلیل.',
+        // DY-003 fix (UX copy audit): network/exception path text — replaces the
+        // old pattern that appended the raw English exception to a Persian prefix.
+        toast_analysis_save_error_network: 'ذخیره تحلیل انجام نشد. اتصال خود را بررسی و دوباره تلاش کنید.',
         toast_analysis_edited: 'تحلیل ویرایش شد.',
         toast_analysis_published: 'تحلیل منتشر شد.',
         toast_analysis_save_error_detail: 'خطا در ذخیره تحلیل: ',
@@ -267,6 +278,13 @@ const i18n = {
         // ── i18n AUDIT: watchlist ──
         remove_from_watchlist: 'حذف از واچ‌لیست',
         add_to_watchlist: 'افزودن به واچ‌لیست',
+        // ── i18n AUDIT: coin-detail a11y aria-labels ──
+        cd_aria_dialog: 'جزئیات ارز',
+        cd_aria_watchlist: 'واچ‌لیست',
+        cd_aria_alert: 'هشدار قیمت',
+        cd_aria_close: 'بستن و بازگشت به بازار',
+        cd_aria_timeframe: 'بازهٔ نمودار',
+        cd_aria_direction: 'جهت هشدار',
         // ── i18n AUDIT: missions ──
         mission_completed_badge: '✓ دریافت شد',
         mission_complete_title: 'ماموریت کامل شد!',
@@ -647,6 +665,9 @@ const i18n = {
         ai_err_image_limit: 'محدودیت ارسال تصویر تمام شده است',
         ai_err_wait_retry: 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید',
         clear_input: 'پاک کردن',
+        // aria-label keys (a11y P2 fix): were hardcoded English on the market header.
+        refresh: 'بروزرسانی',
+        market_ticker_aria: 'نوار متحرک قیمت‌های بازار',
         alert_target_ph: 'قیمت هدف را وارد کنید',
         ai_attach_label: 'پیوست تصویر',
         ai_send_label: 'ارسال',
@@ -796,6 +817,12 @@ const i18n = {
         mem_err_server: 'خطا در ارتباط با سرور. لطفاً دوباره تلاش کنید.',
         mem_err_rules_updated_request: 'قوانین عضویت به‌روزرسانی شده‌اند. لطفاً نسخه جدید را مطالعه کرده و دوباره تأیید کنید.',
         mem_err_submit_failed: 'خطا در ثبت درخواست',
+        // BE-115 fix (UX copy audit): map backend submit error codes to
+        // localized messages instead of leaking raw English `res.error`.
+        mem_err_duplicate_uid: 'این شناسه صرافی قبلاً ثبت شده است.',
+        mem_err_duplicate_request: 'درخواست شما قبلاً ثبت شده و در انتظار بررسی است.',
+        mem_err_exchange_mismatch: 'صرافی انتخابی با الزام فعلی عضویت مطابقت ندارد. لطفاً از لیست مجدد انتخاب کنید.',
+        mem_err_invalid_transition: 'در وضعیت فعلی حساب، امکان ثبت درخواست جدید وجود ندارد.',
         mem_err_server_internet: 'خطا در ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی کنید.',
         mem_uid_label_default: 'شناسه کاربری {exchange} خود را وارد کنید',
         mem_register_btn: 'ثبت‌نام در {exchange}',
@@ -845,7 +872,7 @@ const i18n = {
         adm_maint_saved_toast: 'تنظیمات نگهداری ذخیره شد',
         adm_maint_save_error_prefix: '✗ خطا در ذخیره: ',
         adm_maint_save_error_toast: 'خطا در ذخیره تنظیمات',
-        adm_no_cooldown: 'بدون کوپل‌داون',
+        adm_no_cooldown: 'بدون کوئل‌داون',
         adm_cooldown_weeks: '{n} هفته',
         adm_cooldown_days: '{n} روز',
         adm_cooldown_hours: '{n} ساعت',
@@ -1039,7 +1066,7 @@ const i18n = {
         adm_rc_field_version: 'نسخه',
         adm_rc_field_theme: 'تم',
         adm_rc_field_max_spins_user: 'حداکثر اسپین/کاربر',
-        adm_rc_field_cooldown: 'کوپل‌داون',
+        adm_rc_field_cooldown: 'کوئل‌داون',
         adm_rc_field_max_reward_day: 'حداکثر پاداش/روز',
         adm_rc_opt_1h: '۱ ساعت',
         adm_rc_opt_6h: '۶ ساعت',
@@ -1354,16 +1381,29 @@ const i18n = {
         adm_tk_status_update_failed: 'به‌روزرسانی وضعیت ناموفق بود',
         adm_tk_deleted: 'تیکت حذف شد',
         adm_tk_delete_failed: 'حذف تیکت ناموفق بود',
+        // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+        adm_tk_delete_confirm: 'این تیکت برای همیشه حذف شود؟ این عمل قابل بازگشت نیست.',
         adm_no_admins: 'ادمینی یافت نشد',
         adm_admins_load_error: 'بارگذاری ادمین‌ها انجام نشد',
         adm_admin_status_updated: 'وضعیت ادمین به‌روزرسانی شد',
         adm_admin_removed: 'ادمین حذف شد',
+        // AD-014 fix (UX copy audit): English destructive confirm + error toast
+        // built by .replace() on a SUCCESS message (nonsense in fa, plain
+        // success text in en). Named entity + dedicated error key instead.
+        adm_admin_remove_confirm: 'ادمین {id} حذف شود؟ این عمل قابل بازگشت نیست.',
+        adm_admin_remove_failed: 'حذف ادمین انجام نشد. لطفاً دوباره تلاش کنید.',
         adm_no_users: 'کاربری یافت نشد',
         adm_users_load_error: 'بارگذاری کاربران انجام نشد',
         adm_joined: 'عضو شده',
         adm_not_joined: 'عضو نشده',
         adm_no_broadcasts: 'پیامی یافت نشد',
         adm_broadcasts_load_error: 'بارگذاری پیام‌ها انجام نشد',
+        // AD P2 fix (UX copy audit): four load-error states were hardcoded
+        // English literals in admin.js (rewards/transactions/referrals/logs).
+        adm_rw_load_error: 'بارگذاری پاداش‌ها انجام نشد',
+        adm_tx_load_error: 'بارگذاری تراکنش‌ها انجام نشد',
+        adm_rf_load_error: 'بارگذاری دعوت‌ها انجام نشد',
+        adm_logs_load_error: 'بارگذاری لاگ‌ها انجام نشد',
         adm_refund_pending: 'در انتظار',
         adm_refund_approved: 'تأیید شده',
         adm_refund_delivered: 'تحویل شده',
@@ -1422,7 +1462,9 @@ const i18n = {
         ref_total: 'Total Invites', ref_active: 'Active', ref_reward: 'Reward', coming_soon: 'Coming Soon',
         open_referral_center: 'Open Referral Center',
         ref_wheel: 'Spin Wheel & Prizes', ref_wheel_desc: 'Reward system coming in next update.',
-        ticket_title: 'Ticket subject', ticket_body: 'Your message...', ticket_send: 'Submit Ticket',
+        ticket_title: 'Ticket subject',
+        // ST-002/ST-120 fix (UX copy audit): full guidance text (was 'Your message...').
+        ticket_body: 'Describe your issue or question in detail...', ticket_send: 'Submit Ticket',
         my_tickets: 'My Tickets', ticket_empty: 'No tickets yet', ticket_pending: 'Pending',
         ticket_answered: 'Answered', ticket_reply_btn: 'Send Reply', ticket_delete: 'Delete ticket',
         admin_tickets: 'Manage Tickets',
@@ -1445,6 +1487,8 @@ const i18n = {
         sentiment_bullish: 'Bullish', sentiment_neutral: 'Neutral', sentiment_bearish: 'Bearish',
         fg_extreme_greed: 'Extreme Greed', fg_greed: 'Greed', fg_neutral: 'Neutral', fg_fear: 'Fear', fg_extreme_fear: 'Extreme Fear',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume', rank: 'Rank', supply: 'Circulating Supply',
+        // ST-001 fix (UX copy audit): analysis-specific search placeholder.
+        analysis_search_ph: 'Search analyses...',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
@@ -1547,6 +1591,8 @@ const i18n = {
         toast_fields_required: 'Coin name and analysis text are required.',
         toast_no_server_response: 'Error: No response from server.',
         toast_analysis_save_error: 'Error saving analysis.',
+        // DY-003 fix (UX copy audit): network/exception path text.
+        toast_analysis_save_error_network: 'Could not save the analysis. Check your connection and try again.',
         toast_analysis_edited: 'Analysis edited.',
         toast_analysis_published: 'Analysis published.',
         toast_analysis_save_error_detail: 'Error saving analysis: ',
@@ -1636,6 +1682,13 @@ const i18n = {
         // ── i18n AUDIT EN: watchlist ──
         remove_from_watchlist: 'Remove from watchlist',
         add_to_watchlist: 'Add to watchlist',
+        // ── i18n AUDIT EN: coin-detail a11y aria-labels ──
+        cd_aria_dialog: 'Coin detail',
+        cd_aria_watchlist: 'Watchlist',
+        cd_aria_alert: 'Price alert',
+        cd_aria_close: 'Close and return to Market',
+        cd_aria_timeframe: 'Chart timeframe',
+        cd_aria_direction: 'Alert direction',
         // ── i18n AUDIT EN: missions ──
         mission_completed_badge: '✓ Claimed',
         mission_complete_title: 'Mission Complete!',
@@ -2011,6 +2064,8 @@ const i18n = {
         ai_err_image_limit: 'Image upload limit reached',
         ai_err_wait_retry: 'Please wait a few seconds and try again',
         clear_input: 'Clear',
+        refresh: 'Refresh',
+        market_ticker_aria: 'Market prices ticker',
         alert_target_ph: 'Enter target price',
         ai_attach_label: 'Attach image',
         ai_send_label: 'Send',
@@ -2156,6 +2211,11 @@ const i18n = {
         mem_err_server: 'Server connection error. Please try again.',
         mem_err_rules_updated_request: 'Membership rules have been updated. Please read and accept the new version.',
         mem_err_submit_failed: 'Failed to submit request',
+        // BE-115 fix (UX copy audit): localized submit error codes.
+        mem_err_duplicate_uid: 'This exchange UID has already been registered.',
+        mem_err_duplicate_request: 'Your request has already been submitted and is awaiting review.',
+        mem_err_exchange_mismatch: 'The selected exchange does not match the current membership requirement. Please choose again from the list.',
+        mem_err_invalid_transition: 'A new request cannot be submitted in your current account status.',
         mem_err_server_internet: 'Server connection error. Please check your internet connection.',
         mem_uid_label_default: 'Enter your {exchange} user ID',
         mem_register_btn: 'Sign up on {exchange}',
@@ -2714,16 +2774,26 @@ const i18n = {
         adm_tk_status_update_failed: 'Failed to update status',
         adm_tk_deleted: 'Ticket deleted',
         adm_tk_delete_failed: 'Failed to delete ticket',
+        // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+        adm_tk_delete_confirm: 'Delete this ticket permanently? This action cannot be undone.',
         adm_no_admins: 'No admins found',
         adm_admins_load_error: 'Failed to load admins',
         adm_admin_status_updated: 'Admin status updated',
         adm_admin_removed: 'Admin removed',
+        // AD-014 fix (UX copy audit): named-entity confirm + real error key.
+        adm_admin_remove_confirm: 'Remove admin {id}? This action cannot be undone.',
+        adm_admin_remove_failed: 'Failed to remove admin. Please try again.',
         adm_no_users: 'No users found',
         adm_users_load_error: 'Failed to load users',
         adm_joined: 'Joined',
         adm_not_joined: 'Not joined',
         adm_no_broadcasts: 'No broadcasts yet',
         adm_broadcasts_load_error: 'Failed to load broadcasts',
+        // AD P2 fix (UX copy audit): localized load-error states.
+        adm_rw_load_error: 'Failed to load rewards',
+        adm_tx_load_error: 'Failed to load transactions',
+        adm_rf_load_error: 'Failed to load referrals',
+        adm_logs_load_error: 'Failed to load logs',
         adm_refund_pending: 'Pending',
         adm_refund_approved: 'Approved',
         adm_refund_delivered: 'Delivered',

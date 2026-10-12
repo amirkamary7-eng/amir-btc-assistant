@@ -90,7 +90,10 @@ function extractVpnIcons(src) {
 }
 
 const FN_REQUIRED = ['escapeHtmlAdmin', 'renderVpnPurchases', 'openVpnSendModal', 'closeVpnSendModal', 'sendVpnLink'];
-const FN_OPTIONAL = ['vpnUserDisplay']; // exists only after the F-01 fix
+// adminFormatDate: renderVpnPurchases routes purchase dates through it since
+// the Task 75 admin-date unification (previously an inline fa-IR format).
+// Extracting it keeps the harness faithful to the real file scope.
+const FN_OPTIONAL = ['vpnUserDisplay', 'adminFormatDate']; // vpnUserDisplay: exists only after the F-01 fix
 const fnSrcs = {};
 for (const name of FN_REQUIRED) {
   const src = extractFn(adminSrc, name);

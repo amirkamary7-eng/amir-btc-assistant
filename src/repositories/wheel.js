@@ -353,7 +353,9 @@ export function createWheelRepository(deps) {
     if (!rewardPool || !rewardPool.length) {
       // No rewards configured — return a zero-amount no_reward.
       // Admin must add rewards via Reward Center → Lucky Wheel tab.
-      return { type: 'no_reward', amount: 0, label: 'No reward configured' };
+      // NT-025 fix (UX copy audit): this label is rendered verbatim as the
+      // wheel result sub-label — was English 'No reward configured'.
+      return { type: 'no_reward', amount: 0, label: 'جایزه‌ای تنظیم نشده است' };
     }
     const totalWeight = rewardPool.reduce((sum, r) => sum + r.weight, 0);
     if (totalWeight <= 0) {

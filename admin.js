@@ -198,10 +198,26 @@ function adminFormatDate(iso) {
     if (!iso) return '—';
     try {
         const d = new Date(iso);
-        return d.toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
+        // AD P2 (UX copy audit): unify admin date rendering — previously the
+        // panel mixed en-US short dates (this helper, browser-local tz) with
+        // fa-IR solar dates elsewhere (e.g. VPN purchases table). Now ONE
+        // helper drives all admin dates: calendar follows the panel language
+        // (fa → Persian solar, en → Gregorian) and the timezone is pinned to
+        // Asia/Tehran — the app's canonical timezone (economy resets,
+        // calendar events, missions) — so timestamps no longer depend on the
+        // admin's browser locale/zone.
+        // currentLang guard: admin.js loads after i18n.js, but the date
+        // helper must never hard-crash if the dictionary failed to load.
+        const _fa = (typeof currentLang === 'undefined') || (currentLang === 'fa');
+        return _fa
+            ? d.toLocaleDateString('fa-IR', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran',
+            })
+            : d.toLocaleDateString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran',
+            });
     } catch (e) {
         return String(iso);
     }
@@ -1222,14 +1238,18 @@ async function toggleAdminActive(id, currentActive) {
 }
 
 function removeAdmin(id, telegramId) {
-    if (!confirm('Remove this admin? This action cannot be undone.')) return;
+    // AD-014 fix (UX copy audit): localized destructive confirm naming the entity.
+    if (!confirm(t('adm_admin_remove_confirm', { id: telegramId }))) return;
     adminApiFetch('/api/admin/admins/' + id, { method: 'DELETE' })
         .then(function () {
             showAdminToast(t('adm_admin_removed'), 'success');
             loadAdminList();
         })
         .catch(function (e) {
-            showAdminToast(t('adm_admin_status_updated').replace('به‌روزرسانی', 'حذف'), 'error');
+            // AD-014 fix: was t('adm_admin_status_updated').replace('به‌روزرسانی', 'حذف')
+            // — a SUCCESS message mutated by string-replace: nonsense in fa
+            // ('وضعیت ادمین حذف شد') and plain success text in en.
+            showAdminToast(t('adm_admin_remove_failed'), 'error');
             console.error('removeAdmin:', e);
         });
 }
@@ -1611,7 +1631,8 @@ async function adminSetTicketStatus(ticketId, status) {
 }
 
 async function adminDeleteTicket(ticketId) {
-    if (!confirm('Delete this ticket permanently?')) return;
+    // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+    if (!confirm(t('adm_tk_delete_confirm'))) return;
     try {
         // PHASE 3 FIX (Bug 5): Use admin endpoint, not user endpoint.
         // Previous: /api/tickets/:id (user endpoint, no admin DELETE) → 403
@@ -1808,7 +1829,7 @@ async function loadAdminRewards() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load rewards', 'loadAdminRewards');
+        container.innerHTML = adminErrorState(t('adm_rw_load_error'), 'loadAdminRewards');
         console.error('loadAdminRewards:', e);
     }
 }
@@ -1947,7 +1968,7 @@ async function loadAdminTransactions(page) {
         container.innerHTML = html;
         adminPagination('admin-transactions-pagination', _adminTransactionsPage, totalPages, 'loadAdminTransactions');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load transactions', 'loadAdminTransactions');
+        container.innerHTML = adminErrorState(t('adm_tx_load_error'), 'loadAdminTransactions');
         console.error('loadAdminTransactions:', e);
     }
 }
@@ -2003,7 +2024,7 @@ async function loadAdminReferrals() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load referrals', 'loadAdminReferrals');
+        container.innerHTML = adminErrorState(t('adm_rf_load_error'), 'loadAdminReferrals');
         console.error('loadAdminReferrals:', e);
     }
 }
@@ -2142,7 +2163,7 @@ async function loadAdminLogs(page) {
         container.innerHTML = html;
         adminPagination('admin-logs-pagination', _adminLogsPage, totalPages, 'loadAdminLogs');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load logs', 'loadAdminLogs');
+        container.innerHTML = adminErrorState(t('adm_logs_load_error'), 'loadAdminLogs');
         console.error('loadAdminLogs:', e);
     }
 }
@@ -3788,7 +3809,7 @@ function _adsPopupFormHtml(p) {
             '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-pp-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
             '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-pp-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
             '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-pp-order" value="' + orderVal + '" min="0"></div>' +
-            '<div class="rc-field"><label>کوپل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
+            '<div class="rc-field"><label>کوئل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
             '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-pp-status">' +
                 '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
                 '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +
@@ -4307,7 +4328,7 @@ function renderVpnPurchases(purchases) {
     var rowMap = {};
     tbody.innerHTML = purchases.map(function (p) {
         var userDisplay = vpnUserDisplay(p);
-        var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('fa-IR') : '—';
+        var dateStr = p.created_at ? adminFormatDate(p.created_at) : '—';
         var durationLabel = p.duration_days >= 30 ? '۱ ماه' : '۷ روز';
         var st = statusConfig[p.status] || { label: p.status, cls: '' };
         var statusHtml = '<span class="vpn-status-pill ' + st.cls + '">' + st.label + '</span>';

@@ -11,6 +11,9 @@ const WalletApp = (() => {
   // =============================================
   const WT_FA = {
     wallet_title: 'کیف پول توکن AB',
+    // aria-label keys (a11y P2 fix): were hardcoded English 'Back'/'Close'.
+    back_aria: 'بازگشت',
+    close_aria: 'بستن',
     wallet_subtitle: 'مرکز مدیریت دارایی‌های شما',
     ab_token_wallet: 'کیف پول توکن AB',
     current_balance: 'موجودی فعلی',
@@ -26,6 +29,10 @@ const WalletApp = (() => {
     claiming: 'در حال دریافت...',
     claim_success: 'جایزه روزانه با موفقیت دریافت شد!',
     claim_error: 'دریافت جایزه ناموفق بود',
+    // BE-102 fix (UX copy audit): map backend code ALREADY_CLAIMED (409) to a
+    // friendly message instead of leaking the raw English `result.message`
+    // ('Already claimed today') into the Persian popup.
+    already_claimed: 'جایزه امروز را قبلاً دریافت کرده‌اید. فردا دوباره سر بزنید.',
     referral_program: 'برنامه دعوت دوستان',
     ref_link: 'لینک دعوت',
     invited_users: 'دعوت‌شده‌ها',
@@ -121,6 +128,9 @@ const WalletApp = (() => {
     locked_label: 'قفل',
     day_label: 'روز',
     day_label_full: 'روز {n}: +{reward} AB',
+    // MO-006 fix (UX copy audit): daily check-in card reward label was a
+    // hardcoded English template literal ('Day 2/7 · +3 AB') on the FA card.
+    day_cycle: 'روز {n} از ۷',
     coming_soon_label: 'به‌زودی',
     vpn_month_plan: 'اشتراک یک ماهه',
     vpn_week_plan: 'اشتراک یک هفته‌ای',
@@ -138,6 +148,10 @@ const WalletApp = (() => {
     confirm_and_buy: 'تأیید و خرید',
     vpn_pending_error: 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.',
     vpn_insufficient_ab: 'موجودی AB کافی نیست. {n} AB لازم است.',
+    // BE-118 fix (UX copy audit): PLAN_LIMIT_REACHED + generic fallback were
+    // shown as raw English `resp.message` in the else branch.
+    vpn_plan_limit: 'این پلن را قبلاً خریده‌اید. {n} روز دیگر تا خرید مجدد.',
+    vpn_unknown_error: 'خطا در خرید. لطفاً دوباره تلاش کنید.',
     vpn_premium_required: 'این پلن ویژه اعضای Premium است. لطفاً ابتدا ارتقا دهید.',
     vpn_invalid_plan: 'پلن نامعتبر است.',
     vpn_purchase_error: 'خطا در خرید. لطفاً دوباره تلاش کنید.',
@@ -152,6 +166,8 @@ const WalletApp = (() => {
 
   const WT_EN = {
     wallet_title: 'AB Token Wallet',
+    back_aria: 'Back',
+    close_aria: 'Close',
     wallet_subtitle: 'Amir BTC Assistant',
     ab_token_wallet: 'AB Token Wallet',
     current_balance: 'Current Balance',
@@ -167,6 +183,8 @@ const WalletApp = (() => {
     claiming: 'Claiming...',
     claim_success: 'Daily reward claimed successfully!',
     claim_error: 'Failed to claim daily reward',
+    // BE-102 fix (UX copy audit): ALREADY_CLAIMED (409) friendly message.
+    already_claimed: 'You have already claimed today’s reward. Come back tomorrow.',
     referral_program: 'Referral Program',
     ref_link: 'Referral Link',
     invited_users: 'Invited Users',
@@ -262,6 +280,8 @@ const WalletApp = (() => {
     locked_label: 'Locked',
     day_label: 'Day',
     day_label_full: 'Day {n}: +{reward} AB',
+    // MO-006 fix (UX copy audit): localized daily check-in cycle label.
+    day_cycle: 'Day {n}/7',
     coming_soon_label: 'Coming soon',
     vpn_month_plan: 'Monthly subscription',
     vpn_week_plan: 'Weekly subscription',
@@ -279,6 +299,9 @@ const WalletApp = (() => {
     confirm_and_buy: 'Confirm',
     vpn_pending_error: 'You already have a pending purchase for this plan.',
     vpn_insufficient_ab: 'Insufficient AB balance. {n} AB needed.',
+    // BE-118 fix (UX copy audit): localized PLAN_LIMIT_REACHED + generic fallback.
+    vpn_plan_limit: 'You already purchased this plan. {n} days until next purchase.',
+    vpn_unknown_error: 'Purchase failed. Please try again.',
     vpn_premium_required: 'This plan requires Premium membership.',
     vpn_invalid_plan: 'Invalid plan.',
     vpn_purchase_error: 'Purchase failed. Please try again.',
@@ -552,7 +575,7 @@ const WalletApp = (() => {
     card.classList.remove('skeleton-loading');
     card.innerHTML = `
       <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
-      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="AB Token info">
+      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="${esc(WT('wallet_title'))}">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
       <div class="wallet-preview-top">
@@ -738,7 +761,7 @@ const WalletApp = (() => {
     return `
       <!-- Header -->
       <div class="wallet-page-header">
-        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
+        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="${esc(WT('back_aria'))}">${ICONS.back}</button>
         <div class="wallet-page-header-info">
           <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
           <div class="wallet-page-header-text">
@@ -924,12 +947,54 @@ const WalletApp = (() => {
     `;
   }
 
+  // NT-006/007/009/010 fix (UX copy audit): transaction descriptions are
+  // written by backend services in English ('Invite reward for user 123',
+  // 'Wheel reward: …', 'Extra price alert: …', 'Refund: …', raw type strings
+  // via the economy default) and were rendered verbatim in the Persian
+  // wallet history. Translation happens at RENDER time so old DB rows and
+  // new ones are covered alike; only our own deterministic description
+  // shapes are matched — Persian and unknown text passes through untouched.
+  // English UI keeps the originals.
+  function translateTxDesc(desc) {
+    if (!desc) return '';
+    if (detectLang() !== 'fa') return desc;
+    let m;
+    if (desc === 'Daily check-in reward') return 'جایزه چک‌این روزانه';
+    if (desc === 'Daily Reward') return 'جایزه روزانه';
+    if ((m = desc.match(/^Invite reward for user (\S+)$/))) return 'پاداش دعوت کاربر ' + m[1];
+    if ((m = desc.match(/^Wheel reward( \(retry\))?: (.*)$/))) return (m[1] ? 'پاداش گردونه (تلاش مجدد): ' : 'پاداش گردونه: ') + m[2];
+    if ((m = desc.match(/^Extra price alert: (.*)$/))) return 'هشدار قیمت اضافه: ' + m[1];
+    if ((m = desc.match(/^Purchase: (.*) \((common|rare|epic|legendary|mythic)\)$/))) {
+      const rarityFa = { common: 'معمولی', rare: 'کمیاب', epic: 'حماسی', legendary: 'افسانه‌ای', mythic: 'اسطوره‌ای' }[m[2]];
+      return 'خرید: ' + m[1] + ' (' + rarityFa + ')';
+    }
+    if ((m = desc.match(/^Refund: VPN (\d+)GB purchase failed$/))) return 'بازگشت وجه: خرید VPN ' + m[1] + ' گیگابایتی ناموفق بود';
+    if ((m = desc.match(/^Refund: VPN (\d+)GB already pending$/))) return 'بازگشت وجه: درخواست VPN ' + m[1] + ' گیگابایتی قبلاً در انتظار بوده است';
+    // 'Refund: VPN {n}GB duplicate pending' is the description persisted in
+    // pending_refunds when the immediate duplicate refund fails; the retry
+    // cron replays it verbatim into the wallet ledger. Map it before the
+    // generic Refund fallback so it does not render as mixed-language text.
+    if ((m = desc.match(/^Refund: VPN (\d+)GB duplicate pending$/))) return 'بازگشت وجه: درخواست تکراری VPN ' + m[1] + ' گیگابایتی در انتظار بود';
+    if ((m = desc.match(/^Refund: Cosmetic purchase failed \(.*\)$/))) return 'بازگشت وجه: خرید ظاهر ناموفق بود';
+    if ((m = desc.match(/^Refund: alert creation failed \((.*)\)$/))) return 'بازگشت وجه: ثبت هشدار ناموفق بود (' + m[1] + ')';
+    if ((m = desc.match(/^Refund: alert reactivated — concurrent paid request \((.*)\)$/))) return 'بازگشت وجه: هشدار مجدداً فعال شد — درخواست همزمان پرداخت‌شده (' + m[1] + ')';
+    if ((m = desc.match(/^Refund retry \((.*)\)$/))) return 'بازگشت وجه — تلاش مجدد (' + m[1] + ')';
+    if ((m = desc.match(/^Refund: (.*)$/))) return 'بازگشت وجه: ' + m[1];
+    // NT-010: economy default description is the raw reward/debit type string
+    // (description || rewardType) — map exactly-known types, never guess.
+    if (/^[a-z_]+$/.test(desc)) {
+      const known = ['daily_claim','referral_reward','mission_reward','purchase','redeem','airdrop','admin_credit','wheel_reward','bonus_reward','cosmetic_purchase','alert_debit','vpn_purchase','marketplace_refund','campaign_reward','event_reward'];
+      if (known.includes(desc)) return getTxLabel(desc);
+    }
+    return desc;
+  }
+
   function buildTxItemHTML(tx) {
     // FIX 4: guard against null/undefined/NaN — always show clean values
     const amount = Number(tx.amount) || 0;
     const isPositive = amount > 0;
     const type = tx.type || 'unknown';
-    const desc = (tx.description && String(tx.description).trim()) || '';
+    const desc = translateTxDesc((tx.description && String(tx.description).trim()) || '');
     const time = tx.created_at ? formatTime(tx.created_at) : '';
     const status = tx.status
       ? `<span class="tx-status status-${esc(tx.status)}">${esc(getTxStatusLabel(tx.status))}</span>`
@@ -953,7 +1018,7 @@ const WalletApp = (() => {
   function buildWalletSkeleton() {
     return `
       <div class="wallet-page-header">
-        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
+        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="${esc(WT('back_aria'))}">${ICONS.back}</button>
         <div class="wallet-page-header-info">
           <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
           <div class="wallet-page-header-text">
@@ -1726,7 +1791,11 @@ const WalletApp = (() => {
         if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
         const tg = window.getTg?.();
         try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
-        tg?.showPopup?.({ title: WT('error'), message: result.message || WT('claim_error'), buttons: [{ type: 'ok' }] });
+        // BE-102 fix (UX copy audit): map the known 409 code to a friendly
+        // localized message; unknown codes keep the previous behavior
+        // (server message, then generic claim_error).
+        const claimErrorMsg = (result.code === 'ALREADY_CLAIMED') ? WT('already_claimed') : (result.message || WT('claim_error'));
+        tg?.showPopup?.({ title: WT('error'), message: claimErrorMsg, buttons: [{ type: 'ok' }] });
       }
     } finally {
       // DAILY CHECK FIX: always reset the claiming flag so the user can retry
@@ -1821,7 +1890,7 @@ const WalletApp = (() => {
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </div>
           <h3>${esc(WT('token_info_title'))}</h3>
-          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="Close">
+          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -1870,7 +1939,7 @@ const WalletApp = (() => {
       <div class="dcm-sheet">
         <div class="dcm-header">
           <h3>${esc(WT('daily_checkin'))}</h3>
-          <button class="dcm-close" onclick="WalletApp.closeDailyCheckinModal()" aria-label="Close">
+          <button class="dcm-close" onclick="WalletApp.closeDailyCheckinModal()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -1979,7 +2048,8 @@ const WalletApp = (() => {
     if (rewardEl) {
       const rewards = state.streak_rewards || [1, 3, 6, 10, 18, 30, 50];
       if (state.claimed_today) {
-        rewardEl.textContent = `Day ${state.streak_day}/7 · ✓`;
+        // MO-006 fix: localized label (was hardcoded English `Day N/7 · ✓`).
+        rewardEl.textContent = `${WT('day_cycle', { n: state.streak_day })} · ✓`;
         rewardEl.style.color = '#22C55E';
       } else {
         // FIX: when claimed_today=false and streak_day > 0, the user has a
@@ -2000,7 +2070,8 @@ const WalletApp = (() => {
           ? (state.streak_day > 0 ? (state.streak_day % 7) + 1 : 1)
           : 1;
         const nextReward = rewards[Math.max(0, Math.min(6, day - 1))] || 1;
-        rewardEl.textContent = `Day ${day}/7 · +${nextReward} AB`;
+        // MO-006 fix: localized label (was hardcoded English `Day N/7 · +N AB`).
+        rewardEl.textContent = `${WT('day_cycle', { n: day })} · +${nextReward} AB`;
         rewardEl.style.color = '#f5a623';
       }
     }
@@ -2201,7 +2272,7 @@ const WalletApp = (() => {
       <div class="dcm-sheet vpn-confirm-sheet">
         <div class="dcm-header">
           <h3>${WT('confirm_purchase_title')}</h3>
-          <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="Close">
+          <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -2238,6 +2309,27 @@ const WalletApp = (() => {
     const plan = _vpnPlansCache ? _vpnPlansCache.find(p => p.id === planId) : null;
     if (!plan) return;
     showVpnConfirmModal(plan);
+  }
+
+  // BE-118 live-path fix (UX copy audit): window.apiFetch throws on ALL
+  // non-2xx responses, and the backend returns 422 (INVALID_PLAN /
+  // MISSING_PLAN_ID), 403 (PREMIUM_REQUIRED), 429 (PLAN_LIMIT_REACHED),
+  // 402 (PAYMENT_FAILED) and 409 (DUPLICATE_PENDING) for VPN purchases —
+  // so these errors reach the catch block with the raw JSON body as
+  // e.message and the resp?.code branches in executeVpnPurchase could
+  // never fire. This shared mapper is called from BOTH paths (parsed thrown
+  // body in catch + any hypothetical non-throwing response) so the two can
+  // never diverge. Display-layer only: success/payment/plan-limit/duplicate
+  // BEHAVIOR is entirely server-side and unchanged.
+  function _showVpnPurchaseError(j) {
+    if (j && j.code === 'DUPLICATE_PENDING') { showToast(WT('vpn_pending_error')); return; }
+    if (j && j.code === 'PAYMENT_FAILED') { showToast(WT('vpn_insufficient_ab', { n: j.required_tokens || '' })); return; }
+    if (j && j.code === 'PREMIUM_REQUIRED') { showToast(WT('vpn_premium_required')); return; }
+    if (j && j.code === 'INVALID_PLAN') { showToast(WT('vpn_invalid_plan')); return; }
+    if (j && j.code === 'PLAN_LIMIT_REACHED') { showToast(WT('vpn_plan_limit', { n: j.days_remaining || '' })); return; }
+    // Unknown/missing code: log server detail for support, never show it raw.
+    if (j && j.message) console.warn('VPN purchase error:', j.code || 'no-code', j.message);
+    showToast(WT('vpn_unknown_error'));
   }
 
   async function executeVpnPurchase(planId) {
@@ -2327,19 +2419,31 @@ const WalletApp = (() => {
         if (typeof updateNotifBadge === 'function') {
           try { updateNotifBadge(); } catch (_) {}
         }
-      } else if (resp?.code === 'DUPLICATE_PENDING') {
-        showToast(WT('vpn_pending_error'));
-      } else if (resp?.code === 'PAYMENT_FAILED') {
-        showToast(WT('vpn_insufficient_ab', {n: resp.required_tokens || ''}));
-      } else if (resp?.code === 'PREMIUM_REQUIRED') {
-        showToast(WT('vpn_premium_required'));
-      } else if (resp?.code === 'INVALID_PLAN') {
-        showToast(WT('vpn_invalid_plan'));
+      } else if (resp?.code) {
+        // Non-2xx normally throws (see _showVpnPurchaseError) — this only
+        // fires if apiFetch ever returns a coded error without throwing.
+        _showVpnPurchaseError(resp);
       } else {
-        showToast(resp?.message || WT('vpn_purchase_error'));
+        // 2xx without a recognizable success/coded shape — generic message.
+        console.warn('VPN purchase unexpected response:', resp);
+        showToast(WT('vpn_unknown_error'));
       }
     } catch (e) {
-      showToast(WT('vpn_connection_error'));
+      // BE-118 live path: apiFetch threw (all VPN purchase errors are
+      // non-2xx). Parse the thrown body — it is the backend's
+      // {status:'error', code, message} JSON (no `detail` field, so
+      // apiFetch's j.detail shortcut leaves the raw body as e.message) —
+      // and route through the shared mapper. Non-JSON bodies (network
+      // failures, HTML error pages, plain 'HTTP 500') fall back to the
+      // connection-error message. Mirrors the BE-102/BE-112 pattern.
+      let j = null;
+      try { j = JSON.parse(e && e.message); } catch (_) {}
+      if (j && typeof j === 'object') {
+        _showVpnPurchaseError(j);
+      } else {
+        console.warn('WalletApp: VPN purchase error', e);
+        showToast(WT('vpn_connection_error'));
+      }
     } finally {
       _purchaseInFlight = false;
       // D UX: re-enable the buy button on error (only if it was not
