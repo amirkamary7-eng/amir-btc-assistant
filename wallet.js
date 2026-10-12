@@ -145,6 +145,10 @@ const WalletApp = (() => {
     confirm_and_buy: 'تأیید و خرید',
     vpn_pending_error: 'شما یک درخواست در انتظار برای این پلن دارید. لطفاً منتظر بمانید.',
     vpn_insufficient_ab: 'موجودی AB کافی نیست. {n} AB لازم است.',
+    // BE-118 fix (UX copy audit): PLAN_LIMIT_REACHED + generic fallback were
+    // shown as raw English `resp.message` in the else branch.
+    vpn_plan_limit: 'این پلن را قبلاً خریده‌اید. {n} روز دیگر تا خرید مجدد.',
+    vpn_unknown_error: 'خطا در خرید. لطفاً دوباره تلاش کنید.',
     vpn_premium_required: 'این پلن ویژه اعضای Premium است. لطفاً ابتدا ارتقا دهید.',
     vpn_invalid_plan: 'پلن نامعتبر است.',
     vpn_purchase_error: 'خطا در خرید. لطفاً دوباره تلاش کنید.',
@@ -290,6 +294,9 @@ const WalletApp = (() => {
     confirm_and_buy: 'Confirm',
     vpn_pending_error: 'You already have a pending purchase for this plan.',
     vpn_insufficient_ab: 'Insufficient AB balance. {n} AB needed.',
+    // BE-118 fix (UX copy audit): localized PLAN_LIMIT_REACHED + generic fallback.
+    vpn_plan_limit: 'You already purchased this plan. {n} days until next purchase.',
+    vpn_unknown_error: 'Purchase failed. Please try again.',
     vpn_premium_required: 'This plan requires Premium membership.',
     vpn_invalid_plan: 'Invalid plan.',
     vpn_purchase_error: 'Purchase failed. Please try again.',
@@ -2352,8 +2359,13 @@ const WalletApp = (() => {
         showToast(WT('vpn_premium_required'));
       } else if (resp?.code === 'INVALID_PLAN') {
         showToast(WT('vpn_invalid_plan'));
+      } else if (resp?.code === 'PLAN_LIMIT_REACHED') {
+        // BE-118 fix: 30-day plan limit was shown as raw English server text.
+        showToast(WT('vpn_plan_limit', { n: resp.days_remaining || '' }));
       } else {
-        showToast(resp?.message || WT('vpn_purchase_error'));
+        // BE-118 fix: unknown codes no longer show the raw English message.
+        if (resp?.message) console.warn('VPN purchase error:', resp.code || 'no-code', resp.message);
+        showToast(WT('vpn_unknown_error'));
       }
     } catch (e) {
       showToast(WT('vpn_connection_error'));
