@@ -3793,7 +3793,7 @@ function _adsPopupFormHtml(p) {
             '<div class="rc-field"><label>متن دکمه</label><input type="text" id="ads-pp-btnlabel" value="' + btnLabel + '" placeholder="مشاهده"></div>' +
             '<div class="rc-field"><label>لینک دکمه</label><input type="text" id="ads-pp-btnurl" value="' + btnUrl + '" placeholder="https://..." dir="ltr"></div>' +
             '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-pp-order" value="' + orderVal + '" min="0"></div>' +
-            '<div class="rc-field"><label>کوپل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
+            '<div class="rc-field"><label>کوئل‌داون</label><select id="ads-pp-cooldown" onchange="document.getElementById(\'ads-pp-cooldown-custom\').style.display = this.value === \'custom\' ? \'\' : \'none\'">' + cooldownOptsHtml + '</select><input type="number" id="ads-pp-cooldown-custom" style="display:none;" placeholder="ثانیه" min="60"></div>' +
             '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-pp-status">' +
                 '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
                 '<option value="active"' + (currentStatus === 'active' ? ' selected' : '') + '>فعال</option>' +

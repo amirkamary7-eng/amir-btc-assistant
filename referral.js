@@ -119,7 +119,9 @@ const ReferralApp = (() => {
     referral_history: 'تاریخچه دعوت‌ها',
     no_referrals: 'هنوز دعوتی ثبت نشده',
     start_inviting: 'با اشتراک لینک، دوستان خود را دعوت کنید',
-    load_more: 'باز کردن بیشتر',
+    // MO P2 fix (UX copy audit): was 'باز کردن بیشتر' — awkward phrasing;
+    // unified with the wallet module's 'بارگذاری بیشتر'.
+    load_more: 'بارگذاری بیشتر',
     joined: 'عضو شده',
     not_joined: 'در انتظار عضویت',
     rewarded: 'پاداش داده شده',
@@ -171,13 +173,15 @@ const ReferralApp = (() => {
     mission_progress: 'پیشرفت',
     mission_reward: 'پاداش',
     // Achievements
-    ach_bronze_referrer: 'ارجاع‌دهنده برنزی',
+    // MO P2 fix (UX copy audit): 'ارجاع‌دهنده' is a stiff calque of
+    // 'referrer'; the app's own vocabulary is دعوت (برنامه دعوت، دعوت دوستان).
+    ach_bronze_referrer: 'دعوت‌کننده برنزی',
     ach_bronze_referrer_desc: '۳ دعوت موفق',
-    ach_silver_referrer: 'ارجاع‌دهنده نقره‌ای',
+    ach_silver_referrer: 'دعوت‌کننده نقره‌ای',
     ach_silver_referrer_desc: '۱۰ دعوت موفق',
-    ach_gold_referrer: 'ارجاع‌دهنده طلایی',
+    ach_gold_referrer: 'دعوت‌کننده طلایی',
     ach_gold_referrer_desc: '۲۵ دعوت موفق',
-    ach_platinum_referrer: 'ارجاع‌دهنده پلاتینی',
+    ach_platinum_referrer: 'دعوت‌کننده پلاتینی',
     ach_platinum_referrer_desc: '۵۰ دعوت موفق',
     ach_elite_ambassador: 'سفیر ویژه (الماس)',
     ach_elite_ambassador_desc: '۱۰۰ دعوت موفق',
@@ -210,7 +214,7 @@ const ReferralApp = (() => {
     source_direct: 'مستقیم',
     source_campaign: 'کمپین',
     source_seasonal: 'فصلی',
-    top_referrers: 'برترین ارجاع‌دهندگان',
+    top_referrers: 'برترین دعوت‌کنندگان',
     your_rank: 'رتبه شما',
     not_ranked: 'رتبه‌بندی نشده',
     reward_earned: 'پاداش کسب شده',
@@ -1913,7 +1917,7 @@ const ReferralApp = (() => {
           qrImage.innerHTML = inlineSvg;
         } else {
           // CDN fallback — high-quality QR code generation
-          qrImage.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=ffffff&color=0B1220&margin=8&data=${encodeURIComponent(link)}" alt="QR Code" onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\\'color:#AEB7C2;font-size:11px;text-align:center;padding:20px;\\'>QR generation failed. Please use Copy Link instead.</div>'">`;
+          qrImage.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=ffffff&color=0B1220&margin=8&data=${encodeURIComponent(link)}" alt="QR Code" onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\\'color:#AEB7C2;font-size:11px;text-align:center;padding:20px;\\'>ساخت کد QR ناموفق بود. از دکمه «کپی لینک» استفاده کنید.</div>'">`;
         }
       }
     }
