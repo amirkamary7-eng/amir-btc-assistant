@@ -153,7 +153,9 @@
     try {
       var data = await apiFetch('/api/admin/membership/requests?' + params);
       if (!data || !data.ok) {
-        container.innerHTML = errorState(t('mba_load_error'), 'MembershipAdmin.load()');
+        // AD-098 fix (UX copy audit): retryFn was 'MembershipAdmin.load()' — adminErrorState
+        // appends '()' itself, producing a dead onclick="MembershipAdmin.load()()".
+        container.innerHTML = errorState(t('mba_load_error'), 'MembershipAdmin.load');
         return;
       }
       var result = data.data;
@@ -211,7 +213,11 @@
         paginationEl.innerHTML = '<div style="text-align:center;color:var(--text-sub);font-size:12px;padding:8px">' + t('mba_records_count', { n: result.total }) + '</div>';
       }
     } catch (e) {
-      container.innerHTML = errorState(t('adm_error_prefix') + e.message, 'MembershipAdmin.load()');
+      // AD-098 fix (UX copy audit): retryFn '()' stripped (dead double-invocation)
+      // and the raw English exception is no longer appended to the Persian
+      // prefix — it stays in console.error; mba_load_error names the failure.
+      console.error('MembershipAdmin.load:', e);
+      container.innerHTML = errorState(t('mba_load_error'), 'MembershipAdmin.load');
     }
   }
 

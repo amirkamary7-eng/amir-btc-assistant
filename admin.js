@@ -1222,14 +1222,18 @@ async function toggleAdminActive(id, currentActive) {
 }
 
 function removeAdmin(id, telegramId) {
-    if (!confirm('Remove this admin? This action cannot be undone.')) return;
+    // AD-014 fix (UX copy audit): localized destructive confirm naming the entity.
+    if (!confirm(t('adm_admin_remove_confirm', { id: telegramId }))) return;
     adminApiFetch('/api/admin/admins/' + id, { method: 'DELETE' })
         .then(function () {
             showAdminToast(t('adm_admin_removed'), 'success');
             loadAdminList();
         })
         .catch(function (e) {
-            showAdminToast(t('adm_admin_status_updated').replace('به‌روزرسانی', 'حذف'), 'error');
+            // AD-014 fix: was t('adm_admin_status_updated').replace('به‌روزرسانی', 'حذف')
+            // — a SUCCESS message mutated by string-replace: nonsense in fa
+            // ('وضعیت ادمین حذف شد') and plain success text in en.
+            showAdminToast(t('adm_admin_remove_failed'), 'error');
             console.error('removeAdmin:', e);
         });
 }
@@ -1611,7 +1615,8 @@ async function adminSetTicketStatus(ticketId, status) {
 }
 
 async function adminDeleteTicket(ticketId) {
-    if (!confirm('Delete this ticket permanently?')) return;
+    // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+    if (!confirm(t('adm_tk_delete_confirm'))) return;
     try {
         // PHASE 3 FIX (Bug 5): Use admin endpoint, not user endpoint.
         // Previous: /api/tickets/:id (user endpoint, no admin DELETE) → 403

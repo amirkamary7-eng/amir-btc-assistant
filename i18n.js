@@ -1363,10 +1363,17 @@ const i18n = {
         adm_tk_status_update_failed: 'به‌روزرسانی وضعیت ناموفق بود',
         adm_tk_deleted: 'تیکت حذف شد',
         adm_tk_delete_failed: 'حذف تیکت ناموفق بود',
+        // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+        adm_tk_delete_confirm: 'این تیکت برای همیشه حذف شود؟ این عمل قابل بازگشت نیست.',
         adm_no_admins: 'ادمینی یافت نشد',
         adm_admins_load_error: 'بارگذاری ادمین‌ها انجام نشد',
         adm_admin_status_updated: 'وضعیت ادمین به‌روزرسانی شد',
         adm_admin_removed: 'ادمین حذف شد',
+        // AD-014 fix (UX copy audit): English destructive confirm + error toast
+        // built by .replace() on a SUCCESS message (nonsense in fa, plain
+        // success text in en). Named entity + dedicated error key instead.
+        adm_admin_remove_confirm: 'ادمین {id} حذف شود؟ این عمل قابل بازگشت نیست.',
+        adm_admin_remove_failed: 'حذف ادمین انجام نشد. لطفاً دوباره تلاش کنید.',
         adm_no_users: 'کاربری یافت نشد',
         adm_users_load_error: 'بارگذاری کاربران انجام نشد',
         adm_joined: 'عضو شده',
@@ -2730,10 +2737,15 @@ const i18n = {
         adm_tk_status_update_failed: 'Failed to update status',
         adm_tk_deleted: 'Ticket deleted',
         adm_tk_delete_failed: 'Failed to delete ticket',
+        // AD-013 fix (UX copy audit): destructive confirm was hardcoded English.
+        adm_tk_delete_confirm: 'Delete this ticket permanently? This action cannot be undone.',
         adm_no_admins: 'No admins found',
         adm_admins_load_error: 'Failed to load admins',
         adm_admin_status_updated: 'Admin status updated',
         adm_admin_removed: 'Admin removed',
+        // AD-014 fix (UX copy audit): named-entity confirm + real error key.
+        adm_admin_remove_confirm: 'Remove admin {id}? This action cannot be undone.',
+        adm_admin_remove_failed: 'Failed to remove admin. Please try again.',
         adm_no_users: 'No users found',
         adm_users_load_error: 'Failed to load users',
         adm_joined: 'Joined',
