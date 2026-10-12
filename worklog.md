@@ -2451,3 +2451,36 @@ Phase 5 — READ-ONLY DIFF AUDIT (complete):
 
 COMMIT RULE: per user instruction, NO commit / push / PR / merge / deploy.
 Awaiting user review of diff + test results.
+
+---
+Task ID: 73
+Agent: Z.ai Code (main)
+Task: Sequential UX Copy Remediation Campaign (P1+P2) — aggregate branch fix/ux-copy-remediation, PR #83
+
+Work Log:
+- Environment reset at session start: prior clone + untracked docs/ux-copy-audit/ lost; re-cloned; shared /home/z/my-project/worklog.md used as surviving audit registry; every item re-verified from code before fixing.
+- Branch: fix/ux-copy-remediation from origin/fix/p0-i18n-missing-keys (ed6c36bd, PR #82 head — P0 included traceably, #82 untouched).
+- 14 commits, P1: BE-102 (3e581497), BE-115 (4ada32a3), TG-019+021 (86d5955e), MO-006+026 (6b62bc82), DY-003+004 (8a5850bd), AD-013/014/098 (36efbbe6), NT-005 text half (f7807158), join-gate + delete-account re-derived (119e434f). P2: admin load-errors (8dee6083), BE-112+118 (464fcff3), NT tx-desc translator + NT-025 (0addbd9b), ST-001/002/120/101/102 (f77f137e), wording/spelling/QR (95dd498e), a11y aria (4b25a4db).
+- Tests: full npm 2751/0/2 (identical to baseline skips); per-item batteries green; render simulations verified user-visible text both langs; 355 data-i18n bindings resolve.
+- Pushed; PR #83 open (head 4b25a4db63fb58b33b1d857efa6ede047c3160e0, 15 commits, 14 files, +462/−65, mergeable true). CI: only pre-existing Workers Builds failure (fails on main too). 0 deploy runs on sha.
+
+Stage Summary:
+- READY FOR MERGE (awaiting explicit user approval). Merge path (a): #82 first then #83; path (b): only #83 + close #82. NO merge/NO deploy performed. Deferred: NT-005 channel dedup (behavior change — needs approval), dead-key cleanup, module i18n consolidations, ~24 coin-detail aria-labels, admin date formats, NT-026/NT-032.
+
+---
+Task ID: 75
+Agent: Z.ai Code (main)
+Task: Remaining UX audit remediation + final verification on fix/ux-copy-remediation (from PR #83 state) — fix Task 74 leftovers, prep for independent final review. NO merge/deploy/main-push.
+
+Work Log:
+- Stage 1: Registry rebuilt from shared worklog (audit docs lost in sandbox reset). P1=17 (14 fixed + NT-005 half + AD-024 scan-resolved + 2 unnamed BE P1s), P2=73 (~20 fixed in PR #83, BE-118 claim false). Task 74 report recovered from /home/z/my-project/worklog.md L1710-1728.
+- Stage 2A BE-118 (Task 74 CRITICAL): wallet.js VPN purchase error branches were dead code (apiFetch throws on ALL non-2xx; backend = 422/403/429/402/409). Fix: shared _showVpnPurchaseError mapper + catch-path thrown-body parse (BE-102/BE-112 pattern); 11 behavioral tests simulate real backend bodies → mapped WT() toasts, connection fallback, button re-enable. Display-layer only; success/payment/limit/duplicate behavior untouched (verified: economy/controller/purchases files untouched).
+- Stage 2B NT-005: ROOT CAUSE PROVEN — for users with ch_referral pref 'telegram'/'both', ONE reward dispatched TWO Telegram messages (plain referral_reward template + rich message; template channel col is 'mini_app' but user pref overrides). Minimal fix: new skipTelegram opt in sendNotification (default false = old behavior) set ONLY on the plain referral_reward dispatch; rich message stays the sole TG carrier. Closing line «توکن»→«AB». NT-005-B3/B4 prove: 1 grantReward + rewarded UPDATE + exactly 3 creates with right flags; idempotent re-credit = 0 messages. Trade-off documented: if rich enqueue fails, pref-both users get no TG copy (in-app still exists).
+- Stage 2C unnamed BE P1s: fresh systematic scan of ALL end-user raw-error surfaces (app.js/wallet/referral/membership/cosmetics/assistant): main flows clean; found+fixed 1 additional P2-class leak (cosmetics catalog-load catch rendered raw e.message); 2 unnamed BE P1s remain UNVERIFIED/UNIDENTIFIABLE (lost audit docs) — NOT claimed solved.
+- Stage 3: NT-026 mission seeds → polite register (seed-only; prod rows need admin edit/migration — documented); NT-032 calendar-data.json regenerated via REAL mapCalendarEvent from live feed (109 current-week events; was 100% past/dead); NT-025 wheel no-reward label EN via RT dictionary render-time pick; watch-card-remove tabindex+Enter/Space+focus-visible CSS; 6 coin-detail aria-labels bound to new i18n keys (cd_aria_*) + 2 market coin-star surfaces switched to t(); adminFormatDate unified (lang-aware fa-IR/en-US + Asia/Tehran pin, VPN table routed through it, currentLang guard); assistant ACTION_LABELS (19) + retry btn dual-dict FA/EN; TG-019 all-day/tentative edge: formatEventTimeForAlert renders «تمام‌روز»/«زمان احتمالی» instead of placeholder clock (alert body; reminder table lacks time column — documented limitation); translateTxDesc 'Refund: VPN {n}GB duplicate pending' mapped.
+- Dead keys: verified independent scan (real VM dictionary, 12-file corpus, dynamic-prefix tracing) → 275 dead keys, FA=EN=1435 parity 100%. NO deletions. Registry: docs/ux-copy-audit/09-dead-keys-verified.md. Module i18n consolidations (cosmetics full-bypass, WT/RT parallel dicts) = separate refactor reports, not mixed in.
+- Stage 4: Full npm test = 2787 tests / 2785 pass / 0 fail / 2 skip (PR #83 = 2751+2skip; +34 new = exact; skips pre-existing on main). git diff --check clean. Unintended-change scan: economy/wallet-controller/reward_purchases/cron/scheduler untouched; worker-proxy display-only; notification_platform = 1 gated flag.
+- Stage 5: 3 logical commits on fix/ux-copy-remediation; branch pushed. PR #83 head updated. NO merge/deploy. PR #82 untouched.
+
+Stage Summary:
+- All Task 75 stages complete. P1 final: 15 fixed + NT-005 fully fixed (both halves) + AD-024 scan-resolved + 2 UNVERIFIED (honest). P2: ~35+ fixed total across PR #83 + Task 75 (BE-118 now real). Remaining (documented, not fixed): 2 unnamed BE P1s, NT-026 prod-row refresh, reminder-table all-day column, cosmetics/WT-RT i18n consolidation (refactor), 275 dead keys (registry ready), admin content-editor e.message (admin-facing). Ready for independent final review; awaiting user approval for any merge.
