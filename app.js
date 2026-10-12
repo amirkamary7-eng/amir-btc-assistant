@@ -11345,7 +11345,12 @@ async function executeDeleteAccount() {
                 `;
             }, 1500);
         } else {
-            showMiniToast(t('error_prefix') + (data.message || data.error || t('unknown_error')));
+            // DY-class fix (UX copy audit re-derivation): was t('error_prefix') +
+            // (data.message || data.error || …) — appended the raw English backend
+            // message ('User not found', 'Database not configured', …) to a Persian
+            // prefix on a critical operation. Localized text; raw logged.
+            if (data.message || data.error) console.warn('[DELETE-ACCOUNT] rejected:', data.message || data.error);
+            showMiniToast(t('delete_account_error'));
             if (confirmBtn) confirmBtn.disabled = false;
             if (spinner) spinner.style.display = 'none';
             if (btnText) btnText.textContent = t('delete_account_confirm');
@@ -15234,7 +15239,10 @@ function showJoinStatusBar(state, opts = {}) {
             setJoinLockState('loading');
             bootstrapUser().catch(e => {
                 console.error('[JOIN-LOCK] Manual retry failed:', e.message);
-                setJoinLockState('error', e?.message || 'Retry failed');
+                // DY-class fix (UX copy audit re-derivation): was
+                // `e?.message || 'Retry failed'` — raw English exception on
+                // the app's front-door error card. Localized text; console keeps detail.
+                setJoinLockState('error', t('jl_connection_error'));
             });
         };
     }
@@ -15488,7 +15496,11 @@ async function recheckJoinMembership() {
             getTg()?.HapticFeedback?.notificationOccurred?.('warning');
         }
     } catch (e) {
-        setJoinLockState('error', e?.message || 'Network error');
+        // DY-class fix (UX copy audit re-derivation): was `e?.message || 'Network error'`
+        // — raw English exception on the join-gate status card. Localized text;
+        // the raw error is preserved in console.
+        console.error('[JOIN-LOCK] Recheck failed:', e?.message || e);
+        setJoinLockState('error', t('jl_connection_error'));
         getTg()?.HapticFeedback?.notificationOccurred?.('error');
     } finally {
         _joinVerifying = false;
