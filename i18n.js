@@ -64,7 +64,12 @@ const i18n = {
         ref_total: 'کل دعوت‌ها', ref_active: 'فعال', ref_reward: 'پاداش', coming_soon: 'بزودی',
         open_referral_center: 'باز کردن مرکز دعوت',
         ref_wheel: 'گردونه شانس و جوایز', ref_wheel_desc: 'سیستم پاداش در آپدیت بعدی فعال می‌شود.',
-        ticket_title: 'عنوان تیکت', ticket_body: 'متن پیام...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
+        ticket_title: 'عنوان تیکت',
+        // ST-002/ST-120 fix (UX copy audit): the i18n apply was replacing the
+        // helpful static textarea placeholder («مشکل یا سوال خود را با جزئیات
+        // توضیح دهید...») with this downgrade ('متن پیام...'). Key now carries
+        // the full guidance text so both sources agree.
+        ticket_body: 'مشکل یا سوال خود را با جزئیات توضیح دهید...', ticket_send: 'ارسال تیکت', my_tickets: 'تیکت‌های من',
         ticket_empty: 'تیکتی ثبت نشده است', ticket_pending: 'در انتظار', ticket_answered: 'پاسخ داده شده',
         ticket_reply_btn: 'ارسال پاسخ', ticket_delete: 'حذف تیکت', admin_tickets: 'مدیریت تیکت‌ها',
         ticket_error: 'خطا در ارسال تیکت. لطفاً دوباره تلاش کنید.',
@@ -85,6 +90,9 @@ const i18n = {
         sentiment_bullish: 'صعودی', sentiment_neutral: 'خنثی', sentiment_bearish: 'نزولی',
         fg_extreme_greed: 'طمع شدید', fg_greed: 'طمع', fg_neutral: 'خنثی', fg_fear: 'ترس', fg_extreme_fear: 'ترس شدید',
         price: 'قیمت', change_24h: 'تغییر ۲۴h', mcap: 'مارکت‌کپ', volume_24h: 'حجم ۲۴h', rank: 'رتبه', supply: 'عرضه در گردش',
+        // ST-001 fix (UX copy audit): the analysis search input was bound to
+        // the coin-search key `search` («جستجوی ارز...») — wrong page context.
+        analysis_search_ph: 'جستجوی تحلیل...',
         view_source: 'مشاهده منبع', guest: 'کاربر میهمان', required_fields: 'فیلدهای الزامی را پر کنید',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'قیمت معتبر وارد کنید', copied: 'کپی شد!', copy_ref_msg: 'لینک دعوت کپی شد.',
@@ -1444,7 +1452,9 @@ const i18n = {
         ref_total: 'Total Invites', ref_active: 'Active', ref_reward: 'Reward', coming_soon: 'Coming Soon',
         open_referral_center: 'Open Referral Center',
         ref_wheel: 'Spin Wheel & Prizes', ref_wheel_desc: 'Reward system coming in next update.',
-        ticket_title: 'Ticket subject', ticket_body: 'Your message...', ticket_send: 'Submit Ticket',
+        ticket_title: 'Ticket subject',
+        // ST-002/ST-120 fix (UX copy audit): full guidance text (was 'Your message...').
+        ticket_body: 'Describe your issue or question in detail...', ticket_send: 'Submit Ticket',
         my_tickets: 'My Tickets', ticket_empty: 'No tickets yet', ticket_pending: 'Pending',
         ticket_answered: 'Answered', ticket_reply_btn: 'Send Reply', ticket_delete: 'Delete ticket',
         admin_tickets: 'Manage Tickets',
@@ -1467,6 +1477,8 @@ const i18n = {
         sentiment_bullish: 'Bullish', sentiment_neutral: 'Neutral', sentiment_bearish: 'Bearish',
         fg_extreme_greed: 'Extreme Greed', fg_greed: 'Greed', fg_neutral: 'Neutral', fg_fear: 'Fear', fg_extreme_fear: 'Extreme Fear',
         price: 'Price', change_24h: '24h Change', mcap: 'Market Cap', volume_24h: '24h Volume', rank: 'Rank', supply: 'Circulating Supply',
+        // ST-001 fix (UX copy audit): analysis-specific search placeholder.
+        analysis_search_ph: 'Search analyses...',
         view_source: 'View source', guest: 'Guest User', required_fields: 'Please fill required fields',
         tf_1m: '1m', tf_5m: '5m', tf_15m: '15m', tf_1h: '1H', tf_4h: '4H', tf_1d: '1D', tf_1w: '1W',
         invalid_price: 'Enter a valid price', copied: 'Copied!', copy_ref_msg: 'Referral link copied.',
