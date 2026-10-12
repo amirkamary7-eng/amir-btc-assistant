@@ -44,6 +44,10 @@ export function createNotificationService(deps) {
    *   @param {string} [opts.actionUrl]    - Deep-link/action URL
    *   @param {object} [opts.telegramExtra] - Rich Telegram fields: { reply_markup, parse_mode, disable_web_page_preview }
    *   @param {boolean} [opts.skipInApp]    - If true, only enqueue Telegram (no in-app INSERT)
+   *   @param {boolean} [opts.skipTelegram] - If true, only insert in-app (no Telegram enqueue). NT-005:
+   *                                          used when a richer dedicated Telegram message for the same event
+   *                                          is dispatched separately (prevents double Telegram delivery for
+   *                                          users with ch_referral preference 'telegram'/'both').
    *   @param {string} [opts.dedupKey]      - If provided, notification id is deterministic (idempotent)
    *   @param {boolean} [opts.forceChannel] - If true, ignore user preference (admin/system critical only)
    * @returns {Promise<{id: string|null, status: string}>}

@@ -1126,6 +1126,10 @@ export function createNotificationPlatformRepository(deps) {
       metadata = {},
       telegramExtra,    // Phase 2: rich message fields (reply_markup, parse_mode, disable_web_page_preview)
       skipInApp = false, // Phase 2: skip in-app INSERT (for rich Telegram-only messages)
+      skipTelegram = false, // NT-005 (UX copy audit): suppress Telegram delivery — used when a
+                            // richer dedicated Telegram message for the same event is dispatched
+                            // separately, so preference 'telegram'/'both' users do not receive
+                            // two Telegram messages for one reward.
       dedupKey,          // Phase 2: deterministic notification ID (for idempotency)
       forceChannel = false, // Phase 2: ignore user preference (admin/system critical)
       enqueueOnly = false, // FIX 1: skip immediate processQueue — caller will batch-process after loop
@@ -1172,7 +1176,7 @@ export function createNotificationPlatformRepository(deps) {
     }
 
     const deliverToMiniApp = (userChannel === 'mini_app' || userChannel === 'both') && !skipInApp;
-    const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
+    const deliverToTelegram = (userChannel === 'telegram' || userChannel === 'both') && !skipTelegram;
 
     // Phase 2: deterministic notification ID if dedupKey provided
     const notificationId = dedupKey

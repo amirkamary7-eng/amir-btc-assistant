@@ -970,6 +970,11 @@ const WalletApp = (() => {
     }
     if ((m = desc.match(/^Refund: VPN (\d+)GB purchase failed$/))) return 'بازگشت وجه: خرید VPN ' + m[1] + ' گیگابایتی ناموفق بود';
     if ((m = desc.match(/^Refund: VPN (\d+)GB already pending$/))) return 'بازگشت وجه: درخواست VPN ' + m[1] + ' گیگابایتی قبلاً در انتظار بوده است';
+    // 'Refund: VPN {n}GB duplicate pending' is the description persisted in
+    // pending_refunds when the immediate duplicate refund fails; the retry
+    // cron replays it verbatim into the wallet ledger. Map it before the
+    // generic Refund fallback so it does not render as mixed-language text.
+    if ((m = desc.match(/^Refund: VPN (\d+)GB duplicate pending$/))) return 'بازگشت وجه: درخواست تکراری VPN ' + m[1] + ' گیگابایتی در انتظار بود';
     if ((m = desc.match(/^Refund: Cosmetic purchase failed \(.*\)$/))) return 'بازگشت وجه: خرید ظاهر ناموفق بود';
     if ((m = desc.match(/^Refund: alert creation failed \((.*)\)$/))) return 'بازگشت وجه: ثبت هشدار ناموفق بود (' + m[1] + ')';
     if ((m = desc.match(/^Refund: alert reactivated — concurrent paid request \((.*)\)$/))) return 'بازگشت وجه: هشدار مجدداً فعال شد — درخواست همزمان پرداخت‌شده (' + m[1] + ')';
@@ -2306,6 +2311,27 @@ const WalletApp = (() => {
     showVpnConfirmModal(plan);
   }
 
+  // BE-118 live-path fix (UX copy audit): window.apiFetch throws on ALL
+  // non-2xx responses, and the backend returns 422 (INVALID_PLAN /
+  // MISSING_PLAN_ID), 403 (PREMIUM_REQUIRED), 429 (PLAN_LIMIT_REACHED),
+  // 402 (PAYMENT_FAILED) and 409 (DUPLICATE_PENDING) for VPN purchases —
+  // so these errors reach the catch block with the raw JSON body as
+  // e.message and the resp?.code branches in executeVpnPurchase could
+  // never fire. This shared mapper is called from BOTH paths (parsed thrown
+  // body in catch + any hypothetical non-throwing response) so the two can
+  // never diverge. Display-layer only: success/payment/plan-limit/duplicate
+  // BEHAVIOR is entirely server-side and unchanged.
+  function _showVpnPurchaseError(j) {
+    if (j && j.code === 'DUPLICATE_PENDING') { showToast(WT('vpn_pending_error')); return; }
+    if (j && j.code === 'PAYMENT_FAILED') { showToast(WT('vpn_insufficient_ab', { n: j.required_tokens || '' })); return; }
+    if (j && j.code === 'PREMIUM_REQUIRED') { showToast(WT('vpn_premium_required')); return; }
+    if (j && j.code === 'INVALID_PLAN') { showToast(WT('vpn_invalid_plan')); return; }
+    if (j && j.code === 'PLAN_LIMIT_REACHED') { showToast(WT('vpn_plan_limit', { n: j.days_remaining || '' })); return; }
+    // Unknown/missing code: log server detail for support, never show it raw.
+    if (j && j.message) console.warn('VPN purchase error:', j.code || 'no-code', j.message);
+    showToast(WT('vpn_unknown_error'));
+  }
+
   async function executeVpnPurchase(planId) {
     closeVpnConfirmModal();
     if (_purchaseInFlight) return;
@@ -2393,24 +2419,31 @@ const WalletApp = (() => {
         if (typeof updateNotifBadge === 'function') {
           try { updateNotifBadge(); } catch (_) {}
         }
-      } else if (resp?.code === 'DUPLICATE_PENDING') {
-        showToast(WT('vpn_pending_error'));
-      } else if (resp?.code === 'PAYMENT_FAILED') {
-        showToast(WT('vpn_insufficient_ab', {n: resp.required_tokens || ''}));
-      } else if (resp?.code === 'PREMIUM_REQUIRED') {
-        showToast(WT('vpn_premium_required'));
-      } else if (resp?.code === 'INVALID_PLAN') {
-        showToast(WT('vpn_invalid_plan'));
-      } else if (resp?.code === 'PLAN_LIMIT_REACHED') {
-        // BE-118 fix: 30-day plan limit was shown as raw English server text.
-        showToast(WT('vpn_plan_limit', { n: resp.days_remaining || '' }));
+      } else if (resp?.code) {
+        // Non-2xx normally throws (see _showVpnPurchaseError) — this only
+        // fires if apiFetch ever returns a coded error without throwing.
+        _showVpnPurchaseError(resp);
       } else {
-        // BE-118 fix: unknown codes no longer show the raw English message.
-        if (resp?.message) console.warn('VPN purchase error:', resp.code || 'no-code', resp.message);
+        // 2xx without a recognizable success/coded shape — generic message.
+        console.warn('VPN purchase unexpected response:', resp);
         showToast(WT('vpn_unknown_error'));
       }
     } catch (e) {
-      showToast(WT('vpn_connection_error'));
+      // BE-118 live path: apiFetch threw (all VPN purchase errors are
+      // non-2xx). Parse the thrown body — it is the backend's
+      // {status:'error', code, message} JSON (no `detail` field, so
+      // apiFetch's j.detail shortcut leaves the raw body as e.message) —
+      // and route through the shared mapper. Non-JSON bodies (network
+      // failures, HTML error pages, plain 'HTTP 500') fall back to the
+      // connection-error message. Mirrors the BE-102/BE-112 pattern.
+      let j = null;
+      try { j = JSON.parse(e && e.message); } catch (_) {}
+      if (j && typeof j === 'object') {
+        _showVpnPurchaseError(j);
+      } else {
+        console.warn('WalletApp: VPN purchase error', e);
+        showToast(WT('vpn_connection_error'));
+      }
     } finally {
       _purchaseInFlight = false;
       // D UX: re-enable the buy button on error (only if it was not

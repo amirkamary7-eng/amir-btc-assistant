@@ -106,7 +106,12 @@
         renderShopError('خطا در بارگذاری کاتالوگ');
       }
     } catch (e) {
-      renderShopError('خطا: ' + (e.message || 'نامشخص'));
+      // BE-112 family (UX copy audit): apiFetch throws on ALL non-2xx with the
+      // raw response body as e.message — never render it in the shop overlay.
+      // Log for support, show the generic catalog-load error (same text the
+      // non-throwing failure path above already uses).
+      console.warn('cosmetics catalog load error:', e && e.message);
+      renderShopError('خطا در بارگذاری کاتالوگ');
     }
   }
 
