@@ -86,7 +86,11 @@ const ReferralApp = (() => {
   // ═══════════════════════════════════════════════════════════
   const FA = {
     referral_center: 'مرکز دعوت',
-    brand_quote: 'AB Token Infinity — هر دعوت، آینده تو را می‌سازد',
+    // MO-026 fix (UX copy audit): was 'AB Token Infinity — هر دعوت، آینده تو را می‌سازد'
+    // — a brand name that exists nowhere in the product ('AB Token Infinity'),
+    // vague for recipients. Now names the real product and the real referral
+    // reward mechanism (same string serves the referral header + share text).
+    brand_quote: 'اپلیکیشن امیر BTC — تحلیل، اخبار و هشدار قیمت کریپتو؛ دوستانت را دعوت کن و پاداش بگیر',
     total_earned: 'کل پاداش‌های دریافتی',
     total_invites: 'کل دعوت‌ها',
     share_link: 'اشتراک‌گذاری لینک',
@@ -217,7 +221,7 @@ const ReferralApp = (() => {
 
   const EN = {
     referral_center: 'Referral Center',
-    brand_quote: 'AB Token Infinity — Every Invite Builds Your Future',
+    brand_quote: 'Amir BTC — crypto analysis, news and price alerts. Invite friends and earn rewards',
     total_earned: 'Total Earned',
     total_invites: 'Total Invites',
     share_link: 'Share Link',

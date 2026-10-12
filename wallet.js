@@ -125,6 +125,9 @@ const WalletApp = (() => {
     locked_label: 'قفل',
     day_label: 'روز',
     day_label_full: 'روز {n}: +{reward} AB',
+    // MO-006 fix (UX copy audit): daily check-in card reward label was a
+    // hardcoded English template literal ('Day 2/7 · +3 AB') on the FA card.
+    day_cycle: 'روز {n} از ۷',
     coming_soon_label: 'به‌زودی',
     vpn_month_plan: 'اشتراک یک ماهه',
     vpn_week_plan: 'اشتراک یک هفته‌ای',
@@ -268,6 +271,8 @@ const WalletApp = (() => {
     locked_label: 'Locked',
     day_label: 'Day',
     day_label_full: 'Day {n}: +{reward} AB',
+    // MO-006 fix (UX copy audit): localized daily check-in cycle label.
+    day_cycle: 'Day {n}/7',
     coming_soon_label: 'Coming soon',
     vpn_month_plan: 'Monthly subscription',
     vpn_week_plan: 'Weekly subscription',
@@ -1989,7 +1994,8 @@ const WalletApp = (() => {
     if (rewardEl) {
       const rewards = state.streak_rewards || [1, 3, 6, 10, 18, 30, 50];
       if (state.claimed_today) {
-        rewardEl.textContent = `Day ${state.streak_day}/7 · ✓`;
+        // MO-006 fix: localized label (was hardcoded English `Day N/7 · ✓`).
+        rewardEl.textContent = `${WT('day_cycle', { n: state.streak_day })} · ✓`;
         rewardEl.style.color = '#22C55E';
       } else {
         // FIX: when claimed_today=false and streak_day > 0, the user has a
@@ -2010,7 +2016,8 @@ const WalletApp = (() => {
           ? (state.streak_day > 0 ? (state.streak_day % 7) + 1 : 1)
           : 1;
         const nextReward = rewards[Math.max(0, Math.min(6, day - 1))] || 1;
-        rewardEl.textContent = `Day ${day}/7 · +${nextReward} AB`;
+        // MO-006 fix: localized label (was hardcoded English `Day N/7 · +N AB`).
+        rewardEl.textContent = `${WT('day_cycle', { n: day })} · +${nextReward} AB`;
         rewardEl.style.color = '#f5a623';
       }
     }
