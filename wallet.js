@@ -11,6 +11,9 @@ const WalletApp = (() => {
   // =============================================
   const WT_FA = {
     wallet_title: 'کیف پول توکن AB',
+    // aria-label keys (a11y P2 fix): were hardcoded English 'Back'/'Close'.
+    back_aria: 'بازگشت',
+    close_aria: 'بستن',
     wallet_subtitle: 'مرکز مدیریت دارایی‌های شما',
     ab_token_wallet: 'کیف پول توکن AB',
     current_balance: 'موجودی فعلی',
@@ -163,6 +166,8 @@ const WalletApp = (() => {
 
   const WT_EN = {
     wallet_title: 'AB Token Wallet',
+    back_aria: 'Back',
+    close_aria: 'Close',
     wallet_subtitle: 'Amir BTC Assistant',
     ab_token_wallet: 'AB Token Wallet',
     current_balance: 'Current Balance',
@@ -570,7 +575,7 @@ const WalletApp = (() => {
     card.classList.remove('skeleton-loading');
     card.innerHTML = `
       <div class="wallet-watermark"><img src="${getTokenLogo()}" alt=""></div>
-      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="AB Token info">
+      <button class="wallet-info-btn" onclick="event.stopPropagation(); WalletApp.showTokenInfo()" aria-label="${esc(WT('wallet_title'))}">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
       <div class="wallet-preview-top">
@@ -756,7 +761,7 @@ const WalletApp = (() => {
     return `
       <!-- Header -->
       <div class="wallet-page-header">
-        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
+        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="${esc(WT('back_aria'))}">${ICONS.back}</button>
         <div class="wallet-page-header-info">
           <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
           <div class="wallet-page-header-text">
@@ -1008,7 +1013,7 @@ const WalletApp = (() => {
   function buildWalletSkeleton() {
     return `
       <div class="wallet-page-header">
-        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="Back">${ICONS.back}</button>
+        <button class="wallet-back-btn" onclick="WalletApp.closeWallet()" aria-label="${esc(WT('back_aria'))}">${ICONS.back}</button>
         <div class="wallet-page-header-info">
           <div class="wallet-page-header-logo"><img src="${getTokenLogo()}" alt="AB"></div>
           <div class="wallet-page-header-text">
@@ -1880,7 +1885,7 @@ const WalletApp = (() => {
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </div>
           <h3>${esc(WT('token_info_title'))}</h3>
-          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="Close">
+          <button class="token-info-popup-close" onclick="WalletApp.closeTokenInfo()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -1929,7 +1934,7 @@ const WalletApp = (() => {
       <div class="dcm-sheet">
         <div class="dcm-header">
           <h3>${esc(WT('daily_checkin'))}</h3>
-          <button class="dcm-close" onclick="WalletApp.closeDailyCheckinModal()" aria-label="Close">
+          <button class="dcm-close" onclick="WalletApp.closeDailyCheckinModal()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
@@ -2262,7 +2267,7 @@ const WalletApp = (() => {
       <div class="dcm-sheet vpn-confirm-sheet">
         <div class="dcm-header">
           <h3>${WT('confirm_purchase_title')}</h3>
-          <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="Close">
+          <button class="dcm-close" onclick="WalletApp.closeVpnConfirmModal()" aria-label="${esc(WT('close_aria'))}">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>

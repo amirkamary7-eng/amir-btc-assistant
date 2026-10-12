@@ -6579,7 +6579,7 @@ function renderWatchlist() {
         <div class="watch-card${isForex ? ' watch-card-forex' : ''}" data-symbol="${safeSymbol}" onclick="${isForex ? 'openForexDetail' : 'openCoinDetail'}(this.dataset.symbol)">
             <div class="watch-card-header">
                 ${iconHtml}
-                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="Remove">
+                <span class="watch-card-remove" data-symbol="${safeSymbol}" onclick="toggleWatchlist(this.dataset.symbol, event)" aria-label="${escapeHtml(t('delete'))}" role="button">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </span>
             </div>
@@ -9676,7 +9676,7 @@ function renderActiveAlerts(symbol) {
                 <span class="cd-alert-item-price">${priceStr} ${getAlertUnitLabel(a.symbol)}</span>
                 <span class="cd-alert-item-meta">${escapeHtml(dirLabel)}${createdAt ? ' · ' + escapeHtml(createdAt) : ''}</span>
             </div>
-            <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="Delete alert">
+            <button class="cd-alert-item-delete" data-id="${escapeHtml(a.id)}" onclick="removeAlert(this.dataset.id)" aria-label="${escapeHtml(t('delete'))}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
         </div>
@@ -10989,7 +10989,7 @@ function renderNotifications() {
             <div class="notif-body">${escapeHtml(n.body)}</div>
             ${ctaHtml}
             <div class="notif-date">${datePart} • ${timePart}</div>
-            <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="Delete">×</button>
+            <button class="notif-delete-btn" onclick="event.stopPropagation(); deleteNotification('${escapeHtml(n.id)}')" aria-label="${escapeHtml(t('delete'))}">×</button>
         </div>`;
     }).join('');
 }

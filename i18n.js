@@ -658,6 +658,9 @@ const i18n = {
         ai_err_image_limit: 'محدودیت ارسال تصویر تمام شده است',
         ai_err_wait_retry: 'لطفاً چند ثانیه صبر کنید و دوباره تلاش کنید',
         clear_input: 'پاک کردن',
+        // aria-label keys (a11y P2 fix): were hardcoded English on the market header.
+        refresh: 'بروزرسانی',
+        market_ticker_aria: 'نوار متحرک قیمت‌های بازار',
         alert_target_ph: 'قیمت هدف را وارد کنید',
         ai_attach_label: 'پیوست تصویر',
         ai_send_label: 'ارسال',
@@ -2047,6 +2050,8 @@ const i18n = {
         ai_err_image_limit: 'Image upload limit reached',
         ai_err_wait_retry: 'Please wait a few seconds and try again',
         clear_input: 'Clear',
+        refresh: 'Refresh',
+        market_ticker_aria: 'Market prices ticker',
         alert_target_ph: 'Enter target price',
         ai_attach_label: 'Attach image',
         ai_send_label: 'Send',
