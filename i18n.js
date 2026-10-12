@@ -391,6 +391,11 @@ const i18n = {
         error_prefix: 'خطا: ',
         network_error_retry: 'خطای شبکه — دوباره تلاش کنید',
         unknown_error: 'نامشخص',
+        // DY-001/DY-002 fix: generic error + success toast keys used by app.js
+        // (notifications/alerts paths: markAllRead, clearAll, deleteNotification,
+        //  markNotifRead, setPriceAlert, notif-list empty-state)
+        error_generic: 'خطایی رخ داد. لطفاً دوباره تلاش کنید.',
+        done: 'انجام شد',
         // ── i18n AUDIT: content editor ──
         content_version: 'نسخه',
         official_channel_label: 'کانال رسمی: amir_btc_2024',
@@ -1520,6 +1525,9 @@ const i18n = {
         featured_limit_warn: 'You already have 5 featured analyses.<br>The oldest featured analysis will be removed and replaced.<br>Continue?',
         loading_dots: '...',
         retry: 'Retry',
+        // DY-001/DY-002 fix: generic error + success toast keys used by app.js
+        error_generic: 'Something went wrong. Please try again.',
+        done: 'Done',
         // ── showToast + analysis i18n keys ──
         toast_api_unavailable: 'API unavailable.',
         toast_admin_denied: 'Admin access not verified — please try again.',
