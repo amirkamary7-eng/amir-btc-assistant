@@ -241,7 +241,11 @@
         if (window.admToast) admToast(t('adm_operation_error'), 'error');
       }
     } catch (e) {
-      if (window.admToast) admToast(t('adm_error_prefix') + e.message, 'error');
+      // AD P2 fix (UX copy audit): raw English exception no longer appended to
+      // the Persian prefix — stays in console; adm_operation_error is the
+      // established generic for admin operations.
+      console.error('MembershipAdmin.act:', e);
+      if (window.admToast) admToast(t('adm_operation_error'), 'error');
     }
   }
 

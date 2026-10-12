@@ -1813,7 +1813,7 @@ async function loadAdminRewards() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load rewards', 'loadAdminRewards');
+        container.innerHTML = adminErrorState(t('adm_rw_load_error'), 'loadAdminRewards');
         console.error('loadAdminRewards:', e);
     }
 }
@@ -1952,7 +1952,7 @@ async function loadAdminTransactions(page) {
         container.innerHTML = html;
         adminPagination('admin-transactions-pagination', _adminTransactionsPage, totalPages, 'loadAdminTransactions');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load transactions', 'loadAdminTransactions');
+        container.innerHTML = adminErrorState(t('adm_tx_load_error'), 'loadAdminTransactions');
         console.error('loadAdminTransactions:', e);
     }
 }
@@ -2008,7 +2008,7 @@ async function loadAdminReferrals() {
         });
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load referrals', 'loadAdminReferrals');
+        container.innerHTML = adminErrorState(t('adm_rf_load_error'), 'loadAdminReferrals');
         console.error('loadAdminReferrals:', e);
     }
 }
@@ -2147,7 +2147,7 @@ async function loadAdminLogs(page) {
         container.innerHTML = html;
         adminPagination('admin-logs-pagination', _adminLogsPage, totalPages, 'loadAdminLogs');
     } catch (e) {
-        container.innerHTML = adminErrorState('Failed to load logs', 'loadAdminLogs');
+        container.innerHTML = adminErrorState(t('adm_logs_load_error'), 'loadAdminLogs');
         console.error('loadAdminLogs:', e);
     }
 }

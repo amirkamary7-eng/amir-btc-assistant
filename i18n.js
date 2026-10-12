@@ -1380,6 +1380,12 @@ const i18n = {
         adm_not_joined: 'عضو نشده',
         adm_no_broadcasts: 'پیامی یافت نشد',
         adm_broadcasts_load_error: 'بارگذاری پیام‌ها انجام نشد',
+        // AD P2 fix (UX copy audit): four load-error states were hardcoded
+        // English literals in admin.js (rewards/transactions/referrals/logs).
+        adm_rw_load_error: 'بارگذاری پاداش‌ها انجام نشد',
+        adm_tx_load_error: 'بارگذاری تراکنش‌ها انجام نشد',
+        adm_rf_load_error: 'بارگذاری دعوت‌ها انجام نشد',
+        adm_logs_load_error: 'بارگذاری لاگ‌ها انجام نشد',
         adm_refund_pending: 'در انتظار',
         adm_refund_approved: 'تأیید شده',
         adm_refund_delivered: 'تحویل شده',
@@ -2752,6 +2758,11 @@ const i18n = {
         adm_not_joined: 'Not joined',
         adm_no_broadcasts: 'No broadcasts yet',
         adm_broadcasts_load_error: 'Failed to load broadcasts',
+        // AD P2 fix (UX copy audit): localized load-error states.
+        adm_rw_load_error: 'Failed to load rewards',
+        adm_tx_load_error: 'Failed to load transactions',
+        adm_rf_load_error: 'Failed to load referrals',
+        adm_logs_load_error: 'Failed to load logs',
         adm_refund_pending: 'Pending',
         adm_refund_approved: 'Approved',
         adm_refund_delivered: 'Delivered',
