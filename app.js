@@ -2852,7 +2852,11 @@ function submitAnalysis() {
                             if (retryResult && retryResult.status === 'success') {
                                 _applySaveResult(retryResult, wasEditing);
                             } else {
-                                showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
+                                // DY-004 fix (UX copy audit): show the localized error only;
+                                // the raw server detail/message is English technical text
+                                // and is preserved in console.warn.
+                                if (retryResult?.detail || retryResult?.message) console.warn('[ANALYSIS] featured retry rejected:', retryResult?.detail || retryResult?.message);
+                                showToast(t('toast_analysis_save_error'));
                             }
                         },
                         () => {
@@ -2868,7 +2872,9 @@ function submitAnalysis() {
                                 if (retryResult && retryResult.status === 'success') {
                                     _applySaveResult(retryResult, wasEditing);
                                 } else {
-                                    showToast(retryResult?.detail || retryResult?.message || t('toast_analysis_save_error'));
+                                    // DY-004 fix (UX copy audit): localized error only.
+                                    if (retryResult?.detail || retryResult?.message) console.warn('[ANALYSIS] featured retry rejected:', retryResult?.detail || retryResult?.message);
+                                    showToast(t('toast_analysis_save_error'));
                                 }
                             })();
                         }
@@ -2877,7 +2883,9 @@ function submitAnalysis() {
                 }
 
                 if (result.status !== 'success') {
-                    showToast(result.detail || result.message || t('toast_analysis_save_error'));
+                    // DY-004 fix (UX copy audit): localized error only; raw detail logged.
+                    if (result.detail || result.message) console.warn('[ANALYSIS] save rejected by server:', result.detail || result.message);
+                    showToast(t('toast_analysis_save_error'));
                     return;
                 }
 
@@ -2888,14 +2896,18 @@ function submitAnalysis() {
                 fetchAnalyses(true).catch(() => {});
             } catch (e) {
                 console.error('[ANALYSIS] save error:', e.message);
-                showToast(t('toast_analysis_save_error_detail') + (e.message || 'Unknown'));
+                // DY-003 fix (UX copy audit): no longer appends the raw English
+                // exception to the Persian toast — full error stays in console.
+                showToast(t('toast_analysis_save_error_network'));
             } finally {
                 if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerText = wasEditing ? t('analysis_save_changes') : t('analysis_publish'); }
             }
         })();
     } catch (syncErr) {
         console.error('[ANALYSIS] submit sync error:', syncErr.message);
-        showToast(t('toast_unexpected_error') + (syncErr.message || 'Unknown'));
+        // DY-003 fix (UX copy audit): no longer appends the raw English
+        // exception to the Persian toast — full error stays in console.
+        showToast(t('toast_analysis_save_error_network'));
     }
 }
 
@@ -3000,7 +3012,9 @@ function executeDeleteAnalysis() {
                 return;
             }
             if (result.status !== 'success') {
-                showToast(result.detail || result.message || t('toast_analysis_delete_error'));
+                // DY-004 fix (UX copy audit): localized error only; raw detail logged.
+                if (result.detail || result.message) console.warn('[ANALYSIS] delete rejected by server:', result.detail || result.message);
+                showToast(t('toast_analysis_delete_error'));
                 return;
             }
 

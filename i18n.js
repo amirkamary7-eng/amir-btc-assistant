@@ -189,6 +189,9 @@ const i18n = {
         toast_fields_required: 'نام ارز و متن تحلیل الزامی است.',
         toast_no_server_response: 'خطا: پاسخی از سرور دریافت نشد.',
         toast_analysis_save_error: 'خطا در ذخیره تحلیل.',
+        // DY-003 fix (UX copy audit): network/exception path text — replaces the
+        // old pattern that appended the raw English exception to a Persian prefix.
+        toast_analysis_save_error_network: 'ذخیره تحلیل انجام نشد. اتصال خود را بررسی و دوباره تلاش کنید.',
         toast_analysis_edited: 'تحلیل ویرایش شد.',
         toast_analysis_published: 'تحلیل منتشر شد.',
         toast_analysis_save_error_detail: 'خطا در ذخیره تحلیل: ',
@@ -1553,6 +1556,8 @@ const i18n = {
         toast_fields_required: 'Coin name and analysis text are required.',
         toast_no_server_response: 'Error: No response from server.',
         toast_analysis_save_error: 'Error saving analysis.',
+        // DY-003 fix (UX copy audit): network/exception path text.
+        toast_analysis_save_error_network: 'Could not save the analysis. Check your connection and try again.',
         toast_analysis_edited: 'Analysis edited.',
         toast_analysis_published: 'Analysis published.',
         toast_analysis_save_error_detail: 'Error saving analysis: ',
