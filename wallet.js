@@ -33,6 +33,11 @@ const WalletApp = (() => {
     // friendly message instead of leaking the raw English `result.message`
     // ('Already claimed today') into the Persian popup.
     already_claimed: 'جایزه امروز را قبلاً دریافت کرده‌اید. فردا دوباره سر بزنید.',
+    // Task 79 (T78-BE-01 class): RATE_LIMITED (429 — claim rate window) and
+    // DAILY_DISABLED (403 — reward-engine kill switch) previously leaked their
+    // raw English server messages into the Persian popup as well.
+    claim_rate_limited: 'درخواست‌های شما بیش از حد مجاز است. کمی صبر کنید و دوباره تلاش کنید.',
+    claim_disabled: 'دریافت جایزه روزانه موقتاً غیرفعال است. کمی بعد دوباره تلاش کنید.',
     referral_program: 'برنامه دعوت دوستان',
     ref_link: 'لینک دعوت',
     invited_users: 'دعوت‌شده‌ها',
@@ -185,6 +190,9 @@ const WalletApp = (() => {
     claim_error: 'Failed to claim daily reward',
     // BE-102 fix (UX copy audit): ALREADY_CLAIMED (409) friendly message.
     already_claimed: 'You have already claimed today’s reward. Come back tomorrow.',
+    // Task 79 (T78-BE-01 class): RATE_LIMITED / DAILY_DISABLED friendly messages.
+    claim_rate_limited: 'Too many requests. Please wait a moment and try again.',
+    claim_disabled: 'Daily rewards are temporarily disabled. Please try again later.',
     referral_program: 'Referral Program',
     ref_link: 'Referral Link',
     invited_users: 'Invited Users',
@@ -1291,6 +1299,22 @@ const WalletApp = (() => {
     return null;
   }
 
+  // BE-102 / Task 79: map the known backend claim-error codes to localized
+  // messages. Previously only ALREADY_CLAIMED was mapped — RATE_LIMITED (429,
+  // 5 claims/60s — reachable by re-tapping the claim button) and DAILY_DISABLED
+  // (403 kill-switch) leaked their raw English server messages, and non-JSON
+  // failures surfaced the frontend's own 'Network error' literal (now the
+  // claimDailyRewardAPI catch returns a code instead of an English string).
+  // Unknown codes keep the documented server-message-first fallback.
+  function _claimErrorText(result) {
+    if (result) {
+      if (result.code === 'ALREADY_CLAIMED') return WT('already_claimed');
+      if (result.code === 'RATE_LIMITED') return WT('claim_rate_limited');
+      if (result.code === 'DAILY_DISABLED') return WT('claim_disabled');
+    }
+    return (result && result.message) || WT('claim_error');
+  }
+
   async function claimDailyRewardAPI() {
     try {
       const data = await window.apiFetch('/api/wallet/claim', { method: 'POST' });
@@ -1298,7 +1322,10 @@ const WalletApp = (() => {
     } catch (e) {
       console.warn('WalletApp: claimDailyRewardAPI error', e);
       try { return JSON.parse(e.message); } catch (_) {}
-      return { status: 'error', message: 'Network error' };
+      // Task 79 (T78-BE-03): non-JSON failure — return a machine-readable code
+      // (mapped by _claimErrorText to the localized claim_error), not an
+      // English 'Network error' string that would leak into the popup.
+      return { status: 'error', code: 'NETWORK_ERROR' };
     }
   }
 
@@ -1791,10 +1818,11 @@ const WalletApp = (() => {
         if (btn) { btn.disabled = false; btn.textContent = WT('claim'); }
         const tg = window.getTg?.();
         try { tg?.HapticFeedback?.notificationOccurred?.('error'); } catch (_) {}
-        // BE-102 fix (UX copy audit): map the known 409 code to a friendly
-        // localized message; unknown codes keep the previous behavior
-        // (server message, then generic claim_error).
-        const claimErrorMsg = (result.code === 'ALREADY_CLAIMED') ? WT('already_claimed') : (result.message || WT('claim_error'));
+        // BE-102 fix (UX copy audit) + Task 79: map the known backend codes
+        // (ALREADY_CLAIMED / RATE_LIMITED / DAILY_DISABLED / NETWORK_ERROR via
+        // generic) to friendly localized messages; unknown codes keep the
+        // previous behavior (server message, then generic claim_error).
+        const claimErrorMsg = _claimErrorText(result);
         tg?.showPopup?.({ title: WT('error'), message: claimErrorMsg, buttons: [{ type: 'ok' }] });
       }
     } finally {
