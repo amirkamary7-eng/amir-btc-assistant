@@ -9,7 +9,7 @@
  *   - AD P2   adminFormatDate: language-aware calendar + Asia/Tehran timezone
  *   - MO P2   assistant ACTION_LABELS + retry button language-aware
  *   - TG-019e all-day/tentative alert events render labels, not placeholder clock
- *   - NT-032  calendar-data.json static fallback is not stale (has future events)
+ *   - NT-032  calendar-data.json static fallback stays fresh (servable events + regen tripwire)
  *
  * Run: node --test tests/task75-stage3-regression-test.cjs
  */
@@ -222,21 +222,85 @@ test('TG-019e: all-day/tentative events render labels, not the placeholder clock
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// NT-032 — calendar snapshot freshness
+// NT-032 — calendar snapshot freshness (time-stable rewrite)
+//
+// The original assertion required EVERY snapshot event to sit inside the
+// live serving window [now-1d, now+7d]. That is a wall-clock time bomb:
+// assets/calendar-data.json is a static file regenerated on a weekly-ish
+// cadence, so the earliest events age out of the -1d edge a few days after
+// each regeneration and the test fails without any code/data defect (it
+// failed 2026-10-12 ~23:00Z when the Oct 11 "JPY Bank Holiday" aged out).
+//
+// The REAL invariants (mirroring src/services/calendar.js, which filters
+// the static fallback to the same window AT SERVE TIME — a stale event in
+// the file is simply never served) are:
+//   1. the snapshot still contains at least one future event (dead-fallback
+//      regression — the original NT-032 concern),
+//   2. at least one event is servable in the current ±1d/+7d window,
+//   3. the snapshot is not genuinely old: regeneration is overdue if the
+//      oldest event is more than 8 days behind now (a full snapshot spans
+//      [gen-1d, gen+7d], so >8d of age means even the newest event has
+//      effectively passed — the data cannot serve anything),
+//   4. no implausible far-future data (beyond +8d — the provider only
+//      publishes the current week).
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('NT-032: static calendar fallback contains current-week events (not all past)', () => {
+// Shared predicate — also exercised with FIXED `now` by the fixtures below,
+// so the staleness detection itself is tested deterministically (no
+// wall-clock dependence inside the fixtures).
+function calendarSnapshotFailures(data, now) {
+  const day = 24 * 3600 * 1000;
+  if (!Array.isArray(data) || data.length === 0) return ['snapshot-empty'];
+  const ts = data.map((e) => new Date(e.timestamp).getTime()).filter((t) => !isNaN(t));
+  if (ts.length === 0) return ['no-parseable-timestamps'];
+  const failures = [];
+  if (!ts.some((t) => t >= now)) failures.push('no-future-events');
+  if (!ts.some((t) => t >= now - day && t <= now + 7 * day)) failures.push('nothing-servable-in-window');
+  if (now - Math.min(...ts) > 8 * day) failures.push('snapshot-older-than-8d');
+  if (Math.max(...ts) - now > 8 * day) failures.push('future-horizon-beyond-8d');
+  return failures;
+}
+
+test('NT-032: static calendar fallback is fresh (servable events, not all past, regen tripwire)', () => {
   const data = JSON.parse(read('assets/calendar-data.json'));
   assert.ok(Array.isArray(data) && data.length > 0, 'snapshot must be a non-empty array');
-  const now = Date.now();
-  const ts = data.map((e) => new Date(e.timestamp).getTime()).filter((t) => !isNaN(t));
-  const future = ts.filter((t) => t >= now).length;
-  assert.ok(future > 0, 'snapshot must contain at least one future event (dead-fallback regression)');
-  const inWindow = ts.filter((t) => t >= now - 24 * 3600 * 1000 && t <= now + 7 * 24 * 3600 * 1000).length;
-  assert.ok(inWindow === ts.length, 'all snapshot events must sit in the live ±1d/+7d serving window');
+  const failures = calendarSnapshotFailures(data, Date.now());
+  assert.deepStrictEqual(failures, [], 'snapshot freshness contract violated: ' + failures.join(', '));
   // Shape must stay pre-mapped (the serving path skips re-mapping when flag is present)
   assert.ok(typeof data[0].flag === 'string', 'snapshot events must stay pre-mapped (flag field)');
   for (const k of ['title', 'country', 'flag', 'date', 'impact', 'impact_label', 'status', 'timestamp']) {
     assert.ok(k in data[0], 'pre-mapped field must exist: ' + k);
   }
+});
+
+test('NT-032 fixtures: healthy week snapshot passes at a fixed now', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const data = [
+    { timestamp: '2026-10-12T23:00:00.000Z' }, // yesterday — outside the window, harmless
+    { timestamp: '2026-10-13T14:00:00.000Z' }, // later today — servable
+    { timestamp: '2026-10-18T00:00:00.000Z' },  // end of the week
+  ];
+  assert.deepStrictEqual(calendarSnapshotFailures(data, now), []);
+});
+
+test('NT-032 fixtures: fully-expired snapshot is rejected (dead-fallback regression)', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const data = [
+    { timestamp: '2026-10-04T12:00:00.000Z' },
+    { timestamp: '2026-10-05T12:00:00.000Z' },
+  ];
+  const failures = calendarSnapshotFailures(data, now);
+  assert.ok(failures.includes('no-future-events'), 'must detect the all-past dead-fallback state');
+  assert.ok(failures.includes('snapshot-older-than-8d'), 'must flag overdue regeneration');
+});
+
+test('NT-032 fixtures: overdue-regen snapshot with a stray future event is rejected', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const data = [
+    { timestamp: '2026-10-04T12:00:00.000Z' }, // 9 days old — regeneration overdue
+    { timestamp: '2026-10-22T12:00:00.000Z' }, // stray far-future event keeps future>0 true
+  ];
+  const failures = calendarSnapshotFailures(data, now);
+  assert.ok(failures.includes('snapshot-older-than-8d'), 'tripwire must fire even when a future event exists');
+  assert.ok(failures.includes('nothing-servable-in-window'), 'nothing is servable in the live window');
 });
