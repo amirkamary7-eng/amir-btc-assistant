@@ -1049,6 +1049,30 @@
    */
   var _submitInFlight = false;
 
+  // T78-BE-01 fix (Task 79): map EVERY rules-accept failure shape to a
+  // localized message. The old code preferred `acceptRes.error` verbatim, so
+  // a 500 ACCEPTANCE_FAILED response showed the raw English server string
+  // ('Failed to record acceptance') and non-JSON error bodies showed the
+  // local apiFetch's fabricated 'HTTP 500' text. The raw server detail is
+  // preserved in console.warn for support diagnostics — never shown to the
+  // user. Rules-version drift codes keep their refresh-and-rerender flow.
+  function membershipAcceptError(res) {
+    if (res && res.code === 'RULES_NOT_FOUND') {
+      return { msg: t('mem_err_rules_updated'), refresh: true };
+    }
+    if (res && res.code === 'RULES_NOT_ACTIVE') {
+      return { msg: t('mem_err_rules_changed'), refresh: true };
+    }
+    // ACCEPTANCE_FAILED (500), non-JSON 'HTTP nnn' bodies, 401/422/429/503
+    // route errors and everything else — localized generic, raw detail logged.
+    if (res) {
+      try {
+        console.warn('[MB] rules/accept failed:', res._httpStatus || 0, res.code || 'no_code', res.error || res.message || 'no message');
+      } catch (_) {}
+    }
+    return { msg: t('mem_err_accept_failed'), refresh: false };
+  }
+
   async function submitUid() {
     // PHASE 7B (B1): Duplicate-click protection.
     if (_submitInFlight) return;
@@ -1100,18 +1124,15 @@
             body: JSON.stringify({ rules_version: rules.version, source: 'activation_popup' }),
           });
           if (!acceptRes || !acceptRes.ok) {
-            // Acceptance failed — show structured error, re-enable button, abort.
-            var acceptMsg = (acceptRes && acceptRes.error) ? acceptRes.error : t('mem_err_accept_failed');
-            if (acceptRes && acceptRes.code === 'RULES_NOT_FOUND') {
+            // Acceptance failed — show the localized mapped error, re-enable
+            // button, abort. (T78-BE-01: never display the raw server error.)
+            var mapped = membershipAcceptError(acceptRes);
+            if (mapped.refresh) {
               // The version we have is stale — refresh rules and re-render.
               await refreshRulesAndRerenderSection();
-              acceptMsg = t('mem_err_rules_updated');
-            } else if (acceptRes && acceptRes.code === 'RULES_NOT_ACTIVE') {
-              await refreshRulesAndRerenderSection();
-              acceptMsg = t('mem_err_rules_changed');
             }
-            if (window.admToast) admToast(acceptMsg, 'error');
-            else alert(acceptMsg);
+            if (window.admToast) admToast(mapped.msg, 'error');
+            else alert(mapped.msg);
             // Restore the button to the "accept rules" hint state (unchecked).
             var checkboxAfter = document.getElementById('mb-rules-checkbox');
             if (checkboxAfter) { checkboxAfter.checked = false; }
