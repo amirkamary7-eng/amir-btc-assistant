@@ -38,9 +38,10 @@
  *   ends_at optional ISO 8601 and strictly after starts_at, status only
  *   via the dedicated endpoint with a whitelisted target.
  *
- * CSV export (membership.js pattern): BOM + quoted/escaped cells,
- * formula-injection neutralized (leading =, +, -, @, tab, CR get a single
- * quote prefix), attachment + no-store + nosniff security headers.
+ * CSV export (membership.js pattern + hardening): BOM + quoted/escaped
+ * cells (quote/comma/CR/LF all force quoting), formula-injection
+ * neutralized (leading =, +, -, @, tab, CR get a single quote prefix),
+ * attachment + no-store + nosniff security headers.
  */
 
 export function createCampaignsAdminHandlers(deps) {
@@ -174,10 +175,16 @@ export function createCampaignsAdminHandlers(deps) {
       }
       const raw = body[spec.key];
       if (raw === null || raw === undefined) {
-        // Explicit null/absent value: optional text fields clear to their
-        // empty form (summary → NULL, body → ''), required ones error.
-        if (spec.required && !partial) errors.push({ field: spec.key, message: `${spec.key} is required` });
-        else fields[spec.key] = spec.key.startsWith('body_') ? '' : null;
+        // Explicit null on a REQUIRED field is rejected in create AND partial
+        // mode alike — letting it through on update would surface later as a
+        // DB NOT NULL violation (503) instead of a clean 400 (audit M-1).
+        // Optional text fields still clear to their empty form
+        // (summary → NULL, body → '').
+        if (spec.required) {
+          errors.push({ field: spec.key, message: `${spec.key} is required and cannot be null` });
+        } else {
+          fields[spec.key] = spec.key.startsWith('body_') ? '' : null;
+        }
         continue;
       }
       if (typeof raw !== 'string') {
@@ -525,12 +532,15 @@ export function createCampaignsAdminHandlers(deps) {
   // CSV cell escaping (membership.js csvEscape) PLUS formula-injection
   // neutralization: a leading =, +, -, @, tab or CR makes spreadsheet apps
   // treat the cell as a formula — prefixing a single quote forces text.
+  // Quoting triggers on quote/comma AND any line break (\n, \r): a bare CR
+  // inside an unquoted field would split the record in spreadsheet apps and
+  // could smuggle a post-CR "=..." fragment as a formula (audit M-3).
   function _csvEscape(v) {
     if (v === null || v === undefined) return '';
     let s = String(v);
     if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     s = s.replace(/"/g, '""');
-    return /[",\n]/.test(s) ? `"${s}"` : s;
+    return /[",\n\r]/.test(s) ? `"${s}"` : s;
   }
 
   // Security headers for the CSV download (membership.js csvSecurityHeaders):

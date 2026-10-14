@@ -184,36 +184,65 @@ test('CAMA-12: createCampaign — fully parameterized INSERT, defaults applied, 
   assert.equal(c.registration_count, 0);
 });
 
-test('CAMA-13: updateCampaign — whitelisted SET builder, status NOT updatable, unknown keys ignored', async () => {
-  let captured = null;
+test('CAMA-13: updateCampaign — whitelisted SET builder, status NOT updatable, unknown keys ignored, live registration_count (M-2)', async () => {
+  const queries = [];
+  // Faithful Postgres emulation: UPDATE ... RETURNING yields PLAIN columns
+  // only (Postgres rejects the registration_count subquery inside RETURNING);
+  // the follow-up canonical admin SELECT yields the row WITH the live count.
+  const RETURN_ROW = { ...ADMIN_ROW };
+  delete RETURN_ROW.registration_count;
   const repo = buildRepo(async (env, sql, params) => {
-    captured = { sql, params };
-    return { rows: [ADMIN_ROW] };
+    queries.push({ sql, params });
+    if (/^UPDATE/.test(String(sql).trim())) return { rows: [{ ...RETURN_ROW }] };
+    return { rows: [{ ...ADMIN_ROW }] };
   });
   const c = await repo.updateCampaign({ DATABASE_URL: 'x' }, 'c1', { title_en: 'New', image_url: null });
-  assert.match(captured.sql, /SET title_en = \$1, image_url = \$2, updated_at = NOW\(\)/);
-  assert.deepEqual(captured.params, ['New', null, 'c1']);
+  assert.match(queries[0].sql, /SET title_en = \$1, image_url = \$2, updated_at = NOW\(\)/);
+  assert.deepEqual(queries[0].params, ['New', null, 'c1']);
+  // M-2: the UPDATE alone cannot yield registration_count — a follow-up
+  // canonical admin SELECT (_ADMIN_SELECT_COLUMNS) must run and its live
+  // count must surface (non-zero, so a mock returning 0 cannot hide a wrong
+  // implementation).
+  assert.match(queries[1].sql, /SELECT\s+c\.id, c\.title_fa/, 'follow-up is the canonical admin select');
+  assert.match(queries[1].sql, /\(SELECT COUNT\(\*\)::int FROM promo_campaign_registrations r/);
+  assert.match(queries[1].sql, /WHERE c\.id = \$1/);
+  assert.deepEqual(queries[1].params, ['c1']);
   assert.equal(c.id, 'c1');
+  assert.equal(c.registration_count, 7, 'live registration_count re-read after UPDATE (audit M-2)');
+
+  // Fallback: re-read misses (impossible without a hard DELETE) → the mapped
+  // RETURNING row is still returned (registration_count coerces to 0).
+  const repoFb = buildRepo(async (env, sql) => (/^UPDATE/.test(String(sql).trim()) ? { rows: [{ ...RETURN_ROW }] } : { rows: [] }));
+  const cFb = await repoFb.updateCampaign({ DATABASE_URL: 'x' }, 'c1', { title_en: 'New' });
+  assert.equal(cFb.id, 'c1', 'fallback keeps a usable row when the re-read misses');
+  assert.equal(cFb.registration_count, 0);
 
   // status / unknown columns produce NO SQL at all (no injection surface).
-  let queries = 0;
-  const repo2 = buildRepo(async () => { queries += 1; return { rows: [] }; });
+  let queries2 = 0;
+  const repo2 = buildRepo(async () => { queries2 += 1; return { rows: [] }; });
   assert.equal(await repo2.updateCampaign({ DATABASE_URL: 'x' }, 'c1', { status: 'PUBLISHED' }), null);
   assert.equal(await repo2.updateCampaign({ DATABASE_URL: 'x' }, 'c1', { evil: '; DROP TABLE users;--' }), null);
-  assert.equal(queries, 0, 'no query may run for non-whitelisted fields');
+  assert.equal(queries2, 0, 'no query may run for non-whitelisted fields');
 });
 
-test('CAMA-14: setCampaignStatus — DELETED-terminal guard in SQL, parameterized status', async () => {
-  let captured = null;
+test('CAMA-14: setCampaignStatus — DELETED-terminal guard in SQL, parameterized status, live registration_count (M-2)', async () => {
+  const queries = [];
+  // Faithful Postgres emulation (as in CAMA-13): RETURNING has plain columns
+  // only; the follow-up admin SELECT carries the live count.
+  const RETURN_ROW = { ...ADMIN_ROW };
+  delete RETURN_ROW.registration_count;
   const repo = buildRepo(async (env, sql, params) => {
-    captured = { sql, params };
-    return { rows: [ADMIN_ROW] };
+    queries.push({ sql, params });
+    if (/^UPDATE/.test(String(sql).trim())) return { rows: [{ ...RETURN_ROW }] };
+    return { rows: [{ ...ADMIN_ROW }] };
   });
   const c = await repo.setCampaignStatus({ DATABASE_URL: 'x' }, 'c1', 'STOPPED');
-  assert.match(captured.sql, /SET status = \$2, updated_at = NOW\(\)/);
-  assert.match(captured.sql, /AND status <> 'DELETED'/, 'DELETED is terminal at the SQL level');
-  assert.deepEqual(captured.params, ['c1', 'STOPPED']);
-  assert.equal(c.status, 'PUBLISHED', 'row mapping from RETURNING');
+  assert.match(queries[0].sql, /SET status = \$2, updated_at = NOW\(\)/);
+  assert.match(queries[0].sql, /AND status <> 'DELETED'/, 'DELETED is terminal at the SQL level');
+  assert.deepEqual(queries[0].params, ['c1', 'STOPPED']);
+  assert.match(queries[1].sql, /\(SELECT COUNT\(\*\)::int FROM promo_campaign_registrations r/, 'canonical admin re-read runs');
+  assert.equal(c.status, 'PUBLISHED', 'row mapping from the re-read');
+  assert.equal(c.registration_count, 7, 'live registration_count re-read after status change (audit M-2)');
 
   const repo2 = buildRepo(async () => ({ rows: [] }));
   assert.equal(await repo2.setCampaignStatus({ DATABASE_URL: 'x' }, 'c1', 'PUBLISHED'), null);
@@ -387,6 +416,7 @@ test('CAMA-22: create validation matrix — lengths, types, image_url (REAL vali
   const cases = [
     // [label, payload-mutation, expected error field]
     ['missing title_fa', (p) => delete p.title_fa, 'title_fa'],
+    ['null title_fa', (p) => { p.title_fa = null; }, 'title_fa'],
     ['empty title_en', (p) => { p.title_en = '   '; }, 'title_en'],
     ['title 201 chars', (p) => { p.title_fa = 'a'.repeat(201); }, 'title_fa'],
     ['non-string title', (p) => { p.title_en = 42; }, 'title_en'],
@@ -484,13 +514,44 @@ test('CAMA-24: update — status field rejected, empty patch rejected, DELETED 4
   assert.equal(resWin.__status, 400);
   assert.ok(resWin.__json.errors.some((e) => e.field === 'ends_at'));
 
+  // M-1: explicit null on a REQUIRED field is a clean 400 (not a 503 from
+  // the DB NOT NULL violation), and no UPDATE reaches the repo.
+  for (const requiredTitle of ['title_fa', 'title_en']) {
+    const { handlers: hNull, calls: cNull } = buildHandlers({
+      body: { [requiredTitle]: null, summary_fa: 'kept' },
+      repo: { get: () => existingCampaign() },
+    });
+    const resNull = await hNull.handleAdminUpdateCampaign(REQ(), { DATABASE_URL: 'x' }, 'c1');
+    assert.equal(resNull.__status, 400, `${requiredTitle}: null → 400`);
+    assert.equal(resNull.__json.code, 'VALIDATION_ERROR', `${requiredTitle}: VALIDATION_ERROR`);
+    assert.ok(resNull.__json.errors.some((e) => e.field === requiredTitle && /cannot be null/.test(e.message)), `${requiredTitle} reports the null field`);
+    assert.ok(!cNull.repo.some((c) => c[0] === 'update'), `${requiredTitle}: no UPDATE reaches the repo`);
+  }
+
+  // M-1 counterpart: optional fields still CLEAR on explicit null.
+  const { handlers: hClear, calls: cClear } = buildHandlers({
+    body: { summary_fa: null, body_fa: null },
+    repo: { get: () => existingCampaign() },
+  });
+  const resClear = await hClear.handleAdminUpdateCampaign(REQ(), { DATABASE_URL: 'x' }, 'c1');
+  assert.equal(resClear.__status, 200, 'optional null still clears');
+  assert.deepEqual(
+    cClear.repo.find((c) => c[0] === 'update')[2],
+    { summary_fa: null, body_fa: '' },
+    'summary clears to NULL, body clears to empty string',
+  );
+
   // Happy path: partial patch passes only validated fields to the repo.
   const { handlers: hOk, calls } = buildHandlers({
     body: { title_en: 'New Title', image_url: 'https://cdn.example.com/x.png' },
-    repo: { get: () => existingCampaign() },
+    repo: {
+      get: () => existingCampaign(),
+      update: (id, fields) => ({ ...existingCampaign(), ...fields, registration_count: 9 }),
+    },
   });
   const resOk = await hOk.handleAdminUpdateCampaign(REQ(), { DATABASE_URL: 'x' }, 'c1');
   assert.equal(resOk.__status, 200);
+  assert.equal(resOk.__json.campaign.registration_count, 9, 'M-2: repo registration_count passes through untouched');
   const updateCall = calls.repo.find((c) => c[0] === 'update');
   assert.equal(updateCall[1], 'c1');
   assert.deepEqual(updateCall[2], { title_en: 'New Title', image_url: 'https://cdn.example.com/x.png' });
@@ -505,10 +566,17 @@ test('CAMA-25: state machine — publish/stop/resume legal, invalid transitions 
     ['STOPPED', 'PUBLISHED', 200],
   ];
   for (const [from, to, expected] of legal) {
-    const { handlers, calls } = buildHandlers({ body: { status: to }, repo: { get: () => existingCampaign({ status: from }) } });
+    const { handlers, calls } = buildHandlers({
+      body: { status: to },
+      repo: {
+        get: () => existingCampaign({ status: from }),
+        setStatus: (id, s) => ({ ...existingCampaign({ status: s }), registration_count: 11 }),
+      },
+    });
     const res = await handlers.handleAdminSetCampaignStatus(REQ(), { DATABASE_URL: 'x' }, 'c1');
     assert.equal(res.__status, expected, `${from} → ${to}`);
     assert.equal(calls.repo.find((c) => c[0] === 'setStatus')[2], to);
+    assert.equal(res.__json.campaign.registration_count, 11, 'M-2: live count passes through on status change');
   }
 
   const illegal = [
@@ -519,6 +587,7 @@ test('CAMA-25: state machine — publish/stop/resume legal, invalid transitions 
   const resSame = await hSame.handleAdminSetCampaignStatus(REQ(), { DATABASE_URL: 'x' }, 'c1');
   assert.equal(resSame.__status, 200, 'same-status is an idempotent no-op');
   assert.equal(resSame.__json.campaign.status, 'STOPPED');
+  assert.equal(resSame.__json.campaign.registration_count, 3, 'M-2: idempotent path returns the stored live count');
 
   const { handlers: hIll } = buildHandlers({ body: { status: 'STOPPED' }, repo: { get: () => existingCampaign({ status: 'DRAFT' }) } });
   const resIll = await hIll.handleAdminSetCampaignStatus(REQ(), { DATABASE_URL: 'x' }, 'c1');
@@ -645,6 +714,103 @@ test('CAMA-28: CSV export — BOM, exact header, quote escaping, formula-injecti
   // Nulls render as empty cells: first_name + last_name both null → ",,,".
   assert.ok(lines[2].includes(',,,'),
     `null name fields → empty cells (got row: ${lines[2]})`);
+});
+
+// ── CSV CR/LF regression (audit M-3) ────────────────────────────────────────
+// A naive split('\n') would split INSIDE quoted fields, so these helpers
+// track quote state the way a real CSV consumer (Excel / Sheets / parsers) does.
+
+function splitCsvRecords(text) {
+  const records = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') inQ = !inQ;
+    if (ch === '\n' && !inQ) { records.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.length) records.push(cur);
+  return records;
+}
+
+function parseCsvRow(line) {
+  const cells = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch; // embedded CR/LF/comma stay inside the cell
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { cells.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  cells.push(cur);
+  return cells;
+}
+
+test('CAMA-28b: CSV CR/LF regression (M-3) — records never split, formulas never executable', async () => {
+  // Crafted Telegram profile names: mid-field CR (the audit case x\r=2+5),
+  // mid-field LF, dangerous leading chars with embedded CR/LF, mixed quotes.
+  const crafted = [
+    'x\r=2+5',                                // audit M-3 regression case
+    'x\n=2+5',                                // LF mid-field
+    '\r=2+5',                                 // leading CR → quote-prefixed text
+    '=2+5\rcmd',                              // leading '=' with embedded CR
+    '-2+5\r=SUM(1)',                          // leading '-'
+    '@echo\rcmd',                             // leading '@'
+    '\t=2+5',                                 // leading tab
+    'a"\rb',                                  // quote + CR mixed mid-field
+    '=HYPERLINK("http://evil","x")\rINJECT',  // quote + CR + classic formula
+    'plain',                                  // control row untouched
+  ];
+  const { handlers: h } = buildHandlers({
+    repo: {
+      get: () => existingCampaign(),
+      registrations: () => ({
+        items: crafted.map((name, i) => ({
+          id: i + 1, telegram_id: String(100 + i), username: null, first_name: name,
+          last_name: null, registered_at: PAST,
+        })),
+        total: crafted.length, page: 1, limit: 1000, totalPages: 1,
+      }),
+    },
+  });
+  const res = await h.handleAdminExportRegistrations(REQ(), { DATABASE_URL: 'x' }, 'c1');
+  assert.equal(res.status, 200);
+  const rawBytes = new Uint8Array(await res.arrayBuffer());
+  const text = new TextDecoder('utf-8').decode(rawBytes); // strips the BOM
+
+  // One record per registration: neither CR nor LF may create a new record.
+  const records = splitCsvRecords(text);
+  assert.equal(records.length, crafted.length + 1, 'exactly header + one record per registration — CR/LF never split a record');
+  assert.equal(records[0], 'Registration ID,Telegram ID,Username,First Name,Last Name,Registered At', 'header intact');
+
+  for (let i = 0; i < crafted.length; i++) {
+    const cells = parseCsvRow(records[i + 1]);
+    assert.equal(cells.length, 6, `row ${i + 1} keeps exactly 6 cells`);
+    // Neutralization contract: a leading dangerous char gained the ' prefix;
+    // everything else round-trips byte-identically (embedded CR/LF included).
+    const expected = /^[=+\-@\t\r]/.test(crafted[i]) ? `'${crafted[i]}` : crafted[i];
+    assert.equal(cells[3], expected, `first_name round-trips: ${JSON.stringify(crafted[i])}`);
+  }
+
+  // Hard invariant: NO parsed cell in ANY data row starts with a character a
+  // spreadsheet app could interpret as a formula start (=, +, -, @, tab, CR).
+  for (let i = 1; i < records.length; i++) {
+    for (const cell of parseCsvRow(records[i])) {
+      assert.ok(!/^[=+\-@\t\r]/.test(cell), `cell starts with a formula char: ${JSON.stringify(cell)}`);
+    }
+  }
+
+  // The audit case specifically: the CR survives INSIDE the quoted field of
+  // ONE record — no second record, no executable "=2+5" fragment.
+  assert.ok(records[1].includes('"x\r=2+5"'), 'the CR field is emitted quoted');
+  assert.equal(parseCsvRow(records[1])[3], 'x\r=2+5');
 });
 
 // ── Audit logging ─────────────────────────────────────────────────────────

@@ -418,6 +418,10 @@ export function createCampaignsRepository(deps) {
    * a row that gets soft-deleted between the controller's read and this UPDATE
    * may still be written — harmless by design: DELETED rows never surface in
    * any user or admin list again except through this admin module itself.
+   *
+   * The response is re-read via getCampaignById (canonical _ADMIN_SELECT_COLUMNS)
+   * because PostgreSQL cannot compute the registration_count subquery inside
+   * RETURNING — the RETURNING row is only a fallback (audit M-2).
    */
   async function updateCampaign(env, campaignId, fields) {
     const b = _newSetBuilder();
@@ -441,7 +445,8 @@ export function createCampaignsRepository(deps) {
       [...b.params, String(campaignId)],
     );
     const row = (result.rows || [])[0];
-    return row ? _rowToAdminCampaign(row) : null;
+    if (!row) return null;
+    return (await getCampaignById(env, campaignId)) || _rowToAdminCampaign(row);
   }
 
   /**
@@ -449,6 +454,10 @@ export function createCampaignsRepository(deps) {
    * guard makes DELETED terminal AT THE DATABASE LEVEL — a zombie resurrection
    * is impossible even under a concurrent race. Returns the updated row or
    * null (missing, already deleted, or raced delete).
+   *
+   * The response is re-read via getCampaignById (canonical _ADMIN_SELECT_COLUMNS)
+   * because PostgreSQL cannot compute the registration_count subquery inside
+   * RETURNING — the RETURNING row is only a fallback (audit M-2).
    */
   async function setCampaignStatus(env, campaignId, status) {
     const result = await queryDb(
@@ -465,7 +474,8 @@ export function createCampaignsRepository(deps) {
       [String(campaignId), String(status)],
     );
     const row = (result.rows || [])[0];
-    return row ? _rowToAdminCampaign(row) : null;
+    if (!row) return null;
+    return (await getCampaignById(env, campaignId)) || _rowToAdminCampaign(row);
   }
 
   /**
