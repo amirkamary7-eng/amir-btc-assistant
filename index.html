@@ -141,6 +141,7 @@
     <link rel="preconnect" href="https://scanner.tradingview.com">
     <link rel="stylesheet" href="wallet.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="referral.css" media="print" onload="this.media='all'">
+    <link rel="stylesheet" href="campaigns.css" media="print" onload="this.media='all'">
     <!-- WARM-START: Preconnect to Worker API for faster first API call -->
     <link rel="preconnect" href="https://amir-btc-assistant-api-production.amirkamari9939.workers.dev" crossorigin>
     <link rel="dns-prefetch" href="https://telegram.org">
@@ -206,9 +207,17 @@
                 <img src="assets/banner-channel.webp" alt="AMIRBTC کانال" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
                 <button class="hero-cta hero-cta--channel-v2" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')" data-i18n="join_channel">عضویت در کانال</button>
             </div>
+            <!-- 3. Exchange Campaigns banner (1280x588 → object-fit:cover via
+                 campaigns.css .hero-slide-img--ratio, ~4%/side crop instead of
+                 stretch; no CTA overlay per approved design; opens the
+                 CampaignsApp fullscreen list) -->
+            <div class="hero-slide" data-slide="2" onclick="if(window.CampaignsApp)CampaignsApp.open()" role="button" tabindex="0" data-i18n-aria-label="cmp_hero_aria" aria-label="کمپین‌های صرافی AmirBTC" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();if(window.CampaignsApp)CampaignsApp.open()}">
+                <img src="assets/banner-campian.webp" alt="کمپین‌های صرافی | Exchange Campaigns" class="hero-slide-img hero-slide-img--ratio" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.background='#0B1220'">
+            </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>
                 <span class="hero-dot" data-dot="1"></span>
+                <span class="hero-dot" data-dot="2"></span>
             </div>
         </div>
 
@@ -1595,6 +1604,9 @@
     <script src="cosmetics.js" defer></script>
     <!-- i18n.js must load before app.js and any script that calls t() at runtime -->
     <script src="i18n.js" defer></script>
+    <!-- campaigns.js must load AFTER i18n.js (uses the global t()) and
+         BEFORE app.js. Registers window.CampaignsApp for the hero slide. -->
+    <script src="campaigns.js" defer></script>
     <!-- PERFORMANCE: admin.js lazy-loaded via dynamic import in openAdminPanel() -->
     <script src="app.js" defer></script>
     <!-- #endregion -->
@@ -2507,6 +2519,10 @@
 
     <!-- Referral Center Full Page -->
     <div id="referral-full-page" class="referral-full-page"></div>
+
+    <!-- Exchange Campaigns Full Page (list overlay; the detail overlay is
+         created dynamically by campaigns.js on first open) -->
+    <div id="campaigns-full-page" class="campaigns-full-page"></div>
 
     <!-- ────────────────────────────────────────────────────────────
          FLOATING MEMBERSHIP STATUS CARD (Task 37 redesign)

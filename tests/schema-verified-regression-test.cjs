@@ -23,6 +23,8 @@ const REPO_FILES = [
   // Phase 1 additions — previously missing from the regression suite:
   'src/repositories/analyses.js',
   'src/repositories/notification_platform.js',
+  // Stage 5B — exchange campaigns repository:
+  'src/repositories/campaigns.js',
 ];
 
 // ============================================================================

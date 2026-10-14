@@ -25,9 +25,9 @@
 --
 -- Source-of-truth files mined for DDL:
 --   src/repositories/{admin,alerts,alert_economy,analyses,app_content,
---     calendar_reminders,cosmetics,membership,news_articles,notification_platform,
---     notifications,referrals,reward_center,reward_purchases,tickets,users,
---     wallet,watchlist,wheel,advertisements}.js
+--     calendar_reminders,campaigns,cosmetics,membership,news_articles,
+--     notification_platform,notifications,referrals,reward_center,
+--     reward_purchases,tickets,users,wallet,watchlist,wheel,advertisements}.js
 --   scripts/{membership-schema,membership-cosmetics-schema,
 --     membership-requirements-schema,membership-rules-schema,
 --     stabilization_indexes,groq-model-update}.sql
@@ -37,7 +37,7 @@
 --      in the repository code — only references)
 --   docs/DATABASE_SCHEMA.md (canonical schema reference)
 --
--- Tables covered (47 total, alphabetical):
+-- Tables covered (49 total, alphabetical):
 --   1.  ad_campaigns
 --   2.  ad_channels
 --   3.  ad_messages
@@ -69,22 +69,24 @@
 --   29. notifications
 --   30. price_alerts
 --   31. profile_cosmetics
---   32. referral_reward_tiers
---   33. referrals
---   34. reward_emergency_controls
---   35. reward_library
---   36. reward_purchases
---   37. ticket_replies
---   38. tickets
---   39. token_balances
---   40. token_transactions
---   41. user_cosmetic_ownership
---   42. users
---   43. watchlist_items
---   44. wheel_config
---   45. wheel_history
---   46. wheel_rewards
---   47. wheel_spins
+--   32. promo_campaigns
+--   33. promo_campaign_registrations
+--   34. referral_reward_tiers
+--   35. referrals
+--   36. reward_emergency_controls
+--   37. reward_library
+--   38. reward_purchases
+--   39. ticket_replies
+--   40. tickets
+--   41. token_balances
+--   42. token_transactions
+--   43. user_cosmetic_ownership
+--   44. users
+--   45. watchlist_items
+--   46. wheel_config
+--   47. wheel_history
+--   48. wheel_rewards
+--   49. wheel_spins
 --
 -- Reconciliation note vs. prior audit (worklog phase1-step0-conn, which found 46):
 --   * Excluded `alerts` — that name appears ONLY in a buggy cascade DELETE in
@@ -338,6 +340,39 @@ CREATE TABLE IF NOT EXISTS exchange_campaigns (
 CREATE INDEX IF NOT EXISTS idx_ec_exchange ON exchange_campaigns (exchange_name);
 CREATE INDEX IF NOT EXISTS idx_ec_active   ON exchange_campaigns (active);
 CREATE INDEX IF NOT EXISTS idx_ec_refcode  ON exchange_campaigns (referral_code);
+
+
+-- ── promo_campaigns (Exchange Campaigns — Stage 5B) ─────────────────────────
+-- User-facing promotional campaigns (hero 3rd slide → fullscreen list/detail).
+-- DELIBERATELY SEPARATE from:
+--   • `campaigns` — the reward_center config table (wheel/referral/mission
+--     boosters, owned by src/repositories/reward_center.js); NOT touched here.
+--   • `exchange_campaigns` — dead legacy table (no code references); NOT
+--     touched here, no data migration from it.
+-- Lifecycle: DRAFT (invisible) → PUBLISHED (user-visible) → STOPPED (visible,
+--   registration closed) → DELETED (soft-deleted, invisible). Effective state
+--   for users is computed server-side in UTC: UPCOMING / ACTIVE / ENDED.
+CREATE TABLE IF NOT EXISTS promo_campaigns (
+  id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title_fa    TEXT NOT NULL,
+  title_en    TEXT NOT NULL,
+  summary_fa  TEXT,
+  summary_en  TEXT,
+  body_fa     TEXT NOT NULL DEFAULT '',
+  body_en     TEXT NOT NULL DEFAULT '',
+  image_url   TEXT,
+  starts_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ends_at     TIMESTAMPTZ,
+  status      TEXT NOT NULL DEFAULT 'DRAFT'
+              CHECK (status IN ('DRAFT', 'PUBLISHED', 'STOPPED', 'DELETED')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- List/detail query path: only PUBLISHED/STOPPED rows are user-visible
+-- (DRAFT/DELETED never leave the server).
+CREATE INDEX IF NOT EXISTS idx_promo_campaigns_list
+  ON promo_campaigns (starts_at DESC) WHERE status IN ('PUBLISHED', 'STOPPED');
 
 
 -- ── membership_admins ──────────────────────────────────────────────────────
@@ -955,6 +990,25 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_user_id ON watchlist_items (user_id);
 
 
+-- ── promo_campaign_registrations (Exchange Campaigns — Stage 5B) ────────────
+-- One row per (campaign, user). The UNIQUE constraint is the HARD idempotency
+-- and concurrency guarantee: two concurrent POST /api/campaigns/:id/register
+-- calls for the same pair collapse into one row via
+-- INSERT ... ON CONFLICT (campaign_id, telegram_id) DO NOTHING.
+-- No ON DELETE CASCADE on campaign_id: registrations survive campaign
+-- soft-delete (status='DELETED') and block accidental hard-delete (FK RESTRICT,
+-- the default) — registration history is never silently destroyed.
+CREATE TABLE IF NOT EXISTS promo_campaign_registrations (
+  id            SERIAL PRIMARY KEY,
+  campaign_id   TEXT NOT NULL REFERENCES promo_campaigns(id),
+  telegram_id   VARCHAR(64) NOT NULL REFERENCES users(telegram_id),
+  registered_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (campaign_id, telegram_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pcr_user ON promo_campaign_registrations (telegram_id);
+
+
 -- ── price_alerts ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS price_alerts (
   id                  VARCHAR(64) PRIMARY KEY,
@@ -1412,6 +1466,10 @@ CREATE TRIGGER trg_ma_updated BEFORE UPDATE ON membership_admins
 
 DROP TRIGGER IF EXISTS trg_ec_updated ON exchange_campaigns;
 CREATE TRIGGER trg_ec_updated BEFORE UPDATE ON exchange_campaigns
+  FOR EACH ROW EXECUTE FUNCTION membership_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_promo_campaigns_updated ON promo_campaigns;
+CREATE TRIGGER trg_promo_campaigns_updated BEFORE UPDATE ON promo_campaigns
   FOR EACH ROW EXECUTE FUNCTION membership_set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_cosmetics_updated ON profile_cosmetics;

@@ -32,6 +32,7 @@ const REPOS = [
   { file: 'src/repositories/alert_economy.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
   { file: 'src/repositories/reward_purchases.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
   { file: 'src/repositories/notification_platform.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
+  { file: 'src/repositories/campaigns.js', flag: '_schemaVerified', func: 'ensureSchema', pattern: 'return' },
 ];
 
 for (const repo of REPOS) {

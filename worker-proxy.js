@@ -42,6 +42,15 @@ import { createAdvertisementsHandlers } from './src/controllers/advertisements.j
 import { createNotificationService } from './src/services/notification_service.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
+// Exchange Campaigns (Stage 5B) — user-facing promo campaigns API.
+// NOTE: distinct from reward_center's `campaigns` config table and from the
+// dead legacy `exchange_campaigns` table; see src/repositories/campaigns.js.
+import { createCampaignsRepository } from './src/repositories/campaigns.js';
+import { createCampaignsHandlers } from './src/controllers/campaigns.js';
+// Exchange Campaigns (Stage 6B) — admin panel backend for the promo tables.
+import { createCampaignsAdminHandlers } from './src/controllers/campaigns_admin.js';
+// 5C-L4 fix: shared server-side image_url validator (HTTPS-only, SSRF-safe).
+import { isValidImageUrl } from './src/repositories/advertisements.js';
 
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
@@ -4047,6 +4056,19 @@ const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOp
 // checks the DB admins table to detect DB-added admins (not just env super admin).
 const adminRepo = createAdminRepository({ queryDb, queryDbDirect, normalizeOptionalString, isAdminTelegramId });
 
+// ── Campaigns (Exchange Campaigns — Stage 5B user API) ──────────────────────
+const campaignsRepo = createCampaignsRepository({ queryDb, isDatabaseConfigured });
+const campaignsHandlers = createCampaignsHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  campaignsRepo,
+  isUserRateLimited,
+  ensureUserRow,
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MembershipGateway — central membership decision authority.
 // Created here (after all helper functions are defined) so it can wire to:
@@ -4231,6 +4253,28 @@ const rewardCenterHandlers = createRewardCenterHandlers({
   isUserRateLimited,
   // WALLET-CONSISTENCY H1 FIX: invalidate reward-per-invite cache after tier mutations
   invalidateRewardPerInviteCache,
+});
+//#endregion
+
+// ── Exchange Campaigns admin handlers (Stage 6B) ──
+// Same campaignsRepo as the user API (extended with the admin functions);
+// requireAdmin provides the campaigns.view / campaigns.manage granular
+// permission gates. Mutations are rate-limited + audited inside the controller.
+const campaignsAdminHandlers = createCampaignsAdminHandlers({
+  jsonResponse,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  isUserRateLimited,
+  campaignsRepo,
+  adminRepo,
+  // CSV export security headers (membership.js pattern): withCors for the
+  // cross-origin admin download + attachment + no-store + nosniff.
+  withCors,
+  // 5C-L4 fix: server-side image_url validation (advertisements.js validator).
+  isValidImageUrl,
 });
 //#endregion
 
@@ -8081,7 +8125,7 @@ export default {
       //   - GET /api/membership/rules (rules document — like /api/content)
       //   - GET /api/membership/requirement (requirement config)
       //   - GET /api/calendar/events (public calendar data)
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|campaigns|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
 
       // AP-1 FIX (Security Batch 2): gate on !isDevMode(env) instead of the old
       // prod-only check — staging is gated like production and an unknown/unset
@@ -8611,6 +8655,49 @@ export default {
       }
       // ═══════════════════════════════════════════════════════════════════════
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // EXCHANGE CAMPAIGNS — Admin routes (Stage 6B)
+      // Reads gated by `campaigns.view`, mutations by `campaigns.manage`
+      // (enforced in handlers via requireAdmin). Soft-delete only — DELETED is
+      // terminal and registrations are never cascade-removed. NOT part of
+      // PROTECTED_PATHS: /api/admin/* is admin-authenticated, not
+      // channel-membership-gated (same as every other admin route).
+      // ═══════════════════════════════════════════════════════════════════════
+
+      // ── Admin: list + create ──
+      if (request.method === 'GET' && url.pathname === '/api/admin/campaigns') {
+        return campaignsAdminHandlers.handleAdminListCampaigns(request, env);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/admin/campaigns') {
+        return campaignsAdminHandlers.handleAdminCreateCampaign(request, env);
+      }
+
+      // ── Admin: detail / update / soft-delete (single segment — anchored, so
+      //    the /status and /registrations sub-paths below never match here) ──
+      if (/^\/api\/admin\/campaigns\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname)) {
+        const campaignId = decodeURIComponent(url.pathname.split('/').pop());
+        if (request.method === 'GET') return campaignsAdminHandlers.handleAdminGetCampaign(request, env, campaignId);
+        if (request.method === 'PUT' || request.method === 'PATCH') return campaignsAdminHandlers.handleAdminUpdateCampaign(request, env, campaignId);
+        if (request.method === 'DELETE') return campaignsAdminHandlers.handleAdminDeleteCampaign(request, env, campaignId);
+      }
+
+      // ── Admin: status transitions (publish / stop / resume; POST alias) ──
+      if ((request.method === 'PUT' || request.method === 'POST') && /^\/api\/admin\/campaigns\/[A-Za-z0-9_-]{1,64}\/status$/.test(url.pathname)) {
+        const campaignId = decodeURIComponent(url.pathname.split('/')[4]);
+        return campaignsAdminHandlers.handleAdminSetCampaignStatus(request, env, campaignId);
+      }
+
+      // ── Admin: registrations (paginated list + CSV export) ──
+      if (request.method === 'GET' && /^\/api\/admin\/campaigns\/[A-Za-z0-9_-]{1,64}\/registrations$/.test(url.pathname)) {
+        const campaignId = decodeURIComponent(url.pathname.split('/')[4]);
+        return campaignsAdminHandlers.handleAdminListRegistrations(request, env, campaignId);
+      }
+      if (request.method === 'GET' && /^\/api\/admin\/campaigns\/[A-Za-z0-9_-]{1,64}\/registrations\/export$/.test(url.pathname)) {
+        const campaignId = decodeURIComponent(url.pathname.split('/')[4]);
+        return campaignsAdminHandlers.handleAdminExportRegistrations(request, env, campaignId);
+      }
+      // ═══════════════════════════════════════════════════════════════════════
+
       if (request.method === 'POST' && url.pathname === '/api/sessions/heartbeat') {
         return await sessionHandlers.handleHeartbeat(request, env);
       }
@@ -8725,6 +8812,27 @@ export default {
       // DEPRECATED: /api/referrals/tokens — use /api/wallet instead
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
         return await walletHandlers.handleGetWallet(request, env);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // EXCHANGE CAMPAIGNS — user routes (Stage 5B)
+      // Auth: PROTECTED_PATHS gate above (initData + channel membership in
+      // non-dev) AND per-handler authenticateTelegramRequest (defense-in-depth).
+      // No KV cache by design (per-user `registered` flag — see controller).
+      // Admin/CRUD endpoints are Stage 6 — deliberately absent.
+      // ═══════════════════════════════════════════════════════════════════════
+      if (request.method === 'GET' && url.pathname === '/api/campaigns') {
+        return campaignsHandlers.handleList(request, env);
+      }
+
+      if (request.method === 'GET' && /^\/api\/campaigns\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname)) {
+        const campaignId = url.pathname.split('/').pop();
+        return campaignsHandlers.handleGetDetail(request, env, campaignId);
+      }
+
+      if (request.method === 'POST' && /^\/api\/campaigns\/[A-Za-z0-9_-]{1,64}\/register$/.test(url.pathname)) {
+        const campaignId = url.pathname.split('/')[3];
+        return campaignsHandlers.handleRegister(request, env, campaignId);
       }
 
       // Wallet API Routes

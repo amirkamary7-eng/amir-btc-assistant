@@ -96,7 +96,8 @@ BEGIN;
 -- them is a defense-in-depth measure that closes the PostgREST exposure
 -- surface without affecting any application code path.
 --
--- This affects ALL 48 tables in public schema:
+-- This affects ALL 50 tables in public schema (49 defined in
+-- 00-migrate.sql + alerts, the live-DB legacy table):
 --   ad_campaigns, ad_channels, ad_messages, ad_popups, admins, alert_config,
 --   alert_quota, analyses, app_content, calendar_reminders, campaigns,
 --   daily_checkin_streaks, deleted_users, exchange_campaigns,
@@ -105,7 +106,8 @@ BEGIN;
 --   membership_users, mission_progress, mission_rewards, news_articles,
 --   notification_broadcasts, notification_queue, notification_settings,
 --   notification_templates, notifications, pending_refunds, price_alerts,
---   profile_cosmetics, referral_reward_tiers, referrals,
+--   profile_cosmetics, promo_campaign_registrations, promo_campaigns,
+--   referral_reward_tiers, referrals,
 --   reward_emergency_controls, reward_library, reward_purchases,
 --   ticket_replies, tickets, token_balances, token_transactions,
 --   user_cosmetic_ownership, users, watchlist_items, wheel_config,
@@ -117,6 +119,21 @@ BEGIN;
 -- NOTE: This also revokes privileges on the 2 dead schema tables
 -- (exchange_campaigns, membership_admins) — which is fine since no code
 -- references them anyway.
+--
+-- RE-RUN NOTE (Stage 6B doc fix): The Exchange Campaigns tables
+-- (promo_campaigns, promo_campaign_registrations) were added to
+-- 00-migrate.sql by Stage 5B (commit 990a0f0a). The REVOKE statements in
+-- this file are schema-wide (ALL TABLES IN SCHEMA public), so any table
+-- that ALREADY existed when this script last ran is covered — but tables
+-- added AFTERWARD (like the two campaign tables) receive the Supabase
+-- default anon/authenticated grants at creation time.
+--
+-- ➜ RUNBOOK: after applying the campaigns migration (00-migrate.sql) to a
+--   target environment (staging/production), RE-RUN this script there so the
+--   two new tables get the anon/authenticated grants stripped. The script is
+--   fully idempotent — running it again on already-revoked tables is a no-op
+--   and safe. No new privilege decisions are introduced by the re-run: the
+--   same schema-wide REVOKE applies to every table.
 --
 -- NOTE: This does NOT revoke:
 --   * USAGE on schema public itself (only table DML)
