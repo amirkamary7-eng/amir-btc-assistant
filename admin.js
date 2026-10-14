@@ -136,6 +136,7 @@ const ADMIN_SECTION_PERMS = {
     'notification-center': ['notifications.send','notifications.manage'],
     'alert-economy':       ['market.alerts'],
     'advertisements':      ['ads.banners','ads.manage'],
+    'campaigns':            ['campaigns.view','campaigns.manage'],
     'membership':          null,  // all admins can manage membership
     'system-controls':     ['system.settings','system.maintenance'],
     'system-health':       ['system.settings'],
@@ -535,6 +536,7 @@ const _adminSectionLabels = {
     'notification-center': t('adm_sidebar_notification_center'),
     'alert-economy': t('adm_sidebar_alert_economy'),
     'advertisements': t('adm_sidebar_ads'),
+    'campaigns': t('adm_sidebar_campaigns'),
     'system-controls': t('adm_sidebar_system_control'),
     'system-health': t('adm_sidebar_health'),
     'logs': t('adm_sidebar_logs'),
@@ -684,6 +686,7 @@ function switchAdminSection(section, btn) {
         case 'notification-center': loadNpOverview(); break;
         case 'alert-economy': loadAlertEconomyDashboard(); loadAlertEconomyConfigs(); break;
         case 'advertisements': loadAdvertisementsOverview(); break;
+        case 'campaigns': loadAdminCampaigns(1); break;
         case 'membership': loadAdminMembership(); break;
         case 'system-controls': loadMaintenanceSettings(); break;
         case 'system-health': loadAdminSystemHealth(); break;
@@ -4264,6 +4267,519 @@ async function loadAdminMembership() {
         if (container) container.innerHTML = '<div class="admin-empty">در حال بارگذاری ماژول عضویت...</div>';
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// EXCHANGE CAMPAIGNS (promo campaigns) — Admin Section
+// Contract (src/controllers/campaigns_admin.js):
+//   GET    /api/admin/campaigns?page&limit&status&search → { items, total, page, limit, totalPages, status:'success' }
+//   POST   /api/admin/campaigns                         → create (title_fa/en*, starts_at* ISO-8601+tz, status DRAFT|PUBLISHED)
+//   PUT    /api/admin/campaigns/:id                     → partial update (status NOT updatable here)
+//   PUT    /api/admin/campaigns/:id/status               → { status: PUBLISHED|STOPPED } (publish/stop/resume)
+//   DELETE /api/admin/campaigns/:id                     → soft delete (DELETED terminal)
+//   GET    /api/admin/campaigns/:id/registrations        → { items, total, page, ... }
+//   GET    /api/admin/campaigns/:id/registrations/export → CSV (blob download)
+//   POST   /api/admin/campaigns/upload-image             → WebP-only upload → { url }
+// Permissions: reads = campaigns.view, writes = campaigns.manage.
+// ═══════════════════════════════════════════════════════════════════════
+
+// [CMP-PURE-START] browser-free pure helpers (unit-tested in
+// tests/campaigns-admin-panel-test.cjs — extracted between these markers)
+function _cmpImageUploadPlan(file, opts) {
+    var o = opts || {};
+    var maxStore = o.maxStoreBytes || 512000;      // KV storage cap (500KB)
+    var maxInput = o.maxInputBytes || 15728640;    // 15MB raw input cap
+    if (!file) return { ok: false, code: 'NO_FILE' };
+    if (file.size > maxInput) return { ok: false, code: 'TOO_LARGE_INPUT' };
+    var type = String(file.type || '').toLowerCase();
+    if (type === 'image/webp') {
+        // Valid WebP within the cap passes through untouched (no needless
+        // re-encode → no avoidable quality loss); oversized WebP is converted.
+        return { ok: true, mode: file.size <= maxStore ? 'passthrough' : 'convert' };
+    }
+    if (type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png') {
+        return { ok: true, mode: 'convert' };
+    }
+    // SVG (and everything else) is explicitly rejected — no server-side
+    // conversion exists and SVG is not a rasterizable upload target here.
+    return { ok: false, code: 'UNSUPPORTED_TYPE', type: type };
+}
+
+// Quality ladder for canvas WebP encoding: starts visually-safe, one
+// cautious step down, hard floor 0.65 (below this is destructive). Dimensions
+// are NEVER changed — only quality is adjusted to fit the storage cap.
+var CMP_WEBP_QUALITIES = [0.85, 0.75, 0.65];
+
+// Status → allowed admin actions (mirrors controller ALLOWED_TRANSITIONS:
+// DRAFT→PUBLISHED/DELETED, PUBLISHED→STOPPED/DELETED, STOPPED→PUBLISHED/DELETED).
+function _cmpAllowedActions(status) {
+    switch (status) {
+        case 'DRAFT': return ['publish', 'delete'];
+        case 'PUBLISHED': return ['stop', 'delete'];
+        case 'STOPPED': return ['publish', 'delete'];
+        default: return []; // DELETED is terminal
+    }
+}
+
+// Explicit status→i18n-key map (static, greppable — no dynamic key
+// concatenation, so the p0 i18n class-guard can verify every literal).
+var CMP_STATUS_KEYS = {
+    DRAFT: 'adm_camp_status_DRAFT',
+    PUBLISHED: 'adm_camp_status_PUBLISHED',
+    STOPPED: 'adm_camp_status_STOPPED',
+    DELETED: 'adm_camp_status_DELETED',
+};
+
+// datetime-local input value ("YYYY-MM-DDTHH:mm") → strict ISO 8601 with
+// timezone ("...:ss.mmmZ") — exactly what the controller's ISO_8601_RE expects.
+function _cmpFromLocalInput(value) {
+    if (!value) return '';
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString();
+}
+
+// ISO 8601 (UTC) → datetime-local input value (browser-local timezone).
+function _cmpToLocalInput(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+        'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+// Compact display date for tables (locale-aware, no seconds).
+function _cmpFmtDate(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    try { return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
+    catch (e) { return iso.slice(0, 10); }
+}
+// [CMP-PURE-END]
+
+var _cmpListState = { page: 1, limit: 10, status: '', search: '', total: 0, totalPages: 1, token: 0 };
+var _cmpEditingId = null;
+
+function _cmpStatusBadge(status) {
+    // Uses the panel's shared badge system (adminBadge) for visual consistency.
+    var color = { DRAFT: 'gray', PUBLISHED: 'green', STOPPED: 'orange', DELETED: 'red' }[status] || 'gray';
+    return adminBadge(t(CMP_STATUS_KEYS[status] || CMP_STATUS_KEYS.DRAFT), color);
+}
+
+async function loadAdminCampaigns(page) {
+    var box = document.getElementById('cmp-admin-section');
+    if (!box) return;
+    var token = ++_cmpListState.token;
+    if (page) _cmpListState.page = page;
+    // Loading state (distinguishable from empty/error)
+    box.innerHTML = '<div class="adm-loading">' + adminEscapeHtml(t('adm_camp_loading')) + '</div>';
+    var canManage = _adminHasPerm('campaigns.manage');
+    var params = '?page=' + _cmpListState.page + '&limit=' + _cmpListState.limit;
+    if (_cmpListState.status) params += '&status=' + encodeURIComponent(_cmpListState.status);
+    if (_cmpListState.search) params += '&search=' + encodeURIComponent(_cmpListState.search);
+    try {
+        var data = await adminApiFetch('/api/admin/campaigns' + params);
+        if (token !== _cmpListState.token) return; // stale response — a newer section load won
+        if (!data || data.status !== 'success' || !Array.isArray(data.items)) {
+            throw new Error((data && data.message) || 'bad response');
+        }
+        _cmpListState.total = data.total || 0;
+        _cmpListState.totalPages = data.totalPages || 1;
+        renderCampaignsToolbar(box, canManage);
+        renderCampaignsList(box, data.items, canManage);
+    } catch (e) {
+        if (token !== _cmpListState.token) return;
+        // Error state (distinguishable, with retry)
+        box.innerHTML =
+            '<div class="rc-card"><div class="admin-empty">' +
+            '<div style="margin-bottom:8px">' + adminEscapeHtml(t('adm_camp_load_error')) + '</div>' +
+            '<div style="opacity:.7;font-size:12px;margin-bottom:12px">' + adminEscapeHtml(e.message || String(e)) + '</div>' +
+            '<button class="adm-btn adm-btn-primary" onclick="loadAdminCampaigns()">' + adminEscapeHtml(t('adm_camp_retry')) + '</button>' +
+            '</div></div>';
+    }
+}
+
+function renderCampaignsToolbar(box, canManage) {
+    var el = document.getElementById('cmp-toolbar');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'cmp-toolbar';
+        box.appendChild(el);
+    }
+    var statuses = ['', 'DRAFT', 'PUBLISHED', 'STOPPED', 'DELETED'];
+    var opts = statuses.map(function (s) {
+        var label = s ? t(CMP_STATUS_KEYS[s]) : t('adm_camp_filter_all');
+        var sel = _cmpListState.status === s ? ' selected' : '';
+        return '<option value="' + adminEscapeHtml(s) + '"' + sel + '>' + adminEscapeHtml(label) + '</option>';
+    }).join('');
+    el.innerHTML =
+        '<div class="rc-toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+        '<input type="text" id="cmp-search" placeholder="' + adminEscapeHtml(t('adm_camp_search_ph')) + '" value="' + adminEscapeHtml(_cmpListState.search) + '" onkeydown="if(event.key===\'Enter\'){cmpSearchApply()}" style="flex:1;min-width:160px">' +
+        '<select id="cmp-status-filter" onchange="cmpFilterApply()">' + opts + '</select>' +
+        (canManage ? '<button class="adm-btn adm-btn-primary" onclick="campaignFormOpen(null)">' + adminEscapeHtml(t('adm_camp_new')) + '</button>' : '') +
+        '</div>' +
+        '<div id="cmp-form-card"></div>';
+}
+
+function cmpSearchApply() {
+    var el = document.getElementById('cmp-search');
+    _cmpListState.search = (el && el.value || '').trim().slice(0, 100);
+    _cmpListState.page = 1;
+    loadAdminCampaigns();
+}
+
+function cmpFilterApply() {
+    var el = document.getElementById('cmp-status-filter');
+    _cmpListState.status = el ? String(el.value || '') : '';
+    _cmpListState.page = 1;
+    loadAdminCampaigns();
+}
+
+function renderCampaignsList(box, items, canManage) {
+    var el = document.getElementById('cmp-list');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'cmp-list';
+        box.appendChild(el);
+    }
+    // Empty state (distinguishable)
+    if (!items.length) {
+        el.innerHTML = '<div class="rc-card"><div class="admin-empty">' +
+            '<div style="margin-bottom:4px">' + adminEscapeHtml(t('adm_camp_empty')) + '</div>' +
+            '<div style="opacity:.7;font-size:12px">' + adminEscapeHtml(t('adm_camp_empty_desc')) + '</div></div></div>';
+        return;
+    }
+    var rows = items.map(function (c) {
+        var actions = [];
+        var allowed = _cmpAllowedActions(c.status);
+        if (canManage && allowed.indexOf('publish') !== -1) {
+            actions.push('<button class="adm-btn-sm adm-btn-primary" onclick="campaignSetStatus(\'' + adminEscapeHtml(c.id) + '\',\'PUBLISHED\')">' +
+                adminEscapeHtml(c.status === 'STOPPED' ? t('adm_camp_resume') : t('adm_camp_publish')) + '</button>');
+        }
+        if (canManage && allowed.indexOf('stop') !== -1) {
+            actions.push('<button class="adm-btn-sm adm-btn-ghost" onclick="campaignSetStatus(\'' + adminEscapeHtml(c.id) + '\',\'STOPPED\')">' + adminEscapeHtml(t('adm_camp_stop')) + '</button>');
+        }
+        if (canManage && allowed.indexOf('delete') !== -1) {
+            actions.push('<button class="adm-btn-sm adm-btn-danger" onclick="campaignDelete(\'' + adminEscapeHtml(c.id) + '\')">' + adminEscapeHtml(t('adm_camp_delete')) + '</button>');
+        }
+        if (canManage && c.status !== 'DELETED') {
+            actions.push('<button class="adm-btn-sm adm-btn-ghost" onclick="campaignFormOpen(\'' + adminEscapeHtml(c.id) + '\')">' + adminEscapeHtml(t('adm_camp_edit')) + '</button>');
+        }
+        actions.push('<button class="adm-btn-sm adm-btn-ghost" onclick="campaignShowRegistrations(\'' + adminEscapeHtml(c.id) + '\')">' + adminEscapeHtml(t('adm_camp_regs')) + '</button>');
+        return '<tr>' +
+            '<td><div style="font-weight:600">' + adminEscapeHtml(c.title_fa || '') + '</div>' +
+            '<div style="opacity:.6;font-size:12px">' + adminEscapeHtml(c.title_en || '') + '</div></td>' +
+            '<td>' + _cmpStatusBadge(c.status) + '</td>' +
+            '<td style="white-space:nowrap">' + adminEscapeHtml(_cmpFmtDate(c.starts_at)) + '<br><span style="opacity:.6">→ ' + adminEscapeHtml(_cmpFmtDate(c.ends_at)) + '</span></td>' +
+            '<td style="text-align:center">' + Number(c.registration_count || 0) + '</td>' +
+            '<td style="white-space:nowrap">' + adminEscapeHtml(_cmpFmtDate(c.created_at)) + '</td>' +
+            '<td style="white-space:nowrap">' + actions.join(' ') + '</td>' +
+            '</tr>';
+    }).join('');
+    var pageControls = _cmpPageControls();
+    el.innerHTML = '<div class="adm-table-wrap"><table class="adm-table"><thead><tr>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_title')) + '</th>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_status')) + '</th>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_window')) + '</th>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_regs')) + '</th>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_created')) + '</th>' +
+        '<th>' + adminEscapeHtml(t('adm_camp_th_actions')) + '</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pageControls;
+}
+
+function _cmpPageControls() {
+    if (_cmpListState.totalPages <= 1) return '';
+    var cur = _cmpListState.page, total = _cmpListState.totalPages;
+    return '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:12px">' +
+        '<button class="adm-btn-sm adm-btn-ghost" ' + (cur <= 1 ? 'disabled' : '') + ' onclick="loadAdminCampaigns(' + (cur - 1) + ')">' + adminEscapeHtml(t('adm_camp_prev')) + '</button>' +
+        '<span style="opacity:.7;font-size:12px">' + adminEscapeHtml(t('adm_camp_page_of').replace('{page}', String(cur)).replace('{total}', String(total))) + '</span>' +
+        '<button class="adm-btn-sm adm-btn-ghost" ' + (cur >= total ? 'disabled' : '') + ' onclick="loadAdminCampaigns(' + (cur + 1) + ')">' + adminEscapeHtml(t('adm_camp_next')) + '</button>' +
+        '</div>';
+}
+
+function campaignFormOpen(id) {
+    if (!_adminHasPerm('campaigns.manage')) { showAdminToast(t('adm_no_access'), 'error'); return; }
+    var box = document.getElementById('cmp-form-card');
+    if (!box) return;
+    _cmpEditingId = id || null;
+    box.style.display = '';
+    if (id) {
+        // Editing: fetch the authoritative row from the detail endpoint.
+        campaignFormLoad(id);
+    } else {
+        _cmpRenderForm(box, null);
+    }
+}
+
+async function campaignFormLoad(id) {
+    var box = document.getElementById('cmp-form-card');
+    if (!box) return;
+    box.innerHTML = '<div class="adm-loading">' + adminEscapeHtml(t('adm_camp_loading')) + '</div>';
+    try {
+        var data = await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(id));
+        if (!data || data.status !== 'success' || !data.campaign) throw new Error((data && data.message) || 'not found');
+        _cmpRenderForm(document.getElementById('cmp-form-card'), data.campaign);
+    } catch (e) {
+        showAdminToast(t('adm_camp_load_error') + ': ' + (e.message || e), 'error');
+        box.innerHTML = '';
+        box.style.display = 'none';
+    }
+}
+
+function _cmpRenderForm(box, c) {
+    var isEdit = !!c;
+    var f = function (k) { return isEdit && c[k] != null ? adminEscapeHtml(String(c[k])) : ''; };
+    box.innerHTML = '<div class="rc-card" style="margin-bottom:16px">' +
+        '<h4 class="rc-card-title">' + adminEscapeHtml(t(isEdit ? 'adm_camp_form_edit' : 'adm_camp_form_new')) + '</h4>' +
+        '<div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_title_fa')) + '</label><input type="text" id="cmp-f-title-fa" maxlength="200" value="' + f('title_fa') + '"></div>' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_title_en')) + '</label><input type="text" id="cmp-f-title-en" maxlength="200" value="' + f('title_en') + '"></div>' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_summary_fa')) + '</label><input type="text" id="cmp-f-summary-fa" maxlength="500" value="' + f('summary_fa') + '"></div>' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_summary_en')) + '</label><input type="text" id="cmp-f-summary-en" maxlength="500" value="' + f('summary_en') + '"></div>' +
+        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_body_fa')) + '</label><textarea id="cmp-f-body-fa" rows="3" maxlength="5000">' + f('body_fa') + '</textarea></div>' +
+        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_body_en')) + '</label><textarea id="cmp-f-body-en" rows="3" maxlength="5000">' + f('body_en') + '</textarea></div>' +
+        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_image')) + '</label>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+        '<label class="adm-btn adm-btn-ghost" style="cursor:pointer">' + adminEscapeHtml(t('adm_camp_field_image_pick')) +
+        '<input type="file" id="cmp-f-image-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="campaignImageFileSelected(this)"></label>' +
+        '<span id="cmp-f-image-status" style="font-size:12px;opacity:.7">' + adminEscapeHtml(t('adm_camp_field_image_hint')) + '</span>' +
+        '</div>' +
+        '<img id="cmp-f-image-preview" alt="" style="' + (isEdit && c.image_url ? '' : 'display:none;') + 'max-width:220px;max-height:110px;border-radius:10px;margin-top:8px;border:1px solid rgba(255,255,255,.1)" src="' + (isEdit && c.image_url ? adminEscapeHtml(c.image_url) : '') + '">' +
+        '<input type="text" id="cmp-f-image-url" placeholder="' + adminEscapeHtml(t('adm_camp_field_image_url')) + '" value="' + f('image_url') + '" style="margin-top:8px">' +
+        '</div>' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_starts')) + '</label><input type="datetime-local" id="cmp-f-starts" value="' + adminEscapeHtml(isEdit ? _cmpToLocalInput(c.starts_at) : '') + '"></div>' +
+        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_ends')) + '</label><input type="datetime-local" id="cmp-f-ends" value="' + adminEscapeHtml(isEdit ? _cmpToLocalInput(c.ends_at) : '') + '"></div>' +
+        (!isEdit ? '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_status')) + '</label><select id="cmp-f-status">' +
+        '<option value="DRAFT" selected>DRAFT</option><option value="PUBLISHED">PUBLISHED</option></select></div>' : '') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px">' +
+        '<button class="adm-btn adm-btn-primary" onclick="campaignFormSubmit()">' + adminEscapeHtml(t('adm_camp_save')) + '</button>' +
+        '<button class="adm-btn adm-btn-ghost" onclick="campaignFormClose()">' + adminEscapeHtml(t('adm_camp_cancel')) + '</button>' +
+        '</div></div>';
+}
+
+function campaignFormClose() {
+    var box = document.getElementById('cmp-form-card');
+    if (box) { box.innerHTML = ''; box.style.display = 'none'; }
+    _cmpEditingId = null;
+}
+
+async function campaignFormSubmit() {
+    if (!_adminHasPerm('campaigns.manage')) { showAdminToast(t('adm_no_access'), 'error'); return; }
+    var g = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+    var payload = {
+        title_fa: g('cmp-f-title-fa').trim(),
+        title_en: g('cmp-f-title-en').trim(),
+        summary_fa: g('cmp-f-summary-fa').trim() || null,
+        summary_en: g('cmp-f-summary-en').trim() || null,
+        body_fa: g('cmp-f-body-fa'),
+        body_en: g('cmp-f-body-en'),
+        image_url: g('cmp-f-image-url').trim() || null,
+    };
+    var startsIso = _cmpFromLocalInput(g('cmp-f-starts'));
+    if (!startsIso) { showAdminToast(t('adm_camp_field_starts'), 'error'); return; }
+    payload.starts_at = startsIso;
+    var endsRaw = g('cmp-f-ends');
+    payload.ends_at = endsRaw ? _cmpFromLocalInput(endsRaw) : null;
+    if (payload.ends_at && payload.starts_at && Date.parse(payload.ends_at) <= Date.parse(payload.starts_at)) {
+        showAdminToast(t('adm_camp_field_ends'), 'error'); return;
+    }
+    if (!_cmpEditingId) {
+        var st = g('cmp-f-status') || 'DRAFT';
+        payload.status = st; // DRAFT | PUBLISHED only (select options)
+    }
+    try {
+        var data = _cmpEditingId
+            ? await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(_cmpEditingId), { method: 'PUT', body: JSON.stringify(payload) })
+            : await adminApiFetch('/api/admin/campaigns', { method: 'POST', body: JSON.stringify(payload) });
+        if (!data || data.status !== 'success') throw new Error((data && data.message) || 'save failed');
+        showAdminToast(t(_cmpEditingId ? 'adm_camp_updated' : 'adm_camp_created'), 'success');
+        campaignFormClose();
+        loadAdminCampaigns(_cmpEditingId ? _cmpListState.page : 1);
+    } catch (e) {
+        var msg = (e && e.body && e.body.errors && e.body.errors.length) ? e.body.errors.map(function (x) { return x.field + ': ' + x.message; }).join(' | ') : (e.message || String(e));
+        showAdminToast(msg, 'error');
+    }
+}
+
+async function campaignSetStatus(id, target) {
+    if (!_adminHasPerm('campaigns.manage')) { showAdminToast(t('adm_no_access'), 'error'); return; }
+    try {
+        var data = await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(id) + '/status', { method: 'PUT', body: JSON.stringify({ status: target }) });
+        if (!data || data.status !== 'success') throw new Error((data && data.message) || 'failed');
+        showAdminToast(t(target === 'PUBLISHED' ? (data.campaign && data.campaign.status === 'PUBLISHED' ? 'adm_camp_published' : 'adm_camp_resumed') : 'adm_camp_stopped'), 'success');
+        loadAdminCampaigns();
+    } catch (e) {
+        showAdminToast(e.message || String(e), 'error');
+    }
+}
+
+async function campaignDelete(id) {
+    if (!_adminHasPerm('campaigns.manage')) { showAdminToast(t('adm_no_access'), 'error'); return; }
+    if (!confirm(t('adm_camp_confirm_delete'))) return;
+    try {
+        var data = await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (!data || data.status !== 'success') throw new Error((data && data.message) || 'failed');
+        showAdminToast(t('adm_camp_deleted'), 'success');
+        loadAdminCampaigns();
+    } catch (e) {
+        showAdminToast(e.message || String(e), 'error');
+    }
+}
+
+async function campaignShowRegistrations(id, page) {
+    var box = document.getElementById('cmp-admin-section');
+    if (!box) return;
+    page = page || 1;
+    var panel = document.getElementById('cmp-regs-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'cmp-regs-panel';
+        box.appendChild(panel);
+    }
+    panel.innerHTML = '<div class="adm-loading">' + adminEscapeHtml(t('adm_camp_loading')) + '</div>';
+    try {
+        var data = await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(id) + '/registrations?page=' + page + '&limit=20');
+        if (!data || data.status !== 'success' || !Array.isArray(data.items)) throw new Error((data && data.message) || 'bad response');
+        var rows = data.items.map(function (r) {
+            var who = [r.first_name, r.last_name].filter(Boolean).join(' ') || (r.username ? '@' + r.username : r.telegram_id);
+            return '<tr><td>' + adminEscapeHtml(String(r.id)) + '</td>' +
+                '<td>' + adminEscapeHtml(String(r.telegram_id)) + '</td>' +
+                '<td>' + adminEscapeHtml(who) + '</td>' +
+                '<td>' + adminEscapeHtml(_cmpFmtDate(r.registered_at)) + '</td></tr>';
+        }).join('');
+        var pager = (data.totalPages && data.totalPages > 1)
+            ? '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:12px">' +
+              '<button class="adm-btn-sm adm-btn-ghost" ' + (data.page <= 1 ? 'disabled' : '') + ' onclick="campaignShowRegistrations(\'' + adminEscapeHtml(id) + '\',' + (data.page - 1) + ')">' + adminEscapeHtml(t('adm_camp_prev')) + '</button>' +
+              '<span style="opacity:.7;font-size:12px">' + adminEscapeHtml(t('adm_camp_page_of').replace('{page}', String(data.page)).replace('{total}', String(data.totalPages))) + '</span>' +
+              '<button class="adm-btn-sm adm-btn-ghost" ' + (data.page >= data.totalPages ? 'disabled' : '') + ' onclick="campaignShowRegistrations(\'' + adminEscapeHtml(id) + '\',' + (data.page + 1) + ')">' + adminEscapeHtml(t('adm_camp_next')) + '</button></div>'
+            : '';
+        panel.innerHTML = '<div class="rc-card" style="margin-top:16px">' +
+            '<h4 class="rc-card-title">' + adminEscapeHtml(t('adm_camp_regs')) + '</h4>' +
+            '<div style="font-size:13px;opacity:.8;margin-bottom:10px">' + adminEscapeHtml(t('adm_camp_reg_count')) + ' <b>' + Number(data.registration_count || 0) + '</b></div>' +
+            (rows
+                ? '<div class="adm-table-wrap"><table class="adm-table"><thead><tr>' +
+                  '<th>' + adminEscapeHtml(t('adm_camp_reg_th_id')) + '</th><th>Telegram ID</th>' +
+                  '<th>' + adminEscapeHtml(t('adm_camp_reg_th_user')) + '</th>' +
+                  '<th>' + adminEscapeHtml(t('adm_camp_reg_th_date')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+                : '<div class="admin-empty">' + adminEscapeHtml(t('adm_camp_reg_empty')) + '</div>') +
+            pager +
+            '<div style="display:flex;gap:8px;margin-top:12px">' +
+            '<button class="adm-btn adm-btn-ghost" onclick="campaignExportCsv(\'' + adminEscapeHtml(id) + '\')">' + adminEscapeHtml(t('adm_camp_export_csv')) + '</button>' +
+            '<button class="adm-btn adm-btn-ghost" onclick="document.getElementById(\'cmp-regs-panel\').remove()">' + adminEscapeHtml(t('adm_camp_close')) + '</button>' +
+            '</div></div>';
+    } catch (e) {
+        panel.innerHTML = '<div class="rc-card"><div class="admin-empty">' + adminEscapeHtml(t('adm_camp_load_error')) +
+            '<div style="opacity:.7;font-size:12px;margin-top:6px">' + adminEscapeHtml(e.message || String(e)) + '</div></div></div>';
+    }
+}
+
+async function campaignExportCsv(id) {
+    var initData = (typeof getTelegramInitData === 'function') ? getTelegramInitData() : '';
+    try {
+        var res = await fetch((window.API_BASE || '') + '/api/admin/campaigns/' + encodeURIComponent(id) + '/registrations/export', {
+            headers: initData ? { 'X-Telegram-Init-Data': initData } : {},
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var blob = await res.blob();
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'campaign-registrations-' + id + '.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        showAdminToast(t('adm_camp_load_error') + ': ' + (e.message || e), 'error');
+    }
+}
+
+// ── Campaign image → WebP conversion + upload ──────────────────────────────────
+async function campaignImageFileSelected(input) {
+    var file = input && input.files && input.files[0];
+    var statusEl = document.getElementById('cmp-f-image-status');
+    var preview = document.getElementById('cmp-f-image-preview');
+    var urlField = document.getElementById('cmp-f-image-url');
+    var plan = _cmpImageUploadPlan(file);
+    if (!plan.ok) {
+        if (plan.code === 'UNSUPPORTED_TYPE' && /svg/i.test(plan.type || '')) {
+            showAdminToast(t('adm_camp_img_err_svg'), 'error');
+        } else if (plan.code === 'TOO_LARGE_INPUT') {
+            showAdminToast(t('adm_camp_img_err_big'), 'error');
+        } else {
+            showAdminToast(t('adm_camp_img_err_type'), 'error');
+        }
+        input.value = '';
+        return;
+    }
+    if (statusEl) statusEl.textContent = t(plan.mode === 'passthrough' ? 'adm_camp_field_image_hint' : 'adm_camp_field_image_converting');
+    try {
+        var blob = file; // passthrough: already a small valid WebP
+        if (plan.mode === 'convert') {
+            blob = await _cmpConvertToWebpBlob(file);
+            if (!blob || blob.type !== 'image/webp') throw { code: 'WEBP_UNSUPPORTED' };
+            if (blob.size > 512000) throw { code: 'TOO_LARGE_OUTPUT' };
+        }
+        var dataUri = await new Promise(function (resolve, reject) {
+            var fr = new FileReader();
+            fr.onload = function () { resolve(String(fr.result)); };
+            fr.onerror = function () { reject(new Error('read failed')); };
+            fr.readAsDataURL(blob);
+        });
+        var resp = await adminApiFetch('/api/admin/campaigns/upload-image', {
+            method: 'POST',
+            body: JSON.stringify({ data_uri: dataUri }),
+        });
+        if (!resp || resp.status !== 'success' || !resp.url) throw { code: 'UPLOAD_FAILED', message: (resp && resp.message) || '' };
+        // Only the WebP URL is stored as the campaign image — the original
+        // JPG/PNG never leaves the browser and is never uploaded.
+        if (urlField) urlField.value = resp.url;
+        if (preview) { preview.src = resp.url; preview.style.display = ''; }
+        if (statusEl) statusEl.textContent = t('adm_camp_img_converted');
+        showAdminToast(t('adm_camp_img_converted'), 'success');
+    } catch (e) {
+        var code = (e && e.code) || '';
+        var key = code === 'WEBP_UNSUPPORTED' ? 'adm_camp_img_err_convert'
+            : code === 'TOO_LARGE_OUTPUT' ? 'adm_camp_img_err_size'
+            : 'adm_camp_img_err_upload';
+        showAdminToast(t(key) + (e && e.message && code === 'UPLOAD_FAILED' ? ': ' + e.message : ''), 'error');
+        if (statusEl) statusEl.textContent = t('adm_camp_field_image_hint');
+        input.value = '';
+    }
+}
+
+async function _cmpConvertToWebpBlob(file) {
+    var bitmap = await createImageBitmap(file);
+    var canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;   // dimensions preserved — never resized
+    canvas.height = bitmap.height;
+    var ctx = canvas.getContext('2d');
+    // No background fill: PNG alpha channel is preserved as WebP alpha.
+    ctx.drawImage(bitmap, 0, 0);
+    if (bitmap.close) bitmap.close();
+    var blob = null;
+    for (var i = 0; i < CMP_WEBP_QUALITIES.length; i++) {
+        var b = await new Promise(function (resolve) { canvas.toBlob(resolve, 'image/webp', CMP_WEBP_QUALITIES[i]); });
+        if (!b) continue;
+        if (b.type !== 'image/webp') throw { code: 'WEBP_UNSUPPORTED' }; // browser fell back to PNG
+        blob = b;
+        if (b.size <= 512000) break; // fits the storage cap — stop early (best quality)
+    }
+    return blob; // may still be > cap at floor quality → caller rejects (no destructive resize)
+}
+
+// ── Exports (onclick handlers) ────────────────────────────────────────────
+window.loadAdminCampaigns = loadAdminCampaigns;
+window.cmpSearchApply = cmpSearchApply;
+window.cmpFilterApply = cmpFilterApply;
+window.campaignFormOpen = campaignFormOpen;
+window.campaignFormClose = campaignFormClose;
+window.campaignFormSubmit = campaignFormSubmit;
+window.campaignSetStatus = campaignSetStatus;
+window.campaignDelete = campaignDelete;
+window.campaignShowRegistrations = campaignShowRegistrations;
+window.campaignExportCsv = campaignExportCsv;
+window.campaignImageFileSelected = campaignImageFileSelected;
 
 // ═══════════════════════════════════════════════════════════════════════
 // PHASE 8: VPN Reward Purchases — Admin Queue

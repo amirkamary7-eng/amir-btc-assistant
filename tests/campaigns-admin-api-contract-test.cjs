@@ -294,8 +294,9 @@ function buildHandlers(config = {}) {
     body = null,
     bodyError = null,
     repo: repoConfig = {},
+    storeImageImpl = null,
   } = config;
-  const calls = { requireAdmin: [], rateLimit: [], repo: [], log: [] };
+  const calls = { requireAdmin: [], rateLimit: [], repo: [], log: [], storeImage: [] };
 
   const repo = {
     ensureSchema: async () => {},
@@ -310,6 +311,14 @@ function buildHandlers(config = {}) {
 
   const adminRepo = {
     logAdminAction: async (env, entry) => { calls.log.push(entry); return 1; },
+  };
+
+  const advertisementsRepo = {
+    storeImage: async (env, dataUri, contentType) => {
+      calls.storeImage.push({ dataUri, contentType });
+      if (storeImageImpl) return storeImageImpl(dataUri, contentType);
+      return '/api/advertisements/image/img_test1234';
+    },
   };
 
   const handlers = createCampaignsAdminHandlers({
@@ -329,6 +338,7 @@ function buildHandlers(config = {}) {
     },
     campaignsRepo: repo,
     adminRepo,
+    advertisementsRepo,
     withCors: (headers = {}) => new Headers(headers),
     isValidImageUrl,
   });
@@ -396,6 +406,7 @@ test('CAMA-21: 401/403 passthrough, and mutation rate limit fires BEFORE any rep
     ['handleAdminUpdateCampaign', [REQ(), { RATE_LIMITS: 'on', DATABASE_URL: 'x' }, 'c1']],
     ['handleAdminSetCampaignStatus', [REQ(), { RATE_LIMITS: 'on', DATABASE_URL: 'x' }, 'c1']],
     ['handleAdminDeleteCampaign', [REQ(), { RATE_LIMITS: 'on', DATABASE_URL: 'x' }, 'c1']],
+    ['handleAdminUploadCampaignImage', [REQ(), { RATE_LIMITS: 'on', DATABASE_URL: 'x' }]],
   ]) {
     const { handlers: h, calls } = buildHandlers({ rateLimited: true, body: {} });
     const res = await h[name](...args);
@@ -922,10 +933,13 @@ test('CAMA-31: list — status filter whitelist, search/page/limit bounds, 200 s
 // 3. ROUTE WIRING (worker-proxy.js)
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('CAMA-40: the 9 admin route matchers are wired exactly as designed', () => {
+test('CAMA-40: the 10 admin route matchers are wired exactly as designed', () => {
   // Base list/create.
   assert.match(WORKER, /request\.method === 'GET' && url\.pathname === '\/api\/admin\/campaigns'/);
   assert.match(WORKER, /request\.method === 'POST' && url\.pathname === '\/api\/admin\/campaigns'/);
+  // WebP image upload (must exist; single-segment matcher is method-scoped to GET/PUT/PATCH/DELETE).
+  assert.match(WORKER, /request\.method === 'POST' && url\.pathname === '\/api\/admin\/campaigns\/upload-image'/);
+  assert.match(WORKER, /campaignsAdminHandlers\.handleAdminUploadCampaignImage/);
   // Single-segment :id (anchored so sub-paths fall through).
   assert.match(WORKER, /\/\^\\\/api\\\/admin\\\/campaigns\\\/\[A-Za-z0-9_-\]\{1,64\}\$\/\.test\(url\.pathname\)/);
   assert.match(WORKER, /request\.method === 'GET'\) return campaignsAdminHandlers\.handleAdminGetCampaign/);
@@ -949,7 +963,7 @@ test('CAMA-41: factory wiring — deps incl. requireAdmin, campaignsRepo, adminR
   assert.match(WORKER, /const campaignsAdminHandlers = createCampaignsAdminHandlers\(\{/);
   const wiring = WORKER.slice(WORKER.indexOf('const campaignsAdminHandlers = createCampaignsAdminHandlers({'));
   const block = wiring.slice(0, wiring.indexOf('});'));
-  for (const dep of ['requireAdmin: adminHandlers.requireAdmin', 'campaignsRepo', 'adminRepo', 'withCors', 'isValidImageUrl', 'isUserRateLimited']) {
+  for (const dep of ['requireAdmin: adminHandlers.requireAdmin', 'campaignsRepo', 'adminRepo', 'advertisementsRepo', 'withCors', 'isValidImageUrl', 'isUserRateLimited']) {
     assert.ok(block.includes(dep), `factory receives ${dep}`);
   }
 });
@@ -960,6 +974,100 @@ test('CAMA-42: PROTECTED_PATHS gate covers the USER routes but NOT the admin rou
   assert.ok(PROTECTED_PATHS.test('/api/campaigns'), 'user routes stay behind the auth+channel gate');
   assert.ok(!PROTECTED_PATHS.test('/api/admin/campaigns'), 'admin base route NOT channel-gated');
   assert.ok(!PROTECTED_PATHS.test('/api/admin/campaigns/c1/registrations'), 'admin registrations NOT channel-gated');
+  assert.ok(!PROTECTED_PATHS.test('/api/admin/campaigns/upload-image'), 'upload route NOT channel-gated (admin-authenticated)');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3b. WEBP IMAGE UPLOAD ENDPOINT (campaigns.manage, WebP-only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WEBP_URI = 'data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==';
+const JPEG_URI = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD//gA=';
+
+test('CAMA-60: upload-image gated by campaigns.manage + admin-mutation rate limit BEFORE storage', async () => {
+  const { handlers, calls } = buildHandlers({ body: { data_uri: WEBP_URI } });
+  const res = await handlers.handleAdminUploadCampaignImage(REQ('https://x/api/admin/campaigns/upload-image'), { RATE_LIMITS: 'on', DATABASE_URL: 'x' });
+  assert.equal(res.__status, 200);
+  assert.deepEqual(calls.requireAdmin, ['campaigns.manage'], 'upload requires campaigns.manage');
+  assert.deepEqual(calls.rateLimit, [['900', 'admin-mutation', 20, 60]], 'rate limit checked');
+  assert.equal(calls.storeImage.length, 1, 'storeImage called exactly once');
+});
+
+test('CAMA-61: upload-image rejects non-WebP payloads with 422 WEBP_REQUIRED (JPG/PNG/SVG/raw) and never stores them', async () => {
+  for (const [label, uri] of [
+    ['jpeg', JPEG_URI],
+    ['png', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='],
+    ['svg', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg=='],
+    ['gif', 'data:image/gif;base64,R0lGODlhAQABAAAAACw='],
+    ['no-data-uri', 'not-a-data-uri'],
+  ]) {
+    const { handlers, calls } = buildHandlers({ body: { data_uri: uri } });
+    const res = await handlers.handleAdminUploadCampaignImage(REQ(), {});
+    assert.equal(res.__status, 422, `${label} → 422`);
+    assert.equal(res.__json.code, 'WEBP_REQUIRED', `${label} → WEBP_REQUIRED`);
+    assert.equal(calls.storeImage.length, 0, `${label} must NEVER reach storage`);
+  }
+});
+
+test('CAMA-62: upload-image requires data_uri (422 IMAGE_REQUIRED); body errors pass through', async () => {
+  const { handlers } = buildHandlers({ body: {} });
+  const res = await handlers.handleAdminUploadCampaignImage(REQ(), {});
+  assert.equal(res.__status, 422);
+  assert.equal(res.__json.code, 'IMAGE_REQUIRED');
+
+  const { handlers: h2 } = buildHandlers({ bodyError: { __json: { detail: 'Request body too large' }, __status: 413 } });
+  const res2 = await h2.handleAdminUploadCampaignImage(REQ(), {});
+  assert.equal(res2.__status, 413, 'readJsonBody errors (size cap) pass through');
+});
+
+test('CAMA-63: valid WebP → 200 { status, url } + internal URL + audit log', async () => {
+  const { handlers, calls } = buildHandlers({ body: { data_uri: WEBP_URI } });
+  const res = await handlers.handleAdminUploadCampaignImage(REQ(), {});
+  assert.equal(res.__status, 200);
+  assert.equal(res.__json.status, 'success');
+  assert.equal(res.__json.url, '/api/advertisements/image/img_test1234', 'returns the internal (KV-served) URL form');
+  assert.equal(calls.storeImage[0].contentType, 'image/webp', 'storeImage receives image/webp');
+  assert.equal(calls.storeImage[0].dataUri, WEBP_URI);
+  assert.equal(calls.log.length, 1, 'mutation is audited');
+  assert.equal(calls.log[0].action, 'campaigns_admin.upload_image');
+});
+
+test('CAMA-64: storage failures (oversize / magic mismatch) → 422 UPLOAD_FAILED, message surfaced, nothing faked', async () => {
+  for (const [label, err] of [
+    ['oversize', new Error('Image too large: 640000 bytes (max 512000)')],
+    ['magic mismatch', new Error('Image content does not match declared content-type')],
+    ['kv unavailable', new Error('Image storage unavailable (KV not bound)')],
+  ]) {
+    const { handlers, calls } = buildHandlers({
+      body: { data_uri: WEBP_URI },
+      storeImageImpl: () => { throw err; },
+    });
+    const res = await handlers.handleAdminUploadCampaignImage(REQ(), {});
+    assert.equal(res.__status, 422, `${label} → 422 UPLOAD_FAILED`);
+    assert.equal(res.__json.code, 'UPLOAD_FAILED');
+    assert.ok(res.__json.message.includes(label === 'oversize' ? 'too large' : label === 'magic mismatch' ? 'does not match' : 'unavailable'),
+      `${label} message surfaced honestly`);
+    assert.equal(calls.log.length, 0, 'failed uploads are NOT audited as success');
+  }
+});
+
+test('CAMA-65: unauthorized admin → auth error passes through before any storage call', async () => {
+  const { handlers, calls } = buildHandlers({
+    authError: { __json: { detail: 'Insufficient permissions' }, __status: 403 },
+    body: { data_uri: WEBP_URI },
+  });
+  const res = await handlers.handleAdminUploadCampaignImage(REQ(), {});
+  assert.equal(res.__status, 403);
+  assert.equal(calls.storeImage.length, 0);
+  assert.equal(calls.rateLimit.length, 0, 'no rate-limit slot burned for unauthorized callers');
+});
+
+test('CAMA-66: rate-limited admin → 429 before storage', async () => {
+  const { handlers, calls } = buildHandlers({ rateLimited: true, body: { data_uri: WEBP_URI } });
+  const res = await handlers.handleAdminUploadCampaignImage(REQ(), { RATE_LIMITS: 'on', DATABASE_URL: 'x' });
+  assert.equal(res.__status, 429);
+  assert.equal(res.__json.code, 'RATE_LIMITED');
+  assert.equal(calls.storeImage.length, 0);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

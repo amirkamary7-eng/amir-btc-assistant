@@ -6,10 +6,11 @@
    RTL via logical properties, GPU-friendly transitions.
 
    Contains:
-   - .hero-slide-img--ratio  → object-fit:cover for the 3rd hero
-     slide (banner is 1280x588 ≈ 2.177:1, container is 2:1 →
-     ~4% crop per side instead of vertical stretch). Existing
-     slides keep their dashboard.css classes untouched.
+   - (banner parity fix) .hero-slide-img--ratio was REMOVED — the
+     campaign banner is now re-encoded to 1200x600 (exact 2:1) so the
+     3rd slide uses the SAME dashboard.css class (.hero-slide-img--cover)
+     as slides 0/1: identical frame, identical fill semantics, no live
+     crop, no stretch.
    - #campaigns-full-page    → fullscreen list overlay (wallet
      overlay pattern: fixed, inset 0, translateY slide-in).
    - .cmp-detail-overlay     → fullscreen detail page (created
@@ -18,15 +19,11 @@
      safe-area-inset support, custom scrollbars, skeletons.
    ============================================================ */
 
-/* #region Hero 3rd slide — ratio-preserving image (design-approved cover crop) */
-/* NOTE: dashboard.css `.hero-slide-img--cover` is object-fit:fill (intentional
-   for the two existing 2:1 banners). The campaign banner is 1280x588, so it
-   gets a dedicated class with object-fit:cover → ~4%/side crop, no stretch.
-   Existing slides are untouched (zero changes to dashboard.css / app.js). */
-.hero-slide-img--ratio {
-  object-fit: cover;
-  object-position: center;
-}
+/* #region Hero 3rd slide — banner parity (see header note) */
+/* The dedicated --ratio rule was removed: the asset itself is now exactly
+   2:1 (1200x600), so all three slides render through the shared
+   dashboard.css .hero-slide-img--cover (object-fit:fill) with identical
+   frame size and behavior — full content edge-to-edge, zero distortion. */
 /* #endregion */
 
 /* #region Tokens & fullscreen list overlay */

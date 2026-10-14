@@ -55,6 +55,7 @@ export function createCampaignsAdminHandlers(deps) {
     isUserRateLimited,
     campaignsRepo,
     adminRepo,
+    advertisementsRepo,
     withCors,
     isValidImageUrl,
   } = deps;
@@ -135,8 +136,8 @@ export function createCampaignsAdminHandlers(deps) {
     return Math.max(min, Math.min(max, n));
   }
 
-  async function _readJsonObject(request, env) {
-    const bodyResult = await readJsonBody(request, 102400, env);
+  async function _readJsonObject(request, env, maxSize = 102400) {
+    const bodyResult = await readJsonBody(request, maxSize, env);
     if (bodyResult.error) return { error: bodyResult.error };
     const payload = bodyResult.payload;
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -527,6 +528,57 @@ export function createCampaignsAdminHandlers(deps) {
     }
   }
 
+  // ── POST /api/admin/campaigns/upload-image (WebP-only upload) ────────────
+  //
+  // Campaign image upload with server-side WebP enforcement. The image is
+  // converted to WebP in the ADMIN PANEL (browser canvas — Workers have no
+  // native image libraries, see advertisements.js storeImage notes); this
+  // endpoint is the trust boundary: it accepts ONLY WebP payloads so a
+  // legacy/compromised client can never store a JPG/PNG/SVG as the final
+  // campaign image. Storage reuses the advertisements KV path (adimg:<id>)
+  // and returns the internal URL `/api/advertisements/image/:id`, which the
+  // campaigns image_url validator already accepts. Old HTTPS image URLs keep
+  // working unchanged (backward compatibility).
+  async function handleAdminUploadCampaignImage(request, env) {
+    const { error: authErr, admin } = await requireAdmin(request, env, 'campaigns.manage');
+    if (authErr) return authErr;
+
+    const rlErr = await _checkRateLimit(env, admin.telegram_id); if (rlErr) return rlErr;
+
+    // 1MB JSON cap (base64 of a ≤500KB image ≈ 670KB + overhead).
+    const { error: bodyErr, payload } = await _readJsonObject(request, env, 1024 * 1024);
+    if (bodyErr) return bodyErr;
+
+    const dataUri = payload.data_uri || '';
+    if (typeof dataUri !== 'string' || !dataUri) {
+      return _errorResponse(422, 'IMAGE_REQUIRED', 'data_uri is required', env);
+    }
+    // WebP-ONLY: accept "data:image/webp" data URIs. Everything else —
+    // including SVG (no safe server-side conversion exists) — is explicitly
+    // rejected. The client is expected to convert JPG/PNG first.
+    const m = /^data:([^;]+);base64,/i.exec(dataUri);
+    const declared = m ? m[1].toLowerCase() : '';
+    if (declared !== 'image/webp') {
+      return _errorResponse(
+        422,
+        'WEBP_REQUIRED',
+        'Campaign images must be uploaded as WebP (convert the image in the admin panel first)',
+        env,
+      );
+    }
+
+    try {
+      // storeImage re-verifies the WebP magic bytes (defense in depth) and
+      // enforces the ≤500KB decoded size cap before writing to KV.
+      const url = await advertisementsRepo.storeImage(env, dataUri, 'image/webp');
+      await _log(env, admin, 'campaigns_admin.upload_image', 'image', { url });
+      return jsonResponse({ status: 'success', url }, {}, env);
+    } catch (e) {
+      console.warn(safeError('campaigns-admin-upload-image', e));
+      return _errorResponse(422, 'UPLOAD_FAILED', e.message || 'Upload failed', env);
+    }
+  }
+
   // ── GET /api/admin/campaigns/:id/registrations/export (CSV) ──────────────
 
   // CSV cell escaping (membership.js csvEscape) PLUS formula-injection
@@ -596,5 +648,6 @@ export function createCampaignsAdminHandlers(deps) {
     handleAdminDeleteCampaign,
     handleAdminListRegistrations,
     handleAdminExportRegistrations,
+    handleAdminUploadCampaignImage,
   });
 }

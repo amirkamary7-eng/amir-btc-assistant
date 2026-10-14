@@ -21,8 +21,9 @@
  *      banners' appearance or behavior).
  *   4. Slider behavior is preserved: app.js still discovers slides
  *      dynamically (querySelectorAll('.hero-slide')) and dashboard.css
- *      is untouched for the existing classes (no .hero-slide-img--ratio
- *      definition there — the new class lives only in campaigns.css).
+ *      is untouched for the existing classes (all three slides share
+ *      .hero-slide-img--cover after the banner-parity fix — the campaign
+ *      banner was re-encoded to exact 2:1, see campaigns-banner-parity-test)
  *   5. All cmp_* i18n keys exist in BOTH fa and en dictionaries
  *      (loads the real i18n.js, same technique as the p0 test).
  *   6. Build pipeline: campaigns.js + campaigns.css are registered in
@@ -80,7 +81,7 @@ test('campaigns.css exists with overlay, badge, bar and safe-area styles', () =>
 
 // ── 2. index.html wiring ───────────────────────────────────────────────────
 
-test('index.html: 3rd hero slide with campaign webp + ratio class + open handler', () => {
+test('index.html: 3rd hero slide with campaign webp + banner-parity class + open handler', () => {
   assert.match(
     HTML,
     /<div class="hero-slide" data-slide="2"[^>]*CampaignsApp\.open\(\)/,
@@ -89,7 +90,10 @@ test('index.html: 3rd hero slide with campaign webp + ratio class + open handler
   const slide2 = HTML.match(/<div class="hero-slide" data-slide="2"[\s\S]*?<\/div>/)?.[0] || '';
   assert.ok(slide2, 'slide 2 block must exist');
   assert.match(slide2, /assets\/banner-campian\.webp/, 'slide 2 uses the campaign webp');
-  assert.match(slide2, /hero-slide-img--ratio/, 'slide 2 img uses the ratio-preserving class');
+  // Banner parity fix: slide 2 now uses the SAME class as slides 0/1
+  // (asset re-encoded to exact 2:1 → identical frame, no live crop).
+  assert.match(slide2, /hero-slide-img hero-slide-img--cover/, 'slide 2 img uses the same class as slides 0/1 (parity)');
+  assert.doesNotMatch(slide2, /hero-slide-img--ratio/, 'legacy --ratio class must be gone');
   assert.doesNotMatch(slide2, /hero-cta/, 'no CTA overlay on the campaign slide (approved design)');
   assert.match(slide2, /data-i18n-aria-label="cmp_hero_aria"/, 'localized aria-label');
 });
@@ -143,15 +147,21 @@ test('slider logic untouched: app.js still discovers slides dynamically', () => 
   assert.match(appSrc, /querySelectorAll\('\.hero-dot'\)/, 'dynamic dot discovery');
 });
 
-test('dashboard.css untouched for hero classes (new class lives only in campaigns.css)', () => {
+test('dashboard.css untouched for hero classes (banner parity: no per-slide class needed)', () => {
   const dashSrc = read('dashboard.css');
   assert.match(dashSrc, /\.hero-slide-img--cover\s*\{/, 'existing cover class still in dashboard.css');
+  // Banner parity fix: the --ratio class was REMOVED from campaigns.css —
+  // the asset is now exact 2:1 and uses the shared --cover class.
   assert.doesNotMatch(
     dashSrc,
     /\.hero-slide-img--ratio/,
-    'dashboard.css must NOT define the new ratio class (no changes allowed to dashboard.css)',
+    'dashboard.css must NOT define any ratio class (no changes allowed to dashboard.css)',
   );
-  assert.match(CMP_CSS, /\.hero-slide-img--ratio\s*\{/, 'ratio class defined in campaigns.css');
+  assert.doesNotMatch(
+    CMP_CSS,
+    /\.hero-slide-img--ratio\s*\{/,
+    'the dedicated --ratio rule must be gone from campaigns.css (asset is 2:1 now)',
+  );
 });
 
 test('banner assets on disk unchanged (webp + jpg both present)', () => {

@@ -207,12 +207,12 @@
                 <img src="assets/banner-channel.webp" alt="AMIRBTC کانال" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" onerror="this.style.background='#0B1220'">
                 <button class="hero-cta hero-cta--channel-v2" type="button" onclick="event.stopPropagation();window.open('https://t.me/amir_btc_2024','_blank')" data-i18n="join_channel">عضویت در کانال</button>
             </div>
-            <!-- 3. Exchange Campaigns banner (1280x588 → object-fit:cover via
-                 campaigns.css .hero-slide-img--ratio, ~4%/side crop instead of
-                 stretch; no CTA overlay per approved design; opens the
-                 CampaignsApp fullscreen list) -->
+            <!-- 3. Exchange Campaigns banner (re-encoded to 1200x600 = exact
+                 2:1, same as the container and the other two banners →
+                 same .hero-slide-img--cover class: identical frame, no
+                 crop, no stretch; opens the CampaignsApp fullscreen list) -->
             <div class="hero-slide" data-slide="2" onclick="if(window.CampaignsApp)CampaignsApp.open()" role="button" tabindex="0" data-i18n-aria-label="cmp_hero_aria" aria-label="کمپین‌های صرافی AmirBTC" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();if(window.CampaignsApp)CampaignsApp.open()}">
-                <img src="assets/banner-campian.webp" alt="کمپین‌های صرافی | Exchange Campaigns" class="hero-slide-img hero-slide-img--ratio" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.background='#0B1220'">
+                <img src="assets/banner-campian.webp" alt="کمپین‌های صرافی | Exchange Campaigns" class="hero-slide-img hero-slide-img--cover" loading="lazy" decoding="async" fetchpriority="low" onerror="this.style.background='#0B1220'">
             </div>
             <div class="hero-slider-dots" id="hero-slider-dots">
                 <span class="hero-dot active" data-dot="0"></span>
@@ -1709,6 +1709,10 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
                             <span data-i18n="adm_sidebar_ads">تبلیغات</span>
                         </button>
+                        <button class="adm-nav-item" data-admin-section="campaigns" onclick="switchAdminSection('campaigns', this)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11h16a1 1 0 0 1 1 1v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5a1 1 0 0 1 1-1z"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/><path d="M8 16h.01M16 16h.01"/></svg>
+                            <span data-i18n="adm_sidebar_campaigns">کمپین‌ها</span>
+                        </button>
                         <button class="adm-nav-item" data-admin-section="membership" onclick="switchAdminSection('membership', this)">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"/><path d="M5 20h14"/></svg>
                             <span data-i18n="adm_sidebar_membership">عضویت ویژه</span>
@@ -2240,6 +2244,17 @@
                     <div class="rc-tab-content" id="ads-tab-messages" style="display:none;">
                         <div id="ads-messages-section"></div>
                     </div>
+                </section>
+
+                <!-- ═══ Exchange Campaigns Admin Section (promo campaigns) ═══ -->
+                <section class="adm-section" id="admin-section-campaigns">
+                    <div class="adm-section-head">
+                        <div>
+                            <h3 class="adm-section-title" data-i18n="adm_camp_title">کمپین‌های صرافی</h3>
+                            <p class="adm-section-desc" data-i18n="adm_camp_desc">مدیریت کمپین‌های تبلیغاتی، انتشار و ثبت‌نام‌ها</p>
+                        </div>
+                    </div>
+                    <div id="cmp-admin-section"></div>
                 </section>
 
                 <!-- ══════════════════════════════════════════════════════════

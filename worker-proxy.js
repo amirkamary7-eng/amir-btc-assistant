@@ -4256,28 +4256,6 @@ const rewardCenterHandlers = createRewardCenterHandlers({
 });
 //#endregion
 
-// ── Exchange Campaigns admin handlers (Stage 6B) ──
-// Same campaignsRepo as the user API (extended with the admin functions);
-// requireAdmin provides the campaigns.view / campaigns.manage granular
-// permission gates. Mutations are rate-limited + audited inside the controller.
-const campaignsAdminHandlers = createCampaignsAdminHandlers({
-  jsonResponse,
-  requireAdmin: adminHandlers.requireAdmin,
-  readJsonBody,
-  safeDbErrorResponse,
-  safeError,
-  isDatabaseConfigured,
-  isUserRateLimited,
-  campaignsRepo,
-  adminRepo,
-  // CSV export security headers (membership.js pattern): withCors for the
-  // cross-origin admin download + attachment + no-store + nosniff.
-  withCors,
-  // 5C-L4 fix: server-side image_url validation (advertisements.js validator).
-  isValidImageUrl,
-});
-//#endregion
-
 // ── Notification Platform (admin handlers) ──
 // notificationPlatformRepo is already created above (before analysisHandlers).
 const notificationPlatformHandlers = createNotificationPlatformHandlers({
@@ -4309,6 +4287,32 @@ const advertisementsRepo = createAdvertisementsRepository({
   isoDate: _rcIsoDate,
   normalizeOptionalString,
 });
+
+// ── Exchange Campaigns admin handlers (Stage 6B) ──
+// Same campaignsRepo as the user API (extended with the admin functions);
+// requireAdmin provides the campaigns.view / campaigns.manage granular
+// permission gates. Mutations are rate-limited + audited inside the controller.
+// Wired AFTER advertisementsRepo: the image upload endpoint reuses the
+// advertisements KV store (adimg:<id>) for campaign WebP images.
+const campaignsAdminHandlers = createCampaignsAdminHandlers({
+  jsonResponse,
+  requireAdmin: adminHandlers.requireAdmin,
+  readJsonBody,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  isUserRateLimited,
+  campaignsRepo,
+  adminRepo,
+  // Campaign WebP image uploads → advertisements KV storage path.
+  advertisementsRepo,
+  // CSV export security headers (membership.js pattern): withCors for the
+  // cross-origin admin download + attachment + no-store + nosniff.
+  withCors,
+  // 5C-L4 fix: server-side image_url validation (advertisements.js validator).
+  isValidImageUrl,
+});
+//#endregion
 
 const advertisementsHandlers = createAdvertisementsHandlers({
   jsonResponse,
@@ -8663,6 +8667,14 @@ export default {
       // PROTECTED_PATHS: /api/admin/* is admin-authenticated, not
       // channel-membership-gated (same as every other admin route).
       // ═══════════════════════════════════════════════════════════════════════
+
+      // ── Admin: WebP image upload (campaign banner images) ──
+      // Must precede the single-segment matcher below. WebP-only: the admin
+      // panel converts JPG/PNG via canvas before uploading; the server is the
+      // trust boundary (magic bytes re-verified inside storeImage).
+      if (request.method === 'POST' && url.pathname === '/api/admin/campaigns/upload-image') {
+        return campaignsAdminHandlers.handleAdminUploadCampaignImage(request, env);
+      }
 
       // ── Admin: list + create ──
       if (request.method === 'GET' && url.pathname === '/api/admin/campaigns') {
