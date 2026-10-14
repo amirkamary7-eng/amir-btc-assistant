@@ -342,6 +342,92 @@
 
 ---
 
+### 10. `promo_campaigns`
+
+نقش:
+
+- کمپین‌های تبلیغاتی کاربرپسند (بخش Exchange Campaigns؛ اسلاید سوم hero → صفحه فهرست/جزئیات)
+- محتوای دوزبانه + چرخه عمر + بازه زمانی
+
+وضعیت استفاده:
+
+- فعال در runtime (Stage 5B — commit `990a0f0a`)؛ در `scripts/00-migrate.sql` تعریف شده و توسط `src/repositories/campaigns.js` مدیریت می‌شود.
+- نام‌گذاری عمدی: ربطی به جدول `campaigns` (پیکربندی reward_center) و `exchange_campaigns` (جدول legacy بدون ارجاع کد) ندارد — این دو دست‌نخورده باقی می‌مانند.
+
+#### ستون‌ها
+
+| ستون | نوع | Nullable | توضیح |
+|---|---|---|---|
+| `id` | `TEXT` | خیر | کلید اصلی؛ `gen_random_uuid()::text` |
+| `title_fa` | `TEXT` | خیر | عنوان فارسی |
+| `title_en` | `TEXT` | خیر | عنوان انگلیسی |
+| `summary_fa` | `TEXT` | بله | خلاصه فارسی |
+| `summary_en` | `TEXT` | بله | خلاصه انگلیسی |
+| `body_fa` | `TEXT` | خیر | متن کامل فارسی؛ پیش‌فرض `''` |
+| `body_en` | `TEXT` | خیر | متن کامل انگلیسی؛ پیش‌فرض `''` |
+| `image_url` | `TEXT` | بله | تصویر کاور (در Stage 6B باید با اعتبارسنجی HTTPS سمت سرور ثبت شود) |
+| `starts_at` | `DateTime(timezone=True)` | خیر | شروع بازه؛ پیش‌فرض `NOW()` |
+| `ends_at` | `DateTime(timezone=True)` | بله | پایان بازه؛ `NULL` یعنی بدون پایان |
+| `status` | `TEXT` | خیر | `DRAFT` \| `PUBLISHED` \| `STOPPED` \| `DELETED`؛ CHECK در سطح DB؛ پیش‌فرض `DRAFT` |
+| `created_at` | `DateTime(timezone=True)` | خیر | زمان ایجاد |
+| `updated_at` | `DateTime(timezone=True)` | خیر | زمان آخرین به‌روزرسانی (تریگر `trg_promo_campaigns_updated`) |
+
+#### کلیدها و ایندکس‌ها
+
+- Primary Key:
+  - `id`
+- Check Constraint:
+  - `status IN ('DRAFT', 'PUBLISHED', 'STOPPED', 'DELETED')`
+- Index (partial):
+  - `idx_promo_campaigns_list` روی `(starts_at DESC)` با شرط `status IN ('PUBLISHED', 'STOPPED')` — فقط ردیف‌های قابل نمایش به کاربر
+- Trigger:
+  - `trg_promo_campaigns_updated` (BEFORE UPDATE → `updated_at = NOW()`)
+
+#### روابط
+
+- یک به چند با `promo_campaign_registrations`
+- وضعیت مؤثر کاربر (UPCOMING/ACTIVE/ENDED/STOPPED) سمت سرور و بر اساس UTC محاسبه می‌شود (`src/controllers/campaigns.js`) — همان فرمول فرانت‌اند.
+
+---
+
+### 11. `promo_campaign_registrations`
+
+نقش:
+
+- ثبت‌نام یک‌تاپ کاربران در کمپین‌ها؛ حداکثر یک ردیف به ازای هر `(campaign_id, telegram_id)`
+
+وضعیت استفاده:
+
+- فعال در runtime (Stage 5B — commit `990a0f0a`)؛ درج اتمیک با `INSERT … SELECT … WHERE EXISTS(PUBLISHED + بازه) … ON CONFLICT DO NOTHING … RETURNING` — بدون هیچ gap خواندن-نوشتن.
+
+#### ستون‌ها
+
+| ستون | نوع | Nullable | توضیح |
+|---|---|---|---|
+| `id` | `Integer` | خیر | کلید اصلی auto increment |
+| `campaign_id` | `TEXT` | خیر | FK به `promo_campaigns.id` |
+| `telegram_id` | `String(64)` | خیر | FK به `users.telegram_id` |
+| `registered_at` | `DateTime(timezone=True)` | خیر | زمان ثبت‌نام؛ پیش‌فرض `NOW()` |
+
+#### کلیدها و ایندکس‌ها
+
+- Primary Key:
+  - `id`
+- Foreign Keys (بدون CASCADE — تاریخچه ثبت‌نام هرگز حذف نمی‌شود):
+  - `campaign_id -> promo_campaigns.id` (RESTRICT — حذف فیزیکی کمپینِ دارای ثبت‌نام مسدود است؛ حذف کمپین در API فقط منطقی/soft است)
+  - `telegram_id -> users.telegram_id`
+- Unique Constraint:
+  - `UNIQUE (campaign_id, telegram_id)` — تضمین سختِ یک‌بارنویسی و ایمنی هم‌زمانی
+- Index:
+  - `idx_pcr_user` روی `(telegram_id)`
+
+#### روابط
+
+- چند به یک با `promo_campaigns`
+- چند به یک با `users`
+
+---
+
 ## روابط بین جداول
 
 ```text
@@ -352,9 +438,13 @@ users
 ├── price_alerts (1:N)
 ├── token_transactions (1:N)
 ├── token_balances (1:1 منطقی)
+├── promo_campaign_registrations (1:N)
 └── referrals
     ├── inviter_id -> users.telegram_id
     └── invitee_id -> users.telegram_id
+
+promo_campaigns
+└── promo_campaign_registrations (1:N — FK بدون CASCADE)
 ```
 
 ## جداول فعال در runtime فعلی
@@ -373,6 +463,13 @@ users
 - `tickets`
 - `ticket_replies`
 - `price_alerts`
+
+### فعال و استفاده‌شده (Exchange Campaigns — Stage 5B)
+
+- `promo_campaigns`
+- `promo_campaign_registrations`
+
+نکته: فهرست کامل و canonical همه ۴۹ جدول (شامل جداول membership، wheel، notifications، advertisements و …) در `scripts/00-migrate.sql` است؛ این سند بخش‌های اصلی منطقی را مستند می‌کند.
 
 ## محدودیت‌ها و نکات مهم
 
