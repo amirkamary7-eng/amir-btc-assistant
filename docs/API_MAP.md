@@ -617,6 +617,74 @@
 - وابستگی:
   - PostgreSQL (`promo_campaign_registrations` + `promo_campaigns` + `users`)
 
+### مسیرهای ادمین کمپین (Stage 6B)
+
+کنترلر: `src/controllers/campaigns_admin.js` — مخزن: توابع ادمین `src/repositories/campaigns.js`.
+
+- مجوزها (کلیدهای granular در جدول `admins`؛ سوپرادمین `*` همه را پاس می‌کند):
+  - خواندن (لیست/جزئیات/ثبت‌نام‌ها/CSV): `campaigns.view`
+  - تغییر (ایجاد/ویرایش/وضعیت/حذف): `campaigns.manage`
+- Rate limit تغییرها: باکت `admin-mutation` — ۲۰ در ۶۰ ثانیه به ازای هر ادمین.
+- ثبت عملیات تغییردهنده در `admin_logs` با پیشوند `campaigns_admin.` (create / update / status / delete)؛ خواندن‌ها لاگ نمی‌شوند.
+- ماشین حالت: `DRAFT → PUBLISHED → STOPPED → PUBLISHED` (ادامه)؛ حذف منطقی (status → `DELETED`) از هر وضعیت زنده؛ `DELETED` پایانی است — هم در SQL با گارد `status <> 'DELETED'` و هم در کنترلر با `409`.
+- حذف همیشه نرم است؛ ثبت‌نام‌ها هرگز CASCADE حذف نمی‌شوند.
+
+#### `GET /api/admin/campaigns`
+
+- Auth: `admin_auth` (`campaigns.view`)
+- Query: `status` (DRAFT|PUBLISHED|STOPPED|DELETED — اختیاری)، `search` (≤۱۰۰ نویسه، ILIKE روی title_fa/title_en)، `page` (≥۱)، `limit` (۱..۱۰۰، پیش‌فرض ۲۰)
+- خروجی: `status: 'success'`, `items[]` (همه وضعیت‌ها + `registration_count` + `created_at`/`updated_at`)، `total`, `page`, `limit`, `totalPages`
+- خطا: `400 INVALID_STATUS_FILTER`، `401/403`، `503`
+
+#### `POST /api/admin/campaigns`
+
+- Auth: `admin_auth` (`campaigns.manage`) + rate limit
+- Body (JSON ≤ ۱۰۰KB): `title_fa`/`title_en` (الزامی، ≤۲۰۰)، `summary_fa`/`summary_en` (≤۵۰۰)، `body_fa`/`body_en` (≤۵۰۰۰)، `image_url` (اختیاری — اعتبارسنج HTTPS مشترک `advertisements.js`؛ SSRF-محفوظ؛ رفع یافته 5C-L4)، `starts_at` (الزامی، ISO 8601 با timezone)، `ends_at` (اختیاری، باید بعد از `starts_at`)، `status` (اختیاری: `DRAFT` پیش‌فرض یا `PUBLISHED` — انتشار مستقیم)
+- خروجی: `status: 'success'`, `campaign` (با `registration_count: 0`)
+- خطا: `400 VALIDATION_ERROR` (+ آرایه `errors[]` با field/message)، `413`، `429`، `503`
+
+#### `GET /api/admin/campaigns/{campaign_id}`
+
+- Auth: `admin_auth` (`campaigns.view`)
+- خروجی: `campaign` در **هر** وضعیتی (شامل DRAFT/DELETED) + `registration_count`
+- خطا: `400 INVALID_CAMPAIGN_ID`، `404 CAMPAIGN_NOT_FOUND`، `503`
+
+#### `PUT|PATCH /api/admin/campaigns/{campaign_id}`
+
+- Auth: `admin_auth` (`campaigns.manage`) + rate limit
+- Body: ویرایش جزئی از فیلدهای محتوایی (whitelist ستون‌ها؛ `status` در این مسیر قابل تغییر نیست — فقط از مسیر status)
+- خروجی: `campaign` به‌روز شده
+- خطا: `400 VALIDATION_ERROR` (شامل رد فیلد status و «no updatable fields» و بررسی بازه با مقادیر ادغام‌شده)، `404`، `409 CAMPAIGN_ALREADY_DELETED`، `429`، `503`
+
+#### `PUT|POST /api/admin/campaigns/{campaign_id}/status`
+
+- Auth: `admin_auth` (`campaigns.manage`) + rate limit
+- Body: `{ "status": "PUBLISHED" | "STOPPED" }` (انتشار / توقف / ادامه)
+- رفتار: گذارهای مجاز `DRAFT→PUBLISHED`، `PUBLISHED→STOPPED`، `STOPPED→PUBLISHED`؛ همان-وضعیت = no-op موفق (idempotent برای دوبار کلیک)
+- خروجی: `campaign` با وضعیت جدید
+- خطا: `400 INVALID_STATUS`، `404`، `409 INVALID_STATUS_TRANSITION` / `CAMPAIGN_ALREADY_DELETED` / `CAMPAIGN_STATE_CHANGED` (مسابقه با حذف هم‌زمان)، `429`، `503`
+
+#### `DELETE /api/admin/campaigns/{campaign_id}` (نرم)
+
+- Auth: `admin_auth` (`campaigns.manage`) + rate limit
+- خروجی: `status: 'success'`, `deleted: true`, `id`
+- خطا: `404`، `409 CAMPAIGN_ALREADY_DELETED` / `CAMPAIGN_STATE_CHANGED`، `429`، `503`
+
+#### `GET /api/admin/campaigns/{campaign_id}/registrations`
+
+- Auth: `admin_auth` (`campaigns.view`)
+- Query: `page` (≥۱)، `limit` (۱..۱۰۰، پیش‌فرض ۲۰)
+- خروجی: `campaign_id`, `registration_count` (شمارش سرور از کمپین) + `items[]` (`id`, `telegram_id`, `username`, `first_name`, `last_name`, `registered_at`)، `total`, `page`, `limit`, `totalPages` — ترتیب: `registered_at DESC`
+- خطا: `400`، `404 CAMPAIGN_NOT_FOUND`، `503`
+
+#### `GET /api/admin/campaigns/{campaign_id}/registrations/export` (CSV)
+
+- Auth: `admin_auth` (`campaigns.view`)
+- Query: `page` (≥۱)، `limit` (۱..۱۰۰۰، پیش‌فرض ۱۰۰۰)
+- خروجی: `text/csv; charset=utf-8` — BOM + سطر سرصفحه `Registration ID,Telegram ID,Username,First Name,Last Name,Registered At` + فرار CSV (دوبرابر کردن quotes) + خنثی‌سازی تزریق فرمول (پیشوند `'` برای سلول‌های آغازشونده با `=`, `+`, `-`, `@`، tab، CR)
+- هدرهای امنیتی: `Content-Disposition: attachment`، `Cache-Control: no-store, no-cache, must-revalidate`، `X-Content-Type-Options: nosniff`، CORS برای دانلود ادمین
+- خطا: `400`، `404`، `503`
+
 ---
 
 ## 16. Telegram Webhook
@@ -695,4 +763,12 @@
 | `/api/campaigns` | GET | telegram_auth | PostgreSQL (promo_campaigns) |
 | `/api/campaigns/{id}` | GET | telegram_auth | PostgreSQL (promo_campaigns) |
 | `/api/campaigns/{id}/register` | POST | telegram_auth | PostgreSQL (promo_campaign_registrations) |
+| `/api/admin/campaigns` | GET | admin_auth (campaigns.view) | PostgreSQL (promo_campaigns) |
+| `/api/admin/campaigns` | POST | admin_auth (campaigns.manage) | PostgreSQL (promo_campaigns) + admin_logs |
+| `/api/admin/campaigns/{id}` | GET | admin_auth (campaigns.view) | PostgreSQL (promo_campaigns) |
+| `/api/admin/campaigns/{id}` | PUT/PATCH | admin_auth (campaigns.manage) | PostgreSQL (promo_campaigns) + admin_logs |
+| `/api/admin/campaigns/{id}/status` | PUT/POST | admin_auth (campaigns.manage) | PostgreSQL (promo_campaigns) + admin_logs |
+| `/api/admin/campaigns/{id}` | DELETE | admin_auth (campaigns.manage) | PostgreSQL (soft delete) + admin_logs |
+| `/api/admin/campaigns/{id}/registrations` | GET | admin_auth (campaigns.view) | PostgreSQL (promo_campaign_registrations + users) |
+| `/api/admin/campaigns/{id}/registrations/export` | GET | admin_auth (campaigns.view) | PostgreSQL (CSV) |
 | `/telegram` | POST | public | Worker webhook handler |

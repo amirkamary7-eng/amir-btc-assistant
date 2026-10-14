@@ -491,11 +491,18 @@ test('CAM-40: worker wires the three user routes + PROTECTED_PATHS gate', () => 
   assert.match(WORKER, /campaignsRepo,\s*\n\s*isUserRateLimited,\s*\n\s*ensureUserRow,/);
 });
 
-test('CAM-41: no admin/CRUD campaign routes exist yet (Stage 6 boundary)', () => {
-  assert.ok(!/\/api\/admin\/campaigns/.test(WORKER), 'no admin campaign routes before Stage 6');
-  assert.ok(!/campaigns\.(view|manage)/.test(WORKER), 'no campaign admin permissions before Stage 6');
+test('CAM-41: Stage 6B admin routes exist and stay off the user API surface', () => {
+  // Stage 6B added the admin panel backend under /api/admin/campaigns* —
+  // detailed wiring is locked in tests/campaigns-admin-api-contract-test.cjs.
+  assert.match(WORKER, /'\/api\/admin\/campaigns'/, 'admin list/create base route exists (Stage 6B)');
   // The reward_center admin routes (existing) are a different subsystem and stay.
   assert.match(WORKER, /\/api\/admin\/reward-center\/campaigns/, 'reward_center admin routes unchanged');
+  // The USER-facing surface remains exactly three routes — no new user paths.
+  assert.ok(WORKER.includes("url.pathname === '/api/campaigns'"), 'user list route unchanged');
+  // Admin and user route families stay disjoint (no /api/campaigns handler
+  // dispatches to campaignsAdminHandlers).
+  const adminDispatch = WORKER.slice(WORKER.indexOf('EXCHANGE CAMPAIGNS — Admin routes'));
+  assert.ok(!adminDispatch.slice(0, adminDispatch.indexOf('/api/sessions')).includes('campaignsHandlers.handle'), 'admin block never calls the user handlers');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

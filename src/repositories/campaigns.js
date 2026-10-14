@@ -244,6 +244,296 @@ export function createCampaignsRepository(deps) {
       : null;
   }
 
+  // ── Admin operations (Stage 6B) ───────────────────────────────────────────
+  //
+  // Contract notes:
+  //   - Admin reads see ALL statuses (incl. DRAFT/DELETED) — the user-facing
+  //     functions above are the ONLY paths that can leak rows to users, and
+  //     they hard-filter to PUBLISHED/STOPPED.
+  //   - DELETE is SOFT only (status → 'DELETED'); registrations are never
+  //     cascade-removed (FKs have no CASCADE) and the terminal DELETED state
+  //     is enforced atomically in SQL (`AND status <> 'DELETED'` guards).
+  //   - Every dynamic value is parameterized ($n); the only literals ever
+  //     interpolated into SQL are hard-coded column names from a fixed
+  //     whitelist (UPDATABLE_COLUMNS below) and the NOW()/NULL literals
+  //     allowed by _newSetBuilder.
+  //   - The status CHECK constraint on the table remains the final authority:
+  //     only DRAFT/PUBLISHED/STOPPED/DELETED can ever be stored.
+
+  const _ADMIN_SELECT_COLUMNS = `
+    c.id, c.title_fa, c.title_en, c.summary_fa, c.summary_en,
+    c.body_fa, c.body_en, c.image_url, c.starts_at, c.ends_at,
+    c.status, c.created_at, c.updated_at,
+    (SELECT COUNT(*)::int FROM promo_campaign_registrations r
+      WHERE r.campaign_id = c.id) AS registration_count
+  `;
+
+  function _rowToAdminCampaign(row) {
+    return {
+      id: String(row.id),
+      title_fa: row.title_fa || '',
+      title_en: row.title_en || '',
+      summary_fa: row.summary_fa || null,
+      summary_en: row.summary_en || null,
+      body_fa: row.body_fa || '',
+      body_en: row.body_en || '',
+      image_url: row.image_url || null,
+      starts_at: _iso(row.starts_at),
+      ends_at: _iso(row.ends_at),
+      status: row.status,
+      created_at: _iso(row.created_at),
+      updated_at: _iso(row.updated_at),
+      registration_count: Number(row.registration_count || 0),
+    };
+  }
+
+  /**
+   * Paginated admin list across ALL statuses with per-campaign registration
+   * counts. `status` is optional (controller whitelists it before we see it;
+   * it is bound as a parameter regardless). `search` matches title_fa/title_en
+   * case-insensitively (LIKE-wildcards inside the term are matched literally
+   * enough for an admin search box; the term is bound, never concatenated).
+   */
+  async function listCampaignsAdmin(env, { status, search, page, limit } = {}) {
+    const pg = Math.max(1, Math.min(10000, Number(page) || 1));
+    const lim = Math.max(1, Math.min(100, Number(limit) || 20));
+    const where = [];
+    const values = [];
+    if (status) {
+      values.push(String(status));
+      where.push(`c.status = $${values.length}`);
+    }
+    if (search) {
+      values.push(`%${String(search).slice(0, 100)}%`);
+      where.push(`(c.title_fa ILIKE $${values.length} OR c.title_en ILIKE $${values.length})`);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const offset = (pg - 1) * lim;
+    const countSql = `SELECT COUNT(*)::int AS total FROM promo_campaigns c ${whereClause}`;
+    const dataSql = `
+      SELECT ${_ADMIN_SELECT_COLUMNS}
+        FROM promo_campaigns c
+        ${whereClause}
+       ORDER BY c.created_at DESC, c.id DESC
+       LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+    `;
+    const [countResult, dataResult] = await Promise.all([
+      queryDb(env, countSql, values.slice()),
+      queryDb(env, dataSql, values.concat([lim, offset])),
+    ]);
+    const total = Number(countResult.rows[0]?.total || 0);
+    return {
+      items: (dataResult.rows || []).map(_rowToAdminCampaign),
+      total,
+      page: pg,
+      limit: lim,
+      totalPages: Math.max(1, Math.ceil(total / lim)),
+    };
+  }
+
+  /** Campaign in ANY status (admin view) + registration count, or null. */
+  async function getCampaignById(env, campaignId) {
+    const result = await queryDb(
+      env,
+      `
+        SELECT ${_ADMIN_SELECT_COLUMNS}
+          FROM promo_campaigns c
+         WHERE c.id = $1
+         LIMIT 1
+      `,
+      [String(campaignId)],
+    );
+    const row = (result.rows || [])[0];
+    return row ? _rowToAdminCampaign(row) : null;
+  }
+
+  /**
+   * INSERT a new campaign. All values parameterized. Returns the created row
+   * (registration_count is 0 by construction — the id is a fresh uuid, and a
+   * registration cannot reference the row before the INSERT commits).
+   */
+  async function createCampaign(env, data) {
+    const result = await queryDb(
+      env,
+      `
+        INSERT INTO promo_campaigns
+          (title_fa, title_en, summary_fa, summary_en, body_fa, body_en,
+           image_url, starts_at, ends_at, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, title_fa, title_en, summary_fa, summary_en,
+                  body_fa, body_en, image_url, starts_at, ends_at,
+                  status, created_at, updated_at
+      `,
+      [
+        String(data.title_fa),
+        String(data.title_en),
+        data.summary_fa ?? null,
+        data.summary_en ?? null,
+        data.body_fa ?? '',
+        data.body_en ?? '',
+        data.image_url ?? null,
+        String(data.starts_at),
+        data.ends_at ?? null,
+        String(data.status),
+      ],
+    );
+    const row = (result.rows || [])[0];
+    return row ? _rowToAdminCampaign(row) : null;
+  }
+
+  // Fixed whitelist of columns the admin UPDATE may touch. `status` is
+  // deliberately NOT here — status changes go exclusively through
+  // setCampaignStatus / softDeleteCampaign so every transition passes the
+  // same audited code path.
+  const UPDATABLE_COLUMNS = [
+    'title_fa', 'title_en', 'summary_fa', 'summary_en',
+    'body_fa', 'body_en', 'image_url', 'starts_at', 'ends_at',
+  ];
+
+  // Parameterized SET-clause builder (membership.js newSetBuilder pattern):
+  // values are bound as $n; literals are restricted to NOW().
+  function _newSetBuilder() {
+    const params = [];
+    const sets = [];
+    return {
+      params,
+      addParam(column, value) {
+        params.push(value);
+        sets.push(`${column} = $${params.length}`);
+      },
+      addLiteral(column, literal) {
+        if (literal !== 'NOW()') {
+          throw new Error(`_newSetBuilder: SQL literal not allowed: ${literal}`);
+        }
+        sets.push(`${column} = ${literal}`);
+      },
+      sql() { return sets.join(', '); },
+    };
+  }
+
+  /**
+   * Partial UPDATE of the whitelisted content columns. `fields` keys outside
+   * UPDATABLE_COLUMNS are ignored (never interpolated). Returns the updated
+   * row or null (not found / empty update / concurrent delete). The content of
+   * a row that gets soft-deleted between the controller's read and this UPDATE
+   * may still be written — harmless by design: DELETED rows never surface in
+   * any user or admin list again except through this admin module itself.
+   */
+  async function updateCampaign(env, campaignId, fields) {
+    const b = _newSetBuilder();
+    for (const column of UPDATABLE_COLUMNS) {
+      if (Object.prototype.hasOwnProperty.call(fields, column)) {
+        b.addParam(column, fields[column]);
+      }
+    }
+    if (!b.params.length) return null;
+    b.addLiteral('updated_at', 'NOW()'); // belt-and-suspenders; trigger also maintains it
+    const result = await queryDb(
+      env,
+      `
+        UPDATE promo_campaigns
+           SET ${b.sql()}
+         WHERE id = $${b.params.length + 1}
+        RETURNING id, title_fa, title_en, summary_fa, summary_en,
+                  body_fa, body_en, image_url, starts_at, ends_at,
+                  status, created_at, updated_at
+      `,
+      [...b.params, String(campaignId)],
+    );
+    const row = (result.rows || [])[0];
+    return row ? _rowToAdminCampaign(row) : null;
+  }
+
+  /**
+   * Status transition (publish / stop / resume). The `status <> 'DELETED'`
+   * guard makes DELETED terminal AT THE DATABASE LEVEL — a zombie resurrection
+   * is impossible even under a concurrent race. Returns the updated row or
+   * null (missing, already deleted, or raced delete).
+   */
+  async function setCampaignStatus(env, campaignId, status) {
+    const result = await queryDb(
+      env,
+      `
+        UPDATE promo_campaigns
+           SET status = $2, updated_at = NOW()
+         WHERE id = $1
+           AND status <> 'DELETED'
+        RETURNING id, title_fa, title_en, summary_fa, summary_en,
+                  body_fa, body_en, image_url, starts_at, ends_at,
+                  status, created_at, updated_at
+      `,
+      [String(campaignId), String(status)],
+    );
+    const row = (result.rows || [])[0];
+    return row ? _rowToAdminCampaign(row) : null;
+  }
+
+  /**
+   * SOFT delete (status → 'DELETED'). Registrations are preserved (FK
+   * RESTRICT, no CASCADE). Returns true only when this call performed the
+   * transition; false when the campaign is missing or already DELETED.
+   */
+  async function softDeleteCampaign(env, campaignId) {
+    const result = await queryDb(
+      env,
+      `
+        UPDATE promo_campaigns
+           SET status = 'DELETED', updated_at = NOW()
+         WHERE id = $1
+           AND status <> 'DELETED'
+         RETURNING id
+      `,
+      [String(campaignId)],
+    );
+    return (result.rows || []).length > 0;
+  }
+
+  /**
+   * Paginated registrations for one campaign, newest first, joined with the
+   * users table for display names. Used by BOTH the JSON list and the CSV
+   * export (export passes a larger `limit`).
+   */
+  async function listRegistrations(env, campaignId, { page, limit } = {}) {
+    const pg = Math.max(1, Math.min(10000, Number(page) || 1));
+    const lim = Math.max(1, Math.min(1000, Number(limit) || 20));
+    const offset = (pg - 1) * lim;
+    const [countResult, dataResult] = await Promise.all([
+      queryDb(
+        env,
+        `SELECT COUNT(*)::int AS total FROM promo_campaign_registrations WHERE campaign_id = $1`,
+        [String(campaignId)],
+      ),
+      queryDb(
+        env,
+        `
+          SELECT r.id, r.telegram_id, r.registered_at,
+                 u.username, u.first_name, u.last_name
+            FROM promo_campaign_registrations r
+            LEFT JOIN users u ON u.telegram_id = r.telegram_id
+           WHERE r.campaign_id = $1
+           ORDER BY r.registered_at DESC, r.id DESC
+           LIMIT $2 OFFSET $3
+        `,
+        [String(campaignId), lim, offset],
+      ),
+    ]);
+    const total = Number(countResult.rows[0]?.total || 0);
+    return {
+      items: (dataResult.rows || []).map((row) => ({
+        id: row.id,
+        telegram_id: String(row.telegram_id),
+        username: row.username || null,
+        first_name: row.first_name || null,
+        last_name: row.last_name || null,
+        registered_at: _iso(row.registered_at),
+      })),
+      total,
+      page: pg,
+      limit: lim,
+      totalPages: Math.max(1, Math.ceil(total / lim)),
+    };
+  }
+
   return {
     ensureSchema,
     listVisibleCampaigns,
@@ -251,5 +541,13 @@ export function createCampaignsRepository(deps) {
     registerUser,
     isRegistered,
     getCampaignForGate,
+    // Admin (Stage 6B)
+    listCampaignsAdmin,
+    getCampaignById,
+    createCampaign,
+    updateCampaign,
+    setCampaignStatus,
+    softDeleteCampaign,
+    listRegistrations,
   };
 }
