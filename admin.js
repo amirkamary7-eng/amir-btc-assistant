@@ -4356,6 +4356,71 @@ function _cmpFmtDate(iso) {
     try { return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
     catch (e) { return iso.slice(0, 10); }
 }
+
+// Dominant language of the single-field campaign text: Persian
+// (Arabic-script) letter ratio >= 0.30 -> 'fa', otherwise 'en'. Empty text
+// defaults to 'fa' (the app's primary language).
+function _cmpDetectLang(text) {
+    var s = String(text || '');
+    if (!s.trim()) return 'fa'; // empty input — the app's primary language
+    var persian = (s.match(/[\u0600-\u06FF]/g) || []).length;
+    if (!persian) return 'en';
+    var letters = (s.match(/[\u0600-\u06FFA-Za-z]/g) || []).length;
+    if (!letters) return 'fa';
+    return persian / letters >= 0.30 ? 'fa' : 'en';
+}
+
+// Current admin-panel language ('fa' default) — decides which stored
+// language the main form field prefills from.
+function _cmpPanelLang() {
+    try {
+        var l = (typeof window !== 'undefined' && typeof window.currentLang === 'string' && window.currentLang)
+            ? window.currentLang
+            : (typeof currentLang === 'string' && currentLang ? currentLang : '');
+        return l === 'en' ? 'en' : 'fa';
+    } catch (e) { return 'fa'; }
+}
+
+// Resolve internal /api/... image URLs against the API base (the admin
+// panel is served from a different origin than the API worker, so a
+// relative <img src> would 404). External http(s) URLs pass through
+// unchanged. Stored values are never rewritten — display-time only.
+function _cmpAdminImgUrl(u) {
+    if (!u) return u;
+    if (/^https?:\/\//i.test(u)) return u;
+    if (u.charAt(0) === '/') {
+        var base = '';
+        try { base = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
+        return base ? String(base).replace(/\/$/, '') + u : u;
+    }
+    return u;
+}
+
+// Build the bilingual content payload from the SINGLE-FIELD form: the main
+// text is stored in the language it is written in (auto-detected); the
+// optional manual translation — when provided — fills the OTHER language
+// columns. When absent, the other-language title copies the original (title
+// columns are NOT NULL) and summary/body stay empty so the display fallback
+// shows the ORIGINAL text (never a fake or partial translation).
+function _cmpBuildContentPayload(title, summary, body, trTitle, trSummary, trBody) {
+    var lang = _cmpDetectLang(title);
+    var other = lang === 'fa' ? 'en' : 'fa';
+    var payload = {
+        title_fa: '',
+        title_en: '',
+        summary_fa: null,
+        summary_en: null,
+        body_fa: '',
+        body_en: '',
+    };
+    payload['title_' + lang] = title;
+    payload['title_' + other] = trTitle || title; // NOT NULL columns — original shown for both
+    payload['body_' + lang] = body;
+    payload['body_' + other] = trBody || '';      // '' -> display falls back to the original
+    payload['summary_' + lang] = summary || null;
+    payload['summary_' + other] = trSummary || null;
+    return payload;
+}
 // [CMP-PURE-END]
 
 var _cmpListState = { page: 1, limit: 10, status: '', search: '', total: 0, totalPages: 1, token: 0 };
@@ -4527,36 +4592,118 @@ async function campaignFormLoad(id) {
     }
 }
 
+// Compact inline icons for the form group titles (admin panel svg style).
+var CMP_ICONS = {
+    basic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    schedule: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+    publish: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+};
+
+// Required-field validation: highlight + focus, cleared on first input.
+function _cmpMarkInvalid(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('cmp-adm-invalid');
+    try { el.focus(); } catch (e) { /* non-fatal */ }
+    el.oninput = function () {
+        el.classList.remove('cmp-adm-invalid');
+        el.oninput = null;
+    };
+}
+
 function _cmpRenderForm(box, c) {
     var isEdit = !!c;
-    var f = function (k) { return isEdit && c[k] != null ? adminEscapeHtml(String(c[k])) : ''; };
-    box.innerHTML = '<div class="rc-card" style="margin-bottom:16px">' +
+    var f = function (v) { return v != null ? adminEscapeHtml(String(v)) : ''; };
+
+    // Language-aware prefill (single-field form, Problem C): the main field
+    // shows the ADMIN PANEL's current language text (falling back to the
+    // other language when missing); the optional manual-translation section
+    // carries the other language's text — auto-expanded when it already holds
+    // a DIFFERENT text, so legacy bilingual campaigns keep both versions
+    // editable and nothing is silently overwritten.
+    var lang = _cmpPanelLang();
+    var other = lang === 'fa' ? 'en' : 'fa';
+    var mainTitle = isEdit ? (c['title_' + lang] || c['title_' + other] || '') : '';
+    var mainSummary = isEdit ? (c['summary_' + lang] || c['summary_' + other] || '') : '';
+    var mainBody = isEdit ? (c['body_' + lang] || c['body_' + other] || '') : '';
+    var trTitle = isEdit && c['title_' + other] && c['title_' + other] !== c['title_' + lang] ? c['title_' + other] : '';
+    var trSummary = isEdit && c['summary_' + other] && c['summary_' + other] !== c['summary_' + lang] ? c['summary_' + other] : '';
+    var trBody = isEdit && c['body_' + other] && c['body_' + other] !== c['body_' + lang] ? c['body_' + other] : '';
+    var hasTr = !!(trTitle || trSummary || trBody);
+
+    box.innerHTML =
+        '<div class="adm-form-card cmp-adm-form">' +
         '<h4 class="rc-card-title">' + adminEscapeHtml(t(isEdit ? 'adm_camp_form_edit' : 'adm_camp_form_new')) + '</h4>' +
-        '<div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))">' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_title_fa')) + '</label><input type="text" id="cmp-f-title-fa" maxlength="200" value="' + f('title_fa') + '"></div>' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_title_en')) + '</label><input type="text" id="cmp-f-title-en" maxlength="200" value="' + f('title_en') + '"></div>' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_summary_fa')) + '</label><input type="text" id="cmp-f-summary-fa" maxlength="500" value="' + f('summary_fa') + '"></div>' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_summary_en')) + '</label><input type="text" id="cmp-f-summary-en" maxlength="500" value="' + f('summary_en') + '"></div>' +
-        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_body_fa')) + '</label><textarea id="cmp-f-body-fa" rows="3" maxlength="5000">' + f('body_fa') + '</textarea></div>' +
-        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_body_en')) + '</label><textarea id="cmp-f-body-en" rows="3" maxlength="5000">' + f('body_en') + '</textarea></div>' +
-        '<div class="rc-field" style="grid-column:1/-1"><label>' + adminEscapeHtml(t('adm_camp_field_image')) + '</label>' +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+
+        // Group 1 — basic info (single set of fields)
+        '<fieldset class="cmp-adm-group">' +
+        '<legend class="cmp-adm-group-title">' + CMP_ICONS.basic + adminEscapeHtml(t('adm_camp_g_basic')) + '</legend>' +
+        '<div class="cmp-adm-row2">' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_title')) + ' *</label>' +
+        '<input type="text" id="cmp-f-title" class="adm-input" maxlength="200" value="' + f(mainTitle) + '"></div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_summary')) + '</label>' +
+        '<input type="text" id="cmp-f-summary" class="adm-input" maxlength="500" value="' + f(mainSummary) + '"></div>' +
+        '</div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_body')) + '</label>' +
+        '<textarea id="cmp-f-body" class="adm-input adm-textarea" rows="4" maxlength="5000">' + f(mainBody) + '</textarea></div>' +
+        '</fieldset>' +
+
+        // Group 2 — scheduling
+        '<fieldset class="cmp-adm-group">' +
+        '<legend class="cmp-adm-group-title">' + CMP_ICONS.schedule + adminEscapeHtml(t('adm_camp_g_schedule')) + '</legend>' +
+        '<div class="cmp-adm-row2">' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_starts')) + ' *</label>' +
+        '<input type="datetime-local" id="cmp-f-starts" class="adm-input" value="' + f(isEdit ? _cmpToLocalInput(c.starts_at) : '') + '"></div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_ends')) + '</label>' +
+        '<input type="datetime-local" id="cmp-f-ends" class="adm-input" value="' + f(isEdit && c.ends_at ? _cmpToLocalInput(c.ends_at) : '') + '"></div>' +
+        '</div>' +
+        '<div class="cmp-adm-hint">' + adminEscapeHtml(t('adm_camp_tz_hint')) + '</div>' +
+        '</fieldset>' +
+
+        // Group 3 — image (WebP upload + optional advanced URL)
+        '<fieldset class="cmp-adm-group">' +
+        '<legend class="cmp-adm-group-title">' + CMP_ICONS.image + adminEscapeHtml(t('adm_camp_g_image')) + '</legend>' +
+        '<div class="cmp-adm-image-row">' +
         '<label class="adm-btn adm-btn-ghost" style="cursor:pointer">' + adminEscapeHtml(t('adm_camp_field_image_pick')) +
         '<input type="file" id="cmp-f-image-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="campaignImageFileSelected(this)"></label>' +
-        '<span id="cmp-f-image-status" style="font-size:12px;opacity:.7">' + adminEscapeHtml(t('adm_camp_field_image_hint')) + '</span>' +
+        '<span id="cmp-f-image-status" class="cmp-adm-hint">' + adminEscapeHtml(t('adm_camp_field_image_hint')) + '</span>' +
         '</div>' +
-        '<img id="cmp-f-image-preview" alt="" style="' + (isEdit && c.image_url ? '' : 'display:none;') + 'max-width:220px;max-height:110px;border-radius:10px;margin-top:8px;border:1px solid rgba(255,255,255,.1)" src="' + (isEdit && c.image_url ? adminEscapeHtml(c.image_url) : '') + '">' +
-        '<input type="text" id="cmp-f-image-url" placeholder="' + adminEscapeHtml(t('adm_camp_field_image_url')) + '" value="' + f('image_url') + '" style="margin-top:8px">' +
-        '</div>' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_starts')) + '</label><input type="datetime-local" id="cmp-f-starts" value="' + adminEscapeHtml(isEdit ? _cmpToLocalInput(c.starts_at) : '') + '"></div>' +
-        '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_ends')) + '</label><input type="datetime-local" id="cmp-f-ends" value="' + adminEscapeHtml(isEdit ? _cmpToLocalInput(c.ends_at) : '') + '"></div>' +
-        (!isEdit ? '<div class="rc-field"><label>' + adminEscapeHtml(t('adm_camp_field_status')) + '</label><select id="cmp-f-status">' +
-        '<option value="DRAFT" selected>DRAFT</option><option value="PUBLISHED">PUBLISHED</option></select></div>' : '') +
-        '</div>' +
-        '<div style="display:flex;gap:8px;margin-top:14px">' +
-        '<button class="adm-btn adm-btn-primary" onclick="campaignFormSubmit()">' + adminEscapeHtml(t('adm_camp_save')) + '</button>' +
+        '<img id="cmp-f-image-preview" alt="" class="cmp-adm-preview"' + (isEdit && c.image_url ? '' : ' style="display:none;"') +
+        ' src="' + (isEdit && c.image_url ? f(_cmpAdminImgUrl(c.image_url)) : '') + '">' +
+        '<details class="cmp-adm-advanced"' + (isEdit && c.image_url ? ' open' : '') + '>' +
+        '<summary>' + adminEscapeHtml(t('adm_camp_advanced_url')) + '</summary>' +
+        '<div class="adm-form-field"><input type="text" id="cmp-f-image-url" class="adm-input" placeholder="https://…" value="' + f(isEdit ? c.image_url : '') + '"></div>' +
+        '</details>' +
+        '</fieldset>' +
+
+        // Group 4 — publish settings (create only; status changes have
+        // dedicated actions in the list per the controller state machine)
+        (!isEdit ?
+        '<fieldset class="cmp-adm-group">' +
+        '<legend class="cmp-adm-group-title">' + CMP_ICONS.publish + adminEscapeHtml(t('adm_camp_g_publish')) + '</legend>' +
+        '<div class="adm-form-field" style="max-width:240px"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_status')) + '</label>' +
+        '<select id="cmp-f-status" class="adm-input">' +
+        '<option value="DRAFT" selected>DRAFT</option><option value="PUBLISHED">PUBLISHED</option></select></div>' +
+        '</fieldset>' : '') +
+
+        // Group 5 — optional manual translation (collapsible)
+        '<details class="cmp-adm-advanced" id="cmp-f-translation"' + (hasTr ? ' open' : '') + '>' +
+        '<summary>' + adminEscapeHtml(t('adm_camp_g_translation')) + '</summary>' +
+        '<div class="cmp-adm-hint">' + adminEscapeHtml(t('adm_camp_tr_hint')) + '</div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_title')) + ' (' + (other === 'en' ? 'English' : 'فارسی') + ')</label>' +
+        '<input type="text" id="cmp-f-tr-title" class="adm-input" maxlength="200" value="' + f(trTitle) + '"></div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_summary')) + '</label>' +
+        '<input type="text" id="cmp-f-tr-summary" class="adm-input" maxlength="500" value="' + f(trSummary) + '"></div>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_body')) + '</label>' +
+        '<textarea id="cmp-f-tr-body" class="adm-input adm-textarea" rows="3" maxlength="5000">' + f(trBody) + '</textarea></div>' +
+        '</details>' +
+
+        '<div class="adm-form-actions">' +
+        '<button class="adm-btn adm-btn-primary" id="cmp-f-save" onclick="campaignFormSubmit()">' + adminEscapeHtml(t('adm_camp_save')) + '</button>' +
         '<button class="adm-btn adm-btn-ghost" onclick="campaignFormClose()">' + adminEscapeHtml(t('adm_camp_cancel')) + '</button>' +
-        '</div></div>';
+        '</div>' +
+        '</div>';
 }
 
 function campaignFormClose() {
@@ -4568,27 +4715,52 @@ function campaignFormClose() {
 async function campaignFormSubmit() {
     if (!_adminHasPerm('campaigns.manage')) { showAdminToast(t('adm_no_access'), 'error'); return; }
     var g = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
-    var payload = {
-        title_fa: g('cmp-f-title-fa').trim(),
-        title_en: g('cmp-f-title-en').trim(),
-        summary_fa: g('cmp-f-summary-fa').trim() || null,
-        summary_en: g('cmp-f-summary-en').trim() || null,
-        body_fa: g('cmp-f-body-fa'),
-        body_en: g('cmp-f-body-en'),
-        image_url: g('cmp-f-image-url').trim() || null,
-    };
+
+    // Required-field validation with a visible invalid state (cleared on input).
+    var title = g('cmp-f-title').trim();
+    if (!title) {
+        _cmpMarkInvalid('cmp-f-title');
+        showAdminToast(t('adm_camp_field_title'), 'error');
+        return;
+    }
     var startsIso = _cmpFromLocalInput(g('cmp-f-starts'));
-    if (!startsIso) { showAdminToast(t('adm_camp_field_starts'), 'error'); return; }
+    if (!startsIso) {
+        _cmpMarkInvalid('cmp-f-starts');
+        showAdminToast(t('adm_camp_field_starts'), 'error');
+        return;
+    }
+
+    // Single-field content + optional manual translation (Problem C): the
+    // main text is stored in the language it is written in (detected); the
+    // optional translation fills the other language columns. Without a
+    // translation the ORIGINAL text is what the other-language users see
+    // (display fallback) — never a fake or partial translation.
+    var payload = _cmpBuildContentPayload(
+        title,
+        g('cmp-f-summary').trim(),
+        g('cmp-f-body'),
+        g('cmp-f-tr-title').trim(),
+        g('cmp-f-tr-summary').trim(),
+        g('cmp-f-tr-body')
+    );
+    payload.image_url = g('cmp-f-image-url').trim() || null;
     payload.starts_at = startsIso;
     var endsRaw = g('cmp-f-ends');
     payload.ends_at = endsRaw ? _cmpFromLocalInput(endsRaw) : null;
-    if (payload.ends_at && payload.starts_at && Date.parse(payload.ends_at) <= Date.parse(payload.starts_at)) {
-        showAdminToast(t('adm_camp_field_ends'), 'error'); return;
+    if (payload.ends_at && Date.parse(payload.ends_at) <= Date.parse(payload.starts_at)) {
+        _cmpMarkInvalid('cmp-f-ends');
+        showAdminToast(t('adm_camp_field_ends'), 'error');
+        return;
     }
     if (!_cmpEditingId) {
         var st = g('cmp-f-status') || 'DRAFT';
         payload.status = st; // DRAFT | PUBLISHED only (select options)
     }
+
+    // Save state: the button is disabled + relabeled while the request is
+    // in-flight (no double submit, clear feedback).
+    var saveBtn = document.getElementById('cmp-f-save');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = t('adm_camp_saving'); }
     try {
         var data = _cmpEditingId
             ? await adminApiFetch('/api/admin/campaigns/' + encodeURIComponent(_cmpEditingId), { method: 'PUT', body: JSON.stringify(payload) })
@@ -4600,6 +4772,8 @@ async function campaignFormSubmit() {
     } catch (e) {
         var msg = (e && e.body && e.body.errors && e.body.errors.length) ? e.body.errors.map(function (x) { return x.field + ': ' + x.message; }).join(' | ') : (e.message || String(e));
         showAdminToast(msg, 'error');
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = t('adm_camp_save'); }
     }
 }
 
@@ -4734,7 +4908,7 @@ async function campaignImageFileSelected(input) {
         // Only the WebP URL is stored as the campaign image — the original
         // JPG/PNG never leaves the browser and is never uploaded.
         if (urlField) urlField.value = resp.url;
-        if (preview) { preview.src = resp.url; preview.style.display = ''; }
+        if (preview) { preview.src = _cmpAdminImgUrl(resp.url); preview.style.display = ''; }
         if (statusEl) statusEl.textContent = t('adm_camp_img_converted');
         showAdminToast(t('adm_camp_img_converted'), 'success');
     } catch (e) {

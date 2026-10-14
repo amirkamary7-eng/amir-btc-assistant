@@ -5771,3 +5771,90 @@ html[dir="rtl"] .market-ticker-track {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXCHANGE CAMPAIGNS — Admin form (premium grouped layout on adm-form-card)
+   Scoped to #admin-section-campaigns: reuses the panel's existing tokens
+   (adm-form-card / adm-input / adm-btn) and only adds semantic groups,
+   responsive rows, collapsible advanced sections and invalid-field states.
+   ═══════════════════════════════════════════════════════════════════════════ */
+#admin-section-campaigns .cmp-adm-form { gap: 14px; }
+#admin-section-campaigns .cmp-adm-group {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 12px 12px 14px;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#admin-section-campaigns .cmp-adm-group-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: #f7931a;
+    padding: 0 2px;
+}
+#admin-section-campaigns .cmp-adm-group-title svg {
+    width: 13px;
+    height: 13px;
+    flex: none;
+}
+/* Responsive two-column row: stacks on narrow screens (no overflow). */
+#admin-section-campaigns .cmp-adm-row2 { display: flex; gap: 10px; flex-wrap: wrap; }
+#admin-section-campaigns .cmp-adm-row2 > .adm-form-field { flex: 1 1 200px; }
+#admin-section-campaigns .cmp-adm-hint {
+    font-size: 11px;
+    color: #5a6378;
+    line-height: 1.7;
+}
+#admin-section-campaigns .cmp-adm-image-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+#admin-section-campaigns .cmp-adm-preview {
+    max-width: 220px;
+    max-height: 110px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    object-fit: cover;
+    margin-top: 2px;
+    background: rgba(0, 0, 0, 0.25);
+}
+/* Collapsible advanced / manual-translation sections. */
+#admin-section-campaigns .cmp-adm-advanced {
+    border: 1px dashed rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    padding: 8px 12px;
+}
+#admin-section-campaigns .cmp-adm-advanced summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    color: #a8b2c5;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+#admin-section-campaigns .cmp-adm-advanced summary::-webkit-details-marker { display: none; }
+#admin-section-campaigns .cmp-adm-advanced summary::before {
+    content: '▸';
+    transition: transform 0.15s ease;
+    color: #5a6378;
+    font-size: 10px;
+}
+#admin-section-campaigns .cmp-adm-advanced[open] summary::before { transform: rotate(90deg); }
+#admin-section-campaigns .cmp-adm-advanced[open] { padding-bottom: 12px; }
+#admin-section-campaigns .cmp-adm-advanced .adm-form-field { margin-top: 10px; }
+/* Invalid-field highlight (cleared on first input). */
+#admin-section-campaigns .cmp-adm-invalid {
+    border-color: rgba(255, 77, 77, 0.65) !important;
+    box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.08);
+}

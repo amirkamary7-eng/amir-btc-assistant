@@ -4,16 +4,17 @@
 // Fullscreen list + detail pages for exchange campaigns, opened
 // from the 3rd hero slider slide (assets/banner-campian.webp).
 //
-// STAGE 4 SCOPE (UI only):
-//   - No backend existed at Stage 4 time. The module first tries the real API;
-//     on ANY failure it falls back to clearly labeled DEMO data (badge on
-//     every card + notice bar + detail note). Demo data is NEVER presented
-//     as real.
-//   - STAGE 5B: the user backend is live — GET list/detail attaches the
-//     signed Telegram initData header, and the register button performs a
-//     one-tap POST to the real endpoint. In demo mode (backend unavailable)
-//     the button still only shows the honest "server not live" toast —
-//     registration is NEVER simulated and success is NEVER faked.
+// AUTH-WAIT + HONEST-ERRORS FIX (published-campaign visibility):
+//   - Every authenticated request waits for Telegram auth readiness FIRST
+//     (same waitForApiReady gate app.js apiFetch uses). On cold-open the
+//     SDK may not have populated initData yet — a premature fetch answered
+//     401 and the old demo fallback masked the failure, so published
+//     campaigns looked like they were missing for users.
+//   - API failures are NEVER masked as demo data or an empty list — the
+//     list shows a real error state with a retry button. The demo-data
+//     fallback (Stage 4 pre-backend artifact) was removed.
+//   - Registration is a one-tap POST to the real endpoint; success is only
+//     ever reported when the SERVER confirms it (registered === true).
 //
 // Live API contract (Stage 5B backend, src/controllers/campaigns.js):
 //   GET {API_BASE}/api/campaigns
@@ -32,7 +33,7 @@
 //       409 CAMPAIGN_NOT_STARTED | CAMPAIGN_ENDED | CAMPAIGN_STOPPED |
 //       CAMPAIGN_STATE_CHANGED | 429 RATE_LIMITED | 503 DB
 //   Anything else (non-ok, wrong shape, network error, timeout)
-//   → demo mode with visible labeling.
+//   → honest error state with a retry button (never demo/empty masking).
 //
 // Integration (zero changes to app.js / dashboard.css):
 //   - Script order: i18n.js → campaigns.js → app.js (defer), so
@@ -54,8 +55,7 @@
   var _detailOpen = false;        // detail overlay open
   var _closingListFromBack = false;   // Back button already popped our entry
   var _closingDetailFromBack = false;
-  var _campaigns = null;          // normalized campaign list
-  var _demoMode = false;          // true → showing clearly-labeled demo data
+  var _campaigns = null;          // normalized campaign list (null until a successful load)
   var _loadGeneration = 0;        // stale-response guard (referral F-8 pattern)
   var _detailElement = null;      // lazily created detail overlay
   var _escListenerInstalled = false;
@@ -118,6 +118,41 @@
     } catch (e) { /* non-fatal */ }
   }
 
+  // AUTH-WAIT FIX: apiFetch() (app.js) awaits waitForApiReady() before every
+  // authenticated request because on cold-open the Telegram SDK may not have
+  // populated initData yet (documented app.js race). This module must do the
+  // SAME - a fetch sent before auth is ready answers 401 and used to fall into
+  // the old demo fallback ("published campaigns don't show"). Resolves even
+  // when the helper is absent/failing (older app.js builds): never blocks.
+  function _cmpWaitAuthReady() {
+    return new Promise(function (resolve) {
+      try {
+        if (typeof window.waitForApiReady === 'function') {
+          Promise.resolve(window.waitForApiReady(8000)).then(resolve, resolve);
+          return;
+        }
+      } catch (e) { /* non-fatal */ }
+      resolve();
+    });
+  }
+
+  // Internal image URLs (uploaded via the admin WebP upload - served by the
+  // API worker as /api/advertisements/image/:id) are RELATIVE. The Mini App
+  // is served from a DIFFERENT origin (Pages) than the API worker, so a
+  // relative <img src> would 404 against the Pages origin. Prefix the API
+  // base at RENDER time - the stored image_url stays exactly as the server
+  // returned it (no data change). External http(s) URLs pass through as-is.
+  function resolveImgUrl(u) {
+    if (!u) return u;
+    if (/^https?:\/\//i.test(u)) return u;
+    if (u.charAt(0) === '/') {
+      var base = '';
+      try { base = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
+      return base ? base.replace(/\/$/, '') + u : u;
+    }
+    return u;
+  }
+
   // ── Icons (inline SVG, wallet.js/referral.js convention) ──
   var ICONS = {
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
@@ -142,68 +177,10 @@
     return 'ACTIVE';
   }
 
-  // ── Demo data (clearly labeled — never presented as real) ──
-  // Dates are relative to load time so all three states render
-  // correctly whenever the page is opened.
-  function buildDemoCampaigns() {
-    var now = Date.now();
-    var DAY = 24 * 60 * 60 * 1000;
-    var iso = function (offsetDays) {
-      return new Date(now + offsetDays * DAY).toISOString();
-    };
-    return [
-      {
-        id: 'demo-active-1',
-        demo: true,
-        status: 'PUBLISHED',
-        starts_at: iso(-3),
-        ends_at: iso(11),
-        title_fa: 'کمپین نمایشی ۱ — در حال اجرا',
-        title_en: 'Demo Campaign 1 — Active',
-        summary_fa: 'این کارت نمایشی است و کمپین واقعی نیست. پس از راه‌اندازی سرور، کمپین‌های واقعی صرافی با عنوان، خلاصه، تصویر و دکمه ثبت‌نام در همین صفحه نمایش داده می‌شوند.',
-        summary_en: 'This card is a demo, not a real campaign. Once the server goes live, real exchange campaigns will appear here with title, summary, image and a join button.',
-        body_fa: 'این صفحه صرفاً برای نمایش ظاهر و رفتار بخش کمپین‌ها ساخته شده است.\n\nدر نسخه نهایی، هر کمپین شامل شرایط کامل، بازه زمانی دقیق و دکمه ثبت‌نام یک‌مرحله‌ای خواهد بود. ثبت‌نام واقعی پس از فعال‌سازی سرور در مرحله بعدی امکان‌پذیر می‌شود و در این نسخه نمایشی به هیچ وجه شبیه‌سازی نشده است.',
-        body_en: 'This page exists purely to demonstrate the look and behavior of the campaigns section.\n\nIn the final version, every campaign will include full terms, an exact time window, and a one-tap join button. Real registration will be possible after the server is enabled in the next phase — it is deliberately NOT simulated in this demo.',
-        image_url: null,
-        registered: false
-      },
-      {
-        id: 'demo-upcoming-2',
-        demo: true,
-        status: 'PUBLISHED',
-        starts_at: iso(5),
-        ends_at: iso(26),
-        title_fa: 'کمپین نمایشی ۲ — به‌زودی',
-        title_en: 'Demo Campaign 2 — Upcoming',
-        summary_fa: 'نمونه‌ای از کمپینی که هنوز آغاز نشده است. تا پیش از شروع، وضعیت آن «به‌زودی» نمایش داده می‌شود و دکمه ثبت‌نام غیرفعال می‌ماند.',
-        summary_en: 'Sample of a campaign that has not started yet. Until it begins, it shows the Upcoming status and the join button stays disabled.',
-        body_fa: 'کمپین‌های پیش‌رو پس از رسیدن تاریخ آغاز، به‌صورت خودکار به وضعیت «در حال اجرا» تغییر می‌کنند.\n\nاین محتوا نمایشی است و هیچ داده واقعی در آن وجود ندارد.',
-        body_en: 'Upcoming campaigns automatically switch to the Active state once their start date arrives.\n\nThis content is a demo and contains no real data.',
-        image_url: null,
-        registered: false
-      },
-      {
-        id: 'demo-ended-3',
-        demo: true,
-        status: 'PUBLISHED',
-        starts_at: iso(-20),
-        ends_at: iso(-4),
-        title_fa: 'کمپین نمایشی ۳ — پایان‌یافته',
-        title_en: 'Demo Campaign 3 — Ended',
-        summary_fa: 'نمونه‌ای از کمپینی که بازه آن به پایان رسیده است. پس از پایان، ثبت‌نام برای همیشه بسته می‌شود.',
-        summary_en: 'Sample of a campaign whose window has closed. After it ends, registration stays permanently closed.',
-        body_fa: 'کمپین‌های پایان‌یافته برای مرور و مشاهده نتایج در فهرست باقی می‌مانند اما دکمه ثبت‌نام آن‌ها غیرفعال است.\n\nاین کارت داده واقعی ندارد و فقط نمایشی است.',
-        body_en: 'Ended campaigns stay in the list for review, but their join button is disabled.\n\nThis card holds no real data — demo only.',
-        image_url: null,
-        registered: false
-      }
-    ];
-  }
-
-  // ── API (real) — any failure falls back to demo mode ──
-  // Signed Telegram initData header — the same header app.js apiFetch uses.
+  // ── API (real) — failures surface as the honest error state ──
+  // Signed Telegram initData header — the same header app.js apiFetch sends.
   // Guarded: outside the Telegram WebApp (or before app.js has run) it is
-  // simply absent and the server answers 401 → honest demo fallback.
+  // simply absent and the server answers 401 → honest error state + retry.
   function apiHeaders(withJson) {
     var h = { 'Accept': 'application/json' };
     if (withJson) h['Content-Type'] = 'application/json';
@@ -212,7 +189,7 @@
         var d = window.getTelegramInitData();
         if (d) h['X-Telegram-Init-Data'] = d;
       }
-    } catch (e) { /* non-fatal — server 401 → demo fallback */ }
+    } catch (e) { /* non-fatal — server 401 → honest error state */ }
     return h;
   }
 
@@ -221,7 +198,6 @@
     if (raw.id === undefined || raw.id === null) return null;
     return {
       id: String(raw.id),
-      demo: false,
       status: typeof raw.status === 'string' ? raw.status : 'PUBLISHED',
       starts_at: raw.starts_at || null,
       ends_at: raw.ends_at || null,
@@ -236,38 +212,40 @@
     };
   }
 
-  function fetchRealCampaigns() {
-    return new Promise(function (resolve, reject) {
-      var ctrl = null;
-      var timer = null;
-      try { ctrl = new AbortController(); } catch (e) { ctrl = null; }
-      var base = '';
-      try { base = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
-      var url = base + '/api/campaigns';
-      var opts = { method: 'GET', headers: apiHeaders(false) };
-      if (ctrl) {
-        opts.signal = ctrl.signal;
-        timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* noop */ } }, FETCH_TIMEOUT_MS);
+  async function fetchRealCampaigns() {
+    // AUTH-WAIT FIRST (visibility fix): never send the request before the
+    // Telegram auth is ready - a premature fetch gets 401 and the campaign
+    // list would fail for users who just cold-opened the Mini App.
+    await _cmpWaitAuthReady();
+    var ctrl = null;
+    var timer = null;
+    try { ctrl = new AbortController(); } catch (e) { ctrl = null; }
+    var base = '';
+    try { base = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
+    var url = base + '/api/campaigns';
+    var opts = { method: 'GET', headers: apiHeaders(false) };
+    if (ctrl) {
+      opts.signal = ctrl.signal;
+      timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* noop */ } }, FETCH_TIMEOUT_MS);
+    }
+    try {
+      var res = await fetch(url, opts);
+      if (timer) clearTimeout(timer);
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      var data = await res.json();
+      if (!data || data.status !== 'ok' || !Array.isArray(data.campaigns)) {
+        throw new Error('bad shape');
       }
-      fetch(url, opts).then(function (res) {
-        if (timer) clearTimeout(timer);
-        if (!res.ok) { reject(new Error('HTTP ' + res.status)); return; }
-        return res.json();
-      }).then(function (data) {
-        if (!data || data.status !== 'ok' || !Array.isArray(data.campaigns)) {
-          reject(new Error('bad shape')); return;
-        }
-        var list = [];
-        for (var i = 0; i < data.campaigns.length; i++) {
-          var c = normalizeCampaign(data.campaigns[i]);
-          if (c) list.push(c);
-        }
-        resolve(list);
-      }).catch(function (err) {
-        if (timer) clearTimeout(timer);
-        reject(err);
-      });
-    });
+      var list = [];
+      for (var i = 0; i < data.campaigns.length; i++) {
+        var c = normalizeCampaign(data.campaigns[i]);
+        if (c) list.push(c);
+      }
+      return list;
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      throw err;
+    }
   }
 
   // One-tap registration (Stage 5B). ALWAYS resolves with
@@ -339,15 +317,15 @@
     });
   }
 
-  // Resolves with { demoMode, campaigns } — callers apply the result ONLY
-  // after their generation check, so a stale response can never overwrite
-  // newer data (open→close→open quickly).
+  // Resolves with { campaigns } — callers apply the result ONLY after their
+  // generation check, so a stale response can never overwrite newer data
+  // (open→close→open quickly). REJECTS on failure — the caller renders the
+  // honest error state with a retry button. Failures are never masked as
+  // demo data or an empty list (published campaigns must never silently
+  // disappear behind a "demo" or empty state).
   function loadCampaigns() {
     return fetchRealCampaigns().then(function (list) {
-      return { demoMode: false, campaigns: list };
-    }).catch(function () {
-      // Backend not live yet (expected until Stage 5/6) → clearly-labeled demo data.
-      return { demoMode: true, campaigns: buildDemoCampaigns() };
+      return { campaigns: list };
     });
   }
 
@@ -377,10 +355,6 @@
     return parts.join(' → ');
   }
 
-  function demoChip() {
-    return '<span class="cmp-demo-chip">' + esc(t('cmp_demo_badge')) + '</span>';
-  }
-
   function buildListSkeleton() {
     return '' +
       '<div class="cmp-header">' +
@@ -396,17 +370,10 @@
       '</div>';
   }
 
-  function buildDemoNotice() {
-    return '<div class="cmp-demo-notice" role="note">' + ICONS.info +
-      '<span>' + esc(t('cmp_demo_notice')) + '</span></div>';
-  }
-
   function buildCard(c, status) {
     var cover = c.image_url
-      ? '<img src="' + esc(c.image_url) + '" alt="' + esc(localized(c, 'title')) + '" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">' +
-        (c.demo ? demoChip() : '')
-      : '<div class="cmp-card-cover-icon">' + ICONS.gift + '</div>' +
-        (c.demo ? demoChip() : '');
+      ? '<img src="' + esc(resolveImgUrl(c.image_url)) + '" alt="' + esc(localized(c, 'title')) + '" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">'
+      : '<div class="cmp-card-cover-icon">' + ICONS.gift + '</div>';
     return '' +
       '<article class="cmp-card" data-id="' + esc(c.id) + '" role="button" tabindex="0">' +
         '<div class="cmp-card-cover' + (c.image_url ? '' : ' cmp-card-cover--placeholder') + '">' + cover + '</div>' +
@@ -418,7 +385,7 @@
           '<p class="cmp-card-summary">' + esc(localized(c, 'summary')) + '</p>' +
           '<div class="cmp-card-meta">' +
             '<span class="cmp-card-dates">' + ICONS.calendar + '<span>' + esc(dateRange(c)) + '</span></span>' +
-            (c.registered && !c.demo
+            (c.registered
               ? '<span class="cmp-card-cta">' + esc(t('cmp_registered')) + '</span>'
               : '<span class="cmp-card-cta">' + esc(t('cmp_view_details')) + ICONS.chevron + '</span>') +
           '</div>' +
@@ -434,11 +401,19 @@
       '</div>';
   }
 
-  function buildErrorState() {
+  function buildErrorState(err) {
+    // Real error message (visibility fix): the failure reason is surfaced to
+    // the user — never masked as demo data or an empty list.
+    var detail = '';
+    try {
+      var msg = err && err.message ? String(err.message) : '';
+      if (msg) detail = msg.slice(0, 60);
+    } catch (e) { /* non-fatal */ }
     return '' +
       '<div class="cmp-state">' + ICONS.info +
         '<div class="cmp-state-title">' + esc(t('cmp_list_error')) + '</div>' +
-        '<div class="cmp-state-desc">' + esc(t('cmp_list_error_desc')) + '</div>' +
+        '<div class="cmp-state-desc">' + esc(t('cmp_list_error_desc')) +
+          (detail ? '<br><span style="opacity:.55;font-size:12px">' + esc(detail) + '</span>' : '') + '</div>' +
         '<button class="cmp-retry-btn" type="button" data-action="retry">' + esc(t('cmp_retry')) + '</button>' +
       '</div>';
   }
@@ -453,7 +428,7 @@
       return;
     }
     var now = Date.now();
-    var html = _demoMode ? buildDemoNotice() : '';
+    var html = '';
     for (var i = 0; i < _campaigns.length; i++) {
       var c = _campaigns[i];
       html += buildCard(c, effectiveStatus(c, now));
@@ -474,23 +449,19 @@
     var status = effectiveStatus(c, Date.now());
     var joinable = (status === 'ACTIVE') && !c.registered;
     var btn;
-    if (c.registered && !c.demo) {
+    if (c.registered) {
       btn = '<button class="cmp-register-btn" type="button" disabled>' + esc(t('cmp_registered')) + '</button>';
     } else if (status === 'UPCOMING') {
       btn = '<button class="cmp-register-btn cmp-register-btn--closed" type="button" disabled>' + esc(t('cmp_registration_not_started')) + '</button>';
     } else if (status !== 'ACTIVE') {
       btn = '<button class="cmp-register-btn cmp-register-btn--closed" type="button" disabled>' + esc(t('cmp_registration_closed')) + '</button>';
     } else {
-      // ACTIVE + not registered. Real registration is out of scope for
-      // Stage 4 — the button only shows an honest "server not live" toast.
-      // No POST is sent; nothing is simulated.
+      // ACTIVE + not registered: one-tap registration POST (Stage 5B).
       btn = '<button class="cmp-register-btn" type="button" data-action="register-info">' + ICONS.gift + '<span>' + esc(t('cmp_register')) + '</span></button>';
     }
     var cover = c.image_url
-      ? '<img src="' + esc(c.image_url) + '" alt="' + esc(localized(c, 'title')) + '" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">' +
-        (c.demo ? demoChip() : '')
-      : '<div class="cmp-card-cover-icon">' + ICONS.gift + '</div>' +
-        (c.demo ? demoChip() : '');
+      ? '<img src="' + esc(resolveImgUrl(c.image_url)) + '" alt="' + esc(localized(c, 'title')) + '" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">'
+      : '<div class="cmp-card-cover-icon">' + ICONS.gift + '</div>';
     return '' +
       '<div class="cmp-header">' +
         '<button class="cmp-back-btn" data-action="close-detail" type="button" aria-label="' + esc(t('cmp_back')) + '">' + ICONS.back + '</button>' +
@@ -510,7 +481,6 @@
         '<p class="cmp-detail-summary">' + esc(localized(c, 'summary')) + '</p>' +
         '<div class="cmp-detail-section-title">' + ICONS.listIcon + '<span>' + esc(t('cmp_terms')) + '</span></div>' +
         '<p class="cmp-detail-body-text">' + esc(localized(c, 'body')) + '</p>' +
-        (c.demo ? '<div class="cmp-demo-notice" role="note">' + ICONS.info + '<span>' + esc(t('cmp_demo_detail_note')) + '</span></div>' : '') +
       '</div>' +
       '<div class="cmp-detail-bar">' +
         btn +
@@ -554,13 +524,13 @@
     page.scrollTop = 0;
     loadCampaigns().then(function (result) {
       if (generation !== _loadGeneration) return; // stale response — page was closed
-      _demoMode = result.demoMode;
       _campaigns = result.campaigns;
       renderList();
-    }).catch(function () {
-      if (generation !== _loadGeneration) return;
+    }).catch(function (err) {
+      if (generation !== _loadGeneration) return; // stale response — page was closed
+      _campaigns = null; // never keep stale data behind a failed load
       var body = document.getElementById('cmp-list-body');
-      if (body) body.innerHTML = buildErrorState();
+      if (body) body.innerHTML = buildErrorState(err);
     });
   }
 
@@ -597,13 +567,13 @@
     var generation = ++_loadGeneration; // invalidate any earlier in-flight load
     loadCampaigns().then(function (result) {
       if (generation !== _loadGeneration) return; // page closed / superseded
-      _demoMode = result.demoMode;
       _campaigns = result.campaigns;
       renderList();
-    }).catch(function () {
-      if (generation !== _loadGeneration) return;
+    }).catch(function (err) {
+      if (generation !== _loadGeneration) return; // page closed / superseded
+      _campaigns = null; // never keep stale data behind a failed load
       var b = document.getElementById('cmp-list-body');
-      if (b) b.innerHTML = buildErrorState();
+      if (b) b.innerHTML = buildErrorState(err);
     });
   }
 
@@ -662,13 +632,8 @@
         return;
       }
       if (action === 'register-info') {
-        // Demo mode: honest notice — the backend is unreachable and
-        // registration is NEVER simulated (no POST, no fake success).
-        if (_demoMode) {
-          toast(t('cmp_register_soon'));
-          return;
-        }
-        // Real mode: one-tap POST to the live endpoint.
+        // One-tap POST to the live endpoint. (Demo mode removed — the
+        // backend is live and failures now surface as honest error states.)
         handleRegisterClick(actionEl);
         return;
       }

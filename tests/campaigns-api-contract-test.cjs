@@ -301,7 +301,7 @@ test('CAM-20: handleList — 401 passthrough when initData is missing/invalid', 
   assert.equal(res.__status, 401);
 });
 
-test('CAM-21: handleList — 503 when DB is not configured (frontend falls back to labeled demo)', async () => {
+test('CAM-21: handleList — 503 when DB is not configured (frontend shows the honest error state)', async () => {
   const { handlers } = buildHandlers({ dbConfigured: false });
   const res = await handlers.handleList(REQ, {});
   assert.equal(res.__status, 503);
@@ -509,13 +509,16 @@ test('CAM-41: Stage 6B admin routes exist and stay off the user API surface', ()
 // 5. FRONTEND ↔ BACKEND CONTRACT ALIGNMENT
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('CAM-50: frontend registers only in real mode, one-tap POST, initData header', () => {
+test('CAM-50: frontend registers one-tap POST with initData header (demo mode removed)', () => {
   assert.match(FRONTEND, /'\/api\/campaigns\/' \+ encodeURIComponent\(String\(id\)\) \+ '\/register'/);
   assert.match(FRONTEND, /method: 'POST'/);
   assert.match(FRONTEND, /apiHeaders\(true\)/);
   assert.match(FRONTEND, /X-Telegram-Init-Data/);
-  // Demo mode: toast only, never a POST (honest fallback).
-  assert.match(FRONTEND, /if \(_demoMode\) \{\s*\n\s*toast\(t\('cmp_register_soon'\)\)/);
+  // Demo mode fully removed — registration is always the real POST.
+  assert.ok(!FRONTEND.includes('_demoMode'), 'no demo mode state');
+  assert.ok(!FRONTEND.includes('cmp_register_soon'), 'no demo not-live copy');
+  // The list fetch waits for auth readiness (same gate as app.js apiFetch).
+  assert.match(FRONTEND, /waitForApiReady\(8000\)/, 'auth-wait before fetching');
   // Success only when the server confirms (registered === true).
   assert.match(FRONTEND, /res\.body && res\.body\.registered === true/);
 });
