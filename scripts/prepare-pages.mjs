@@ -39,6 +39,8 @@ const hashedFiles = [
   'wallet.css',
   'referral.js',
   'referral.css',
+  'campaigns.js',
+  'campaigns.css',
   'admin.js',
   'membership-user.js',
   'membership-admin.js',

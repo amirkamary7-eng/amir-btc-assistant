@@ -1,0 +1,788 @@
+/* ============================================================
+   campaigns.css — Exchange Campaigns (Stage 4: user UI only)
+   ------------------------------------------------------------
+   Mirrors the wallet.css / referral.css design system exactly:
+   same dark palette, radii, blur, borders, typography scale,
+   RTL via logical properties, GPU-friendly transitions.
+
+   Contains:
+   - .hero-slide-img--ratio  → object-fit:cover for the 3rd hero
+     slide (banner is 1280x588 ≈ 2.177:1, container is 2:1 →
+     ~4% crop per side instead of vertical stretch). Existing
+     slides keep their dashboard.css classes untouched.
+   - #campaigns-full-page    → fullscreen list overlay (wallet
+     overlay pattern: fixed, inset 0, translateY slide-in).
+   - .cmp-detail-overlay     → fullscreen detail page (created
+     dynamically by campaigns.js, stacks above the list).
+   - Status badges, demo-data labeling, fixed bottom bar with
+     safe-area-inset support, custom scrollbars, skeletons.
+   ============================================================ */
+
+/* #region Hero 3rd slide — ratio-preserving image (design-approved cover crop) */
+/* NOTE: dashboard.css `.hero-slide-img--cover` is object-fit:fill (intentional
+   for the two existing 2:1 banners). The campaign banner is 1280x588, so it
+   gets a dedicated class with object-fit:cover → ~4%/side crop, no stretch.
+   Existing slides are untouched (zero changes to dashboard.css / app.js). */
+.hero-slide-img--ratio {
+  object-fit: cover;
+  object-position: center;
+}
+/* #endregion */
+
+/* #region Tokens & fullscreen list overlay */
+#campaigns-full-page,
+.cmp-detail-overlay {
+  --cmp-bg: #020611;
+  --cmp-card: #0B1220;
+  --cmp-card-2: #0F1828;
+  --cmp-accent: #F5A623;
+  --cmp-accent-2: #FFCC4D;
+  --cmp-text: #FFFFFF;
+  --cmp-text-2: #AEB7C2;
+  --cmp-text-dim: #6B7A8D;
+  --cmp-green: #00C896;
+  --cmp-red: #FF4D4D;
+  --cmp-orange: #F97316;
+  --cmp-border: rgba(255, 255, 255, 0.07);
+  --cmp-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --cmp-skeleton: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 75%);
+
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--cmp-bg);
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(245, 166, 35, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 40% at 50% 100%, rgba(245, 166, 35, 0.04) 0%, transparent 70%);
+  overflow-y: auto;
+  overflow-x: hidden;
+  transform: translateY(100%);
+  transition: transform 0.4s var(--cmp-ease);
+  -webkit-overflow-scrolling: touch;
+  padding-block-end: 32px;
+  color: var(--cmp-text);
+  visibility: hidden;
+  /* Keep the overlay out of tab/keyboard flow while closed */
+  pointer-events: none;
+}
+
+#campaigns-full-page.open,
+.cmp-detail-overlay.open {
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Detail page stacks above the list overlay */
+.cmp-detail-overlay {
+  z-index: 1001;
+}
+/* #endregion */
+
+/* #region Page header (sticky, safe-area aware — wallet pattern) */
+.cmp-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  padding-block-start: calc(16px + env(safe-area-inset-top, 0px));
+  background: rgba(2, 6, 17, 0.82);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-block-end: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cmp-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cmp-header-text h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--cmp-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-header-sub {
+  font-size: 12px;
+  color: var(--cmp-text-dim);
+}
+
+.cmp-back-btn {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: 1px solid var(--cmp-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cmp-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.cmp-back-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cmp-back-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cmp-back-btn:active {
+  transform: scale(0.94);
+}
+
+[dir='rtl'] .cmp-back-btn svg {
+  transform: scaleX(-1); /* chevron points "back" in both directions */
+}
+/* #endregion */
+
+/* #region Page body */
+.cmp-body {
+  max-width: 640px;
+  margin-inline: auto;
+  padding: 16px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* #endregion */
+
+/* #region Demo-data labeling (mandatory — never present mock as real) */
+.cmp-demo-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(245, 166, 35, 0.45);
+  background: rgba(245, 166, 35, 0.08);
+  color: var(--cmp-accent-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.cmp-demo-notice svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-block-start: 2px;
+}
+
+.cmp-demo-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px dashed rgba(245, 166, 35, 0.55);
+  background: rgba(245, 166, 35, 0.12);
+  color: var(--cmp-accent-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  direction: ltr; /* keep the word "DEMO" readable in both modes */
+  white-space: nowrap;
+}
+
+.cmp-demo-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cmp-accent);
+  box-shadow: 0 0 6px rgba(245, 166, 35, 0.8);
+}
+/* #endregion */
+
+/* #region Campaign cards */
+.cmp-card {
+  border-radius: 18px;
+  border: 1px solid var(--cmp-border);
+  background: var(--cmp-card);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  animation: cmpFadeIn 0.35s var(--cmp-ease) both;
+}
+
+.cmp-card:hover {
+  border-color: rgba(245, 166, 35, 0.35);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.cmp-card:active {
+  transform: scale(0.985);
+}
+
+.cmp-card:focus-visible {
+  outline: 2px solid var(--cmp-accent);
+  outline-offset: 2px;
+}
+
+/* Image area — real campaigns serve their image via the campaigns API;
+   demo mode renders a neutral decorative gradient block (no fake visuals). */
+.cmp-card-cover {
+  position: relative;
+  aspect-ratio: 1280 / 588;
+  width: 100%;
+  background: linear-gradient(135deg, #0F1828 0%, #0B1220 55%, #101a2e 100%);
+  overflow: hidden;
+}
+
+.cmp-card-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+/* Decorative placeholder for demo cards (icon + soft glow, clearly not a photo) */
+.cmp-card-cover--placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 70% at 50% 45%, rgba(245, 166, 35, 0.14) 0%, transparent 70%),
+    repeating-linear-gradient(-45deg,
+      rgba(255, 255, 255, 0.025) 0px, rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px, transparent 12px);
+}
+
+.cmp-card-cover--placeholder .cmp-card-cover-icon {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  transform: translate(-50%, -50%);
+  width: 46px;
+  height: 46px;
+  color: rgba(245, 166, 35, 0.5);
+}
+
+[dir='rtl'] .cmp-card-cover--placeholder .cmp-card-cover-icon {
+  transform: translate(50%, -50%);
+}
+
+.cmp-card-cover-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cmp-card-cover .cmp-demo-chip {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-start: 10px;
+  z-index: 2;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.cmp-card-content {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cmp-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cmp-card-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--cmp-text);
+  line-height: 1.5;
+}
+
+.cmp-card-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--cmp-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cmp-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-block-start: 2px;
+  font-size: 11.5px;
+  color: var(--cmp-text-dim);
+}
+
+.cmp-card-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  direction: ltr; /* dates render LTR in both language modes */
+}
+
+.cmp-card-dates svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.cmp-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--cmp-accent);
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cmp-card-cta svg {
+  width: 13px;
+  height: 13px;
+}
+
+[dir='rtl'] .cmp-card-cta svg {
+  transform: scaleX(-1);
+}
+/* #endregion */
+
+/* #region Status badges (server-approved state machine colors) */
+.cmp-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+.cmp-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* ACTIVE — green (running now) */
+.cmp-badge--active {
+  background: rgba(0, 200, 150, 0.12);
+  border: 1px solid rgba(0, 200, 150, 0.35);
+  color: var(--cmp-green);
+}
+.cmp-badge--active::before {
+  background: var(--cmp-green);
+  box-shadow: 0 0 6px rgba(0, 200, 150, 0.7);
+}
+
+/* UPCOMING — amber (not started yet; never shown as active) */
+.cmp-badge--upcoming {
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  color: var(--cmp-accent);
+}
+.cmp-badge--upcoming::before {
+  background: var(--cmp-accent);
+  box-shadow: 0 0 6px rgba(245, 166, 35, 0.7);
+}
+
+/* ENDED / STOPPED — muted red/gray */
+.cmp-badge--ended {
+  background: rgba(255, 77, 77, 0.10);
+  border: 1px solid rgba(255, 77, 77, 0.30);
+  color: #FF8080;
+}
+.cmp-badge--ended::before {
+  background: #FF8080;
+}
+
+.cmp-badge--stopped {
+  background: rgba(110, 122, 141, 0.12);
+  border: 1px solid rgba(110, 122, 141, 0.35);
+  color: #8B99AC;
+}
+.cmp-badge--stopped::before {
+  background: #8B99AC;
+}
+/* #endregion */
+
+/* #region Empty / error states */
+.cmp-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 52px 20px;
+  text-align: center;
+}
+
+.cmp-state svg {
+  width: 44px;
+  height: 44px;
+  color: var(--cmp-text-dim);
+  opacity: 0.7;
+}
+
+.cmp-state-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cmp-text-2);
+}
+
+.cmp-state-desc {
+  font-size: 12.5px;
+  color: var(--cmp-text-dim);
+  line-height: 1.8;
+  max-width: 300px;
+}
+
+.cmp-retry-btn {
+  margin-block-start: 4px;
+  padding: 9px 22px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  background: rgba(245, 166, 35, 0.1);
+  color: var(--cmp-accent-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.cmp-retry-btn:hover {
+  background: rgba(245, 166, 35, 0.18);
+}
+
+.cmp-retry-btn:active {
+  transform: scale(0.96);
+}
+/* #endregion */
+
+/* #region Skeleton loaders */
+.cmp-skel-card {
+  border-radius: 18px;
+  border: 1px solid var(--cmp-border);
+  background: var(--cmp-card);
+  overflow: hidden;
+}
+
+.cmp-skel-cover {
+  aspect-ratio: 1280 / 588;
+  background: var(--cmp-skeleton);
+  background-size: 200% 100%;
+  animation: cmpShimmer 1.4s ease-in-out infinite;
+}
+
+.cmp-skel-lines {
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmp-skel-line {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--cmp-skeleton);
+  background-size: 200% 100%;
+  animation: cmpShimmer 1.4s ease-in-out infinite;
+}
+
+.cmp-skel-line--w60 { width: 60%; }
+.cmp-skel-line--w90 { width: 90%; height: 10px; }
+.cmp-skel-line--w40 { width: 40%; height: 10px; }
+
+@keyframes cmpShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes cmpFadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+/* #endregion */
+
+/* #region Detail page */
+.cmp-detail-body {
+  max-width: 640px;
+  margin-inline: auto;
+  padding: 16px 16px 120px; /* bottom clears the fixed bar */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cmp-detail-cover {
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--cmp-border);
+  aspect-ratio: 1280 / 588;
+  background: linear-gradient(135deg, #0F1828 0%, #0B1220 55%, #101a2e 100%);
+}
+
+.cmp-detail-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+.cmp-detail-cover.cmp-card-cover--placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 70% at 50% 45%, rgba(245, 166, 35, 0.14) 0%, transparent 70%),
+    repeating-linear-gradient(-45deg,
+      rgba(255, 255, 255, 0.025) 0px, rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px, transparent 12px);
+}
+
+.cmp-detail-cover .cmp-card-cover-icon {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  color: rgba(245, 166, 35, 0.5);
+}
+
+[dir='rtl'] .cmp-detail-cover .cmp-card-cover-icon {
+  transform: translate(50%, -50%);
+}
+
+.cmp-detail-cover .cmp-demo-chip {
+  position: absolute;
+  inset-block-start: 12px;
+  inset-inline-start: 12px;
+  z-index: 2;
+}
+
+.cmp-detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cmp-detail-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--cmp-text);
+  line-height: 1.6;
+}
+
+.cmp-detail-period {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--cmp-border);
+  background: var(--cmp-card);
+  font-size: 12.5px;
+  color: var(--cmp-text-2);
+}
+
+.cmp-detail-period svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--cmp-accent);
+}
+
+.cmp-detail-period .cmp-period-range {
+  direction: ltr;
+  unicode-bidi: embed;
+}
+
+.cmp-detail-summary {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: var(--cmp-text-2);
+}
+
+.cmp-detail-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cmp-text);
+}
+
+.cmp-detail-section-title svg {
+  width: 17px;
+  height: 17px;
+  color: var(--cmp-accent);
+}
+
+.cmp-detail-body-text {
+  margin: 0;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--cmp-border);
+  background: var(--cmp-card);
+  font-size: 13px;
+  line-height: 2;
+  color: var(--cmp-text-2);
+  white-space: pre-line;
+}
+/* #endregion */
+
+/* #region Fixed bottom bar (detail page) — safe-area aware */
+.cmp-detail-bar {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  padding-block-end: calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(2, 6, 17, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-block-start: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cmp-register-btn {
+  flex: 1;
+  min-height: 46px; /* touch target */
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #F5A623 0%, #FFCC4D 100%);
+  color: #1A1206;
+  font-size: 14.5px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 6px 20px rgba(245, 166, 35, 0.28);
+}
+
+.cmp-register-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cmp-register-btn:hover {
+  box-shadow: 0 8px 26px rgba(245, 166, 35, 0.38);
+}
+
+.cmp-register-btn:active {
+  transform: scale(0.97);
+}
+
+.cmp-register-btn:disabled,
+.cmp-register-btn--closed {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--cmp-text-dim);
+  box-shadow: none;
+  border: 1px solid var(--cmp-border);
+  cursor: not-allowed;
+}
+
+.cmp-register-btn:focus-visible {
+  outline: 2px solid var(--cmp-accent-2);
+  outline-offset: 2px;
+}
+/* #endregion */
+
+/* #region Custom scrollbar (list/detail scroll containers) */
+#campaigns-full-page::-webkit-scrollbar,
+.cmp-detail-overlay::-webkit-scrollbar {
+  width: 5px;
+}
+
+#campaigns-full-page::-webkit-scrollbar-track,
+.cmp-detail-overlay::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#campaigns-full-page::-webkit-scrollbar-thumb,
+.cmp-detail-overlay::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
+#campaigns-full-page::-webkit-scrollbar-thumb:hover,
+.cmp-detail-overlay::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 166, 35, 0.4);
+}
+
+#campaigns-full-page,
+.cmp-detail-overlay {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+/* #endregion */
+
+/* #region Small screens & motion preferences */
+@media (max-width: 360px) {
+  .cmp-header {
+    padding: 13px 14px;
+    padding-block-start: calc(13px + env(safe-area-inset-top, 0px));
+  }
+
+  .cmp-body,
+  .cmp-detail-body {
+    padding-inline: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #campaigns-full-page,
+  .cmp-detail-overlay {
+    transition: none;
+  }
+
+  .cmp-card,
+  .cmp-skel-line,
+  .cmp-skel-cover {
+    animation: none;
+  }
+}
+/* #endregion */

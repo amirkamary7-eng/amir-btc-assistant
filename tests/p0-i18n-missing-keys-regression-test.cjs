@@ -58,6 +58,7 @@ const I18N_CONSUMERS = [
   'membership-user.js',
   'membership-admin.js',
   'assistant.js',
+  'campaigns.js',
 ];
 
 // ── 1. DY-001: `error_generic` defined in both dictionaries ─────────────────
