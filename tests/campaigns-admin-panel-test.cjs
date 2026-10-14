@@ -18,6 +18,10 @@
  *   6. Old-image compatibility: manual HTTPS image_url field remains; only
  *      the WebP upload URL is stored after a successful conversion.
  *   7. i18n parity: every adm_camp_* key used by admin.js exists in fa AND en.
+ *   8. Single-field content (Problem C): _cmpDetectLang language detection,
+ *      _cmpBuildContentPayload derivation (original stored in its language,
+ *      optional manual translation in the other, NO fake translation),
+ *      _cmpAdminImgUrl internal-URL resolution for previews.
  *
  * All tests are offline. Run: node --test tests/campaigns-admin-panel-test.cjs
  */
@@ -59,7 +63,7 @@ function fnBody(name) {
 // [CMP-PURE-START]..[CMP-PURE-END] block (pure helpers — no DOM).
 function loadPureHelpers() {
   const block = sliceBetween(ADMIN_JS, '// [CMP-PURE-START]', '// [CMP-PURE-END]');
-  return new Function(block + '\n;return { _cmpImageUploadPlan, CMP_WEBP_QUALITIES, _cmpAllowedActions, _cmpFromLocalInput, _cmpToLocalInput, _cmpFmtDate };')();
+  return new Function(block + '\n;return { _cmpImageUploadPlan, CMP_WEBP_QUALITIES, _cmpAllowedActions, _cmpFromLocalInput, _cmpToLocalInput, _cmpFmtDate, _cmpDetectLang, _cmpPanelLang, _cmpAdminImgUrl, _cmpBuildContentPayload };')();
 }
 
 // ADMIN_SECTION_PERMS + _adminHasPerm + _adminCanAccessSection (behavioral).
@@ -152,11 +156,19 @@ test('CAMP-AD-20: list call — GET /api/admin/campaigns with page/limit/status/
 
 test('CAMP-AD-21: create/update — POST /api/admin/campaigns and PUT /:id with the exact field set', () => {
   const body = fnBody('campaignFormSubmit');
-  assert.match(body, /title_fa: g\('cmp-f-title-fa'\)\.trim\(\)/);
-  assert.match(body, /title_en: g\('cmp-f-title-en'\)\.trim\(\)/);
+  // Single-field form (Problem C): ONE title/summary/body set; the bilingual
+  // payload is derived from the detected language + optional translation.
+  assert.match(body, /var title = g\('cmp-f-title'\)\.trim\(\)/, 'single title field');
+  assert.match(body, /_cmpBuildContentPayload\(/, 'payload built by the pure content builder');
+  assert.match(body, /g\('cmp-f-tr-title'\)\.trim\(\)/, 'optional translation title read');
   assert.match(body, /payload\.starts_at = startsIso/);
   // ISO 8601 with timezone (controller ISO_8601_RE contract).
   assert.match(body, /_cmpFromLocalInput\(g\('cmp-f-starts'\)\)/);
+  // Required-field validation marks the invalid input visibly.
+  assert.match(body, /_cmpMarkInvalid\('cmp-f-title'\)/, 'title required + marked');
+  assert.match(body, /_cmpMarkInvalid\('cmp-f-starts'\)/, 'starts required + marked');
+  // Save state: button disabled + relabeled while in-flight.
+  assert.match(body, /saveBtn\.disabled = true; saveBtn\.textContent = t\('adm_camp_saving'\)/, 'in-flight save state');
   // status is ONLY sent on create (update rejects it server-side).
   assert.match(body, /if \(!_cmpEditingId\) \{[\s\S]{0,120}payload\.status = st;/);
   assert.match(body, /adminApiFetch\('\/api\/admin\/campaigns', \{ method: 'POST'/);
@@ -317,9 +329,36 @@ test('CAMP-AD-52: allowed-actions matrix mirrors the controller state machine', 
 test('CAMP-AD-60: manual HTTPS image_url field kept (old external URLs stay usable)', () => {
   const formBody = fnBody('_cmpRenderForm');
   assert.match(formBody, /id="cmp-f-image-url"/, 'manual URL input present');
-  assert.match(formBody, /adm_camp_field_image_url/, 'labeled');
+  assert.match(formBody, /adm_camp_advanced_url/, 'labeled as the advanced URL section');
   const submitBody = fnBody('campaignFormSubmit');
-  assert.match(submitBody, /image_url: g\('cmp-f-image-url'\)\.trim\(\) \|\| null/, 'payload sends the manual URL when used');
+  assert.match(submitBody, /payload\.image_url = g\('cmp-f-image-url'\)\.trim\(\) \|\| null;/, 'payload sends the manual URL when used');
+});
+
+test('CAMP-AD-64: premium grouped form structure (adm-form-card + semantic groups)', () => {
+  const formBody = fnBody('_cmpRenderForm');
+  assert.match(formBody, /adm-form-card cmp-adm-form/, 'premium form card');
+  for (const g of ['adm_camp_g_basic', 'adm_camp_g_schedule', 'adm_camp_g_image', 'adm_camp_g_publish']) {
+    assert.match(formBody, new RegExp(g), `group ${g}`);
+  }
+  // Responsive rows wrap (no overflow on mobile).
+  assert.match(formBody, /cmp-adm-row2/, 'responsive row class used');
+  // Image preview resolves internal URLs against the API base.
+  assert.match(formBody, /_cmpAdminImgUrl\(c\.image_url\)/, 'preview URL resolved');
+  // WebP upload input wired.
+  assert.match(formBody, /campaignImageFileSelected\(this\)/, 'upload onchange wired');
+});
+
+test('CAMP-AD-65: manual translation section is optional and collapsible', () => {
+  const formBody = fnBody('_cmpRenderForm');
+  assert.match(formBody, /id="cmp-f-translation"/, 'translation details section');
+  assert.match(formBody, /adm_camp_g_translation/, 'translation group label');
+  assert.match(formBody, /adm_camp_tr_hint/, 'honest fallback hint (no fake translation)');
+  for (const id of ['cmp-f-tr-title', 'cmp-f-tr-summary', 'cmp-f-tr-body']) {
+    assert.match(formBody, new RegExp(`id="${id}"`), `translation field ${id}`);
+  }
+  // Auto-expanded ONLY when the other language already holds a different text
+  // (legacy bilingual campaigns keep both versions visible/editable).
+  assert.match(formBody, /hasTr \? ' open' : ''/, 'details open state driven by existing translation');
 });
 
 test('CAMP-AD-61: every adm_camp_* key used by admin.js exists in fa AND en', () => {
@@ -352,4 +391,58 @@ test('CAMP-AD-63: adm_camp_status_<STATUS> keys exist for all four statuses (fa 
     assert.ok(`adm_camp_status_${s}` in ctx.i18n.fa, `adm_camp_status_${s} missing in fa`);
     assert.ok(`adm_camp_status_${s}` in ctx.i18n.en, `adm_camp_status_${s} missing in en`);
   }
+});
+
+
+// ═════════════════════════════════════════════════════════════════════════
+// 8. SINGLE-FIELD CONTENT (Problem C — behavioral, real pure helpers)
+// ═════════════════════════════════════════════════════════════════════════
+
+test('CAMP-AD-70: _cmpDetectLang — Persian ratio detection (fa/en/mixed/empty)', () => {
+  assert.equal(pure._cmpDetectLang('کمپین ویژه صرافی'), 'fa', 'pure Persian');
+  assert.equal(pure._cmpDetectLang('Special BTC reward campaign'), 'en', 'pure English');
+  assert.equal(pure._cmpDetectLang('جوایز BTC ویژه'), 'fa', 'Persian with a ticker symbol');
+  assert.equal(pure._cmpDetectLang(''), 'fa', 'empty defaults to fa (app primary language)');
+  assert.equal(pure._cmpDetectLang(null), 'fa', 'null-safe');
+  assert.equal(pure._cmpDetectLang(undefined), 'fa', 'undefined-safe');
+  // A mostly-English text with a few Persian letters stays English.
+  assert.equal(pure._cmpDetectLang('Join now and win جایزه big rewards today'), 'en');
+});
+
+test('CAMP-AD-71: _cmpBuildContentPayload — original stored in its language, no fake translation', () => {
+  // Persian main text, NO translation: fa column gets the original; en title
+  // copies the original (NOT NULL) so English users see the SAME original
+  // text via the display fallback — never a fabricated translation.
+  const p1 = pure._cmpBuildContentPayload('کمپین تست', 'خلاصه تست', 'متن تست', '', '', '');
+  assert.equal(p1.title_fa, 'کمپین تست');
+  assert.equal(p1.title_en, 'کمپین تست', 'no translation → original shown for both (honest fallback)');
+  assert.equal(p1.summary_fa, 'خلاصه تست');
+  assert.equal(p1.summary_en, null, 'no fake English summary');
+  assert.equal(p1.body_fa, 'متن تست');
+  assert.equal(p1.body_en, '', 'empty other body → display falls back to the original');
+
+  // English main text, no translation: mirrored.
+  const p2 = pure._cmpBuildContentPayload('Test campaign', 'Test summary', 'Test body', '', '', '');
+  assert.equal(p2.title_en, 'Test campaign');
+  assert.equal(p2.title_fa, 'Test campaign', 'no translation → original shown for both');
+  assert.equal(p2.summary_en, 'Test summary');
+  assert.equal(p2.summary_fa, null);
+
+  // WITH a manual translation: the other language stores the translation.
+  const p3 = pure._cmpBuildContentPayload('کمپین تست', 'خلاصه', 'متن', 'Test campaign', 'Summary', 'Body');
+  assert.equal(p3.title_fa, 'کمپین تست', 'original preserved');
+  assert.equal(p3.title_en, 'Test campaign', 'manual translation stored');
+  assert.equal(p3.body_en, 'Body');
+  assert.equal(p3.summary_en, 'Summary');
+});
+
+test('CAMP-AD-72: _cmpPanelLang — admin panel language (default fa)', () => {
+  assert.equal(pure._cmpPanelLang(), 'fa', 'defaults to fa outside a window context');
+});
+
+test('CAMP-AD-73: _cmpAdminImgUrl — internal URLs prefixed, external untouched', () => {
+  assert.equal(pure._cmpAdminImgUrl('https://cdn.example.com/x.webp'), 'https://cdn.example.com/x.webp', 'external untouched');
+  assert.equal(pure._cmpAdminImgUrl('/api/advertisements/image/img_abc123'), '/api/advertisements/image/img_abc123', 'no API_BASE → relative kept as-is');
+  assert.equal(pure._cmpAdminImgUrl(''), '', 'empty safe');
+  assert.equal(pure._cmpAdminImgUrl(null), null, 'null safe');
 });

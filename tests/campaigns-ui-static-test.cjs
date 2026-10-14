@@ -28,10 +28,15 @@
  *      (loads the real i18n.js, same technique as the p0 test).
  *   6. Build pipeline: campaigns.js + campaigns.css are registered in
  *      prepare-pages.mjs hashedFiles.
- *   7. Registration safety (Stage 5B contract): in DEMO mode campaigns.js
- *      must never send a register POST (honest not-live toast only); in REAL
- *      mode the one-tap POST is sent, and success is announced ONLY when the
- *      server confirmed it (body.registered === true). No faked success.
+ *   7. Registration safety (Stage 5B contract): the one-tap register POST is
+ *      always real (demo mode removed), and success is announced ONLY when
+ *      the server confirmed it (body.registered === true). No faked success.
+ *   7b. Published-campaign visibility contract (auth-wait + honest errors):
+ *      the list fetch waits for Telegram auth readiness (waitForApiReady,
+ *      same gate as app.js apiFetch) BEFORE the request, failures surface
+ *      as the honest error state with a retry button (never demo data or
+ *      an empty list), and internal image URLs are resolved against
+ *      window.API_BASE at render time.
  *   8. UX contracts: scroll lock, Telegram BackButton integration,
  *      safe-area support, RTL handling.
  *
@@ -76,7 +81,6 @@ test('campaigns.css exists with overlay, badge, bar and safe-area styles', () =>
   assert.match(CMP_CSS, /\.cmp-detail-bar\s*\{/, 'fixed bottom bar style');
   assert.match(CMP_CSS, /safe-area-inset-bottom/, 'bottom bar respects safe area');
   assert.match(CMP_CSS, /safe-area-inset-top/, 'header respects safe area');
-  assert.match(CMP_CSS, /\.cmp-demo-chip\s*\{/, 'demo data chip style');
 });
 
 // ── 2. index.html wiring ───────────────────────────────────────────────────
@@ -227,24 +231,16 @@ test('p0 i18n class-guard covers campaigns.js as a consumer', () => {
 
 // ── 6. Safety: no simulated/real registration ──────────────────────────────
 
-test('register POST is gated on demo mode (demo never sends, real mode does)', () => {
-  // Demo mode: the honest not-live toast — no POST path.
+test('register POST is always real (demo mode fully removed)', () => {
   const registerHandler = CMP_JS.slice(
     CMP_JS.indexOf("if (action === 'register-info')"),
     CMP_JS.indexOf("var card = target.closest"),
   );
-  assert.ok(registerHandler.includes('if (_demoMode)'),
-    'register handler must branch on _demoMode first');
-  const demoBranch = registerHandler.slice(
-    registerHandler.indexOf('if (_demoMode)'),
-    registerHandler.indexOf('handleRegisterClick(actionEl)'),
-  );
-  assert.ok(demoBranch.includes('cmp_register_soon'),
-    'demo branch shows the honest not-live copy');
-  assert.ok(!demoBranch.includes('registerCampaign('),
-    'demo branch must NOT call registerCampaign (no POST in demo mode)');
+  // Demo mode is gone entirely — no _demoMode state, no demo branches.
+  assert.ok(!CMP_JS.includes('_demoMode'), 'no _demoMode state anywhere');
+  assert.ok(!registerHandler.includes('cmp_register_soon'), 'no not-live demo copy');
   assert.ok(registerHandler.includes('handleRegisterClick(actionEl)'),
-    'real mode dispatches to the register flow');
+    'the register action always dispatches to the real register flow');
   // The register POST itself targets ONLY the live register endpoint.
   assert.match(CMP_JS, /'\/api\/campaigns\/'.*.*'\/register'/,
     'register URL is /api/campaigns/:id/register');
@@ -266,8 +262,6 @@ test('register success is server-confirmed only; errors mapped honestly (no fake
   assert.match(CMP_JS, /cmp_register_error/, 'generic failure copy exists');
   // In-flight guard: exactly one register POST at a time.
   assert.match(CMP_JS, /_registeringId/, 'single in-flight registration guard');
-  // Demo copy still present for the demo path.
-  assert.match(CMP_JS, /cmp_register_soon/, 'honest not-live copy retained for demo mode');
 });
 
 test('GET list attaches the signed Telegram initData header', () => {
@@ -276,16 +270,19 @@ test('GET list attaches the signed Telegram initData header', () => {
     'uses the shared app.js helper (same header apiFetch sends)');
 });
 
-test('demo data is clearly labeled in code and UI', () => {
-  assert.match(CMP_JS, /buildDemoCampaigns/, 'demo data builder exists');
-  assert.match(CMP_JS, /cmp_demo_notice/, 'demo notice key used');
-  assert.match(CMP_JS, /cmp_demo_badge/, 'demo badge key used');
-  assert.match(CMP_JS, /cmp_demo_detail_note/, 'demo detail note key used');
-  const demoTitles = CMP_JS.match(/title_fa:\s*'([^']*)'/g) || [];
-  assert.ok(
-    demoTitles.every((t) => /نمایشی/.test(t)),
-    'every demo title must contain the word نمایشی (demo)',
+test('no demo fallback exists anywhere (backend is live — failures are honest)', () => {
+  assert.ok(!CMP_JS.includes('buildDemoCampaigns'), 'demo data builder removed');
+  assert.ok(!CMP_JS.includes('demoChip'), 'demo chip removed');
+  assert.ok(!CMP_JS.includes('buildDemoNotice'), 'demo notice removed');
+  assert.ok(!CMP_JS.includes('demoMode: true'), 'no demo fallback resolution');
+  assert.ok(!CMP_JS.includes('cmp_demo_'), 'no demo i18n keys referenced');
+  // loadCampaigns propagates failures — no masking catch.
+  const loadFn = CMP_JS.slice(
+    CMP_JS.indexOf('function loadCampaigns()'),
+    CMP_JS.indexOf('function loadCampaigns()') + 400,
   );
+  assert.ok(!/\.catch\(\s*function\s*\(\)\s*\{\s*return/.test(loadFn),
+    'loadCampaigns must NOT swallow failures into demo/empty data');
 });
 
 // ── 7. UX contracts ───────────────────────────────────────────────────────
@@ -307,8 +304,32 @@ test('RTL/LTR: applyDir sets direction per current language', () => {
   assert.match(CMP_JS, /'rtl' : 'ltr'/, 'rtl for fa, ltr otherwise');
 });
 
-test('API fallback: any failure degrades to clearly-labeled demo mode', () => {
-  assert.match(CMP_JS, /demoMode: true/, 'failed loads resolve to demo mode');
-  assert.match(CMP_JS, /_demoMode = result\.demoMode/, 'demo mode applied only after generation check (no stale overwrite)');
+test('auth-wait + honest error state (visibility contract)', () => {
+  // 1. The fetch waits for Telegram auth readiness BEFORE the request.
+  assert.match(CMP_JS, /function _cmpWaitAuthReady\(\)/, 'auth-wait helper exists');
+  assert.match(CMP_JS, /waitForApiReady\(8000\)/, 'waits with the same 8s budget as apiFetch');
+  const fetchFn = CMP_JS.slice(
+    CMP_JS.indexOf('async function fetchRealCampaigns()'),
+    CMP_JS.indexOf('async function fetchRealCampaigns()') + 1200,
+  );
+  assert.ok(fetchFn.indexOf('_cmpWaitAuthReady()') < fetchFn.indexOf('fetch('),
+    'auth wait happens BEFORE the fetch call');
+  // 2. Failures render the honest error state with a retry button.
+  assert.match(CMP_JS, /buildErrorState\(err\)/, 'the load error is passed to the error state');
+  assert.match(CMP_JS, /data-action="retry"/, 'error state offers a retry button');
   assert.match(CMP_JS, /bad shape/, 'shape validation rejects malformed responses');
+  assert.match(CMP_JS, /_campaigns = null; \/\/ never keep stale data behind a failed load/,
+    'a failed refresh never keeps stale data');
+});
+
+test('internal image URLs are resolved against the API base at render time', () => {
+  assert.match(CMP_JS, /function resolveImgUrl\(u\)/, 'resolveImgUrl helper exists');
+  assert.match(CMP_JS, /resolveImgUrl\(c\.image_url\)/, 'card/detail covers resolve the URL');
+  // The stored image_url is never mutated — only the rendered src changes.
+  const resolveFn = CMP_JS.slice(
+    CMP_JS.indexOf('function resolveImgUrl'),
+    CMP_JS.indexOf('function resolveImgUrl') + 500,
+  );
+  assert.match(resolveFn, /\^https\?:\\\/\\\//, 'external http(s) URLs pass through untouched');
+  assert.match(resolveFn, /charAt\(0\) === '\/'/, 'internal /api/ URLs get the base prefix');
 });
