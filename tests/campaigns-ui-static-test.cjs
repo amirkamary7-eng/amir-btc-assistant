@@ -27,9 +27,10 @@
  *      (loads the real i18n.js, same technique as the p0 test).
  *   6. Build pipeline: campaigns.js + campaigns.css are registered in
  *      prepare-pages.mjs hashedFiles.
- *   7. Safety: no real/simulated registration — campaigns.js must not
- *      call any campaign registration endpoint (GET list only), the
- *      register button only surfaces the honest "server not live" key.
+ *   7. Registration safety (Stage 5B contract): in DEMO mode campaigns.js
+ *      must never send a register POST (honest not-live toast only); in REAL
+ *      mode the one-tap POST is sent, and success is announced ONLY when the
+ *      server confirmed it (body.registered === true). No faked success.
  *   8. UX contracts: scroll lock, Telegram BackButton integration,
  *      safe-area support, RTL handling.
  *
@@ -216,21 +217,53 @@ test('p0 i18n class-guard covers campaigns.js as a consumer', () => {
 
 // ── 6. Safety: no simulated/real registration ──────────────────────────────
 
-test('campaigns.js never POSTs to a registration endpoint (list GET only)', () => {
-  assert.doesNotMatch(
-    CMP_JS,
-    /api\/campaigns[^'"`\s]*register/i,
-    'no registration endpoint may be called (real registration is out of Stage 4 scope)',
+test('register POST is gated on demo mode (demo never sends, real mode does)', () => {
+  // Demo mode: the honest not-live toast — no POST path.
+  const registerHandler = CMP_JS.slice(
+    CMP_JS.indexOf("if (action === 'register-info')"),
+    CMP_JS.indexOf("var card = target.closest"),
   );
-  assert.match(CMP_JS, /method:\s*'GET'/, 'the only API call must be the list GET');
-  const methodMatches = CMP_JS.match(/method:\s*'([A-Z]+)'/g) || [];
-  assert.deepEqual(methodMatches, ["method: 'GET'"], 'exactly one HTTP method: GET');
+  assert.ok(registerHandler.includes('if (_demoMode)'),
+    'register handler must branch on _demoMode first');
+  const demoBranch = registerHandler.slice(
+    registerHandler.indexOf('if (_demoMode)'),
+    registerHandler.indexOf('handleRegisterClick(actionEl)'),
+  );
+  assert.ok(demoBranch.includes('cmp_register_soon'),
+    'demo branch shows the honest not-live copy');
+  assert.ok(!demoBranch.includes('registerCampaign('),
+    'demo branch must NOT call registerCampaign (no POST in demo mode)');
+  assert.ok(registerHandler.includes('handleRegisterClick(actionEl)'),
+    'real mode dispatches to the register flow');
+  // The register POST itself targets ONLY the live register endpoint.
+  assert.match(CMP_JS, /'\/api\/campaigns\/'.*.*'\/register'/,
+    'register URL is /api/campaigns/:id/register');
+  const methods = CMP_JS.match(/method:\s*'([A-Z]+)'/g) || [];
+  assert.deepEqual([...new Set(methods)].sort(), ["method: 'GET'", "method: 'POST'"],
+    'exactly two HTTP methods: list GET + register POST');
 });
 
-test('register button surfaces the honest not-live notice (no fake success)', () => {
-  assert.match(CMP_JS, /cmp_register_soon/, 'uses the honest cmp_register_soon copy');
-  assert.doesNotMatch(CMP_JS, /cmp_register_(success|done|ok)\b/, 'no success copy for registration');
-  assert.match(CMP_JS, /ثبت‌نام.*شبیه‌سازی/, 'source documents that registration is not simulated');
+test('register success is server-confirmed only; errors mapped honestly (no fake success)', () => {
+  assert.match(CMP_JS, /res\.body && res\.body\.registered === true/,
+    'success requires the server body to confirm registered===true');
+  assert.match(CMP_JS, /cmp_register_success/, 'uses the success copy');
+  assert.match(CMP_JS, /cmp_register_already/, 'uses the already-registered copy');
+  assert.match(CMP_JS, /already_registered/, 'distinguishes already-registered server responses');
+  // Error codes mapped to honest messages — never a success toast.
+  assert.match(CMP_JS, /CAMPAIGN_NOT_STARTED/, 'maps CAMPAIGN_NOT_STARTED');
+  assert.match(CMP_JS, /CAMPAIGN_STOPPED/, 'maps CAMPAIGN_STOPPED');
+  assert.match(CMP_JS, /RATE_LIMITED/, 'maps RATE_LIMITED');
+  assert.match(CMP_JS, /cmp_register_error/, 'generic failure copy exists');
+  // In-flight guard: exactly one register POST at a time.
+  assert.match(CMP_JS, /_registeringId/, 'single in-flight registration guard');
+  // Demo copy still present for the demo path.
+  assert.match(CMP_JS, /cmp_register_soon/, 'honest not-live copy retained for demo mode');
+});
+
+test('GET list attaches the signed Telegram initData header', () => {
+  assert.match(CMP_JS, /X-Telegram-Init-Data/, 'initData header is set');
+  assert.match(CMP_JS, /window\.getTelegramInitData/,
+    'uses the shared app.js helper (same header apiFetch sends)');
 });
 
 test('demo data is clearly labeled in code and UI', () => {

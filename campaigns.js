@@ -5,24 +5,32 @@
 // from the 3rd hero slider slide (assets/banner-campian.webp).
 //
 // STAGE 4 SCOPE (UI only):
-//   - No backend exists yet. The module first tries the real API;
-//     until Stage 5/6 ship it, ANY failure falls back to clearly
-//     labeled DEMO data (badge on every card + notice bar +
-//     detail note). Demo data is NEVER presented as real.
-//   - Registration is NOT simulated: the join button only shows
-//     an honest "opens once the server is live" toast. No POST is
-//     ever sent to a registration endpoint.
+//   - No backend existed at Stage 4 time. The module first tries the real API;
+//     on ANY failure it falls back to clearly labeled DEMO data (badge on
+//     every card + notice bar + detail note). Demo data is NEVER presented
+//     as real.
+//   - STAGE 5B: the user backend is live — GET list/detail attaches the
+//     signed Telegram initData header, and the register button performs a
+//     one-tap POST to the real endpoint. In demo mode (backend unavailable)
+//     the button still only shows the honest "server not live" toast —
+//     registration is NEVER simulated and success is NEVER faked.
 //
-// Expected Stage 5/6 API contract (documented for the backend phase):
+// Live API contract (Stage 5B backend, src/controllers/campaigns.js):
 //   GET {API_BASE}/api/campaigns
-//     → 200 { status: 'ok', campaigns: [{
+//     → 200 { status: 'ok', count, campaigns: [{
 //          id, title_fa, title_en, summary_fa, summary_en,
 //          body_fa, body_en, image_url (optional),
-//          starts_at (ISO), ends_at (ISO),
-//          status ('PUBLISHED'|'DRAFT'|'STOPPED'|'DELETED'),
+//          starts_at (ISO), ends_at (ISO|null),
+//          status ('PUBLISHED'|'STOPPED'),
 //          effective_status ('ACTIVE'|'UPCOMING'|'ENDED'|'STOPPED'),
-//          registered (bool, optional)
+//          registered (bool)
 //        }] }
+//   POST {API_BASE}/api/campaigns/:id/register (one-tap, no body)
+//     → 200 { status:'ok', registered:true, already_registered:bool,
+//           campaign_id, registered_at }
+//     → 400 INVALID_CAMPAIGN_ID | 404 CAMPAIGN_NOT_FOUND |
+//       409 CAMPAIGN_NOT_STARTED | CAMPAIGN_ENDED | CAMPAIGN_STOPPED |
+//       CAMPAIGN_STATE_CHANGED | 429 RATE_LIMITED | 503 DB
 //   Anything else (non-ok, wrong shape, network error, timeout)
 //   → demo mode with visible labeling.
 //
@@ -55,6 +63,9 @@
   var LIST_PAGE_ID = 'campaigns-full-page';
   var DETAIL_CLASS = 'cmp-detail-overlay';
   var FETCH_TIMEOUT_MS = 6000;
+  var REGISTER_TIMEOUT_MS = 8000;
+  var _registeringId = null;       // campaign id with an in-flight register POST
+  var _detailCampaignId = null;    // campaign shown in the detail overlay
 
   // ── Small utilities ───────────────────────────────────────
   function esc(str) {
@@ -190,6 +201,21 @@
   }
 
   // ── API (real) — any failure falls back to demo mode ──
+  // Signed Telegram initData header — the same header app.js apiFetch uses.
+  // Guarded: outside the Telegram WebApp (or before app.js has run) it is
+  // simply absent and the server answers 401 → honest demo fallback.
+  function apiHeaders(withJson) {
+    var h = { 'Accept': 'application/json' };
+    if (withJson) h['Content-Type'] = 'application/json';
+    try {
+      if (typeof window.getTelegramInitData === 'function') {
+        var d = window.getTelegramInitData();
+        if (d) h['X-Telegram-Init-Data'] = d;
+      }
+    } catch (e) { /* non-fatal — server 401 → demo fallback */ }
+    return h;
+  }
+
   function normalizeCampaign(raw) {
     if (!raw || typeof raw !== 'object') return null;
     if (raw.id === undefined || raw.id === null) return null;
@@ -218,7 +244,7 @@
       var base = '';
       try { base = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
       var url = base + '/api/campaigns';
-      var opts = { method: 'GET', headers: { 'Accept': 'application/json' } };
+      var opts = { method: 'GET', headers: apiHeaders(false) };
       if (ctrl) {
         opts.signal = ctrl.signal;
         timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* noop */ } }, FETCH_TIMEOUT_MS);
@@ -241,6 +267,75 @@
         if (timer) clearTimeout(timer);
         reject(err);
       });
+    });
+  }
+
+  // One-tap registration (Stage 5B). ALWAYS resolves with
+  // { ok, status, code, body } — never rejects. `ok` mirrors HTTP 200;
+  // success is only ever reported when the SERVER confirmed it
+  // (body.registered === true after a DB-verified insert).
+  function registerCampaign(id) {
+    return new Promise(function (resolve) {
+      var ctrl = null;
+      var timer = null;
+      try { ctrl = new AbortController(); } catch (e) { ctrl = null; }
+      var base = '';
+      try { base = (typeof window.API_BASE === 'string' && window.API_BASE) ? window.API_BASE : ''; } catch (e) { base = ''; }
+      var url = base + '/api/campaigns/' + encodeURIComponent(String(id)) + '/register';
+      var opts = { method: 'POST', headers: apiHeaders(true) };
+      if (ctrl) {
+        opts.signal = ctrl.signal;
+        timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* noop */ } }, REGISTER_TIMEOUT_MS);
+      }
+      fetch(url, opts).then(function (res) {
+        if (timer) clearTimeout(timer);
+        return res.json().catch(function () { return null; }).then(function (data) {
+          resolve({ ok: res.ok, status: res.status, code: (data && data.code) || '', body: data || null });
+        });
+      }).catch(function () {
+        if (timer) clearTimeout(timer);
+        resolve({ ok: false, status: 0, code: 'NETWORK', body: null });
+      });
+    });
+  }
+
+  // Register button click in the detail overlay (real data mode only).
+  // Demo mode never reaches this path — the honest not-live toast is shown
+  // instead, and no POST is sent.
+  function handleRegisterClick(btn) {
+    var c = _detailCampaignId ? findCampaign(_detailCampaignId) : null;
+    if (!c || c.registered) return;
+    if (_registeringId) return; // one in-flight registration at a time
+    _registeringId = c.id;
+
+    // In-flight visual state (button disabled + loading label).
+    if (btn) btn.disabled = true;
+    var label = btn && btn.querySelector ? btn.querySelector('span') : null;
+    if (label) label.textContent = t('cmp_register_in_progress');
+
+    registerCampaign(c.id).then(function (res) {
+      _registeringId = null;
+      var serverConfirmed = res && res.ok && res.body && res.body.registered === true;
+      if (serverConfirmed) {
+        // Server (database) confirmed the registration — safe to announce.
+        c.registered = true;
+        toast(t(res.body.already_registered ? 'cmp_register_already' : 'cmp_register_success'));
+        if (_detailOpen && _detailElement) _detailElement.innerHTML = buildDetail(c);
+        renderList();
+        return;
+      }
+
+      // Failure — map the server code to an honest message. The detail bar
+      // is re-rendered fresh so the user can retry (unless the campaign
+      // state itself makes the button permanently closed).
+      var code = res && res.code ? res.code : '';
+      if (code === 'CAMPAIGN_STOPPED') c.status = 'STOPPED';
+      if (_detailOpen && _detailElement) _detailElement.innerHTML = buildDetail(c);
+
+      if (code === 'CAMPAIGN_NOT_STARTED') toast(t('cmp_registration_not_started'));
+      else if (code === 'CAMPAIGN_ENDED' || code === 'CAMPAIGN_STOPPED' || code === 'CAMPAIGN_STATE_CHANGED') toast(t('cmp_register_stopped'));
+      else if (code === 'RATE_LIMITED' || res.status === 429) toast(t('cmp_register_rate_limited'));
+      else toast(t('cmp_register_error'));
     });
   }
 
@@ -522,6 +617,7 @@
 
     var el = ensureDetailElement();
     applyDir(el);
+    _detailCampaignId = c.id;
     el.innerHTML = buildDetail(c);
     el.classList.add('open');
     el.scrollTop = 0;
@@ -538,6 +634,8 @@
   function closeDetail() {
     if (!_detailOpen) return;
     _detailOpen = false;
+    _detailCampaignId = null;
+    _registeringId = null; // a closed overlay cancels any pending UI update
 
     if (!_closingDetailFromBack && typeof window.tgBackPop === 'function') {
       window.tgBackPop();
@@ -564,8 +662,14 @@
         return;
       }
       if (action === 'register-info') {
-        // Honest notice — registration is NOT simulated in Stage 4.
-        toast(t('cmp_register_soon'));
+        // Demo mode: honest notice — the backend is unreachable and
+        // registration is NEVER simulated (no POST, no fake success).
+        if (_demoMode) {
+          toast(t('cmp_register_soon'));
+          return;
+        }
+        // Real mode: one-tap POST to the live endpoint.
+        handleRegisterClick(actionEl);
         return;
       }
     }

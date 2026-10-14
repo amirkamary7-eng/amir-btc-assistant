@@ -42,6 +42,11 @@ import { createAdvertisementsHandlers } from './src/controllers/advertisements.j
 import { createNotificationService } from './src/services/notification_service.js';
 import { createAlertEconomyRepository } from './src/repositories/alert_economy.js';
 import { createAlertEconomyHandlers } from './src/controllers/alert_economy.js';
+// Exchange Campaigns (Stage 5B) — user-facing promo campaigns API.
+// NOTE: distinct from reward_center's `campaigns` config table and from the
+// dead legacy `exchange_campaigns` table; see src/repositories/campaigns.js.
+import { createCampaignsRepository } from './src/repositories/campaigns.js';
+import { createCampaignsHandlers } from './src/controllers/campaigns.js';
 
 import { createMarketOverviewService } from './src/services/market_overview_service.js';
 import { createMembershipRepository } from './src/repositories/membership.js';
@@ -4046,6 +4051,19 @@ const userRepo = createUserRepository({ queryDb, queryDbTransaction, normalizeOp
 // adminRepo must be created BEFORE userHandlers because userHandlers (bootstrap)
 // checks the DB admins table to detect DB-added admins (not just env super admin).
 const adminRepo = createAdminRepository({ queryDb, queryDbDirect, normalizeOptionalString, isAdminTelegramId });
+
+// ── Campaigns (Exchange Campaigns — Stage 5B user API) ──────────────────────
+const campaignsRepo = createCampaignsRepository({ queryDb, isDatabaseConfigured });
+const campaignsHandlers = createCampaignsHandlers({
+  jsonResponse,
+  authenticateTelegramRequest,
+  safeDbErrorResponse,
+  safeError,
+  isDatabaseConfigured,
+  campaignsRepo,
+  isUserRateLimited,
+  ensureUserRow,
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MembershipGateway — central membership decision authority.
@@ -8081,7 +8099,7 @@ export default {
       //   - GET /api/membership/rules (rules document — like /api/content)
       //   - GET /api/membership/requirement (requirement config)
       //   - GET /api/calendar/events (public calendar data)
-      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
+      const PROTECTED_PATHS = /^\/api\/(wallet|tickets|alerts|campaigns|assistant|referrals|users\/me|watchlist|sessions|notify|notifications|wheel|calendar\/reminders|cosmetics\/mine|cosmetics\/[^/]+\/(?:purchase|activate)|membership\/(?:status|request|welcome-shown|rules\/accept|rules\/accepted)|rewards)/;
 
       // AP-1 FIX (Security Batch 2): gate on !isDevMode(env) instead of the old
       // prod-only check — staging is gated like production and an unknown/unset
@@ -8725,6 +8743,27 @@ export default {
       // DEPRECATED: /api/referrals/tokens — use /api/wallet instead
       if (request.method === 'GET' && url.pathname === '/api/referrals/tokens') {
         return await walletHandlers.handleGetWallet(request, env);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // EXCHANGE CAMPAIGNS — user routes (Stage 5B)
+      // Auth: PROTECTED_PATHS gate above (initData + channel membership in
+      // non-dev) AND per-handler authenticateTelegramRequest (defense-in-depth).
+      // No KV cache by design (per-user `registered` flag — see controller).
+      // Admin/CRUD endpoints are Stage 6 — deliberately absent.
+      // ═══════════════════════════════════════════════════════════════════════
+      if (request.method === 'GET' && url.pathname === '/api/campaigns') {
+        return campaignsHandlers.handleList(request, env);
+      }
+
+      if (request.method === 'GET' && /^\/api\/campaigns\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname)) {
+        const campaignId = url.pathname.split('/').pop();
+        return campaignsHandlers.handleGetDetail(request, env, campaignId);
+      }
+
+      if (request.method === 'POST' && /^\/api\/campaigns\/[A-Za-z0-9_-]{1,64}\/register$/.test(url.pathname)) {
+        const campaignId = url.pathname.split('/')[3];
+        return campaignsHandlers.handleRegister(request, env, campaignId);
       }
 
       // Wallet API Routes

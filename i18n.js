@@ -1436,7 +1436,13 @@ const i18n = {
         cmp_register: 'ثبت‌نام در کمپین',
         cmp_register_soon: 'ثبت‌نام پس از راه‌اندازی سرور فعال می‌شود.',
         cmp_registration_not_started: 'ثبت‌نام هنوز آغاز نشده است',
-        cmp_registration_closed: 'ثبت‌نام در این کمپین بسته است.'
+        cmp_registration_closed: 'ثبت‌نام در این کمپین بسته است.',
+        cmp_register_in_progress: 'در حال ثبت‌نام…',
+        cmp_register_success: 'ثبت‌نام شما در این کمپین ثبت شد.',
+        cmp_register_already: 'قبلاً در این کمپین ثبت‌نام کرده‌اید.',
+        cmp_register_stopped: 'این کمپین دیگر فعال نیست.',
+        cmp_register_rate_limited: 'درخواست‌های زیاد؛ لطفاً کمی بعد دوباره تلاش کنید.',
+        cmp_register_error: 'ثبت‌نام انجام نشد؛ لطفاً دوباره تلاش کنید.'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -2853,7 +2859,13 @@ const i18n = {
         cmp_register: 'Join this campaign',
         cmp_register_soon: 'Registration opens once the server goes live.',
         cmp_registration_not_started: 'Registration has not started yet',
-        cmp_registration_closed: 'Registration for this campaign is closed.'
+        cmp_registration_closed: 'Registration for this campaign is closed.',
+        cmp_register_in_progress: 'Registering…',
+        cmp_register_success: 'Your registration for this campaign was recorded.',
+        cmp_register_already: 'You are already registered for this campaign.',
+        cmp_register_stopped: 'This campaign is no longer active.',
+        cmp_register_rate_limited: 'Too many requests — please try again in a moment.',
+        cmp_register_error: 'Registration failed — please try again.'
     }
 };
 

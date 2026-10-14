@@ -559,7 +559,67 @@
 
 ---
 
-## 15. Telegram Webhook
+## 15. کمپین‌های تبلیغاتی (Exchange Campaigns)
+
+### `GET /api/campaigns`
+
+- Auth: `telegram_auth` (+ عضویت کانال از طریق PROTECTED_PATHS در محیط غیر dev)
+- ورودی: ندارد (بدنه نیست؛ شناسه کاربر فقط از initData امضاشده)
+- خروجی:
+  - `status: 'ok'`
+  - `count`
+  - `campaigns[]`:
+    - `id`, `title_fa`, `title_en`, `summary_fa`, `summary_en`, `body_fa`, `body_en`, `image_url`
+    - `starts_at` (ISO), `ends_at` (ISO یا null)
+    - `status: 'PUBLISHED' | 'STOPPED'` (کمپین‌های DRAFT/DELETED هرگز بازگردانده نمی‌شوند)
+    - `effective_status: 'ACTIVE' | 'UPCOMING' | 'ENDED' | 'STOPPED'` (محاسبه سمت سرور، UTC، همان فرمول کلاینت)
+    - `registered` (bool — فقط برای کاربر احراز هویت‌شده)
+- خطا:
+  - `401` بدون/با initData نامعتبر
+  - `503` دیتابیس در دسترس نیست (کلاینت به حالت دموی برچسب‌دار برمی‌گردد)
+- وابستگی:
+  - PostgreSQL (جدول `promo_campaigns` + LEFT JOIN `promo_campaign_registrations`)
+  - بدون KV cache (پرچم `registered` به ازای هر کاربر متفاوت است)
+
+### `GET /api/campaigns/{campaign_id}`
+
+- Auth: `telegram_auth` (+ PROTECTED_PATHS)
+- خروجی:
+  - `status: 'ok'`, `campaign` (همان ساختار رکورد لیست)
+- خطا:
+  - `400 INVALID_CAMPAIGN_ID` — id با الگوی `^[A-Za-z0-9_-]{1,64}$` نخواند
+  - `404 CAMPAIGN_NOT_FOUND` — ناموجود / DRAFT / DELETED (عمداً غیرقابل تمیز)
+  - `503` دیتابیس
+- وابستگی:
+  - PostgreSQL (`promo_campaigns` + `promo_campaign_registrations`)
+
+### `POST /api/campaigns/{campaign_id}/register`
+
+- Auth: `telegram_auth` (+ PROTECTED_PATHS)
+- Body: **ندارد** (ثبت‌نام یک‌لمسی؛ شناسه صرافی از کلاینت پذیرفته نمی‌شود)
+- Rate limit: 10 درخواست در ۶۰ ثانیه به ازای هر کاربر (`campaign_register`)
+- خروجی موفق:
+  - `status: 'ok'`, `registered: true`, `already_registered: bool`, `campaign_id`, `registered_at`
+  - موفقیت فقط پس از تأیید واقعی دیتابیس اعلام می‌شود (ردیف RETURNING یا ردیف موجود)
+- خطا:
+  - `400 INVALID_CAMPAIGN_ID`
+  - `401` احراز هویت
+  - `404 CAMPAIGN_NOT_FOUND` — ناموجود / DRAFT / DELETED
+  - `409 CAMPAIGN_NOT_STARTED` — هنوز شروع نشده
+  - `409 CAMPAIGN_ENDED` — بازه تمام شده
+  - `409 CAMPAIGN_STOPPED` — متوقف
+  - `409 CAMPAIGN_STATE_CHANGED` — مسابقه گذار وضعیت (قابل تلاش مجدد)
+  - `429 RATE_LIMITED`
+  - `503` دیتابیس
+- تضمین هم‌زمانی:
+  - یک دستور اتمیک: `INSERT … SELECT … WHERE EXISTS(status='PUBLISHED' AND بازه معتبر با NOW() سرور) … ON CONFLICT (campaign_id, telegram_id) DO NOTHING RETURNING`
+  - قید UNIQUE `(campaign_id, telegram_id)` → تکرار ثبت‌نام و مسابقه درخواست‌های هم‌زمان غیرممکن است (idempotent)
+- وابستگی:
+  - PostgreSQL (`promo_campaign_registrations` + `promo_campaigns` + `users`)
+
+---
+
+## 16. Telegram Webhook
 
 ### `POST /telegram`
 
@@ -574,7 +634,7 @@
 
 ---
 
-## 16. دستور `/start` ربات
+## 17. دستور `/start` ربات
 
 اگرچه HTTP endpoint مجزا نیست، اما به‌عنوان contract مهم سیستم باید مستند شود.
 
@@ -632,4 +692,7 @@
 | `/api/alerts` | POST | telegram_auth | PostgreSQL (price_alerts table) |
 | `/api/alerts` | GET | telegram_auth | PostgreSQL (price_alerts table) |
 | `/api/alerts/{id}` | DELETE | telegram_auth | PostgreSQL (price_alerts table) |
+| `/api/campaigns` | GET | telegram_auth | PostgreSQL (promo_campaigns) |
+| `/api/campaigns/{id}` | GET | telegram_auth | PostgreSQL (promo_campaigns) |
+| `/api/campaigns/{id}/register` | POST | telegram_auth | PostgreSQL (promo_campaign_registrations) |
 | `/telegram` | POST | public | Worker webhook handler |
