@@ -63,7 +63,7 @@ function fnBody(name) {
 // [CMP-PURE-START]..[CMP-PURE-END] block (pure helpers — no DOM).
 function loadPureHelpers() {
   const block = sliceBetween(ADMIN_JS, '// [CMP-PURE-START]', '// [CMP-PURE-END]');
-  return new Function(block + '\n;return { _cmpImageUploadPlan, CMP_WEBP_QUALITIES, _cmpAllowedActions, _cmpFromLocalInput, _cmpToLocalInput, _cmpFmtDate, _cmpDetectLang, _cmpPanelLang, _cmpAdminImgUrl, _cmpBuildContentPayload };')();
+  return new Function(block + '\n;return { _cmpImageUploadPlan, CMP_WEBP_QUALITIES, _cmpAllowedActions, _cmpFromLocalInput, _cmpToLocalInput, _cmpFmtDate, _cmpDetectLang, _cmpPanelLang, _cmpAdminImgUrl, _cmpBuildContentPayload, _cmpIsValidRegUrl };')();
 }
 
 // ADMIN_SECTION_PERMS + _adminHasPerm + _adminCanAccessSection (behavioral).
@@ -445,4 +445,113 @@ test('CAMP-AD-73: _cmpAdminImgUrl — internal URLs prefixed, external untouched
   assert.equal(pure._cmpAdminImgUrl('/api/advertisements/image/img_abc123'), '/api/advertisements/image/img_abc123', 'no API_BASE → relative kept as-is');
   assert.equal(pure._cmpAdminImgUrl(''), '', 'empty safe');
   assert.equal(pure._cmpAdminImgUrl(null), null, 'null safe');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. REGISTRATION LINK + REDESIGNED TOOLBAR (P0/P1 — this PR)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// The pure-helper block must expose the new validator for these tests.
+// (loadPureHelpers extracts [CMP-PURE-START]..[CMP-PURE-END].)
+test('CAMP-AD-80: _cmpIsValidRegUrl — http(s) only, no credentials/localhost/IP literals, null-safe', () => {
+  const h = loadPureHelpers();
+  // Valid destinations.
+  assert.equal(h._cmpIsValidRegUrl('https://exchange.example.com/register?vip=AMIRBTC'), true, 'https with query');
+  assert.equal(h._cmpIsValidRegUrl('http://example.org/join'), true, 'plain http allowed (matches server policy)');
+  assert.equal(h._cmpIsValidRegUrl('  https://pad.example.com/signup  '), true, 'whitespace tolerated (trimmed)');
+  // Dangerous schemes — structurally rejected.
+  assert.equal(h._cmpIsValidRegUrl('javascript:alert(document.domain)'), false, 'javascript: rejected');
+  assert.equal(h._cmpIsValidRegUrl('data:text/html,<script>alert(1)</script>'), false, 'data: rejected');
+  assert.equal(h._cmpIsValidRegUrl('vbscript:msgbox(1)'), false, 'vbscript: rejected');
+  assert.equal(h._cmpIsValidRegUrl('file:///etc/passwd'), false, 'file: rejected');
+  assert.equal(h._cmpIsValidRegUrl('intent://x/#Intent'), false, 'intent: rejected');
+  assert.equal(h._cmpIsValidRegUrl('HTTPS://exchange.example.com'), true, 'scheme case-insensitive');
+  // Credentials / internal hosts.
+  assert.equal(h._cmpIsValidRegUrl('https://user:pass@exchange.example.com/register'), false, 'embedded credentials rejected');
+  assert.equal(h._cmpIsValidRegUrl('http://localhost/x'), false, 'localhost rejected');
+  assert.equal(h._cmpIsValidRegUrl('http://127.0.0.1/x'), false, 'IPv4 literal rejected');
+  assert.equal(h._cmpIsValidRegUrl('http://[::1]/x'), false, 'IPv6 literal rejected');
+  // Malformed / null-safe.
+  assert.equal(h._cmpIsValidRegUrl(''), false, 'empty');
+  assert.equal(h._cmpIsValidRegUrl('not a url'), false, 'garbage');
+  assert.equal(h._cmpIsValidRegUrl(null), false, 'null');
+  assert.equal(h._cmpIsValidRegUrl(undefined), false, 'undefined');
+  assert.equal(h._cmpIsValidRegUrl(12345), false, 'non-string');
+  assert.equal(h._cmpIsValidRegUrl('https://x.example/' + 'a'.repeat(2100)), false, 'length-bounded (2048)');
+});
+
+test('CAMP-AD-81: registration URL field exists in create AND edit forms with stored-value prefill', () => {
+  const formBody = fnBody('_cmpRenderForm');
+  assert.match(formBody, /id="cmp-f-reg-url"/, 'the registration URL input');
+  assert.match(formBody, /adm_camp_g_registration/, 'its group label key');
+  assert.match(formBody, /c\.registration_url \|\| ''/, 'edit mode prefills the STORED value');
+  assert.match(formBody, /maxlength="2048"/, 'client length bound');
+});
+
+test('CAMP-AD-82: campaignFormSubmit validates and sends registration_url (client mirror of the server validator)', () => {
+  const body = fnBody('campaignFormSubmit');
+  assert.match(body, /_cmpIsValidRegUrl\(regUrl\)/, 'client-side validation before send');
+  assert.match(body, /_cmpMarkInvalid\('cmp-f-reg-url'\)/, 'visible invalid state');
+  assert.match(body, /payload\.registration_url = regUrl \|\| null/, 'explicit clear when empty (never an accidental stale link)');
+});
+
+test('CAMP-AD-83: redesigned toolbar — chips + search + count + reset, no native select, mobile-safe classes', () => {
+  const body = fnBody('renderCampaignsToolbar');
+  assert.match(body, /cmp-adm-toolbar/, 'toolbar container');
+  assert.match(body, /adm-filter-btn/, 'reuses the panel chip token');
+  assert.match(body, /cmp-adm-search-input/, 'search input');
+  assert.match(body, /cmp-adm-search-clear/, 'clear (×) affordance');
+  assert.match(body, /cmp-adm-count/, 'real result count badge');
+  assert.match(body, /cmp-adm-reset/, 'explicit reset-to-All affordance');
+  assert.match(body, /cmpFilterApply/, 'status chips dispatch through cmpFilterApply');
+  assert.ok(!body.includes('<select'), 'the unstyled native select is gone');
+  assert.ok(!body.includes('style="flex:1;min-width:160px"'), 'no inline layout styles remain');
+  // The API contract is unchanged: same query params as before.
+  const load = fnBody('loadAdminCampaigns');
+  assert.match(load, /'\?page=' \+ _cmpListState\.page/, 'page param still sent');
+  assert.match(load, /'&limit=' \+ _cmpListState\.limit/, 'limit param still sent');
+  assert.match(load, /'&status=' \+ encodeURIComponent/, 'status param still sent');
+  assert.match(load, /'&search=' \+ encodeURIComponent/, 'search param still sent');
+});
+
+test('CAMP-AD-84: new toolbar/export handlers wired to window (onclick contract)', () => {
+  for (const fn of ['cmpSearchClear', 'cmpFiltersReset']) {
+    assert.match(ADMIN_JS, new RegExp(`window\\.${fn} = ${fn};`), `window.${fn} export`);
+  }
+});
+
+test('CAMP-AD-85: toolbar CSS — mobile-safe rules exist and are scoped to the campaigns section', () => {
+  const css = read('style.css');
+  for (const rule of [
+    '#admin-section-campaigns .cmp-adm-toolbar {',
+    '#admin-section-campaigns .cmp-adm-search {',
+    '#admin-section-campaigns .cmp-adm-chips {',
+    '#admin-section-campaigns .cmp-adm-count {',
+    '#admin-section-campaigns .cmp-adm-reset {',
+  ]) {
+    assert.ok(css.includes(rule), `missing rule: ${rule}`);
+  }
+  // Mobile: the meta cluster and search take full rows on tiny screens.
+  assert.match(css, /@media \(max-width: 480px\)[\s\S]{0,600}#admin-section-campaigns \.cmp-adm-meta/, '480px media query covers the toolbar');
+  assert.match(css, /#admin-section-campaigns \.cmp-adm-search \{[\s\S]{0,200}min-width: 0/, 'search can shrink (no overflow)');
+});
+
+test('CAMP-AD-86: new adm_camp_* keys exist in fa AND en (registration link + toolbar)', () => {
+  const ctx = loadI18nContext();
+  for (const key of [
+    'adm_camp_g_registration', 'adm_camp_field_reg_url', 'adm_camp_field_reg_url_hint',
+    'adm_camp_field_reg_url_invalid', 'adm_camp_results_count', 'adm_camp_filter_reset',
+    'adm_camp_search_clear', 'adm_camp_filters_label',
+  ]) {
+    assert.ok(key in ctx.i18n.fa, `${key} missing in fa`);
+    assert.ok(key in ctx.i18n.en, `${key} missing in en`);
+  }
+});
+
+test('CAMP-AD-87: user-side share/register-link i18n keys exist in fa AND en', () => {
+  const ctx = loadI18nContext();
+  for (const key of ['cmp_share', 'cmp_share_reg_link', 'cmp_share_copied', 'cmp_share_copy_error', 'cmp_register_url_invalid']) {
+    assert.ok(key in ctx.i18n.fa, `${key} missing in fa`);
+    assert.ok(key in ctx.i18n.en, `${key} missing in en`);
+  }
 });

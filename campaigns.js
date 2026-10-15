@@ -66,6 +66,8 @@
   var REGISTER_TIMEOUT_MS = 8000;
   var _registeringId = null;       // campaign id with an in-flight register POST
   var _detailCampaignId = null;    // campaign shown in the detail overlay
+  var _currentLoad = null;         // settled-or-in-flight list load promise (deep-link wait)
+  var _shareBusy = false;          // share dialog in flight (double-tap guard)
 
   // ── Small utilities ───────────────────────────────────────
   function esc(str) {
@@ -153,6 +155,28 @@
     return u;
   }
 
+  // Admin registration URL (P0 fix): client-side mirror of the SERVER
+  // validator (src/controllers/campaigns_admin.js). The button NEVER
+  // navigates to a value that fails this check — javascript:, data: and
+  // every other non-http(s) scheme is rejected structurally (protocol
+  // allowlist), credentials and IP/localhost hosts are refused. Returns
+  // the normalized URL string, or null (treated as "no custom link" →
+  // the honest in-app register flow / a clear error toast on click).
+  function _cmpSafeRegUrl(u) {
+    if (!u || typeof u !== 'string') return null;
+    var s = u.trim();
+    if (!s || s.length > 2048) return null;
+    var parsed = null;
+    try { parsed = new URL(s); } catch (e) { return null; }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    if (parsed.username || parsed.password) return null;
+    var host = (parsed.hostname || '').toLowerCase();
+    if (!host) return null;
+    if (host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return null;
+    if (host.charAt(0) === '[' && host.charAt(host.length - 1) === ']') return null; // IPv6 literal
+    return s;
+  }
+
   // ── Icons (inline SVG, wallet.js/referral.js convention) ──
   var ICONS = {
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
@@ -161,7 +185,11 @@
     gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
-    listIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'
+    listIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    // Share (node-link diagram — mirrors the app-wide SVG_SHARE icon).
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+    // External destination (register button that opens the admin-specified URL).
+    external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
   };
 
   // ── Effective status (mirrors the approved server state machine) ──
@@ -208,6 +236,7 @@
       body_fa: raw.body_fa || raw.body_en || '',
       body_en: raw.body_en || raw.body_fa || '',
       image_url: raw.image_url || null,
+      registration_url: raw.registration_url || null,
       registered: !!raw.registered
     };
   }
@@ -315,6 +344,148 @@
       else if (code === 'RATE_LIMITED' || res.status === 429) toast(t('cmp_register_rate_limited'));
       else toast(t('cmp_register_error'));
     });
+  }
+
+  // ADMIN REGISTRATION LINK (P0 fix): when the campaign carries a validated
+  // external registration_url, the button opens that destination instead of
+  // POSTing the in-app registration. Opening the link NEVER registers the
+  // user (no POST, no `registered` state change — external completion is
+  // tracked by the destination, not by this app), the button is never
+  // disabled by this action, and a second tap simply opens the link again.
+  function handleRegisterUrlClick() {
+    var c = _detailCampaignId ? findCampaign(_detailCampaignId) : null;
+    if (!c) return;
+    var url = _cmpSafeRegUrl(c.registration_url);
+    if (!url) {
+      // Unreachable when the server validated the row — but a stale/legacy
+      // payload with a bad URL must NEVER navigate somewhere dangerous:
+      // honest error, no state change, the button stays usable.
+      toast(t('cmp_register_url_invalid'));
+      return;
+    }
+    try {
+      var tg = (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) || null;
+      if (tg && typeof tg.openLink === 'function') {
+        tg.openLink(url);
+        return;
+      }
+    } catch (e) { /* fall through to window.open */ }
+    try {
+      var win = window.open(url, '_blank', 'noopener');
+      if (!win) toast(t('cmp_register_url_invalid'));
+    } catch (e2) {
+      toast(t('cmp_register_url_invalid'));
+    }
+  }
+
+  // ── Share (P1) ─────────────────────────────────────────
+  // Public campaign link = the app's EXISTING Telegram deep-link scheme
+  // (https://t.me/<bot>?startapp=<prefix>_<id> — the analysis/news/calendar/
+  // announcement links already use this; app.js checkAnalysisDeepLink consumes
+  // campaign_<id> and calls CampaignsApp.openAndShow). No new domains/routes.
+  function _cmpDeepLink(id) {
+    var bot = '';
+    try {
+      bot = (typeof window.BOT_USERNAME === 'string' && window.BOT_USERNAME) ? window.BOT_USERNAME : '';
+    } catch (e) { bot = ''; }
+    if (!bot) bot = 'Amir_BTC_AssistantBot'; // app.js default (H-R4 bootstrap overrides it)
+    return 'https://t.me/' + bot + '?startapp=campaign_' + encodeURIComponent(String(id));
+  }
+
+  // Share text: title, short description, registration link (the admin's
+  // custom URL when present — otherwise the campaign deep link, where the
+  // one-tap in-app register button lives) and the public campaign link.
+  // NEVER includes user data, tokens or Telegram initData.
+  function _cmpShareText(c, deepLink, imgUrl) {
+    var lines = [];
+    var title = localized(c, 'title');
+    if (title) lines.push(title);
+    var summary = localized(c, 'summary');
+    if (summary) lines.push(summary);
+    var regUrl = _cmpSafeRegUrl(c.registration_url);
+    if (regUrl) lines.push(t('cmp_share_reg_link') + ' ' + regUrl);
+    if (deepLink) lines.push(deepLink);
+    // When the platform cannot share the image as a FILE, the public image
+    // URL is included in the text instead (requirement: image or its link).
+    if (imgUrl) lines.push(imgUrl);
+    return lines.join('\n');
+  }
+
+  function _cmpCopyShare(text) {
+    var nav = (typeof navigator !== 'undefined') ? navigator : null;
+    var done = function (ok) {
+      toast(t(ok ? 'cmp_share_copied' : 'cmp_share_copy_error'));
+    };
+    var legacyCopy = function () {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e0) { ok = false; }
+        document.body.removeChild(ta);
+        done(ok);
+      } catch (e) { done(false); }
+    };
+    if (nav && nav.clipboard && nav.clipboard.writeText) {
+      nav.clipboard.writeText(text).then(function () { done(true); }, legacyCopy);
+    } else {
+      legacyCopy();
+    }
+  }
+
+  function handleShareClick() {
+    if (_shareBusy) return; // share dialog already in flight
+    var c = _detailCampaignId ? findCampaign(_detailCampaignId) : null;
+    if (!c) return;
+    var deepLink = _cmpDeepLink(c.id);
+    var imgUrl = c.image_url ? resolveImgUrl(c.image_url) : null; // absolute (public ads image endpoint or external https)
+    var title = localized(c, 'title');
+    var textNoImg = _cmpShareText(c, deepLink, null);
+    var textWithImg = _cmpShareText(c, deepLink, imgUrl);
+
+    // 1) Web Share API with the REAL image file, when the platform allows it.
+    if (imgUrl && typeof navigator !== 'undefined' && navigator.canShare && navigator.share) {
+      _shareBusy = true;
+      fetch(imgUrl).then(function (r) { return r.ok ? r.blob() : null; }).then(function (blob) {
+        _shareBusy = false;
+        if (!blob) { _shareTextOnly(); return; }
+        var file = null;
+        try {
+          file = new File([blob], 'campaign-image', { type: blob.type || 'image/webp' });
+        } catch (e) { file = null; }
+        if (file && navigator.canShare({ files: [file] })) {
+          navigator.share({ title: title, text: textNoImg, url: deepLink, files: [file] })
+            .then(function () { /* shared */ }, function () { /* cancelled/failed — no noisy error */ });
+        } else {
+          _shareTextOnly();
+        }
+      }).catch(function () { _shareBusy = false; _shareTextOnly(); });
+      return;
+    }
+    _shareTextOnly();
+
+    function _shareTextOnly() {
+      // 2) Plain Web Share API (no image) — text carries the image link.
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        _shareBusy = true;
+        navigator.share({ title: title, text: textWithImg, url: deepLink }).then(function () {
+          _shareBusy = false;
+        }, function (err) {
+          _shareBusy = false;
+          // User-cancelled the native sheet — NOT an error to mask with copy.
+          if (err && err.name === 'AbortError') return;
+          _cmpCopyShare(textWithImg);
+        });
+        return;
+      }
+      // 3) No Web Share API (Telegram WebView / old browsers): copy with feedback.
+      _cmpCopyShare(textWithImg);
+    }
   }
 
   // Resolves with { campaigns } — callers apply the result ONLY after their
@@ -447,7 +618,7 @@
 
   function buildDetail(c) {
     var status = effectiveStatus(c, Date.now());
-    var joinable = (status === 'ACTIVE') && !c.registered;
+    var regUrl = _cmpSafeRegUrl(c.registration_url);
     var btn;
     if (c.registered) {
       btn = '<button class="cmp-register-btn" type="button" disabled>' + esc(t('cmp_registered')) + '</button>';
@@ -455,10 +626,21 @@
       btn = '<button class="cmp-register-btn cmp-register-btn--closed" type="button" disabled>' + esc(t('cmp_registration_not_started')) + '</button>';
     } else if (status !== 'ACTIVE') {
       btn = '<button class="cmp-register-btn cmp-register-btn--closed" type="button" disabled>' + esc(t('cmp_registration_closed')) + '</button>';
+    } else if (regUrl) {
+      // ACTIVE + not registered + admin-specified external destination:
+      // the button OPENS the stored URL (Telegram openLink). It is NEVER
+      // disabled by this action and NEVER POSTs a registration — opening
+      // the link does not count the user as registered (server-confirmed
+      // registrations only happen through the one-tap flow below).
+      btn = '<button class="cmp-register-btn" type="button" data-action="open-register-url" aria-label="' + esc(t('cmp_register')) + '">' + ICONS.external + '<span>' + esc(t('cmp_register')) + '</span></button>';
     } else {
       // ACTIVE + not registered: one-tap registration POST (Stage 5B).
       btn = '<button class="cmp-register-btn" type="button" data-action="register-info">' + ICONS.gift + '<span>' + esc(t('cmp_register')) + '</span></button>';
     }
+    // Share is ALWAYS available — sharing a campaign is independent of the
+    // registration state. DOM order [share, register] keeps the primary CTA
+    // at the reading-direction end in both LTR and RTL.
+    var shareBtn = '<button class="cmp-share-btn" type="button" data-action="share" aria-label="' + esc(t('cmp_share')) + '" title="' + esc(t('cmp_share')) + '">' + ICONS.share + '</button>';
     var cover = c.image_url
       ? '<img src="' + esc(resolveImgUrl(c.image_url)) + '" alt="' + esc(localized(c, 'title')) + '" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">'
       : '<div class="cmp-card-cover-icon">' + ICONS.gift + '</div>';
@@ -483,6 +665,7 @@
         '<p class="cmp-detail-body-text">' + esc(localized(c, 'body')) + '</p>' +
       '</div>' +
       '<div class="cmp-detail-bar">' +
+        shareBtn +
         btn +
       '</div>';
   }
@@ -522,7 +705,10 @@
 
     var generation = ++_loadGeneration;
     page.scrollTop = 0;
-    loadCampaigns().then(function (result) {
+    // The settled-or-rejected promise is kept for openAndShow (deep links):
+    // it NEVER keeps the overlay open on failure — the generation guard
+    // below is the single authority on applying the result.
+    _currentLoad = loadCampaigns().then(function (result) {
       if (generation !== _loadGeneration) return; // stale response — page was closed
       _campaigns = result.campaigns;
       renderList();
@@ -565,7 +751,7 @@
         '<div class="cmp-skel-card"><div class="cmp-skel-cover"></div></div>';
     }
     var generation = ++_loadGeneration; // invalidate any earlier in-flight load
-    loadCampaigns().then(function (result) {
+    _currentLoad = loadCampaigns().then(function (result) {
       if (generation !== _loadGeneration) return; // page closed / superseded
       _campaigns = result.campaigns;
       renderList();
@@ -617,6 +803,25 @@
     _detailElement.innerHTML = '';
   }
 
+  // ── Deep link (P1 share): open the list, wait for the CURRENT load to
+  // settle, then open the detail for a VISIBLE campaign. DRAFT/DELETED/non-
+  // existent ids (or a receiver whose server hides the row) simply leave the
+  // honest list view on screen — nothing is fabricated. A failed load keeps
+  // the honest error state + retry (never an empty list).
+  function openAndShow(id) {
+    var target = String(id || '');
+    if (!target) return;
+    if (_detailOpen) closeDetail();
+    if (!_listOpen) open();
+    var settle = _currentLoad;
+    if (!settle || typeof settle.then !== 'function') return;
+    settle.then(function () {
+      if (!_listOpen) return; // closed while loading
+      var c = findCampaign(target);
+      if (c) openDetail(c.id);
+    }).catch(function () { /* honest error state already rendered with retry */ });
+  }
+
   // ── Event delegation (list cards, retry, close buttons) ────
   document.addEventListener('click', function (ev) {
     var target = ev.target;
@@ -635,6 +840,16 @@
         // One-tap POST to the live endpoint. (Demo mode removed — the
         // backend is live and failures now surface as honest error states.)
         handleRegisterClick(actionEl);
+        return;
+      }
+      if (action === 'open-register-url') {
+        // Admin-specified external destination — opens the stored URL; no
+        // registration POST, no state change, button stays usable.
+        handleRegisterUrlClick();
+        return;
+      }
+      if (action === 'share') {
+        handleShareClick();
         return;
       }
     }
@@ -673,6 +888,7 @@
     open: open,
     close: close,
     openDetail: openDetail,
-    closeDetail: closeDetail
+    closeDetail: closeDetail,
+    openAndShow: openAndShow
   };
 })();

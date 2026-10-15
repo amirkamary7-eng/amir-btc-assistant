@@ -67,6 +67,7 @@ export function createCampaignsAdminHandlers(deps) {
   const MAX_SUMMARY = 500;
   const MAX_BODY = 5000;
   const MAX_SEARCH = 100;
+  const MAX_REGISTRATION_URL = 2048;
 
   // Strict ISO 8601 with mandatory timezone (Z or ±HH:MM) — Date.parse alone
   // would also accept ambiguous locale formats like 02/01/2026.
@@ -77,6 +78,34 @@ export function createCampaignsAdminHandlers(deps) {
   const CREATE_STATUSES = new Set(['DRAFT', 'PUBLISHED']);
   // The /status endpoint only performs publish / stop / resume.
   const STATUS_TARGETS = new Set(['PUBLISHED', 'STOPPED']);
+
+  // registration_url — optional EXTERNAL link the user-side register button
+  // opens instead of the in-app one-tap POST. Security mirror of the shared
+  // advertisements.js button-URL policy (sanitizeUrl):
+  //   • http(s) ONLY — the URL() protocol check structurally rejects
+  //     javascript:, data:, vbscript:, file:, and every other scheme;
+  //   • no embedded credentials (user:pass@host);
+  //   • no localhost / IPv4-literal hosts (SSRF-style targets);
+  //   • length-bounded.
+  // The Mini App client re-validates before navigating (defense in depth).
+  function _isValidRegistrationUrl(raw) {
+    if (typeof raw !== 'string') return false;
+    const s = raw.trim();
+    if (!s || s.length > MAX_REGISTRATION_URL) return false;
+    let u;
+    try {
+      u = new URL(s);
+    } catch {
+      return false;
+    }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    if (u.username || u.password) return false;
+    const host = u.hostname.toLowerCase();
+    if (!host) return false;
+    if (host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    if (host.startsWith('[') && host.endsWith(']')) return false; // IPv6 literal
+    return true;
+  }
 
   // Lifecycle: DRAFT→PUBLISHED→STOPPED→PUBLISHED; delete from any live state.
   // DELETED is terminal (also enforced atomically in the repository SQL).
@@ -220,6 +249,22 @@ export function createCampaignsAdminHandlers(deps) {
         } else {
           fields.image_url = trimmed;
         }
+      }
+    }
+
+    // registration_url — optional external registration destination. Empty/
+    // null clears it (back to the in-app one-tap flow); a non-empty value
+    // must pass the http(s)-only validator above.
+    if (Object.prototype.hasOwnProperty.call(body, 'registration_url')) {
+      const raw = body.registration_url;
+      if (raw === null || raw === undefined || String(raw).trim() === '') {
+        fields.registration_url = null;
+      } else if (typeof raw !== 'string') {
+        errors.push({ field: 'registration_url', message: 'registration_url must be a string' });
+      } else if (!_isValidRegistrationUrl(raw)) {
+        errors.push({ field: 'registration_url', message: 'registration_url must be a valid http(s) URL' });
+      } else {
+        fields.registration_url = raw.trim();
       }
     }
 
