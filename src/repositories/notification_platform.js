@@ -642,11 +642,37 @@ export function createNotificationPlatformRepository(deps) {
 
   async function createBroadcast(env, data) {
     if (!isDatabaseConfigured(env)) return null;
+    // RISK-1 HARDENING: force_channel / target_all_users are RESERVED flags.
+    // The ONLY trusted setter is the maintenance path (createDedupBroadcast,
+    // called exclusively by worker-proxy's maintenance start/end handlers with
+    // server-built metadata). createBroadcast is the PUBLIC boundary — its
+    // metadata arrives verbatim from the admin request body (notification
+    // platform handleCreateBroadcast spreads the body in) — so the two
+    // reserved flags are stripped here, before the row is persisted; every
+    // other metadata key passes through unchanged. String-encoded objects are
+    // sanitized too: processBroadcastFull JSON.parses string metadata back
+    // into an object at read time, so a string-wrapped flag would otherwise
+    // bypass the strip. The caller's object is never mutated (shallow copy).
+    let _meta = data.metadata;
+    if (typeof _meta === 'string') {
+      try {
+        const _parsed = JSON.parse(_meta);
+        if (_parsed && typeof _parsed === 'object' && !Array.isArray(_parsed)) {
+          delete _parsed.force_channel;
+          delete _parsed.target_all_users;
+          _meta = JSON.stringify(_parsed);
+        }
+      } catch (e) { /* unparseable string cannot decode into the reserved flags */ }
+    } else if (_meta && typeof _meta === 'object' && !Array.isArray(_meta)) {
+      _meta = { ..._meta };
+      delete _meta.force_channel;
+      delete _meta.target_all_users;
+    }
     const result = await queryDb(env, `
       INSERT INTO notification_broadcasts (admin_id, title, message, category, priority, channel, target_type, target_value, scheduled_at, status, metadata)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
-    `, [String(data.admin_id), data.title, data.message, data.category || 'announcement', data.priority || 'medium', data.channel || 'mini_app', data.target_type || 'all', JSON.stringify(data.target_value || {}), data.scheduled_at || null, data.scheduled_at ? 'scheduled' : 'pending', JSON.stringify(data.metadata || {})]);
+    `, [String(data.admin_id), data.title, data.message, data.category || 'announcement', data.priority || 'medium', data.channel || 'mini_app', data.target_type || 'all', JSON.stringify(data.target_value || {}), data.scheduled_at || null, data.scheduled_at ? 'scheduled' : 'pending', JSON.stringify(_meta || {})]);
     return result.rows[0] ? _mapBroadcast(result.rows[0]) : null;
   }
 
@@ -1314,6 +1340,26 @@ export function createNotificationPlatformRepository(deps) {
 
     let checkpoint = broadcast.last_processed_user_id || null;
 
+    // MAINT-NOTIF: force_channel broadcasts (maintenance start/end — critical
+    // system notices) deliver to BOTH channels for every target user
+    // regardless of their per-category preference, matching the documented
+    // forceChannel semantics of sendNotification ("admin/system critical
+    // only"). Opt-in via metadata.force_channel === true; every existing
+    // broadcast (metadata '{}' or null) keeps the previous
+    // preference-driven behavior unchanged.
+    //
+    // MAINT-NOTIF (audience): metadata.target_all_users === true opts a
+    // broadcast into targeting EVERY user who started the bot (the full
+    // users table — premium, free, channel-member or not: equal). The
+    // channel_joined=TRUE filter is dropped ONLY for these rows; every
+    // legacy broadcast keeps the previous channel_joined-only target set.
+    let _bMeta = broadcast.metadata;
+    if (typeof _bMeta === 'string') {
+      try { _bMeta = JSON.parse(_bMeta); } catch (e) { _bMeta = {}; }
+    }
+    const _forceChannel = !!(_bMeta && typeof _bMeta === 'object' && _bMeta.force_channel === true);
+    const _targetAllUsers = !!(_bMeta && typeof _bMeta === 'object' && _bMeta.target_all_users === true);
+
     // REGRESSION ROLLBACK: The previous commit (991abeb) added
     // `AND active = TRUE` for target_type='active', but the `users` table
     // has NO `active` column — that column exists on the `admins` table only.
@@ -1332,11 +1378,14 @@ export function createNotificationPlatformRepository(deps) {
     // Process in batches until all users done
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      // Get next batch of users (after checkpoint)
+      // Get next batch of users (after checkpoint).
+      // MAINT-NOTIF (audience): target_all_users broadcasts read the FULL
+      // users table (no channel_joined gate); legacy broadcasts keep the
+      // historical `WHERE channel_joined = TRUE` target set byte-for-byte.
       const userResult = await queryDb(env, `
         SELECT telegram_id FROM users
-        WHERE channel_joined = TRUE
-        ${checkpoint ? "AND telegram_id > $2" : ""}
+        ${_targetAllUsers ? '' : 'WHERE channel_joined = TRUE'}
+        ${checkpoint ? (_targetAllUsers ? 'WHERE telegram_id > $2' : 'AND telegram_id > $2') : ''}
         ORDER BY telegram_id ASC
         LIMIT $1
       `, checkpoint ? [BATCH_SIZE, checkpoint] : [BATCH_SIZE], 1, pool);
@@ -1375,7 +1424,7 @@ export function createNotificationPlatformRepository(deps) {
       const miniAppUsers = [];
       const telegramUsers = [];
       for (const uid of userIds) {
-        const userChannel = prefMap.get(uid) || 'both';
+        const userChannel = _forceChannel ? 'both' : (prefMap.get(uid) || 'both');
         if (userChannel === 'none') continue;
         const deliverToMiniApp = userChannel === 'mini_app' || userChannel === 'both';
         const deliverToTelegram = userChannel === 'telegram' || userChannel === 'both';
@@ -1519,6 +1568,56 @@ export function createNotificationPlatformRepository(deps) {
   }
 
   /**
+   * Create a broadcast row ATOMICALLY — a single-statement
+   * INSERT…SELECT…WHERE NOT EXISTS guarded by metadata.dedup_key.
+   *
+   * Exactly-once semantics for system events (e.g. maintenance start/end):
+   * two concurrent callers (admin request + cron tick, or overlapping cron
+   * ticks) can never produce duplicate rows — the database evaluates the
+   * NOT EXISTS predicate and the INSERT as ONE atomic statement, so exactly
+   * one caller receives RETURNING id; the loser receives null. This is NOT
+   * a SELECT-then-INSERT pattern (which would race) — the guard lives
+   * inside the INSERT statement itself.
+   *
+   * @returns {Promise<number|null>} the new broadcast id, or null when a
+   *   row with the same dedup_key already exists (or on error).
+   */
+  async function createDedupBroadcast(env, { adminId, title, message, category, priority, channel, target_type, metadata }, pool = null) {
+    if (!isDatabaseConfigured(env)) return null;
+    const meta = (metadata && typeof metadata === 'object') ? metadata : {};
+    const dedupKey = String(meta.dedup_key || '');
+    if (!dedupKey) {
+      console.warn('createDedupBroadcast: metadata.dedup_key is required');
+      return null;
+    }
+    try {
+      const result = await queryDb(env, `
+        INSERT INTO notification_broadcasts (admin_id, title, message, category, priority, channel, target_type, status, metadata, created_at)
+        SELECT $1, $2, $3, $4, $5, $6, $7, 'pending', $8::jsonb, NOW()
+        WHERE NOT EXISTS (
+          SELECT 1 FROM notification_broadcasts
+          WHERE metadata->>'dedup_key' = $9
+        )
+        RETURNING id
+      `, [
+        String(adminId || 'system'),
+        String(title || ''),
+        String(message || ''),
+        String(category || 'system'),
+        String(priority || 'high'),
+        String(channel || 'both'),
+        String(target_type || 'all'),
+        JSON.stringify(meta),
+        dedupKey,
+      ], 1, pool);
+      return result.rows && result.rows[0] ? result.rows[0].id : null;
+    } catch (e) {
+      console.warn('createDedupBroadcast error:', e?.message);
+      return null;
+    }
+  }
+
+  /**
    * Process ONE batch — called from cron as fallback/resume.
    * Used when processBroadcastFull was killed (e.g. Worker eviction).
    */
@@ -1588,6 +1687,7 @@ export function createNotificationPlatformRepository(deps) {
     enqueue,
     processQueue,
     createBroadcastJob,
+    createDedupBroadcast,
     processBroadcastBatch,
     processBroadcastFull,
     // Phase 4: Crash Recovery

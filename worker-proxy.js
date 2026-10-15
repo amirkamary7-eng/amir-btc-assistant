@@ -752,6 +752,11 @@ const MAINT_DEFAULTS = {
   progress: 0,
   updated_at: null,
   updated_by: null,
+  // MAINT-NOTIF: stable identity of the CURRENT maintenance period. It is
+  // generated ONLY on a true disabled→enabled transition and survives
+  // mid-maintenance edits (title/description/progress) and the disable itself
+  // (the end-notification detector needs it after the period closes).
+  period_id: null,
 };
 
 // In-memory fallback: persists across requests within the same Worker isolate.
@@ -812,6 +817,15 @@ async function setMaintenanceState(env, patch, updatedBy) {
     title: patch.title != null ? String(patch.title).slice(0, 60) : current.title,
     description: patch.description != null ? String(patch.description).slice(0, 200) : current.description,
     enabled: patch.enabled != null ? Boolean(patch.enabled) : current.enabled,
+    // MAINT-NOTIF — period identity: a NEW id is minted ONLY on a true
+    // disabled→enabled transition. Mid-maintenance edits (title/description/
+    // progress, or enabled:true while already enabled) KEEP the existing id,
+    // and disabling KEEPS it too (the end-notification detector reads it
+    // after the period closes). Deterministic per-UTC-minute so two racing
+    // enable requests collapse into ONE period (and one start broadcast).
+    period_id: (patch.enabled === true && !current.enabled)
+      ? _maintPeriodId()
+      : (current.period_id != null ? current.period_id : null),
     updated_at: new Date().toISOString(),
     updated_by: String(updatedBy || 'admin'),
   };
@@ -841,6 +855,275 @@ async function setMaintenanceState(env, patch, updatedBy) {
   }
   return result;
 }
+
+// Deterministic per-UTC-minute maintenance period id. Two racing enable
+// requests inside the same minute mint the SAME id, so the atomic dedup
+// broadcast insert collapses them into ONE start notification. Sub-minute
+// enable→disable→enable churn also collapses (prevents notification storms);
+// any transition a minute apart or later is a genuinely new period.
+function _maintPeriodId() {
+  const d = new Date();
+  const p = (n) => (n < 10 ? '0' : '') + n;
+  return 'maint_' + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate())
+    + 'T' + p(d.getUTCHours()) + p(d.getUTCMinutes()) + 'Z';
+}
+
+// [MAINT-NOTIF-START] ── Maintenance auto-notifications (start/end) ────────
+// Delivers maintenance start / service-restored messages to users through the
+// EXISTING notification platform only: one notification_broadcasts row per
+// event (created via the atomic createDedupBroadcast), drained by the
+// standard processBroadcastBatch / processBroadcastFull machinery into the
+// notification_queue, sent exclusively by processQueue → sendTelegramMessage
+// (429-aware, max_attempts-bounded, FOR UPDATE SKIP LOCKED). No direct or
+// parallel Telegram sending exists on this path.
+//
+// AUDIENCE (metadata.target_all_users = true): EVERY user who started the
+// bot — the full `users` table, the real sendable list. Channel membership
+// (channel_joined) is NOT a condition; premium, free and every other user
+// are targeted equally. Users who blocked the bot (Telegram 403) or have
+// invalid ids are handled by the STANDARD queue semantics — bounded retries
+// capped at max_attempts, then the row terminates as 'failed'. They are
+// never placed into an infinite retry loop and no parallel cleanup path
+// exists (the queue's own attempts cap is the single mechanism).
+
+// Safe default texts (used when the stored panel texts are empty/invalid).
+const MAINT_NOTIF_START_DEFAULT = [
+  '🔧 AMIRBTC | عملیات بهینه‌سازی',
+  '',
+  'کاربران عزیز AmirBTC،',
+  '',
+  'برای ارتقای زیرساخت و بهبود پایداری سرویس، عملیات فنی و بهینه‌سازی سیستم در حال انجام است.',
+  '',
+  '⏳ ممکن است دسترسی به برخی امکانات موقتاً محدود شود.',
+  '',
+  '🛡️ تیم فنی در حال انجام بررسی‌ها و اقدامات لازم است. پس از تأیید سلامت سرویس، اطلاع‌رسانی بازگشت انجام خواهد شد.',
+  '',
+  'از صبر و همراهی شما سپاسگزاریم.',
+  '',
+  '@AMIR_BTC_2024',
+].join('\n');
+
+const MAINT_NOTIF_END_DEFAULT = [
+  '🟢 AMIRBTC | بازگشت به سرویس',
+  '',
+  '🚀 عملیات بهینه‌سازی با موفقیت به پایان رسید!',
+  '',
+  'کاربران عزیز AmirBTC،',
+  '',
+  'فرآیند بهینه‌سازی و به‌روزرسانی زیرساخت تکمیل شد و سرویس مجدداً در دسترس قرار گرفته است.',
+  '',
+  '⚡ سرویس آماده استفاده است.',
+  '🛡️ اقدامات لازم برای بهبود پایداری انجام شده است.',
+  '📡 می‌توانید دوباره از امکانات ربات استفاده کنید.',
+  '',
+  '✅ ربات AmirBTC اکنون فعال است.',
+  '',
+  'از صبر و همراهی شما در زمان انجام عملیات فنی سپاسگزاریم.',
+  '',
+  '💎 با ما، یک قدم جلوتر از بازار باشید.',
+  '',
+  '@AMIR_BTC_2024',
+].join('\n');
+
+const MAINT_NOTIF_MAX_LEN = 4000; // Telegram sendMessage cap is 4096 chars
+
+// Split a notification text into a short title (first line — shown in the
+// in-app notification list) and the body. Telegram re-joins them with a
+// newline, so the delivered message equals the panel text.
+function _maintSplitText(text) {
+  const t = String(text || '').replace(/^\s+/, '');
+  if (!t) return { title: '', message: '' };
+  const nl = t.indexOf('\n');
+  if (nl === -1) return { title: t, message: '' };
+  const body = t.slice(nl + 1).replace(/^\s+/, '');
+  return { title: t.slice(0, nl), message: body };
+}
+
+// Raw stored texts from app_content (id='maintenance_notif', lang 'fa').
+// Shape: sections = [{heading:'start_message'|'end_message', body:'…'}].
+// Returns '' for anything missing — the EFFECTIVE getter applies defaults.
+async function _maintLoadStoredTexts(env) {
+  let start = '';
+  let end = '';
+  try {
+    const row = await appContentRepo.getContent(env, 'maintenance_notif', 'fa');
+    const sections = row && Array.isArray(row.sections) ? row.sections : [];
+    for (const s of sections) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.heading === 'start_message' && typeof s.body === 'string') start = s.body;
+      if (s.heading === 'end_message' && typeof s.body === 'string') end = s.body;
+    }
+  } catch (e) {
+    console.warn('[MAINT-NOTIF] stored text load failed (defaults apply):', e?.message || e);
+  }
+  return { start, end };
+}
+
+// Effective texts: custom panel text when present and valid, otherwise the
+// safe defaults. Validation: non-empty after trim AND within the Telegram
+// length budget — anything else is treated as "unset".
+async function getMaintenanceNotificationTexts(env) {
+  const stored = await _maintLoadStoredTexts(env);
+  const valid = (v) => {
+    const t = String(v || '').trim();
+    return (t && t.length <= MAINT_NOTIF_MAX_LEN) ? t : '';
+  };
+  const start = valid(stored.start);
+  const end = valid(stored.end);
+  return {
+    start: start || MAINT_NOTIF_START_DEFAULT,
+    end: end || MAINT_NOTIF_END_DEFAULT,
+    start_is_default: !start,
+    end_is_default: !end,
+  };
+}
+
+// Real recovery gate — the SAME two dependency probes getSystemHealth uses
+// (PostgreSQL SELECT 1 + Telegram Bot API getMe), NOT /api/health (which
+// only reports configuration booleans). Only a definitively healthy result
+// passes: errors, timeouts, HTTP failures and the slow 'warning' band all
+// return false, so a flapping dependency can never trigger a false
+// "service restored" broadcast.
+async function checkServiceRecoveryHealth(env, pool = null) {
+  try {
+    const t0 = Date.now();
+    await queryDb(env, 'SELECT 1', [], 1, pool);
+    if (Date.now() - t0 > 2000) return false; // slow ⇒ not confirmed healthy
+  } catch (e) { return false; }
+  if (!isBotConfigured(env)) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(buildTelegramApiUrl(env, 'getMe'), { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data && data.ok === true);
+  } catch (e) { return false; }
+}
+
+// START notification — invoked from the admin PUT handler (inside
+// backgroundTask) right after a true disabled→enabled transition. The
+// broadcast row is inserted ATOMICALLY (dedup key maint_start_<period>) and
+// then drained through processBroadcastFull (enqueue-only; Telegram sends
+// happen exclusively in processQueue). If the inline insert dies with the
+// isolate, the 5-min cron tick re-inserts it atomically.
+async function maintenanceStartNotification(env, adminId, periodId, pool = null) {
+  try {
+    if (!isDatabaseConfigured(env) || !isBotConfigured(env)) return { status: 'skipped' };
+    if (!periodId) return { status: 'skipped' };
+    const texts = await getMaintenanceNotificationTexts(env);
+    const parts = _maintSplitText(texts.start);
+    const id = await notificationPlatformRepo.createDedupBroadcast(env, {
+      adminId: String(adminId || 'system'),
+      title: parts.title,
+      message: parts.message,
+      category: 'system',
+      priority: 'high',
+      channel: 'both',
+      target_type: 'all',
+      metadata: {
+        maintenance_period_id: periodId,
+        maintenance_kind: 'start',
+        force_channel: true,
+        target_all_users: true,
+        dedup_key: 'maint_start_' + periodId,
+      },
+    }, pool);
+    if (!id) return { status: 'already-notified' };
+    console.log('[MAINT-NOTIF] start broadcast', id, 'inserted for period', periodId);
+    // Immediate enqueue drain (I/O-bounded batches with checkpoint; if the
+    // isolate dies mid-drain, requeueStaleBroadcasts + the 5-min cron resume).
+    await notificationPlatformRepo.processBroadcastFull(env, sendTelegramMessage, id);
+    return { status: 'inserted', broadcastId: id };
+  } catch (e) {
+    console.warn('[MAINT-NOTIF] start notification failed (cron tick will retry):', e?.message || e);
+    return { status: 'error' };
+  }
+}
+
+// 5-min cron tick — idempotent maintenance notification detector:
+//   • period ACTIVE  (enabled + period_id): re-insert the START broadcast
+//     if (and only if) it is missing (recovers an inline insert that died
+//     with its isolate). Existing rows make this a 1-query no-op.
+//   • period ENDED   (disabled + period_id): insert the END broadcast ONLY
+//     after checkServiceRecoveryHealth() confirms PostgreSQL + Telegram.
+//     Unhealthy ⇒ no insert, no state change — the next tick re-checks.
+// Every insert goes through createDedupBroadcast (single-statement atomic
+// INSERT…WHERE NOT EXISTS), so repeated/overlapping ticks and restarts can
+// never produce a duplicate broadcast for the same event.
+async function maintenanceNotificationTick(env, pool = null) {
+  try {
+    if (!isDatabaseConfigured(env) || !isBotConfigured(env)) return { status: 'skipped' };
+    const state = await getMaintenanceState(env);
+    const m = state.maintenance;
+    if (!m || !m.period_id) return { status: 'idle' }; // no (current) period
+
+    if (m.enabled) {
+      // Fast path: start broadcast already exists ⇒ nothing to do.
+      const exists = await queryDb(env,
+        `SELECT 1 FROM notification_broadcasts WHERE metadata->>'dedup_key' = $1 LIMIT 1`,
+        ['maint_start_' + m.period_id], 1, pool).catch(() => ({ rows: [] }));
+      if (exists.rows && exists.rows.length > 0) return { status: 'start-already' };
+      const texts = await getMaintenanceNotificationTexts(env);
+      const parts = _maintSplitText(texts.start);
+      const id = await notificationPlatformRepo.createDedupBroadcast(env, {
+        adminId: 'system',
+        title: parts.title,
+        message: parts.message,
+        category: 'system',
+        priority: 'high',
+        channel: 'both',
+        target_type: 'all',
+        metadata: {
+          maintenance_period_id: m.period_id,
+          maintenance_kind: 'start',
+          force_channel: true,
+          target_all_users: true,
+          dedup_key: 'maint_start_' + m.period_id,
+        },
+      }, pool);
+      if (id) console.log('[MAINT-NOTIF] start broadcast', id, 'recovered for period', m.period_id);
+      return { status: id ? 'start-recovered' : 'start-raced' };
+    }
+
+    // Period ended — END notification, gated on REAL service health.
+    const endExists = await queryDb(env,
+      `SELECT 1 FROM notification_broadcasts WHERE metadata->>'dedup_key' = $1 LIMIT 1`,
+      ['maint_end_' + m.period_id], 1, pool).catch(() => ({ rows: [] }));
+    if (endExists.rows && endExists.rows.length > 0) return { status: 'end-already' };
+
+    const healthy = await checkServiceRecoveryHealth(env, pool);
+    if (!healthy) {
+      console.log('[MAINT-NOTIF] end notification deferred — service health not confirmed yet');
+      return { status: 'deferred-unhealthy' };
+    }
+    const texts = await getMaintenanceNotificationTexts(env);
+    const parts = _maintSplitText(texts.end);
+    const id = await notificationPlatformRepo.createDedupBroadcast(env, {
+      adminId: 'system',
+      title: parts.title,
+      message: parts.message,
+      category: 'system',
+      priority: 'high',
+      channel: 'both',
+      target_type: 'all',
+      metadata: {
+        maintenance_period_id: m.period_id,
+        maintenance_kind: 'end',
+        force_channel: true,
+        target_all_users: true,
+        dedup_key: 'maint_end_' + m.period_id,
+      },
+    }, pool);
+    if (id) console.log('[MAINT-NOTIF] end broadcast', id, 'inserted for period', m.period_id);
+    return { status: id ? 'end-inserted' : 'end-raced', broadcastId: id || undefined };
+  } catch (e) {
+    console.warn('[MAINT-NOTIF] tick failed:', e?.message || e);
+    return { status: 'error' };
+  }
+}
+// [MAINT-NOTIF-END]
 
 async function readRateLimitCache(env, key) {
   if (!env.RATE_LIMITS || typeof env.RATE_LIMITS.get !== 'function') {
@@ -7678,8 +7961,23 @@ export default {
         if (payload.description !== undefined) patch.description = String(payload.description);
         if (payload.progress !== undefined) patch.progress = Number(payload.progress);
 
+        // MAINT-NOTIF: snapshot BEFORE the write so the true
+        // disabled→enabled transition can be detected for the start
+        // notification (mid-maintenance edits must never re-notify).
+        const _maintPrevState = await getMaintenanceState(env);
+
         try {
           const newState = await setMaintenanceState(env, patch, authState.user.id);
+          // MAINT-NOTIF: START notification fires ONLY on a real
+          // disabled→enabled transition (period_id is minted exactly then).
+          // Runs via backgroundTask (ctx.waitUntil) so the admin response is
+          // never delayed by the broadcast drain; the 5-min cron tick
+          // re-inserts atomically if this isolate dies first.
+          const _mntNext = newState && newState.maintenance;
+          if (_mntNext && _mntNext.enabled === true && _mntNext.period_id
+            && _maintPrevState && _maintPrevState.maintenance && _maintPrevState.maintenance.enabled !== true) {
+            backgroundTask(env, maintenanceStartNotification(env, authState.user.id, _mntNext.period_id));
+          }
           return jsonResponse({ status: 'success', ...newState }, {}, env);
         } catch (err) {
           console.warn('maintenance update failed:', err?.message || err);
@@ -7689,6 +7987,78 @@ export default {
           );
         }
       }
+
+      // [MAINT-NOTIF-ROUTE-START]
+      // ── Maintenance Notification Texts (admin only — SAME auth model as
+      // the maintenance controls above: authenticateTelegramRequest +
+      // isAdminTelegramId). The texts live in app_content
+      // (id='maintenance_notif') — durable PostgreSQL storage that survives
+      // restarts and deploys. Saving texts never touches the maintenance
+      // state, ads, payments or monetization status.
+      //   GET  /api/admin/maintenance/notif-texts → effective texts + flags
+      //   PUT  /api/admin/maintenance/notif-texts → save {start_message?, end_message?}
+      //     (each field optional — only provided fields are updated;
+      //      empty/oversized values clear back to the safe defaults)
+      if (url.pathname === '/api/admin/maintenance/notif-texts' && (request.method === 'GET' || request.method === 'PUT' || request.method === 'POST')) {
+        const authState = await authenticateTelegramRequest(request, env);
+        if (authState.error) return authState.error;
+        if (!isAdminTelegramId(env, authState.user.id)) {
+          return jsonResponse({ detail: 'Admin access required' }, { status: 403 }, env);
+        }
+        if (!isDatabaseConfigured(env)) {
+          return jsonResponse({ status: 'error', message: 'Database not configured' }, { status: 503 }, env);
+        }
+
+        if (request.method === 'GET') {
+          const texts = await getMaintenanceNotificationTexts(env);
+          return jsonResponse({
+            status: 'success',
+            start_message: texts.start,
+            end_message: texts.end,
+            start_is_default: texts.start_is_default,
+            end_is_default: texts.end_is_default,
+            max_length: MAINT_NOTIF_MAX_LEN,
+          }, {}, env);
+        }
+
+        // PUT / POST — update
+        const bodyResult = await readJsonBody(request, 24576, env);
+        if (bodyResult.error) return bodyResult.error;
+        const payload = bodyResult.payload || {};
+
+        const raw = await _maintLoadStoredTexts(env);
+        const _clean = (v) => String(v == null ? '' : v).trim().slice(0, MAINT_NOTIF_MAX_LEN);
+        const nextStart = payload.start_message !== undefined ? _clean(payload.start_message) : raw.start.trim();
+        const nextEnd = payload.end_message !== undefined ? _clean(payload.end_message) : raw.end.trim();
+
+        try {
+          await appContentRepo.updateContent(env, 'maintenance_notif', {
+            title: 'maintenance_notif',
+            sections: [
+              { heading: 'start_message', body: nextStart },
+              { heading: 'end_message', body: nextEnd },
+            ],
+            version: '1.0.0',
+            updated_by: authState.user.id,
+          }, 'fa');
+          const texts = await getMaintenanceNotificationTexts(env);
+          return jsonResponse({
+            status: 'success',
+            start_message: texts.start,
+            end_message: texts.end,
+            start_is_default: texts.start_is_default,
+            end_is_default: texts.end_is_default,
+            max_length: MAINT_NOTIF_MAX_LEN,
+          }, {}, env);
+        } catch (err) {
+          console.warn('maintenance notif-texts save failed:', err?.message || err);
+          return jsonResponse(
+            { status: 'error', message: 'Failed to save maintenance notification texts', detail: String(err?.message || err).slice(0, 200) },
+            { status: 500 }, env
+          );
+        }
+      }
+      // [MAINT-NOTIF-ROUTE-END]
 
       // ── SECURITY: Membership gate for data endpoints ──
       // User-specific data endpoints (forex, analyses, calendar, farsi-news) must
@@ -8987,6 +9357,7 @@ export default {
       notificationPlatformRepo,
       marketOverviewSvc,
       setCalendarIsolateCache,
+      maintenanceNotificationTick,
     });
   },
 };

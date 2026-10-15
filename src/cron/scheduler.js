@@ -25,6 +25,7 @@ export async function runScheduled(controller, env, ctx, deps) {
     notificationPlatformRepo,
     marketOverviewSvc,
     setCalendarIsolateCache,
+    maintenanceNotificationTick,
   } = deps;
 
     const _cronTickId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -321,6 +322,24 @@ export async function runScheduled(controller, env, ctx, deps) {
           } catch (e) {
             _logPhase('phase4-processQueue', 'error', { error: e?.message });
             console.warn('[CRON] processQueue (5min) failed:', e?.message);
+          }
+        }
+
+        // ── MAINT-NOTIF: Maintenance auto-notification check (every 5 min) ──
+        // Idempotent by construction: KV state + period_id + atomic dedup
+        // inserts make repeated ticks, restarts and overlaps safe. Covers
+        // (a) recovery of a start broadcast whose inline insert died with
+        // its isolate and (b) the END broadcast — inserted ONLY after
+        // PostgreSQL + Telegram health are confirmed. Any broadcast this
+        // inserts is picked up by phase1b (processBroadcastBatch) in the
+        // SAME tick.
+        if (typeof maintenanceNotificationTick === 'function') {
+          try {
+            const _mntRes = await maintenanceNotificationTick(env, pool);
+            _logPhase('maint-notif', 'ok', _mntRes);
+          } catch (e) {
+            _logPhase('maint-notif', 'error', { error: e?.message });
+            console.warn('[CRON] maintenance notif tick failed:', e?.message);
           }
         }
       }

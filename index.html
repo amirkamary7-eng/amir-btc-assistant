@@ -2068,6 +2068,19 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- MAINT-NOTIF: automatic maintenance start/end notification texts.
+                         Lives here with the real Maintenance Mode controls (system
+                         controls), NOT in the advertisements section. Editing these
+                         texts never changes Maintenance Mode, ads, payments or
+                         monetization state. -->
+                    <div class="adm-card" id="adm-maint-notif-card">
+                        <div class="adm-card-head">
+                            <h4 class="adm-card-title" data-i18n="adm_maint_notif_section_title">متن اعلان‌های خودکار تعمیرات</h4>
+                        </div>
+                        <p class="adm-maint-desc" data-i18n="adm_maint_notif_section_desc" style="margin:0 0 14px">این متن‌ها هنگام شروع و پایان واقعی هر دوره تعمیرات، به‌صورت خودکار برای کاربران ارسال می‌شوند. خالی بماند، متن پیش‌فرض امن استفاده می‌شود. تنظیم متن‌ها هیچ تأثیری روی وضعیت تعمیرات، تبلیغات، پرداخت یا مانیتایز ندارد.</p>
+                        <div id="maint-notif-section"></div>
+                    </div>
                 </section>
 
                 <!-- System Health Section -->

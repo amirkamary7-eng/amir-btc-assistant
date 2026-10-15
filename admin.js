@@ -688,7 +688,7 @@ function switchAdminSection(section, btn) {
         case 'advertisements': loadAdvertisementsOverview(); break;
         case 'campaigns': loadAdminCampaigns(1); break;
         case 'membership': loadAdminMembership(); break;
-        case 'system-controls': loadMaintenanceSettings(); break;
+        case 'system-controls': loadMaintenanceSettings(); loadMaintenanceNotifTexts(); break;
         case 'system-health': loadAdminSystemHealth(); break;
         case 'logs': loadAdminLogs(1); break;
     }
@@ -2990,6 +2990,103 @@ async function loadNpTemplates() {
     } catch (e) { section.innerHTML = '<div class="admin-empty">' + t('adm_rc_error') + '</div>'; console.error(e); }
 }
 window.loadNpTemplates = loadNpTemplates;
+
+// ─── Maintenance Notification Texts (MAINT-NOTIF) ──────────────────────────
+// Two editable texts broadcast automatically to users when a maintenance
+// period starts / ends. Lives in the SYSTEM-CONTROLS (maintenance) section —
+// next to the real Maintenance Mode controls — NOT in the notification
+// center or the advertisements section. Persisted server-side in app_content
+// (id='maintenance_notif'); empty/invalid ⇒ safe defaults. Editing the texts
+// never changes Maintenance Mode, ads, payments or monetization state.
+
+async function loadMaintenanceNotifTexts() {
+    const section = document.getElementById('maint-notif-section');
+    if (!section) return;
+    section.innerHTML = '<div class="admin-empty">' + t('adm_loading') + '</div>';
+    const token = _adminLoadToken;
+    let data = null;
+    try {
+        data = await adminApiFetch('/api/admin/maintenance/notif-texts');
+        if (_isLoadTokenStale(token)) return;
+    } catch (e) {
+        section.innerHTML = '<div class="admin-empty">' + t('adm_maint_notif_load_error') + '</div>';
+        console.error('loadMaintenanceNotifTexts:', e);
+        return;
+    }
+    if (!data || data.status !== 'success') {
+        section.innerHTML = '<div class="admin-empty">' + t('adm_maint_notif_load_error') + '</div>';
+        return;
+    }
+    const maxLen = Number(data.max_length) || 4000;
+    const field = function (kind, labelKey, value, isDefault) {
+        return '<div class="adm-form-card">' +
+            '<h4 class="adm-card-title">' + t(labelKey) +
+            ' <span class="admin-badge ' + (isDefault ? 'admin-badge-gray' : 'admin-badge-green') + '" id="maint-notif-' + kind + '-badge">' + t(isDefault ? 'adm_maint_notif_default_badge' : 'adm_maint_notif_custom_badge') + '</span></h4>' +
+            '<div class="adm-form-field">' +
+            '<textarea id="maint-notif-' + kind + '-input" class="adm-input adm-textarea" rows="9" maxlength="' + maxLen + '" dir="rtl" oninput="maintNotifPreview(\'' + kind + '\')">' + adminEscapeHtml(value || '') + '</textarea>' +
+            '</div>' +
+            '<div class="maint-notif-meta">' +
+            '<span class="maint-notif-count" id="maint-notif-' + kind + '-count"></span>' +
+            '<span class="adm-hint" style="flex:1">' + t('adm_maint_notif_char_hint') + '</span>' +
+            '<button class="adm-btn adm-btn-primary" id="maint-notif-' + kind + '-save" onclick="maintNotifSave(\'' + kind + '\')">' + t('adm_maint_notif_save') + '</button>' +
+            '</div>' +
+            '<div class="maint-notif-preview-lbl">' + t('adm_maint_notif_preview') + '</div>' +
+            '<div class="maint-notif-preview" id="maint-notif-' + kind + '-preview"></div>' +
+            '</div>';
+    };
+    section.innerHTML =
+        field('start', 'adm_maint_notif_start_label', data.start_message, data.start_is_default) +
+        field('end', 'adm_maint_notif_end_label', data.end_message, data.end_is_default);
+    maintNotifPreview('start');
+    maintNotifPreview('end');
+}
+window.loadMaintenanceNotifTexts = loadMaintenanceNotifTexts;
+
+// Live preview: exactly what Telegram users will receive (title line + body).
+function maintNotifPreview(kind) {
+    const input = document.getElementById('maint-notif-' + kind + '-input');
+    const preview = document.getElementById('maint-notif-' + kind + '-preview');
+    const count = document.getElementById('maint-notif-' + kind + '-count');
+    if (input && preview) preview.textContent = input.value; // DOM property — no HTML injection
+    if (input && count) count.textContent = String(input.value.length) + ' / ' + input.maxLength;
+}
+window.maintNotifPreview = maintNotifPreview;
+
+// Save ONE field (start|end). The button locks while in-flight and is always
+// restored (success AND error) — never a permanent disable. Only the SAVED
+// field's badge is refreshed in place (the other field's unsaved edits are
+// preserved).
+async function maintNotifSave(kind) {
+    const input = document.getElementById('maint-notif-' + kind + '-input');
+    const btn = document.getElementById('maint-notif-' + kind + '-save');
+    const badge = document.getElementById('maint-notif-' + kind + '-badge');
+    if (!input) return;
+    const payloadKey = kind === 'start' ? 'start_message' : 'end_message';
+    if (btn) { btn.disabled = true; btn.textContent = t('adm_maint_notif_saving'); }
+    try {
+        const data = await adminApiFetch('/api/admin/maintenance/notif-texts', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [payloadKey]: input.value })
+        });
+        if (!data || data.status !== 'success') throw new Error((data && data.message) || 'save failed');
+        // Reflect the EFFECTIVE stored value + default/custom badge in place.
+        const effective = kind === 'start' ? (data.start_message || '') : (data.end_message || '');
+        const isDefault = kind === 'start' ? data.start_is_default : data.end_is_default;
+        input.value = effective;
+        if (badge) {
+            badge.className = 'admin-badge ' + (isDefault ? 'admin-badge-gray' : 'admin-badge-green');
+            badge.textContent = t(isDefault ? 'adm_maint_notif_default_badge' : 'adm_maint_notif_custom_badge');
+        }
+        maintNotifPreview(kind);
+        showAdminToast(t('adm_maint_notif_saved'), 'success');
+    } catch (e) {
+        showAdminToast(t('adm_maint_notif_save_error') + (e.message ? ': ' + e.message : ''), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('adm_maint_notif_save'); }
+    }
+}
+window.maintNotifSave = maintNotifSave;
 
 // Notification Templates UI: Create/Edit form
 var _npTemplateCache = [];
