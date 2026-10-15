@@ -705,6 +705,20 @@ const i18n = {
         adm_np_tab_broadcast: 'ارسال همگانی',
         adm_np_tab_templates: 'قالب‌ها',
         adm_np_tab_analytics: 'تحلیل‌ها',
+        // ── Maintenance auto-notification texts (MAINT-NOTIF) ──
+        adm_maint_notif_section_title: 'متن اعلان‌های خودکار تعمیرات',
+        adm_maint_notif_section_desc: 'این متن‌ها هنگام شروع و پایان واقعی هر دوره تعمیرات، به‌صورت خودکار برای کاربران ارسال می‌شوند. خالی بماند، متن پیش‌فرض امن استفاده می‌شود. تنظیم متن‌ها هیچ تأثیری روی وضعیت تعمیرات، تبلیغات، پرداخت یا مانیتایز ندارد.',
+        adm_maint_notif_start_label: 'متن شروع تعمیرات',
+        adm_maint_notif_end_label: 'متن پایان تعمیرات و بازگشت سرویس',
+        adm_maint_notif_preview: 'پیش‌نمایش پیام تلگرام',
+        adm_maint_notif_char_hint: 'خط اول = عنوان اعلان؛ متن کامل برای کاربران ارسال می‌شود.',
+        adm_maint_notif_save: 'ذخیره',
+        adm_maint_notif_saving: 'در حال ذخیره…',
+        adm_maint_notif_saved: 'متن اعلان تعمیرات ذخیره شد.',
+        adm_maint_notif_save_error: 'خطا در ذخیره متن اعلان',
+        adm_maint_notif_load_error: 'خطا در بارگذاری متن‌های تعمیرات',
+        adm_maint_notif_default_badge: 'پیش‌فرض',
+        adm_maint_notif_custom_badge: 'سفارشی',
         adm_ae_title: 'اقتصاد هشدارها',
         adm_ae_desc: 'مدیریت سهمیه، هزینه و فعال‌سازی هشدارها',
         adm_ads_title: 'تبلیغات',
@@ -801,6 +815,9 @@ const i18n = {
         adm_ads_tab_channels: 'کانال‌ها',
         adm_ads_tab_popups: 'پاپ‌آپ‌ها',
         adm_ads_tab_messages: 'پیام‌های تبلیغاتی',
+        // MAINT-NOTIF (Phase 4): the maintenance tab key was retired — the
+        // texts now live in the system-controls (maintenance) section, whose
+        // title/desc keys are adm_maint_notif_section_*.
         adm_mb_title: 'عضویت ویژه',
         adm_mb_desc: 'مدیریت درخواست‌های عضویت صرافی و کاربران VIP',
         adm_update_btn: 'به‌روزرسانی',
@@ -2222,6 +2239,20 @@ const i18n = {
         adm_np_tab_broadcast: 'Broadcast',
         adm_np_tab_templates: 'Templates',
         adm_np_tab_analytics: 'Analytics',
+        // ── Maintenance auto-notification texts (MAINT-NOTIF) — English mirror ──
+        adm_maint_notif_section_title: 'Automatic Maintenance Notification Texts',
+        adm_maint_notif_section_desc: 'These texts are sent automatically to users when a maintenance period truly starts and ends. Empty values fall back to the safe defaults. Editing them never changes maintenance mode, ads, payments, or monetization status.',
+        adm_maint_notif_start_label: 'Maintenance start message',
+        adm_maint_notif_end_label: 'Maintenance end / service-restored message',
+        adm_maint_notif_preview: 'Telegram message preview',
+        adm_maint_notif_char_hint: 'First line = notification title; the full text is what users receive.',
+        adm_maint_notif_save: 'Save',
+        adm_maint_notif_saving: 'Saving…',
+        adm_maint_notif_saved: 'Maintenance notification text saved.',
+        adm_maint_notif_save_error: 'Failed to save maintenance notification text',
+        adm_maint_notif_load_error: 'Failed to load maintenance texts',
+        adm_maint_notif_default_badge: 'Default',
+        adm_maint_notif_custom_badge: 'Custom',
         adm_ae_title: 'Alert Economy',
         adm_ae_desc: 'Manage alert quotas, costs, and activation',
         adm_ads_title: 'Advertisements',
@@ -2314,6 +2345,9 @@ const i18n = {
         adm_ads_tab_channels: 'Channels',
         adm_ads_tab_popups: 'Popups',
         adm_ads_tab_messages: 'Ad Messages',
+        // MAINT-NOTIF (Phase 4): the maintenance tab key was retired — the
+        // texts now live in the system-controls (maintenance) section, whose
+        // title/desc keys are adm_maint_notif_section_*.
         adm_mb_title: 'Premium Membership',
         adm_mb_desc: 'Manage exchange membership requests and VIP users',
         adm_update_btn: 'Update',

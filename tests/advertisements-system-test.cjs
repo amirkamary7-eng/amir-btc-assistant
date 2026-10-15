@@ -3195,11 +3195,16 @@ test('ADS-TAB-07: index.html ad tab bar is a single .rc-tabs container with 3 .r
   // Count .rc-tab BUTTON classes inside the ads-tabs section. The regex must
   // match 'class="rc-tab"' and 'class="rc-tab active"' but NOT 'class="rc-tab-icon"'
   // (the SVG icon class) — so it requires a space or end-quote right after 'rc-tab'.
+  // MAINT-NOTIF (Phase 4): the maintenance tab was MOVED to the system-controls
+  // section (next to the real Maintenance Mode controls) — the ads bar is back
+  // to the 3 real ad tabs (channels + popups + messages).
   const adsTabsStart = INDEX_HTML.indexOf('id="ads-tabs"');
   const adsTabsEnd = INDEX_HTML.indexOf('</div>', INDEX_HTML.indexOf('data-ads-tab="messages"'));
   const section = INDEX_HTML.slice(adsTabsStart, adsTabsEnd);
   const tabCount = (section.match(/class="rc-tab(?:\s[^"]*)?"/g) || []).length;
   assert.equal(tabCount, 3, 'exactly 3 tabs in the ad tab bar (channels + popups + messages), not counting rc-tab-icon SVGs');
+  assert.ok(!section.includes('data-ads-tab="maintenance"'), 'maintenance tab no longer present in the ads tab bar');
+  assert.ok(!INDEX_HTML.includes('data-ads-tab="maintenance"'), 'no maintenance tab anywhere in the ads bar');
 });
 
 test('ADS-TAB-08: #ads-tabs .rc-tab scoped layout rule exists (even width + centered)', () => {

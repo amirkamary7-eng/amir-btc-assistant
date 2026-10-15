@@ -5975,3 +5975,44 @@ html[dir="rtl"] .market-ticker-track {
     #admin-section-campaigns .cmp-adm-search { flex-basis: 100%; }
     #admin-section-campaigns .cmp-adm-new-btn { flex: 1 1 100%; }
 }
+
+/* ── MAINT-NOTIF: maintenance texts editor (system-controls → تعمیرات) ──
+   Scoped to the system-controls (maintenance) section — next to the real
+   Maintenance Mode controls. Telegram-style preview bubble (RTL, pre-wrap)
+   + the meta row (char counter / hint / save button). */
+#admin-section-system-controls .maint-notif-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+#admin-section-system-controls .maint-notif-count {
+    font-size: 11.5px;
+    color: var(--text-sub, #a8b2c5);
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    white-space: nowrap;
+}
+#admin-section-system-controls .maint-notif-preview-lbl {
+    margin: 14px 0 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--text-sub, #a8b2c5);
+    letter-spacing: 0.3px;
+}
+#admin-section-system-controls .maint-notif-preview {
+    background: #182533;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.8;
+    color: #e8edf5;
+    direction: rtl;
+    text-align: right;
+    max-height: 320px;
+    overflow-y: auto;
+}
