@@ -555,3 +555,272 @@ test('CAMP-AD-87: user-side share/register-link i18n keys exist in fa AND en', (
     assert.ok(key in ctx.i18n.en, `${key} missing in en`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10. FORM SUBMIT — BEHAVIORAL (hotfix regression for the PR-#88 dead button)
+// ═══════════════════════════════════════════════════════════════════════════
+// PR #88 introduced `payload.registration_url = regUrl || null;` BEFORE the
+// `var payload = _cmpBuildContentPayload(...)` declaration. With `var`
+// hoisting, `payload` is undefined at the assignment → TypeError on EVERY
+// submit → the async onclick handler rejected silently: no request, no
+// toast, no loading state — the Save button appeared completely dead.
+//
+// These tests EXECUTE the real extracted `campaignFormSubmit` (and the real
+// `_cmpRenderForm`) in a vm sandbox with DOM + fetch stubs, so ANY
+// use-before-declaration or broken submit path fails here — a regex pin
+// cannot catch ordering bugs (which is exactly how the bug shipped).
+
+// Extract a full EXECUTABLE declaration (keeps the `async` keyword, unlike
+// fnBody which is regex-pin-only).
+function fnDeclSrc(name) {
+  const asyncAt = ADMIN_JS.indexOf(`async function ${name}(`);
+  const plainAt = ADMIN_JS.indexOf(`function ${name}(`);
+  const start = (asyncAt !== -1 && (plainAt === -1 || asyncAt <= plainAt)) ? asyncAt : plainAt;
+  assert.ok(start !== -1, `function not found: ${name}`);
+  const rest = ADMIN_JS.slice(start);
+  const next = rest.slice(1).search(/\n(?:async )?function |\n\/\/ ──|\nwindow\./);
+  return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
+const vm = require('node:vm');
+
+// Minimal DOM stubs faithful to the browser semantics the code relies on:
+// escapeHtml via createElement/createTextNode (innerHTML serializes text
+// with & < > escaped), form inputs as {value}, toasts/fetch recorded.
+function makeSubmitHarness(opts) {
+  const o = opts || {};
+  const calls = { fetches: [], toasts: [], marks: [], closed: 0, reloads: [] };
+  const fields = o.fields || {};
+  const elements = {};
+  const saveBtn = { disabled: false, textContent: 'adm_camp_save' };
+  for (const id of [
+    'cmp-f-title', 'cmp-f-summary', 'cmp-f-body', 'cmp-f-starts', 'cmp-f-ends',
+    'cmp-f-image-url', 'cmp-f-reg-url', 'cmp-f-status',
+    'cmp-f-tr-title', 'cmp-f-tr-summary', 'cmp-f-tr-body',
+  ]) {
+    elements[id] = {
+      id,
+      value: fields[id] != null ? String(fields[id]) : '',
+      classList: {
+        _set: new Set(),
+        add(c) { this._set.add(c); },
+        remove(c) { this._set.delete(c); },
+        contains(c) { return this._set.has(c); },
+      },
+      focus() { calls.focusId = id; },
+      oninput: null,
+    };
+  }
+  elements['cmp-f-save'] = saveBtn;
+  const document = { getElementById: (id) => elements[id] || null };
+
+  // Deferred fetch controller for in-flight (double-click) assertions.
+  let pendingResolve = null, pendingReject = null;
+  const deferred = o.deferred === true;
+
+  const sandbox = {
+    document,
+    t: (k) => k,
+    URL, // real URL — the client validator needs it
+    _adminHasPerm: o.hasPerm != null ? o.hasPerm : () => true,
+    _cmpEditingId: o.editingId || null,
+    _cmpListState: { page: 3, limit: 20, status: '', search: '', total: 0, totalPages: 1 },
+    // REAL pure helpers from [CMP-PURE-START]..[CMP-PURE-END]
+    _cmpIsValidRegUrl: pure._cmpIsValidRegUrl,
+    _cmpBuildContentPayload: pure._cmpBuildContentPayload,
+    _cmpFromLocalInput: pure._cmpFromLocalInput,
+    // REAL validation marker (extracted from admin.js)
+    _cmpMarkInvalid: null,
+    showAdminToast: (msg, kind) => { calls.toasts.push({ msg, kind }); },
+    adminApiFetch: (path, options) => {
+      calls.fetches.push({ path, options });
+      if (deferred) {
+        return new Promise((res, rej) => { pendingResolve = res; pendingReject = rej; });
+      }
+      if (o.fetchError) return Promise.reject(o.fetchError);
+      return Promise.resolve(o.fetchResult != null ? o.fetchResult : { status: 'success', campaign: { id: 'new-1', status: 'DRAFT' } });
+    },
+    campaignFormClose: () => { calls.closed += 1; },
+    loadAdminCampaigns: (page) => { calls.reloads.push(page); },
+    console,
+  };
+  // The REAL _cmpMarkInvalid (records + real classList/focus behavior).
+  vm.createContext(sandbox);
+  vm.runInContext(fnDeclSrc('_cmpMarkInvalid'), sandbox, { filename: 'admin.js#_cmpMarkInvalid' });
+  vm.runInContext(fnDeclSrc('campaignFormSubmit'), sandbox, { filename: 'admin.js#campaignFormSubmit' });
+  return {
+    sandbox, calls, saveBtn, elements,
+    submit: () => sandbox.campaignFormSubmit(),
+    settleFetch: (value) => { if (pendingResolve) pendingResolve(value); },
+    failFetch: (err) => { if (pendingReject) pendingReject(err); },
+  };
+}
+
+const VALID_FIELDS = {
+  'cmp-f-title': 'کمپین تست هات‌فیکس',
+  'cmp-f-summary': 'خلاصه تست',
+  'cmp-f-body': 'متن کامل تست',
+  'cmp-f-starts': '2026-10-20T12:00',
+  'cmp-f-reg-url': 'https://exchange.example.com/register?via=amirbtc',
+};
+
+test('CAMP-AD-90: HOTFIX — valid form submit SENDS the request (no use-before-declaration TypeError)', async () => {
+  const h = makeSubmitHarness({ fields: VALID_FIELDS });
+  // The buggy PR-#88 code rejected with a TypeError and NEVER called
+  // adminApiFetch — this await would throw and the assertions fail.
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 1, 'exactly one API call');
+  const { path, options } = h.calls.fetches[0];
+  assert.equal(path, '/api/admin/campaigns', 'create → POST /api/admin/campaigns');
+  assert.equal(options.method, 'POST');
+  const payload = JSON.parse(options.body);
+  assert.equal(payload.title_fa, 'کمپین تست هات‌فیکس', 'single-field title stored in its detected language');
+  assert.equal(payload.registration_url, 'https://exchange.example.com/register?via=amirbtc', 'registration_url PERSISTED in the payload');
+  assert.ok(Date.parse(payload.starts_at) > 0, 'starts_at is a parseable ISO timestamp');
+  assert.equal(payload.status, 'DRAFT', 'create defaults to DRAFT');
+  assert.deepEqual(h.calls.toasts.map((x) => x.msg), ['adm_camp_created'], 'one success toast');
+  assert.equal(h.calls.closed, 1, 'form closed after success');
+  assert.deepEqual(h.calls.reloads, [1], 'list reloaded from page 1');
+  assert.equal(h.saveBtn.disabled, false, 'button restored (not stuck)');
+});
+
+test('CAMP-AD-91: edit mode → PUT /:id, no status field, current page preserved', async () => {
+  const h = makeSubmitHarness({
+    fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-reg-url': '' }),
+    editingId: 'camp-42',
+  });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 1);
+  const { path, options } = h.calls.fetches[0];
+  assert.equal(path, '/api/admin/campaigns/camp-42', 'edit → PUT /api/admin/campaigns/:id');
+  assert.equal(options.method, 'PUT');
+  const payload = JSON.parse(options.body);
+  assert.equal('status' in payload, false, 'update never sends status (server rejects it)');
+  assert.equal(payload.registration_url, null, 'EMPTY reg-url clears to null — never a stale link');
+  assert.equal(h.calls.toasts[0].msg, 'adm_camp_updated', 'edit success toast');
+  assert.deepEqual(h.calls.reloads, [3], 'edit reloads the CURRENT list page (state.page = 3)');
+});
+
+test('CAMP-AD-92: publish flow through the form — status PUBLISHED is sent on create', async () => {
+  const h = makeSubmitHarness({ fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-status': 'PUBLISHED' }) });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 1);
+  assert.equal(JSON.parse(h.calls.fetches[0].options.body).status, 'PUBLISHED', '«انتشار» via the form = PUBLISHED in the create payload');
+});
+
+test('CAMP-AD-93: validation gates stop BEFORE any request (title/starts/reg-url/ends)', async () => {
+  // Missing title.
+  let h = makeSubmitHarness({ fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-title': '   ' }) });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 0, 'no request on missing title');
+  assert.equal(h.calls.toasts[0].msg, 'adm_camp_field_title');
+  assert.ok(h.elements['cmp-f-title'].classList.contains('cmp-adm-invalid'), 'title visibly marked');
+
+  // Missing starts_at.
+  h = makeSubmitHarness({ fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-starts': '' }) });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 0, 'no request on missing starts');
+  assert.equal(h.calls.toasts[0].msg, 'adm_camp_field_starts');
+
+  // Dangerous registration URL scheme.
+  h = makeSubmitHarness({ fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-reg-url': 'javascript:alert(document.domain)' }) });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 0, 'no request on javascript: URL');
+  assert.equal(h.calls.toasts[0].msg, 'adm_camp_field_reg_url_invalid');
+  assert.ok(h.elements['cmp-f-reg-url'].classList.contains('cmp-adm-invalid'), 'reg-url visibly marked');
+
+  // ends_at before starts_at.
+  h = makeSubmitHarness({ fields: Object.assign({}, VALID_FIELDS, { 'cmp-f-ends': '2020-01-01T00:00' }) });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 0, 'no request on reversed window');
+  assert.equal(h.calls.toasts[0].msg, 'adm_camp_field_ends');
+});
+
+test('CAMP-AD-94: API failure → honest error toast with the REAL message; button re-enabled for retry', async () => {
+  const err = new Error('HTTP 422');
+  err.status = 422;
+  err.body = { errors: [{ field: 'starts_at', message: 'must be a future ISO-8601 timestamp' }] };
+  const h = makeSubmitHarness({ fields: VALID_FIELDS, fetchError: err });
+  await h.submit(); // must NOT throw out of the handler
+  assert.equal(h.calls.fetches.length, 1, 'the request WAS sent');
+  assert.equal(h.calls.toasts.length, 1, 'exactly one error toast');
+  assert.equal(h.calls.toasts[0].kind, 'error');
+  assert.equal(h.calls.toasts[0].msg, 'starts_at: must be a future ISO-8601 timestamp', 'server field errors surfaced verbatim');
+  assert.equal(h.calls.closed, 0, 'form stays open on failure');
+  assert.equal(h.saveBtn.disabled, false, 'button NOT permanently disabled');
+  assert.equal(h.saveBtn.textContent, 'adm_camp_save', 'label restored');
+
+  // Plain network error → the raw message is surfaced (not swallowed).
+  const h2 = makeSubmitHarness({ fields: VALID_FIELDS, fetchError: new Error('network down') });
+  await h2.submit();
+  assert.equal(h2.calls.toasts[0].msg, 'network down');
+  assert.equal(h2.saveBtn.disabled, false, 'retry possible after network failure');
+});
+
+test('CAMP-AD-95: in-flight lock + rapid re-click — ONE request per submit, retry after settle', async () => {
+  const h = makeSubmitHarness({ fields: VALID_FIELDS, deferred: true });
+  const p1 = h.submit();
+  assert.equal(h.saveBtn.disabled, true, 'button locked while in-flight (a real second click cannot fire)');
+  assert.equal(h.saveBtn.textContent, 'adm_camp_saving', 'loading feedback shown');
+  h.settleFetch({ status: 'success', campaign: { id: 'new-1', status: 'DRAFT' } });
+  await p1;
+  assert.equal(h.calls.fetches.length, 1, 'exactly ONE request for the click');
+  assert.equal(h.saveBtn.disabled, false, 'unlocked after completion');
+
+  // The user may submit again afterwards (retry / next edit) — never a
+  // permanent disable.
+  const p2 = h.submit();
+  h.settleFetch({ status: 'success', campaign: { id: 'new-2', status: 'DRAFT' } });
+  await p2;
+  assert.equal(h.calls.fetches.length, 2, 'a subsequent submit works (no permanent disable)');
+});
+
+test('CAMP-AD-96: campaigns.manage permission is checked before ANY work', async () => {
+  const h = makeSubmitHarness({ fields: VALID_FIELDS, hasPerm: () => false });
+  await h.submit();
+  assert.equal(h.calls.fetches.length, 0, 'no request without campaigns.manage');
+  assert.equal(h.calls.toasts[0].msg, 'adm_no_access');
+});
+
+test('CAMP-AD-97: edit form prefills the STORED registration_url (reopen persistence)', () => {
+  // Execute the REAL _cmpRenderForm with a stored campaign and verify the
+  // input carries the stored value (the reopen path re-fetches the row and
+  // renders from it — this locks that contract behaviorally).
+  const escapeDoc = {
+    createElement: () => {
+      const el = { _children: [] };
+      Object.defineProperty(el, 'innerHTML', {
+        get() {
+          return el._children.map((c) => String(c.text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('');
+        },
+      });
+      el.appendChild = (n) => { el._children.push(n); };
+      return el;
+    },
+    createTextNode: (s) => ({ text: String(s) }),
+  };
+  const sandbox = {
+    t: (k) => k,
+    _cmpPanelLang: pure._cmpPanelLang,
+    _cmpToLocalInput: pure._cmpToLocalInput,
+    _cmpAdminImgUrl: pure._cmpAdminImgUrl,
+    CMP_ICONS: { basic: '', schedule: '', image: '', publish: '', link: '' },
+    document: Object.assign({ getElementById: () => null }, escapeDoc),
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(fnDeclSrc('adminEscapeHtml'), ctx, { filename: 'admin.js#adminEscapeHtml' });
+  vm.runInContext(fnDeclSrc('_cmpRenderForm'), ctx, { filename: 'admin.js#_cmpRenderForm' });
+  const box = { innerHTML: '' };
+  ctx._cmpRenderForm(box, {
+    id: 'camp-9',
+    title_fa: 'کمپین ذخیره‌شده', title_en: 'Stored campaign',
+    summary_fa: null, summary_en: null, body_fa: '', body_en: '',
+    image_url: null,
+    registration_url: 'https://exchange.example.com/register?via=amirbtc',
+    starts_at: '2026-10-20T09:00:00.000Z', ends_at: null,
+    status: 'PUBLISHED',
+  });
+  const m = box.innerHTML.match(/<input type="text" id="cmp-f-reg-url"[^>]*value="([^"]*)"/);
+  assert.ok(m, 'registration URL input rendered');
+  assert.equal(m[1], 'https://exchange.example.com/register?via=amirbtc', 'stored URL prefilled — survives form reopen');
+});

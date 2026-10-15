@@ -4821,7 +4821,6 @@ async function campaignFormSubmit() {
         showAdminToast(t('adm_camp_field_reg_url_invalid'), 'error');
         return;
     }
-    payload.registration_url = regUrl || null;
 
     // Single-field content + optional manual translation (Problem C): the
     // main text is stored in the language it is written in (detected); the
@@ -4836,6 +4835,10 @@ async function campaignFormSubmit() {
         g('cmp-f-tr-summary').trim(),
         g('cmp-f-tr-body')
     );
+    // registration_url MUST be set AFTER the payload object exists — the
+    // previous use-before-declaration (PR #88) threw a TypeError on every
+    // submit, making the Save button appear dead (no request, no toast).
+    payload.registration_url = regUrl || null;
     payload.image_url = g('cmp-f-image-url').trim() || null;
     payload.starts_at = startsIso;
     var endsRaw = g('cmp-f-ends');
