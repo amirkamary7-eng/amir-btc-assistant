@@ -540,3 +540,37 @@ test('CAM-52: frontend error-code handling covers every controller error code', 
     assert.ok(FRONTEND.includes(code), `frontend maps ${code}`);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REGISTRATION URL (P0 fix — public API exposure)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('CAM-60: registration_url passes through the public list/detail shapes (null for legacy campaigns)', async () => {
+  const { handlers } = buildHandlers({
+    repo: {
+      list: () => [
+        { id: 'linked', title_fa: 'a', title_en: 'a', summary_fa: null, summary_en: null, body_fa: '', body_en: '', image_url: null, registration_url: 'https://exchange.example.com/register?vip=AMIRBTC', starts_at: PAST, ends_at: null, status: 'PUBLISHED', registered: false, registered_at: null },
+        { id: 'legacy', title_fa: 'b', title_en: 'b', summary_fa: null, summary_en: null, body_fa: '', body_en: '', image_url: null, registration_url: null, starts_at: PAST, ends_at: null, status: 'PUBLISHED', registered: false, registered_at: null },
+      ],
+    },
+  });
+  const res = await handlers.handleList(REQ, { DATABASE_URL: 'x' });
+  assert.equal(res.__status, 200);
+  const [linked, legacy] = res.__json.campaigns;
+  assert.equal(linked.registration_url, 'https://exchange.example.com/register?vip=AMIRBTC', 'stored link exposed to the client button');
+  assert.equal(legacy.registration_url, null, 'legacy campaign → null (in-app one-tap flow unchanged)');
+  // The register endpoint itself is untouched — a custom link NEVER writes a
+  // registration server-side (the client only OPENS the URL).
+  assert.equal(typeof handlers.handleRegister, 'function');
+});
+
+test('CAM-61: handleGetDetail exposes registration_url for the deep-linked detail view', async () => {
+  const { handlers } = buildHandlers({
+    repo: {
+      detail: () => ({ id: 'x1', title_fa: 't', title_en: 't', summary_fa: null, summary_en: null, body_fa: '', body_en: '', image_url: null, registration_url: 'https://exchange.example.com/register', starts_at: PAST, ends_at: null, status: 'PUBLISHED', registered: false, registered_at: null }),
+    },
+  });
+  const res = await handlers.handleGetDetail(REQ, { DATABASE_URL: 'x' }, 'x1');
+  assert.equal(res.__status, 200);
+  assert.equal(res.__json.campaign.registration_url, 'https://exchange.example.com/register');
+});

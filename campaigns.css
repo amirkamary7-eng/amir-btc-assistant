@@ -76,6 +76,21 @@
 /* Detail page stacks above the list overlay */
 .cmp-detail-overlay {
   z-index: 1001;
+  /* REGISTER-BAR SCROLL FIX: the overlay keeps a computed transform
+     (translateY(0) when open — never `none`), so a `position: fixed`
+     child is positioned relative to THIS element (css-transforms spec:
+     a transformed ancestor becomes the containing block for fixed
+     descendants) and used to scroll away with the content — the register
+     button floated mid-screen over the campaign text. The overlay is
+     therefore a FLEX COLUMN scroller: the body grows when the content is
+     short (bar lands at the viewport bottom) and the bottom bar is
+     `position: sticky` (pinned to the scrollport while scrolling, rests
+     AFTER the last paragraph at scroll end — never overlaps text at
+     rest, no fixed-position math, immune to variable viewport height). */
+  display: flex;
+  flex-direction: column;
+  /* the sticky bar owns the bottom edge now (incl. safe-area padding) */
+  padding-block-end: 0;
 }
 /* #endregion */
 
@@ -479,7 +494,14 @@
 .cmp-detail-body {
   max-width: 640px;
   margin-inline: auto;
-  padding: 16px 16px 120px; /* bottom clears the fixed bar */
+  width: 100%;
+  /* flex column child: grows to fill the viewport when the content is
+     short (pushing the sticky bar to the bottom edge); never shrinks when
+     the content is taller than the viewport (it simply scrolls). The old
+     120px bottom clearance is obsolete — the sticky bar rests IN FLOW
+     after the last paragraph at scroll end, so nothing is ever covered. */
+  flex: 1 0 auto;
+  padding: 16px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -604,12 +626,15 @@
 }
 /* #endregion */
 
-/* #region Fixed bottom bar (detail page) — safe-area aware */
+/* #region Bottom bar (detail page) — sticky, safe-area aware
+   See the .cmp-detail-overlay flex-column note: sticky (not fixed) is
+   REQUIRED because the overlay's slide-in transform creates the
+   containing block — a fixed bar would scroll away with the content. */
 .cmp-detail-bar {
-  position: fixed;
-  inset-inline: 0;
-  inset-block-end: 0;
+  position: sticky;
+  bottom: 0;
   z-index: 20;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -662,6 +687,43 @@
 }
 
 .cmp-register-btn:focus-visible {
+  outline: 2px solid var(--cmp-accent-2);
+  outline-offset: 2px;
+}
+
+/* Share button (secondary, compact) — always available in the detail
+   bar regardless of registration state. DOM order [share, register] puts
+   the primary CTA at the reading-direction end in both LTR and RTL. */
+.cmp-share-btn {
+  flex: 0 0 auto;
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid var(--cmp-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cmp-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.cmp-share-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.cmp-share-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.cmp-share-btn:active {
+  transform: scale(0.94);
+}
+
+.cmp-share-btn:focus-visible {
   outline: 2px solid var(--cmp-accent-2);
   outline-offset: 2px;
 }

@@ -78,9 +78,41 @@ test('campaigns.css exists with overlay, badge, bar and safe-area styles', () =>
   assert.match(CMP_CSS, /\.cmp-badge--upcoming\s*\{/, 'UPCOMING badge style');
   assert.match(CMP_CSS, /\.cmp-badge--ended\s*\{/, 'ENDED badge style');
   assert.match(CMP_CSS, /\.cmp-badge--stopped\s*\{/, 'STOPPED badge style');
-  assert.match(CMP_CSS, /\.cmp-detail-bar\s*\{/, 'fixed bottom bar style');
+  assert.match(CMP_CSS, /\.cmp-detail-bar\s*\{/, 'bottom bar style');
   assert.match(CMP_CSS, /safe-area-inset-bottom/, 'bottom bar respects safe area');
   assert.match(CMP_CSS, /safe-area-inset-top/, 'header respects safe area');
+});
+
+test('REGISTER-BAR SCROLL FIX: sticky bar inside a flex-column overlay — never fixed inside the transformed ancestor', () => {
+  // ROOT CAUSE this pins: .cmp-detail-bar used position:fixed INSIDE
+  // .cmp-detail-overlay, whose slide-in transform (translateY(0) — never
+  // `none`) makes it the containing block for fixed descendants → the bar
+  // scrolled with the content and floated mid-screen over the text.
+  const barRule = CMP_CSS.match(/\.cmp-detail-bar\s*\{[^}]*\}/)?.[0] || '';
+  assert.ok(barRule, '.cmp-detail-bar rule exists');
+  assert.match(barRule, /position:\s*sticky/, 'the bar is STICKY (scrollport-pinned, in-flow)');
+  assert.ok(!/position:\s*fixed/.test(barRule), 'the bar is never position:fixed again');
+  assert.match(barRule, /bottom:\s*0/, 'pinned to the bottom edge');
+  assert.match(barRule, /safe-area-inset-bottom/, 'safe-area padding preserved');
+
+  // The overlay is a FLEX COLUMN scroller so short content pushes the bar to
+  // the viewport bottom (flex-grow body) and long content scrolls with the
+  // bar resting AFTER the last paragraph (no overlap, no fixed math).
+  // (Anchor on the stacking rule — the FIRST .cmp-detail-overlay selector in
+  // the file is the shared tokens block, not this behavioral rule.)
+  const overlayRule = CMP_CSS.match(/\.cmp-detail-overlay\s*\{[^}]*padding-block-end:\s*0;[^}]*\}/)?.[0]
+    || CMP_CSS.match(/\/\* Detail page stacks above the list overlay \*\/\s*\.cmp-detail-overlay\s*\{[^}]*\}/)?.[0]
+    || '';
+  assert.match(overlayRule, /display:\s*flex/, 'overlay is a flex container');
+  assert.match(overlayRule, /flex-direction:\s*column/, 'flex column scroller');
+  assert.match(overlayRule, /padding-block-end:\s*0/, 'no dead padding under the sticky bar');
+  const bodyRule = CMP_CSS.match(/\.cmp-detail-body\s*\{[^}]*\}/)?.[0] || '';
+  assert.match(bodyRule, /flex:\s*1 0 auto/, 'body grows for short content (bar at the bottom edge)');
+  const bodyPadding = bodyRule.match(/padding:[^;]+;/)?.[0] || '';
+  assert.ok(!bodyPadding.includes('120px'), 'the obsolete 120px fixed-bar clearance is gone');
+
+  // Share button styling exists next to the register CTA.
+  assert.match(CMP_CSS, /\.cmp-share-btn\s*\{/, 'share button style');
 });
 
 // ── 2. index.html wiring ───────────────────────────────────────────────────

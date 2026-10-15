@@ -4284,6 +4284,25 @@ async function loadAdminMembership() {
 
 // [CMP-PURE-START] browser-free pure helpers (unit-tested in
 // tests/campaigns-admin-panel-test.cjs — extracted between these markers)
+
+// Admin registration-URL validation (P0 fix) — client-side mirror of the
+// SERVER validator in src/controllers/campaigns_admin.js: http(s) ONLY
+// (javascript:, data:, … rejected structurally by the protocol allowlist),
+// no embedded credentials, no localhost / IP-literal hosts, length-bounded.
+function _cmpIsValidRegUrl(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s || s.length > 2048) return false;
+    var u = null;
+    try { u = new URL(s); } catch (e) { return false; }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    if (u.username || u.password) return false;
+    var host = String(u.hostname || '').toLowerCase();
+    if (!host) return false;
+    if (host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    if (host.charAt(0) === '[' && host.charAt(host.length - 1) === ']') return false; // IPv6 literal
+    return true;
+}
+
 function _cmpImageUploadPlan(file, opts) {
     var o = opts || {};
     var maxStore = o.maxStoreBytes || 512000;      // KV storage cap (500KB)
@@ -4451,7 +4470,7 @@ async function loadAdminCampaigns(page) {
         }
         _cmpListState.total = data.total || 0;
         _cmpListState.totalPages = data.totalPages || 1;
-        renderCampaignsToolbar(box, canManage);
+        renderCampaignsToolbar(box, canManage, _cmpListState.total);
         renderCampaignsList(box, data.items, canManage);
     } catch (e) {
         if (token !== _cmpListState.token) return;
@@ -4465,7 +4484,19 @@ async function loadAdminCampaigns(page) {
     }
 }
 
-function renderCampaignsToolbar(box, canManage) {
+/* Toolbar icons (search / clear) — inline, admin panel svg style. */
+var CMP_TOOLBAR_ICONS = {
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    clear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>'
+};
+
+// Redesigned campaigns toolbar (P1): search + status filter chips + REAL
+// result count + explicit reset. Same /api/admin/campaigns?status=&search=&
+// page=&limit= contract as before — this is a pure UI layer change. Mobile-
+// safe by construction: every row wraps (flex-wrap) and the search input
+// shrinks (min-width:0), so nothing overflows horizontally on narrow panels.
+function renderCampaignsToolbar(box, canManage, total) {
     var el = document.getElementById('cmp-toolbar');
     if (!el) {
         el = document.createElement('div');
@@ -4473,16 +4504,34 @@ function renderCampaignsToolbar(box, canManage) {
         box.appendChild(el);
     }
     var statuses = ['', 'DRAFT', 'PUBLISHED', 'STOPPED', 'DELETED'];
-    var opts = statuses.map(function (s) {
-        var label = s ? t(CMP_STATUS_KEYS[s]) : t('adm_camp_filter_all');
-        var sel = _cmpListState.status === s ? ' selected' : '';
-        return '<option value="' + adminEscapeHtml(s) + '"' + sel + '>' + adminEscapeHtml(label) + '</option>';
+    var chips = statuses.map(function (s) {
+        var active = _cmpListState.status === s;
+        return '<button type="button" class="adm-filter-btn cmp-adm-chip' + (active ? ' active' : '') +
+            '" onclick="cmpFilterApply(\'' + adminEscapeHtml(s) + '\')"' +
+            (active ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' +
+            adminEscapeHtml(s ? t(CMP_STATUS_KEYS[s]) : t('adm_camp_filter_all')) + '</button>';
     }).join('');
+    var hasQuery = !!(_cmpListState.search || _cmpListState.status);
+    var countBadge = (typeof total === 'number' && isFinite(total))
+        ? '<span class="cmp-adm-count">' + adminEscapeHtml(t('adm_camp_results_count').replace('{n}', String(total))) + '</span>'
+        : '';
     el.innerHTML =
-        '<div class="rc-toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
-        '<input type="text" id="cmp-search" placeholder="' + adminEscapeHtml(t('adm_camp_search_ph')) + '" value="' + adminEscapeHtml(_cmpListState.search) + '" onkeydown="if(event.key===\'Enter\'){cmpSearchApply()}" style="flex:1;min-width:160px">' +
-        '<select id="cmp-status-filter" onchange="cmpFilterApply()">' + opts + '</select>' +
-        (canManage ? '<button class="adm-btn adm-btn-primary" onclick="campaignFormOpen(null)">' + adminEscapeHtml(t('adm_camp_new')) + '</button>' : '') +
+        '<div class="cmp-adm-toolbar">' +
+        '<div class="cmp-adm-toolbar-row">' +
+        '<div class="cmp-adm-search">' +
+        '<span class="cmp-adm-search-icon" aria-hidden="true">' + CMP_TOOLBAR_ICONS.search + '</span>' +
+        '<input type="text" id="cmp-search" class="adm-input cmp-adm-search-input" placeholder="' + adminEscapeHtml(t('adm_camp_search_ph')) + '" value="' + adminEscapeHtml(_cmpListState.search) + '" onkeydown="if(event.key===\'Enter\'){cmpSearchApply()}" aria-label="' + adminEscapeHtml(t('adm_camp_search_ph')) + '">' +
+        '<button type="button" class="cmp-adm-search-clear' + (_cmpListState.search ? '' : ' is-hidden') + '" onclick="cmpSearchClear()" aria-label="' + adminEscapeHtml(t('adm_camp_search_clear')) + '" title="' + adminEscapeHtml(t('adm_camp_search_clear')) + '">' + CMP_TOOLBAR_ICONS.clear + '</button>' +
+        '</div>' +
+        (canManage ? '<button class="adm-btn adm-btn-primary cmp-adm-new-btn" onclick="campaignFormOpen(null)">' + adminEscapeHtml(t('adm_camp_new')) + '</button>' : '') +
+        '</div>' +
+        '<div class="cmp-adm-toolbar-row cmp-adm-filters-row">' +
+        '<div class="cmp-adm-chips" role="group" aria-label="' + adminEscapeHtml(t('adm_camp_filters_label')) + '">' + chips + '</div>' +
+        '<div class="cmp-adm-meta">' +
+        countBadge +
+        (hasQuery ? '<button type="button" class="cmp-adm-reset" onclick="cmpFiltersReset()">' + CMP_TOOLBAR_ICONS.reset + '<span>' + adminEscapeHtml(t('adm_camp_filter_reset')) + '</span></button>' : '') +
+        '</div>' +
+        '</div>' +
         '</div>' +
         '<div id="cmp-form-card"></div>';
 }
@@ -4494,9 +4543,30 @@ function cmpSearchApply() {
     loadAdminCampaigns();
 }
 
-function cmpFilterApply() {
-    var el = document.getElementById('cmp-status-filter');
-    _cmpListState.status = el ? String(el.value || '') : '';
+// Clear the search term and reload (× button / reset affordance).
+function cmpSearchClear() {
+    var el = document.getElementById('cmp-search');
+    if (el) el.value = '';
+    if (!_cmpListState.search) return; // nothing to clear — no needless reload
+    _cmpListState.search = '';
+    _cmpListState.page = 1;
+    loadAdminCampaigns();
+}
+
+// Status filter — chips pass the status directly ('' = «همه» / All).
+function cmpFilterApply(status) {
+    var next = (status === undefined || status === null) ? '' : String(status);
+    if (next === _cmpListState.status) return; // same chip — no needless reload
+    _cmpListState.status = next;
+    _cmpListState.page = 1;
+    loadAdminCampaigns();
+}
+
+// One-tap return to the unfiltered list («همه» + empty search).
+function cmpFiltersReset() {
+    if (!_cmpListState.status && !_cmpListState.search) return;
+    _cmpListState.status = '';
+    _cmpListState.search = '';
     _cmpListState.page = 1;
     loadAdminCampaigns();
 }
@@ -4598,6 +4668,7 @@ var CMP_ICONS = {
     schedule: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
     image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
     publish: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+    link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'
 };
 
 // Required-field validation: highlight + focus, cleared on first input.
@@ -4677,7 +4748,18 @@ function _cmpRenderForm(box, c) {
         '</details>' +
         '</fieldset>' +
 
-        // Group 4 — publish settings (create only; status changes have
+        // Group 4 — registration link (optional external destination, P0 fix).
+        // Present in BOTH create and edit; edit prefills the stored value so
+        // it survives reopening the form (it is re-fetched from the detail
+        // endpoint, never from stale client state).
+        '<fieldset class="cmp-adm-group">' +
+        '<legend class="cmp-adm-group-title">' + CMP_ICONS.link + adminEscapeHtml(t('adm_camp_g_registration')) + '</legend>' +
+        '<div class="adm-form-field"><label class="adm-form-label">' + adminEscapeHtml(t('adm_camp_field_reg_url')) + '</label>' +
+        '<input type="text" id="cmp-f-reg-url" class="adm-input" maxlength="2048" placeholder="https://…" dir="ltr" value="' + f(isEdit ? (c.registration_url || '') : '') + '"></div>' +
+        '<div class="cmp-adm-hint">' + adminEscapeHtml(t('adm_camp_field_reg_url_hint')) + '</div>' +
+        '</fieldset>' +
+
+        // Group 5 — publish settings (create only; status changes have
         // dedicated actions in the list per the controller state machine)
         (!isEdit ?
         '<fieldset class="cmp-adm-group">' +
@@ -4729,6 +4811,17 @@ async function campaignFormSubmit() {
         showAdminToast(t('adm_camp_field_starts'), 'error');
         return;
     }
+
+    // Registration URL (P0 fix): client-side validation mirrors the server
+    // validator (http/https only, no javascript:/data:, no credentials or
+    // IP/localhost hosts). Empty clears the link (back to in-app one-tap).
+    var regUrl = g('cmp-f-reg-url').trim();
+    if (regUrl && !_cmpIsValidRegUrl(regUrl)) {
+        _cmpMarkInvalid('cmp-f-reg-url');
+        showAdminToast(t('adm_camp_field_reg_url_invalid'), 'error');
+        return;
+    }
+    payload.registration_url = regUrl || null;
 
     // Single-field content + optional manual translation (Problem C): the
     // main text is stored in the language it is written in (detected); the
@@ -4945,7 +5038,9 @@ async function _cmpConvertToWebpBlob(file) {
 // ── Exports (onclick handlers) ────────────────────────────────────────────
 window.loadAdminCampaigns = loadAdminCampaigns;
 window.cmpSearchApply = cmpSearchApply;
+window.cmpSearchClear = cmpSearchClear;
 window.cmpFilterApply = cmpFilterApply;
+window.cmpFiltersReset = cmpFiltersReset;
 window.campaignFormOpen = campaignFormOpen;
 window.campaignFormClose = campaignFormClose;
 window.campaignFormSubmit = campaignFormSubmit;

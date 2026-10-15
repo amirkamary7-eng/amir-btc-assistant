@@ -51,6 +51,7 @@ export function createCampaignsRepository(deps) {
       body_fa     TEXT NOT NULL DEFAULT '',
       body_en     TEXT NOT NULL DEFAULT '',
       image_url   TEXT,
+      registration_url TEXT,
       starts_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       ends_at     TIMESTAMPTZ,
       status      TEXT NOT NULL DEFAULT 'DRAFT'
@@ -58,6 +59,8 @@ export function createCampaignsRepository(deps) {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE promo_campaigns ADD COLUMN IF NOT EXISTS registration_url TEXT;
 
     CREATE INDEX IF NOT EXISTS idx_promo_campaigns_list
       ON promo_campaigns (starts_at DESC) WHERE status IN ('PUBLISHED', 'STOPPED');
@@ -111,6 +114,7 @@ export function createCampaignsRepository(deps) {
       body_fa: row.body_fa || '',
       body_en: row.body_en || '',
       image_url: row.image_url || null,
+      registration_url: row.registration_url || null,
       starts_at: _iso(row.starts_at),
       ends_at: _iso(row.ends_at),
       status: row.status,
@@ -123,7 +127,8 @@ export function createCampaignsRepository(deps) {
 
   const _SELECT_COLUMNS = `
     c.id, c.title_fa, c.title_en, c.summary_fa, c.summary_en,
-    c.body_fa, c.body_en, c.image_url, c.starts_at, c.ends_at,
+    c.body_fa, c.body_en, c.image_url, c.registration_url,
+    c.starts_at, c.ends_at,
     c.status, (r.id IS NOT NULL) AS registered, r.registered_at
   `;
 
@@ -262,7 +267,8 @@ export function createCampaignsRepository(deps) {
 
   const _ADMIN_SELECT_COLUMNS = `
     c.id, c.title_fa, c.title_en, c.summary_fa, c.summary_en,
-    c.body_fa, c.body_en, c.image_url, c.starts_at, c.ends_at,
+    c.body_fa, c.body_en, c.image_url, c.registration_url,
+    c.starts_at, c.ends_at,
     c.status, c.created_at, c.updated_at,
     (SELECT COUNT(*)::int FROM promo_campaign_registrations r
       WHERE r.campaign_id = c.id) AS registration_count
@@ -278,6 +284,7 @@ export function createCampaignsRepository(deps) {
       body_fa: row.body_fa || '',
       body_en: row.body_en || '',
       image_url: row.image_url || null,
+      registration_url: row.registration_url || null,
       starts_at: _iso(row.starts_at),
       ends_at: _iso(row.ends_at),
       status: row.status,
@@ -358,10 +365,11 @@ export function createCampaignsRepository(deps) {
       `
         INSERT INTO promo_campaigns
           (title_fa, title_en, summary_fa, summary_en, body_fa, body_en,
-           image_url, starts_at, ends_at, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           image_url, registration_url, starts_at, ends_at, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, title_fa, title_en, summary_fa, summary_en,
-                  body_fa, body_en, image_url, starts_at, ends_at,
+                  body_fa, body_en, image_url, registration_url,
+                  starts_at, ends_at,
                   status, created_at, updated_at
       `,
       [
@@ -372,6 +380,7 @@ export function createCampaignsRepository(deps) {
         data.body_fa ?? '',
         data.body_en ?? '',
         data.image_url ?? null,
+        data.registration_url ?? null,
         String(data.starts_at),
         data.ends_at ?? null,
         String(data.status),
@@ -387,7 +396,7 @@ export function createCampaignsRepository(deps) {
   // same audited code path.
   const UPDATABLE_COLUMNS = [
     'title_fa', 'title_en', 'summary_fa', 'summary_en',
-    'body_fa', 'body_en', 'image_url', 'starts_at', 'ends_at',
+    'body_fa', 'body_en', 'image_url', 'registration_url', 'starts_at', 'ends_at',
   ];
 
   // Parameterized SET-clause builder (membership.js newSetBuilder pattern):
@@ -439,7 +448,8 @@ export function createCampaignsRepository(deps) {
            SET ${b.sql()}
          WHERE id = $${b.params.length + 1}
         RETURNING id, title_fa, title_en, summary_fa, summary_en,
-                  body_fa, body_en, image_url, starts_at, ends_at,
+                  body_fa, body_en, image_url, registration_url,
+                  starts_at, ends_at,
                   status, created_at, updated_at
       `,
       [...b.params, String(campaignId)],
@@ -468,7 +478,8 @@ export function createCampaignsRepository(deps) {
          WHERE id = $1
            AND status <> 'DELETED'
         RETURNING id, title_fa, title_en, summary_fa, summary_en,
-                  body_fa, body_en, image_url, starts_at, ends_at,
+                  body_fa, body_en, image_url, registration_url,
+                  starts_at, ends_at,
                   status, created_at, updated_at
       `,
       [String(campaignId), String(status)],

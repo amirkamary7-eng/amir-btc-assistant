@@ -2639,6 +2639,22 @@ function checkAnalysisDeepLink() {
         }
     }
 
+    // ── Campaign deep link (Exchange Campaigns fullscreen detail) ──
+    // Same t.me/<bot>?startapp=<prefix>_<id> scheme as the analysis/news/
+    // calendar/announcement links. The campaigns module owns everything after
+    // the prefix: it opens the list overlay, waits for the CURRENT load to
+    // settle and opens the detail for a visible campaign (DRAFT/DELETED/
+    // missing ids honestly leave the list view — nothing is fabricated).
+    if (sp.startsWith('campaign_')) {
+        const campaignId = sp.replace('campaign_', '');
+        if (campaignId && /^[a-zA-Z0-9_-]+$/.test(campaignId)) {
+            if (window.CampaignsApp && typeof window.CampaignsApp.openAndShow === 'function') {
+                window.CampaignsApp.openAndShow(campaignId);
+            }
+            return true;
+        }
+    }
+
     return false;
 }
 

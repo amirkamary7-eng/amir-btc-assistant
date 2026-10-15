@@ -769,6 +769,14 @@ const i18n = {
         adm_camp_stopped: 'کمپین متوقف شد.',
         adm_camp_resumed: 'کمپین ادامه یافت.',
         adm_camp_confirm_delete: 'این کمپین حذف شود؟ (حذف نرم — ثبت‌نام‌ها حفظ می‌شود)',
+        adm_camp_field_reg_url: 'آدرس ثبت‌نام (اختیاری)',
+        adm_camp_field_reg_url_hint: 'در صورت واردکردن، دکمه ثبت‌نام کاربر به این آدرس باز می‌شود (فقط http/https). خالی بماند، ثبت‌نام داخل اپ انجام می‌شود.',
+        adm_camp_field_reg_url_invalid: 'آدرس ثبت‌نام نامعتبر است؛ باید با http:// یا https:// شروع شود.',
+        adm_camp_g_registration: 'لینک ثبت‌نام',
+        adm_camp_results_count: '{n} کمپین',
+        adm_camp_filter_reset: 'حذف فیلترها',
+        adm_camp_search_clear: 'پاک‌کردن جستجو',
+        adm_camp_filters_label: 'فیلتر وضعیت',
         adm_camp_reg_count: 'تعداد ثبت‌نام:',
         adm_camp_reg_empty: 'هنوز ثبت‌نامی انجام نشده است.',
         adm_camp_reg_th_id: 'شناسه',
@@ -1515,7 +1523,12 @@ const i18n = {
         cmp_register_already: 'قبلاً در این کمپین ثبت‌نام کرده‌اید.',
         cmp_register_stopped: 'این کمپین دیگر فعال نیست.',
         cmp_register_rate_limited: 'درخواست‌های زیاد؛ لطفاً کمی بعد دوباره تلاش کنید.',
-        cmp_register_error: 'ثبت‌نام انجام نشد؛ لطفاً دوباره تلاش کنید.'
+        cmp_register_error: 'ثبت‌نام انجام نشد؛ لطفاً دوباره تلاش کنید.',
+        cmp_share: 'اشتراک‌گذاری کمپین',
+        cmp_share_reg_link: 'لینک ثبت‌نام:',
+        cmp_share_copied: 'متن کمپین کپی شد؛ می‌توانید آن را ارسال کنید.',
+        cmp_share_copy_error: 'کپی انجام نشد؛ لطفاً لینک را دستی کپی کنید.',
+        cmp_register_url_invalid: 'لینک ثبت‌نام این کمپین در دسترس نیست یا نامعتبر است.'
     },
     en: {
         welcome: 'Welcome,', dashboard: 'Dashboard', market: 'Market', analysis: 'Analysis', news: 'News',
@@ -2273,6 +2286,14 @@ const i18n = {
         adm_camp_stopped: 'Campaign stopped.',
         adm_camp_resumed: 'Campaign resumed.',
         adm_camp_confirm_delete: 'Delete this campaign? (soft delete — registrations are preserved)',
+        adm_camp_field_reg_url: 'Registration URL (optional)',
+        adm_camp_field_reg_url_hint: 'When set, the user register button opens this URL (http/https only). Leave empty for in-app registration.',
+        adm_camp_field_reg_url_invalid: 'Invalid registration URL — it must start with http:// or https://.',
+        adm_camp_g_registration: 'Registration Link',
+        adm_camp_results_count: '{n} campaigns',
+        adm_camp_filter_reset: 'Clear filters',
+        adm_camp_search_clear: 'Clear search',
+        adm_camp_filters_label: 'Status filter',
         adm_camp_reg_count: 'Registration count:',
         adm_camp_reg_empty: 'No registrations yet.',
         adm_camp_reg_th_id: 'ID',
@@ -3011,7 +3032,12 @@ const i18n = {
         cmp_register_already: 'You are already registered for this campaign.',
         cmp_register_stopped: 'This campaign is no longer active.',
         cmp_register_rate_limited: 'Too many requests — please try again in a moment.',
-        cmp_register_error: 'Registration failed — please try again.'
+        cmp_register_error: 'Registration failed — please try again.',
+        cmp_share: 'Share campaign',
+        cmp_share_reg_link: 'Registration link:',
+        cmp_share_copied: 'Campaign text copied — ready to send.',
+        cmp_share_copy_error: 'Copy failed — please copy the link manually.',
+        cmp_register_url_invalid: 'The registration link for this campaign is unavailable or invalid.'
     }
 };
 

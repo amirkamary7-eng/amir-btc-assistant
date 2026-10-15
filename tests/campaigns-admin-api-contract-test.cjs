@@ -168,20 +168,41 @@ test('CAMA-12: createCampaign — fully parameterized INSERT, defaults applied, 
     // INSERT ... RETURNING shape: plain columns only (no registration_count).
     return { rows: [{
       id: 'c1', title_fa: 'کمپین', title_en: 'Campaign', summary_fa: null, summary_en: null,
-      body_fa: '', body_en: '', image_url: null,
+      body_fa: '', body_en: '', image_url: null, registration_url: null,
       starts_at: new Date('2026-01-01T00:00:00Z'), ends_at: null, status: 'DRAFT',
       created_at: new Date('2025-12-01T00:00:00Z'), updated_at: new Date('2025-12-01T00:00:00Z'),
     }] };
   });
   const c = await repo.createCampaign({ DATABASE_URL: 'x' }, {
     title_fa: 'کمپین', title_en: 'Campaign', summary_fa: null, summary_en: null,
-    body_fa: '', body_en: '', image_url: null, starts_at: '2026-01-01T00:00:00Z', ends_at: null, status: 'DRAFT',
+    body_fa: '', body_en: '', image_url: null, registration_url: null,
+    starts_at: '2026-01-01T00:00:00Z', ends_at: null, status: 'DRAFT',
   });
   assert.match(captured.sql, /INSERT INTO promo_campaigns\s+\(title_fa, title_en, summary_fa, summary_en, body_fa, body_en,/);
-  assert.match(captured.sql, /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10\)/);
-  assert.deepEqual(captured.params, ['کمپین', 'Campaign', null, null, '', '', null, '2026-01-01T00:00:00Z', null, 'DRAFT']);
+  assert.match(captured.sql, /image_url, registration_url, starts_at, ends_at, status\)/);
+  assert.match(captured.sql, /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11\)/);
+  assert.deepEqual(captured.params, ['کمپین', 'Campaign', null, null, '', '', null, null, '2026-01-01T00:00:00Z', null, 'DRAFT']);
+  assert.equal(c.registration_url, null, 'registration_url mapped through to the created row');
   // A fresh uuid campaign cannot have registrations — count is 0 by construction.
   assert.equal(c.registration_count, 0);
+
+  // registration_url is persisted verbatim after controller-side validation.
+  const repoUrl = buildRepo(async (env, sql, params) => {
+    captured = { sql, params };
+    return { rows: [{
+      id: 'c2', title_fa: 'x', title_en: 'y', summary_fa: null, summary_en: null,
+      body_fa: '', body_en: '', image_url: null, registration_url: 'https://exchange.example/register',
+      starts_at: new Date('2026-01-01T00:00:00Z'), ends_at: null, status: 'PUBLISHED',
+      created_at: new Date('2025-12-01T00:00:00Z'), updated_at: new Date('2025-12-01T00:00:00Z'),
+    }] };
+  });
+  const c2 = await repoUrl.createCampaign({ DATABASE_URL: 'x' }, {
+    title_fa: 'x', title_en: 'y', summary_fa: null, summary_en: null,
+    body_fa: '', body_en: '', image_url: null, registration_url: 'https://exchange.example/register',
+    starts_at: '2026-01-01T00:00:00Z', ends_at: null, status: 'PUBLISHED',
+  });
+  assert.equal(captured.params[7], 'https://exchange.example/register', 'registration_url bound as the 8th parameter');
+  assert.equal(c2.registration_url, 'https://exchange.example/register');
 });
 
 test('CAMA-13: updateCampaign — whitelisted SET builder, status NOT updatable, unknown keys ignored, live registration_count (M-2)', async () => {
@@ -1074,9 +1095,18 @@ test('CAMA-66: rate-limited admin → 429 before storage', async () => {
 // 4. BOUNDARY / NON-REGRESSION
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('CAMA-50: no schema changes, no CASCADE, no cross-module table access, revoke coverage intact', () => {
-  // The repo never mutates schema or cascades anything.
-  for (const forbidden of ['ALTER TABLE', 'DROP TABLE', 'DROP INDEX', 'TRUNCATE', 'ON DELETE CASCADE', 'CREATE TABLE AS']) {
+test('CAMA-50: no destructive schema changes, no CASCADE, no cross-module table access, revoke coverage intact', () => {
+  // The repo's ONLY DDL is the idempotent dev self-provision block. The single
+  // allowed ALTER is the additive, re-runnable registration_url column that
+  // mirrors scripts/00-migrate.sql (evidence-justified new nullable column for
+  // the admin registration-link feature; every other ALTER stays forbidden).
+  const alters = [...REPO_SRC.matchAll(/ALTER\s+TABLE\s+[^;]*;/g)].map((m) => m[0]);
+  assert.equal(alters.length, 1, 'exactly one ALTER TABLE statement lives in the repo');
+  assert.ok(
+    /^ALTER\s+TABLE\s+promo_campaigns\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+registration_url\s+TEXT;$/i.test(alters[0]),
+    'the only ALTER is the additive idempotent registration_url column',
+  );
+  for (const forbidden of ['DROP TABLE', 'DROP INDEX', 'TRUNCATE', 'ON DELETE CASCADE', 'CREATE TABLE AS', 'ALTER COLUMN', 'DROP COLUMN']) {
     assert.ok(!REPO_SRC.includes(forbidden), `repo must not contain "${forbidden}"`);
   }
   // Cross-module boundary: only the two promo tables (+ users read via JOIN);
@@ -1093,8 +1123,92 @@ test('CAMA-50: no schema changes, no CASCADE, no cross-module table access, revo
   // grants from BOTH promo tables (needed again post-migration).
   assert.ok(REVOKE.includes('promo_campaigns'), 'revoke script covers promo_campaigns');
   assert.ok(REVOKE.includes('promo_campaign_registrations'), 'revoke script covers promo_campaign_registrations');
-  // The 5B migration is untouched by this stage (no new tables needed).
   const MIGRATE = read('scripts/00-migrate.sql');
   assert.equal((MIGRATE.match(/CREATE TABLE IF NOT EXISTS promo_campaigns \(/g) || []).length, 1, 'exactly one promo_campaigns definition');
   assert.equal((MIGRATE.match(/CREATE TABLE IF NOT EXISTS promo_campaign_registrations \(/g) || []).length, 1, 'exactly one registrations definition');
+  // The migration carries the SAME additive ALTER (idempotent for databases
+  // created before the column existed — production runs this file, the repo
+  // SCHEMA_SQL is only the dev mirror).
+  assert.equal((MIGRATE.match(/ALTER TABLE promo_campaigns ADD COLUMN IF NOT EXISTS registration_url TEXT;/g) || []).length, 1,
+    'migrate.sql carries exactly one idempotent registration_url ALTER');
+  assert.ok(MIGRATE.includes('  registration_url TEXT,'), 'fresh installs get the column in CREATE TABLE');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. REGISTRATION URL (P0 fix — admin-specified external destination)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('CAMA-32: registration_url — create/update validation matrix, explicit clear, persistence', async () => {
+  // CREATE — every dangerous scheme/type is rejected with a 400 field error.
+  const badCases = [
+    ['javascript:', 'javascript:alert(document.domain)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
+    ['file:', 'file:///etc/passwd'],
+    ['ftp:', 'ftp://files.example.com/x'],
+    ['userinfo', 'https://user:pass@exchange.example.com/register'],
+    ['localhost', 'http://localhost/join'],
+    ['IPv4 literal', 'http://10.0.0.1/join'],
+    ['IPv6 literal', 'http://[::1]/join'],
+    ['garbage', 'not a url'],
+    ['non-string', 12345],
+    ['over 2048 chars', 'https://x.example/' + 'a'.repeat(2048)],
+  ];
+  for (const [label, value] of badCases) {
+    const { handlers } = buildHandlers({ body: { ...VALID_CREATE, registration_url: value } });
+    const res = await handlers.handleAdminCreateCampaign(REQ('https://x/api/admin/campaigns'), { DATABASE_URL: 'x' });
+    assert.equal(res.__status, 400, `${label}: rejected with 400`);
+    assert.equal(res.__json.code, 'VALIDATION_ERROR', `${label}: VALIDATION_ERROR`);
+    assert.ok(res.__json.errors.some((e) => e.field === 'registration_url'), `${label}: field error on registration_url`);
+  }
+
+  // CREATE — valid http(s) URLs pass through verbatim (trimmed).
+  for (const value of ['https://exchange.example.com/register?vip=AMIRBTC', 'http://example.org/join']) {
+    const { handlers, calls } = buildHandlers({ body: { ...VALID_CREATE, registration_url: '  ' + value + '  ' } });
+    const res = await handlers.handleAdminCreateCampaign(REQ('https://x/api/admin/campaigns'), { DATABASE_URL: 'x' });
+    assert.equal(res.__status, 200, `valid ${value} accepted`);
+    assert.equal(calls.repo[0][1].registration_url, value, 'stored trimmed');
+  }
+
+  // CREATE — absent / null / empty → null-ish (legacy in-app one-tap behavior;
+  // the repository maps undefined → NULL at the INSERT boundary).
+  for (const [label, mutate] of [
+    ['absent', (p) => delete p.registration_url],
+    ['null', (p) => { p.registration_url = null; }],
+    ['empty', (p) => { p.registration_url = ''; }],
+    ['whitespace', (p) => { p.registration_url = '   '; }],
+  ]) {
+    const payload = { ...VALID_CREATE, registration_url: 'https://keep.example/x' };
+    mutate(payload);
+    const { handlers, calls } = buildHandlers({ body: payload });
+    const res = await handlers.handleAdminCreateCampaign(REQ('https://x/api/admin/campaigns'), { DATABASE_URL: 'x' });
+    assert.equal(res.__status, 200, `${label}: accepted`);
+    assert.ok(calls.repo[0][1].registration_url == null, `${label}: stored as NULL (never the stale link)`);
+  }
+
+  // UPDATE — same matrix applies to partial updates (patch semantics).
+  const { handlers: uh } = buildHandlers({
+    body: { registration_url: 'javascript:alert(1)' },
+    repo: { get: () => existingCampaign() },
+  });
+  const badUpd = await uh.handleAdminUpdateCampaign(REQ('https://x/api/admin/campaigns/c1'), { DATABASE_URL: 'x' }, 'c1');
+  assert.equal(badUpd.__status, 400);
+  assert.ok(badUpd.__json.errors.some((e) => e.field === 'registration_url'));
+
+  const { handlers: uh2, calls: uc2 } = buildHandlers({
+    body: { registration_url: 'https://exchange.example.com/register' },
+    repo: { get: () => existingCampaign() },
+  });
+  const okUpd = await uh2.handleAdminUpdateCampaign(REQ('https://x/api/admin/campaigns/c1'), { DATABASE_URL: 'x' }, 'c1');
+  assert.equal(okUpd.__status, 200);
+  assert.equal(uc2.repo.find((c) => c[0] === 'update')[2].registration_url, 'https://exchange.example.com/register', 'update persists the link');
+
+  // UPDATE — clearing back to null (empty form field → in-app flow again).
+  const { handlers: uh3, calls: uc3 } = buildHandlers({
+    body: { registration_url: '' },
+    repo: { get: () => existingCampaign({ registration_url: 'https://old.example/x' }) },
+  });
+  const clrUpd = await uh3.handleAdminUpdateCampaign(REQ('https://x/api/admin/campaigns/c1'), { DATABASE_URL: 'x' }, 'c1');
+  assert.equal(clrUpd.__status, 200);
+  assert.equal(uc3.repo.find((c) => c[0] === 'update')[2].registration_url, null, 'explicit clear to null');
 });

@@ -80,6 +80,10 @@ export function createCampaignsHandlers(deps) {
       body_fa: campaign.body_fa,
       body_en: campaign.body_en,
       image_url: campaign.image_url,
+      // Optional admin-specified external registration destination. The
+      // client re-validates the scheme before navigating (defense in depth);
+      // null = in-app one-tap registration (unchanged legacy behavior).
+      registration_url: campaign.registration_url || null,
       starts_at: campaign.starts_at,
       ends_at: campaign.ends_at,
       status: campaign.status,

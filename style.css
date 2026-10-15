@@ -5858,3 +5858,120 @@ html[dir="rtl"] .market-ticker-track {
     border-color: rgba(255, 77, 77, 0.65) !important;
     box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.08);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXCHANGE CAMPAIGNS — Admin list toolbar (P1 redesign)
+   Scoped to #admin-section-campaigns. Reuses the panel's existing chip
+   (.adm-filter-btn) and input (.adm-input) tokens; adds a search box with
+   icon + clear, wrapped filter chips, the real result count and an explicit
+   reset affordance. Mobile-safe: rows wrap, the search shrinks (min-width:0),
+   chips never clip (nowrap chips + wrapping container).
+   ═══════════════════════════════════════════════════════════════════════════ */
+#admin-section-campaigns .cmp-adm-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+#admin-section-campaigns .cmp-adm-toolbar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+#admin-section-campaigns .cmp-adm-search {
+    position: relative;
+    flex: 1 1 200px;
+    min-width: 0; /* lets the input shrink on narrow panels — no overflow */
+    display: flex;
+    align-items: center;
+}
+#admin-section-campaigns .cmp-adm-search-icon {
+    position: absolute;
+    inset-inline-end: 12px; /* RTL-aware (panel is rtl) */
+    top: 50%;
+    transform: translateY(-50%);
+    color: #5a6378;
+    pointer-events: none;
+    display: flex;
+}
+#admin-section-campaigns .cmp-adm-search-icon svg { width: 16px; height: 16px; }
+#admin-section-campaigns .cmp-adm-search-input {
+    padding-inline-end: 38px; /* room for the icon */
+    padding-inline-start: 14px;
+    min-width: 0;
+}
+#admin-section-campaigns .cmp-adm-search-clear {
+    position: absolute;
+    inset-inline-end: 34px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    color: #a8b2c5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+#admin-section-campaigns .cmp-adm-search-clear svg { width: 12px; height: 12px; }
+#admin-section-campaigns .cmp-adm-search-clear:hover { background: rgba(255, 77, 77, 0.16); color: #ff8080; }
+#admin-section-campaigns .cmp-adm-search-clear.is-hidden { display: none; }
+#admin-section-campaigns .cmp-adm-new-btn { flex: 0 0 auto; }
+/* Filter chips row: chips keep their own compact size; the row wraps. */
+#admin-section-campaigns .cmp-adm-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+#admin-section-campaigns .cmp-adm-chip { font-size: 12.5px; padding: 6px 13px; }
+#admin-section-campaigns .cmp-adm-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    margin-inline-start: auto; /* count/reset cluster sits at the row end */
+    flex-wrap: wrap;
+}
+#admin-section-campaigns .cmp-adm-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border-radius: 999px;
+    background: rgba(247, 147, 26, 0.10);
+    border: 1px solid rgba(247, 147, 26, 0.22);
+    color: #f7b950;
+    font-size: 11.5px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+#admin-section-campaigns .cmp-adm-reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.04);
+    color: #a8b2c5;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+#admin-section-campaigns .cmp-adm-reset svg { width: 12px; height: 12px; }
+#admin-section-campaigns .cmp-adm-reset:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+/* Small screens: let the meta cluster take a full row instead of squeezing. */
+@media (max-width: 480px) {
+    #admin-section-campaigns .cmp-adm-meta { margin-inline-start: 0; width: 100%; justify-content: space-between; }
+    #admin-section-campaigns .cmp-adm-search { flex-basis: 100%; }
+    #admin-section-campaigns .cmp-adm-new-btn { flex: 1 1 100%; }
+}

@@ -361,6 +361,11 @@ CREATE TABLE IF NOT EXISTS promo_campaigns (
   body_fa     TEXT NOT NULL DEFAULT '',
   body_en     TEXT NOT NULL DEFAULT '',
   image_url   TEXT,
+  -- Optional EXTERNAL registration link (admin-specified). When set, the
+  -- user-side register button opens this URL (Telegram openLink) instead of
+  -- the in-app one-tap POST. NULL/empty = in-app registration (legacy rows
+  -- and campaigns without a custom link behave exactly as before).
+  registration_url TEXT,
   starts_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   ends_at     TIMESTAMPTZ,
   status      TEXT NOT NULL DEFAULT 'DRAFT'
@@ -368,6 +373,11 @@ CREATE TABLE IF NOT EXISTS promo_campaigns (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- registration_url for databases created before the column existed
+-- (idempotent — safe to re-run on every deploy; table-level GRANTs cover
+-- columns added after the grant was issued).
+ALTER TABLE promo_campaigns ADD COLUMN IF NOT EXISTS registration_url TEXT;
 
 -- List/detail query path: only PUBLISHED/STOPPED rows are user-visible
 -- (DRAFT/DELETED never leave the server).
