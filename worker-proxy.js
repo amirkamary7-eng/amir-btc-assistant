@@ -5140,11 +5140,20 @@ async function handleFarsiNews(request, env, ctx = null) {
 async function handleTelegramWebhook(request, env) {
   const requestPath = new URL(request.url).pathname || '/';
 
-  // ── Webhook secret validation (Task 2.11 + S-02 FIX) ───────────────────────
+  // ── Webhook secret validation (Task 2.11 + S-02 FIX + SEC-03 FIX) ─────────
   // S-02 FIX: If a secret IS configured, the header MUST be present AND match.
   // Previously, a missing header was allowed through (fail-open), which meant
   // an attacker could spoof Telegram updates by simply omitting the header.
   // Now: fail-closed — if secret is configured, header must be present and valid.
+  //
+  // SEC-03 FIX: If NO secret is configured, validation used to be SKIPPED
+  // entirely (fail-open) in every environment — an unset or empty
+  // TELEGRAM_WEBHOOK_SECRET (accidental removal, fresh environment, deploy
+  // misconfiguration) silently disabled webhook authentication with no error
+  // anywhere. Non-development environments (production/staging/anything that
+  // is not APP_ENV=development) now REJECT the request with 403 instead.
+  // Local development (isDevMode: APP_ENV=development) keeps the permissive
+  // behavior so `wrangler dev` webhook testing works without a secret.
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET;
   if (webhookSecret) {
     const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
@@ -5163,6 +5172,16 @@ async function handleTelegramWebhook(request, env) {
         { status: 'error', detail: 'Invalid webhook secret token' },
         { status: 403 }, env);
     }
+  } else if (!isDevMode(env)) {
+    // SEC-03 FIX: fail-closed — the webhook secret MUST be configured in
+    // non-development environments. A missing/empty secret previously let
+    // ANY unauthenticated POST /telegram (or POST /) request reach the
+    // handler: spoofed /start sends (bot messages to arbitrary chats,
+    // pending_ref KV writes poisoning referral attribution) and membership
+    // API quota abuse, none of which are rate-limited on this path.
+    return jsonResponse(
+      { status: 'error', detail: 'Webhook secret not configured' },
+      { status: 403 }, env);
   }
   // ── End webhook secret validation ─────────────────────────────────────────
 
