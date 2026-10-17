@@ -3428,8 +3428,13 @@ function _adsItemCard(opts) {
     var metaHtml = (opts.metaParts && opts.metaParts.filter(Boolean).length > 0)
         ? '<div class="ads-item-meta">' + opts.metaParts.filter(Boolean).join(' <span class="ads-meta-sep">·</span> ') + '</div>'
         : '';
+    // SEC-01b FIX (Phase 4): thumbnail is a stored ad image_url rendered in a
+    // double-quoted src attribute. adminEscapeHtml (text-node serialization)
+    // leaves quotes raw, so a quote-bearing URL that passes isValidImageUrl
+    // (quotes are legal URL characters) breaks out of the attribute and
+    // injects event handlers. adminEscapeAttr is the attribute-context escaper.
     var thumbHtml = opts.thumbnail
-        ? '<img class="ads-item-thumb" src="' + adminEscapeHtml(opts.thumbnail) + '" alt="">'
+        ? '<img class="ads-item-thumb" src="' + adminEscapeAttr(opts.thumbnail) + '" alt="">'
         : '';
     var iconHtml = opts.titleIcon
         ? '<span class="ads-item-icon">' + _adsIcon(opts.titleIcon, 'ads-item-svg') + '</span>'
