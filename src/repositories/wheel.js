@@ -381,11 +381,21 @@ export function createWheelRepository(deps) {
     const uid = String(userId);
     const sid = Number(spinId);
 
-    // Atomically consume the spin (status: available → used)
+    // Atomically consume the spin (status: available → used).
+    // SEC-02 FIX: the UPDATE must also enforce the expiry predicate
+    // (expires_at IS NULL OR expires_at > NOW()) — the same guard every
+    // allocation/listing query above already applies (getOrCreateDailySpins
+    // count + final SELECT, getAvailableSpins). Without it, an expired-but-
+    // still-'available' row (an unswept "zombie" spin) could be consumed
+    // forever via an explicit spin_id — the controller passes body.spin_id
+    // straight here, short-circuiting the allocation path that filters
+    // expired rows — granting a reward outside the expiry contract.
+    // NULL-expires rows (no expiry set) remain consumable (legacy behavior).
     const result = await queryDbTransaction(env, [
       {
         sql: `UPDATE wheel_spins SET status = 'used', used_at = NOW()
               WHERE id = $1 AND user_id = $2 AND status = 'available'
+                AND (expires_at IS NULL OR expires_at > NOW())
               RETURNING id, spin_type, source, campaign_id`,
         params: [sid, uid],
       },

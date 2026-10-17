@@ -508,6 +508,50 @@ async function retryFailedMissionRewards(env) {
     let succeeded = 0;
     for (const row of result.rows) {
       try {
+        // SEC-06 FIX (weekly retry candidate window): for WEEKLY missions the
+        // row's daily_date is the day of FIRST progress — incrementMissionProgress
+        // never updates it on later progress — while the interactive completion
+        // path credits under the COMPLETION-day refId
+        // (mission_<uid>_<mid>_<completion day>, wallet.js handleMissionComplete).
+        // The SQL candidate check above inspects only daily_date ± 1, so a weekly
+        // mission completed 2+ days after its first progress (e.g. first progress
+        // Saturday, completion Monday → lag 2) has its completion-day transaction
+        // OUTSIDE the candidate set → NOT EXISTS wrongly passes → this cron
+        // re-credits under the daily_date refId → duplicate reward. For weekly
+        // missions, widen the candidate window to daily_date-1 … daily_date+6
+        // (the full Tehran week) and skip the row if ANY in-week credit exists.
+        // Daily missions keep the exact ±1 candidate semantics (unchanged).
+        // Uses rewardCenterRepo.isWeeklyMission (single source of truth for the
+        // weekly identifier set — reward_center.js WEEKLY_MISSION_IDS).
+        const isWeekly = rewardCenterRepo && typeof rewardCenterRepo.isWeeklyMission === 'function'
+          ? rewardCenterRepo.isWeeklyMission(String(row.mission_id))
+          : false;
+        if (isWeekly) {
+          const baseMs = Date.parse(String(row.date_str) + 'T00:00:00Z');
+          const weeklyCandidates = [];
+          for (let off = -1; off <= 6; off++) {
+            const day = new Date(baseMs + off * 86400000).toISOString().slice(0, 10);
+            weeklyCandidates.push(`mission_${row.user_id}_${row.mission_id}_${day}`);
+          }
+          const weeklyPlaceholders = weeklyCandidates.map((_c, i) => `$${i + 2}`).join(', ');
+          // Existence probe only (NOT the candidate batch query — that one
+          // keeps its LIMIT 3 / 3-day window, H5 Layer 2). Adds at most one
+          // extra query per weekly row (LIMIT 3 rows per tick → ≤ +3
+          // subrequests; well inside the Free Plan budget).
+          const weeklyCreditCheckSql =
+            `SELECT 1 FROM token_transactions
+              WHERE user_id = $1 AND tx_type = 'mission_reward' AND status = 'completed'
+                AND ref_id IN (${weeklyPlaceholders})
+              LIMIT 1`;
+          const alreadyCredited = await queryDb(env, weeklyCreditCheckSql,
+            [String(row.user_id), ...weeklyCandidates]);
+          if (alreadyCredited.rows.length > 0) {
+            // An in-week credit already exists (completion-day tx at lag 2-6,
+            // or the daily_date credit itself) — this row must NOT be re-credited.
+            retried++;
+            continue;
+          }
+        }
         // M3 FIX: reconstruct the refId from the mission's COMPLETION date
         // (row.date_str = to_char(daily_date) — the Tehran date recorded by
         // incrementMissionProgress at completion, identical to the date the
