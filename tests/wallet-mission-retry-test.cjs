@@ -29,6 +29,25 @@
  *   MR4  candidate filtering: only in-window (daily_date >= CURRENT_DATE - 2)
  *        completed+rewarded rows WITHOUT a matching tx are retried.
  *
+ * ── SEC-06 series (weekly retry candidate window) ─────────────────────────
+ *   Weekly missions persist daily_date = day of FIRST progress
+ *   (reward_center.js incrementMissionProgress never updates it), while the
+ *   interactive completion path credits under the COMPLETION-day refId
+ *   (wallet.js handleMissionComplete). The SQL candidate check inspects only
+ *   daily_date ± 1 → a weekly mission completed at lag 2 had its tx OUTSIDE
+ *   the candidate set → NOT EXISTS wrongly passed → duplicate credit.
+ *   FIX: retryFailedMissionRewards widens the weekly candidate window to
+ *   daily_date-1 … daily_date+6 (rewardCenterRepo.isWeeklyMission guards the
+ *   branch); daily missions keep the exact ±1 semantics.
+ *   MR5  weekly mission, completion tx at lag 2 → retry must NOT credit
+ *        again. (RED on pre-fix code — the SEC-06 double-credit itself.)
+ *   MR6  weekly completion tx at lags 3-5 (in-window rows) → no credit.
+ *   MR7  weekly mission with a GENUINELY missing reward → still recovered
+ *        exactly once under the daily_date refId (fix must not over-skip).
+ *   MR8  weekly retry idempotency: second cron run is a no-op.
+ *   MR9  daily mission logic UNCHANGED: a D+1 tx (another day's reward) must
+ *        not block the retry of a genuinely-missing D-1 daily reward.
+ *
  * pg-mem limitations (documented):
  *   - Single-threaded: no true concurrent cron overlap is simulated here; the
  *     unique index (real, active in the harness) is the concurrency defense
@@ -53,6 +72,16 @@ const {
 
 const WORKER_SRC = fs.readFileSync(path.join(__dirname, '..', 'worker-proxy.js'), 'utf8');
 const RR_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/services/referral-rewards.js'), 'utf8');
+const RC_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/repositories/reward_center.js'), 'utf8');
+
+// The REAL weekly-mission identifier set, parsed from the single source of
+// truth (reward_center.js WEEKLY_MISSION_IDS) — the mock repo below exposes it
+// as isWeeklyMission exactly like the production reward center repository.
+const weeklySetMatch = RC_SRC.match(/WEEKLY_MISSION_IDS\s*=\s*new Set\(\[([^\]]*)\]\)/);
+if (!weeklySetMatch) throw new Error('WEEKLY_MISSION_IDS not found in src/repositories/reward_center.js');
+const WEEKLY_MISSION_IDS = new Set(
+  weeklySetMatch[1].split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean),
+);
 
 // ── Extract the REAL retryFailedMissionRewards from src/services/referral-rewards.js ────────
 const startIdx = RR_SRC.indexOf('async function retryFailedMissionRewards');
@@ -70,6 +99,7 @@ const realGetMissionRewardAmount = loadFactory(
 // ── Deterministic date helpers (relative to the real clock) ────────────────
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const daysAgoStr = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const daysAheadStr = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
 /**
  * Build a full retry environment:
@@ -94,6 +124,8 @@ function setup({ cronDate, premiumUsers = new Set(), tokenAmount = 10 } = {}) {
   };
   const rewardCenterRepo = {
     getMissionReward: async () => ({ token_amount: tokenAmount, mission_name: 'Read News' }),
+    // SEC-06: production repo method — weekly classification from the real set.
+    isWeeklyMission: (mid) => WEEKLY_MISSION_IDS.has(String(mid)),
   };
 
   const wrapped = `${RETRY_FN_SRC}\nmodule.exports = { retryFailedMissionRewards };`;
@@ -275,4 +307,107 @@ test('MR4: candidate filtering — only in-window completed+rewarded rows withou
   assert.equal(await balanceOf(h, 'uC'), null);
   assert.equal(await balanceOf(h, 'uD'), null);
   assert.equal(await balanceOf(h, 'uE'), null);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEC-06 — weekly mission retry candidate window (lag boundary)
+//
+// Seeding strategy: the weekly row's daily_date = D-1 (day of FIRST progress,
+// reliably inside the pg-mem selection window — see the MR4 note about the
+// CURRENT_DATE time-of-day quirk), and the completion-day tx refId is seeded
+// at D-1+lag. lag == completionDay - daily_date exactly as in production
+// (first progress Saturday, completion Monday ⇒ daily_date = Sat, tx date =
+// Sat+2). The refId dates are plain strings, so future dates (D+1…) model
+// later completion days faithfully.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('MR5: weekly mission completed at lag 2 → retry must NOT double-credit (SEC-06, RED on pre-fix code)', async () => {
+  const cronDate = todayStr();            // cron runs after the completion day
+  const firstProgress = daysAgoStr(1);    // daily_date = D-1 (first progress)
+  const completionDate = daysAheadStr(1); // completion day = daily_date + 2 (lag 2)
+
+  const { h, grants, retry } = setup({ cronDate });
+  // Weekly mission row (read_news ∈ WEEKLY_MISSION_IDS), completed + rewarded.
+  await seedMission(h, 'u_mr5', 'read_news', firstProgress);
+  // The interactive completion path already credited under the COMPLETION-day
+  // refId (wallet.js handleMissionComplete: mission_<uid>_<mid>_<today>).
+  await seedRewardTx(h, 'u_mr5', 'read_news', completionDate, 10);
+
+  await retry({});
+
+  // Pre-fix: candidates {D-2, D-1, D} miss the D+1 tx → NOT EXISTS passes →
+  // a SECOND credit lands under mission_u_mr5_read_news_{D-1} (double credit).
+  assert.equal(grants.length, 0, 'weekly lag-2 completion already credited — retry must NOT credit again');
+  assert.equal(await txCount(h, "WHERE tx_type = 'mission_reward'"), 1, 'exactly the pre-existing completion tx');
+  assert.equal(await balanceOf(h, 'u_mr5'), 10, 'balance unchanged — no duplicate credit');
+});
+
+test('MR6: weekly mission completed at lags 3-5 → widened window covers the whole week, no credit', async () => {
+  const cronDate = todayStr();
+  const firstProgress = daysAgoStr(1);
+
+  for (const lag of [3, 4, 5]) {
+    const { h, grants, retry } = setup({ cronDate });
+    const completionDate = daysAheadStr(lag - 1); // daily_date(D-1) + lag
+    await seedMission(h, 'u_mr6_' + lag, 'read_news', firstProgress);
+    await seedRewardTx(h, 'u_mr6_' + lag, 'read_news', completionDate, 10);
+
+    await retry({});
+
+    assert.equal(grants.length, 0, `lag ${lag}: weekly completion tx must be recognized — no duplicate credit`);
+    assert.equal(await balanceOf(h, 'u_mr6_' + lag), 10, `lag ${lag}: balance unchanged`);
+  }
+});
+
+test('MR7: weekly mission with a GENUINELY missing reward → still recovered exactly once (fix must not over-skip)', async () => {
+  const cronDate = todayStr();
+  const firstProgress = daysAgoStr(1); // also the completion day (lag 0)
+
+  const { h, grants, retry } = setup({ cronDate });
+  await seedMission(h, 'u_mr7', 'read_news', firstProgress);
+  // NO tx anywhere — the original grantReward genuinely failed. The widened
+  // candidate window finds nothing → the retry must still credit the user
+  // exactly once, under the daily_date (completion) refId.
+  await retry({});
+
+  assert.equal(grants.length, 1, 'genuinely missing weekly reward must still be retried');
+  assert.equal(grants[0].refId, `mission_u_mr7_read_news_${firstProgress}`,
+    'recovery credit uses the daily_date (completion) refId');
+  assert.equal(await balanceOf(h, 'u_mr7'), 10);
+});
+
+test('MR8: weekly retry idempotency — second cron run is a no-op', async () => {
+  const cronDate = todayStr();
+  const firstProgress = daysAgoStr(1);
+
+  const { h, grants, retry } = setup({ cronDate });
+  await seedMission(h, 'u_mr8', 'read_news', firstProgress);
+
+  await retry({});
+  await retry({}); // second hourly tick
+
+  assert.equal(grants.length, 1, 'exactly one grantReward call across two runs');
+  assert.equal(await txCount(h, "WHERE tx_type = 'mission_reward'"), 1);
+  assert.equal(await balanceOf(h, 'u_mr8'), 10);
+});
+
+test('MR9: daily mission logic UNCHANGED — a D+1 tx (another day reward) must not block the D-1 retry', async () => {
+  const cronDate = todayStr();
+  const dailyDate = daysAgoStr(1);
+
+  const { h, grants, retry } = setup({ cronDate });
+  // daily_login ∉ WEEKLY_MISSION_IDS — the weekly guard must NOT apply.
+  await seedMission(h, 'u_mr9', 'daily_login', dailyDate);
+  // A tx under a D+1 refId belongs to a DIFFERENT daily completion (its own
+  // row would have daily_date = D+1). The D-1 row's reward is genuinely
+  // missing → the retry must credit it (exact pre-fix daily semantics).
+  await seedRewardTx(h, 'u_mr9', 'daily_login', daysAheadStr(1), 10);
+
+  await retry({});
+
+  assert.equal(grants.length, 1, 'daily retry semantics unchanged — the missing D-1 reward is recovered');
+  assert.equal(grants[0].refId, `mission_u_mr9_daily_login_${dailyDate}`,
+    'daily retry credits under the daily_date refId (unchanged identity)');
+  assert.equal(await txCount(h, "WHERE tx_type = 'mission_reward'"), 2);
+  assert.equal(await balanceOf(h, 'u_mr9'), 20, 'pre-existing D+1 reward + recovered D-1 reward');
 });

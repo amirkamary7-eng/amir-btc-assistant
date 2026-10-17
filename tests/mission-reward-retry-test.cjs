@@ -48,9 +48,11 @@ test('MISSION-RETRY-02: refId carries the COMPLETION date — NOT the cron execu
   // stole that day's reward. The old assertion locked in the buggy
   // `tehranToday` pattern; behavior is now locked by MR1 in
   // wallet-mission-retry-test.cjs (pg-mem, real function extraction).
+  // NOTE: slice widened 6500 → 9000 (SEC-06 added the weekly guard block
+  // inside the function; all markers must stay within the slice).
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes("`mission_${row.user_id}_${row.mission_id}_${row.date_str}`"),
     'retry must build the refId from the completion date (row.date_str / daily_date)');
@@ -61,7 +63,7 @@ test('MISSION-RETRY-02: refId carries the COMPLETION date — NOT the cron execu
 test('MISSION-RETRY-03: uses same tx_type as original reward', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes("'mission_reward'"),
     'retry must use tx_type: mission_reward');
@@ -70,7 +72,7 @@ test('MISSION-RETRY-03: uses same tx_type as original reward', () => {
 test('MISSION-RETRY-04: query finds completed+rewarded missions without token_transactions', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes('completed = TRUE'),
     'query must filter completed = TRUE');
@@ -89,7 +91,7 @@ test('MISSION-RETRY-05: query bounded to today + yesterday + day before (timezon
   // ref_ids (daily_date, daily_date+1, daily_date-1) to find the matching token_transaction.
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes('CURRENT_DATE - 2'),
     'query must bound to today + yesterday + day before (CURRENT_DATE - 2) for timezone safety');
@@ -98,7 +100,7 @@ test('MISSION-RETRY-05: query bounded to today + yesterday + day before (timezon
 test('MISSION-RETRY-06: query has LIMIT 3 (H5-CRITICAL fix — batch size reduced from 20 to 3 to stay within 50-subrequest Free Plan limit at minute=0 hourly retry invocation)', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes('LIMIT 3'),
     'query must have LIMIT 3 for bounded batch (H5-CRITICAL fix — was 20)');
@@ -109,7 +111,7 @@ test('MISSION-RETRY-06: query has LIMIT 3 (H5-CRITICAL fix — batch size reduce
 test('MISSION-RETRY-07: reward amount from DB (not hardcoded)', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes('getMissionReward'),
     'retry must call getMissionReward to get amount from DB');
@@ -120,7 +122,7 @@ test('MISSION-RETRY-07: reward amount from DB (not hardcoded)', () => {
 test('MISSION-RETRY-08: individual failure does not abort batch', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   // Each row has its own try/catch
   assert.ok(retryBlock.includes("catch (e)"),
@@ -171,7 +173,7 @@ test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
   // and serves as a regression guard against re-introduction).
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(!retryBlock.includes('_bsDiag'),
     'no _bsDiag added to retry function');
@@ -187,7 +189,7 @@ test('MISSION-RETRY-12: does NOT add diagnostics or modify bootstrap', () => {
 test('MISSION-RETRY-13: uses safeError for top-level catch (existing pattern)', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes("safeError('mission-reward-retry-cron'"),
     'top-level catch must use safeError with mission-reward-retry-cron scope');
@@ -196,10 +198,50 @@ test('MISSION-RETRY-13: uses safeError for top-level catch (existing pattern)', 
 test('MISSION-RETRY-14: checks isDatabaseConfigured + economyService + walletRepo', () => {
   const retryBlock = REFERRAL_REWARDS_SRC.slice(
     REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
-    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 6500
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
   );
   assert.ok(retryBlock.includes('isDatabaseConfigured(env)'),
     'must check isDatabaseConfigured');
   assert.ok(retryBlock.includes('!economyService || !walletRepo'),
     'must check economyService + walletRepo availability');
+});
+
+test('MISSION-RETRY-15: SEC-06 — weekly retry candidate window widened (daily_date-1 … daily_date+6) via isWeeklyMission', () => {
+  // SEC-06 FIX: weekly missions persist daily_date = FIRST-progress day while
+  // the completion path credits under the COMPLETION-day refId — the ±1 SQL
+  // candidates missed lag-2+ completions → duplicate credit. The fix widens
+  // the weekly candidate window to the full Tehran week BEFORE crediting.
+  // Behavioral proof: MR5/MR6 in wallet-mission-retry-test.cjs (pg-mem, real
+  // function extraction) — this assertion locks the source shape.
+  const retryBlock = REFERRAL_REWARDS_SRC.slice(
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
+  );
+  assert.ok(retryBlock.includes('isWeeklyMission'),
+    'retry must classify weekly missions (rewardCenterRepo.isWeeklyMission — single source of truth)');
+  assert.ok(/off\s*<=\s*6/.test(retryBlock),
+    'weekly candidate window must extend to daily_date + 6 (full Tehran week)');
+  assert.ok(/off\s*=\s*-1/.test(retryBlock),
+    'weekly candidate window must start at daily_date - 1');
+  assert.ok(retryBlock.includes("ref_id IN (${weeklyPlaceholders})"),
+    'weekly guard must check tx existence across the widened candidate set');
+});
+
+test('MISSION-RETRY-16: SEC-06 — daily missions keep the exact ±1 candidate semantics (unchanged)', () => {
+  // The daily path must remain byte-identical: the SQL candidate check still
+  // inspects exactly {daily_date-1, daily_date, daily_date+1}, and the weekly
+  // guard applies ONLY when isWeeklyMission() is true (daily_login & any
+  // future daily mission keep pre-fix behavior — locked by MR9).
+  const retryBlock = REFERRAL_REWARDS_SRC.slice(
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards'),
+    REFERRAL_REWARDS_SRC.indexOf('async function retryFailedMissionRewards') + 9000
+  );
+  assert.ok(/to_char\(mp\.daily_date, 'YYYY-MM-DD'\)/.test(retryBlock),
+    'SQL candidates must still include the daily_date refId');
+  assert.ok(/to_char\(mp\.daily_date \+ 1, 'YYYY-MM-DD'\)/.test(retryBlock),
+    'SQL candidates must still include daily_date + 1');
+  assert.ok(/to_char\(mp\.daily_date - 1, 'YYYY-MM-DD'\)/.test(retryBlock),
+    'SQL candidates must still include daily_date - 1');
+  assert.ok(retryBlock.includes('typeof rewardCenterRepo.isWeeklyMission === \'function\''),
+    'weekly guard must be gated on the repo method (daily missions skip it)');
 });

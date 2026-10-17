@@ -805,6 +805,14 @@ export function createRewardCenterRepository(deps) {
   // daily_login stays daily. All others are weekly.
   const WEEKLY_MISSION_IDS = new Set(['read_news', 'read_analysis', 'check_calendar', 'visit_market']);
 
+  // SEC-06 FIX: expose the weekly-mission classification so services (the
+  // mission-reward retry cron in referral-rewards.js) can apply weekly-specific
+  // semantics without duplicating this identifier list. Single source of
+  // truth stays the WEEKLY_MISSION_IDS set above.
+  function isWeeklyMission(missionId) {
+    return WEEKLY_MISSION_IDS.has(String(missionId));
+  }
+
   async function incrementMissionProgress(env, userId, missionId, targetCount = 1) {
     await ensureSchema(env);
     if (!isDatabaseConfigured(env)) return null;
@@ -1100,6 +1108,7 @@ export function createRewardCenterRepository(deps) {
     deleteMissionReward,
     getMissionReward,
     getActiveMissionRewards,
+    isWeeklyMission,
     incrementMissionProgress,
     getTodayMissionProgress,
     markMissionRewarded,

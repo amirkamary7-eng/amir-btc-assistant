@@ -195,6 +195,31 @@ function adminEscapeJsId(value) {
         .replace(/\\/g, '\\\\');          // \ → \\ (prevent JS escape sequence injection)
 }
 
+// SEC-01 FIX: Escape a value for safe interpolation into a QUOTED HTML
+// ATTRIBUTE (value="…", src="…", placeholder="…").
+// adminEscapeHtml (DOM text-node serialization above) escapes only & < > —
+// double and single quotes pass through RAW, so a stored value like
+//   x" autofocus onfocus="alert(1)
+// terminates the value attribute early and injects NEW attributes (event
+// handlers) / markup — stored XSS in every admin edit form that prefills
+// input fields from DB-stored campaign/ad/template data (write path stores
+// raw: length-only validation, no HTML sanitization).
+// This helper escapes all five HTML-special characters, which is correct for
+// double-quoted (and single-quoted) attribute serialization: entity-encoded
+// quotes round-trip through innerHTML parsing back to the literal character,
+// so legitimate values containing & < > " ' render identically. Use for ANY
+// attribute-value interpolation of untrusted data; keep adminEscapeHtml for
+// element TEXT content and adminEscapeJsId for inline JS-string contexts.
+function adminEscapeAttr(s) {
+    if (!s) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function adminFormatDate(iso) {
     if (!iso) return '—';
     try {
@@ -2304,8 +2329,8 @@ async function loadRcWheelConfig() {
                     </div>
                     <div class="rc-form-grid" style="margin-top:12px;">
                         <div class="rc-field"><label>${t('adm_rc_field_segments')}</label><select id="rc-wc-segments"><option value="6" ${c.segment_count==6?'selected':''}>۶</option><option value="8" ${c.segment_count==8?'selected':''}>۸</option><option value="10" ${c.segment_count==10?'selected':''}>۱۰</option><option value="12" ${c.segment_count==12?'selected':''}>۱۲</option><option value="16" ${c.segment_count==16?'selected':''}>۱۶</option></select></div>
-                        <div class="rc-field"><label>${t('adm_rc_field_version')}</label><input type="text" id="rc-wc-version" value="${adminEscapeHtml(c.version||'1.0.0')}"></div>
-                        <div class="rc-field"><label>${t('adm_rc_field_theme')}</label><input type="text" id="rc-wc-theme" value="${adminEscapeHtml(c.theme||'default')}"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_version')}</label><input type="text" id="rc-wc-version" value="${adminEscapeAttr(c.version||'1.0.0')}"></div>
+                        <div class="rc-field"><label>${t('adm_rc_field_theme')}</label><input type="text" id="rc-wc-theme" value="${adminEscapeAttr(c.theme||'default')}"></div>
                         <div class="rc-field"><label>${t('adm_rc_field_max_spins_user')}</label><input type="number" id="rc-wc-maxspins" value="${c.max_spins_per_user||1}" min="1"></div>
                         <div class="rc-field"><label>${t('adm_rc_field_cooldown')}</label><select id="rc-wc-cooldown" onchange="document.getElementById('rc-wc-cooldown-custom').style.display = this.value === 'custom' ? '' : 'none'"><option value="0">${t('adm_no_cooldown')}</option><option value="3600">${t('adm_rc_opt_1h')}</option><option value="21600">${t('adm_rc_opt_6h')}</option><option value="43200">${t('adm_rc_opt_12h')}</option><option value="86400">${t('adm_rc_opt_24h')}</option><option value="151200">${t('adm_rc_opt_42h')}</option><option value="259200">${t('adm_rc_opt_72h')}</option><option value="604800">${t('adm_rc_opt_weekly')}</option><option value="custom">${t('adm_rc_opt_custom')}</option></select><input type="number" id="rc-wc-cooldown-custom" style="display:none;" placeholder="${t('adm_rc_ph_seconds')}" min="60"></div>
                         <div class="rc-field"><label>${t('adm_rc_field_max_reward_day')}</label><input type="number" id="rc-wc-maxreward" value="${c.max_reward_per_day||1000}" min="0"></div>
@@ -3116,13 +3141,13 @@ function editNpTemplate(templateId) {
     if (!section) return;
     section.innerHTML = '<div class="rc-card"><h4 class="rc-card-title">' + t('adm_np_edit_template_title', { key: adminEscapeHtml(tpl.key) }) + '</h4>' +
         '<div class="rc-form-grid">' +
-        '<div class="rc-field"><label>' + t('adm_np_th_category') + '</label><input type="text" id="np-tpl-category" value="' + adminEscapeHtml(tpl.category || '') + '"></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_th_category') + '</label><input type="text" id="np-tpl-category" value="' + adminEscapeAttr(tpl.category || '') + '"></div>' +
         '<div class="rc-field"><label>' + t('adm_np_th_priority') + '</label><select id="np-tpl-priority"><option value="low"' + (tpl.priority === 'low' ? ' selected' : '') + '>low</option><option value="medium"' + (tpl.priority === 'medium' ? ' selected' : '') + '>medium</option><option value="high"' + (tpl.priority === 'high' ? ' selected' : '') + '>high</option></select></div>' +
         '<div class="rc-field"><label>' + t('adm_np_field_channel') + '</label><select id="np-tpl-channel"><option value="mini_app"' + (tpl.channel === 'mini_app' ? ' selected' : '') + '>mini_app</option><option value="telegram"' + (tpl.channel === 'telegram' ? ' selected' : '') + '>telegram</option><option value="both"' + (tpl.channel === 'both' ? ' selected' : '') + '>both</option></select></div>' +
-        '<div class="rc-field"><label>' + t('adm_np_field_title') + '</label><input type="text" id="np-tpl-title" value="' + adminEscapeHtml(tpl.title || '') + '"></div>' +
+        '<div class="rc-field"><label>' + t('adm_np_field_title') + '</label><input type="text" id="np-tpl-title" value="' + adminEscapeAttr(tpl.title || '') + '"></div>' +
         '<div class="rc-field"><label>' + t('adm_rc_field_active') + '</label><select id="np-tpl-active"><option value="true"' + (tpl.is_active ? ' selected' : '') + '>' + t('adm_rc_opt_yes') + '</option><option value="false"' + (!tpl.is_active ? ' selected' : '') + '>' + t('adm_rc_opt_no') + '</option></select></div>' +
         '</div>' +
-        '<div class="rc-field" style="margin-top:10px;"><label>' + t('adm_ads_field_body_text') + '</label><textarea id="np-tpl-message" rows="4">' + adminEscapeHtml(tpl.message || '') + '</textarea></div>' +
+        '<div class="rc-field" style="margin-top:10px;"><label>' + t('adm_ads_field_body_text') + '</label><textarea id="np-tpl-message" rows="4">' + adminEscapeAttr(tpl.message || '') + '</textarea></div>' +
         '<button class="adm-btn adm-btn-primary" onclick="saveNpTemplate(\'' + adminEscapeJsId(templateId) + '\')" style="margin-top:10px;">' + t('adm_update_btn') + '</button> ' +
         '<button class="adm-btn" onclick="loadNpTemplates()">' + t('adm_np_cancel_btn') + '</button> ' +
         '<button class="adm-btn adm-btn-red" onclick="deleteNpTemplate(\'' + adminEscapeJsId(templateId) + '\')">' + t('delete') + '</button>' +
@@ -3696,9 +3721,9 @@ function showAdChannelForm(channelId) {
         '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
             '<h4 class="rc-card-title">' + _adsIcon('pencil', 'rc-card-icon') + 'ویرایش کانال: @' + adminEscapeHtml(ch.channel_username || '') + '</h4>' +
             '<div class="rc-form-grid">' +
-                '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" value="' + adminEscapeHtml(ch.channel_username || '') + '"></div>' +
-                '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" value="' + adminEscapeHtml(ch.channel_title || '') + '"></div>' +
-                '<div class="rc-field"><label>لینک عضویت</label><input type="text" id="ads-ch-joinurl" value="' + adminEscapeHtml(ch.join_url || '') + '" dir="ltr"></div>' +
+                '<div class="rc-field"><label>یوزرنیم کانال (بدون @)</label><input type="text" id="ads-ch-username" value="' + adminEscapeAttr(ch.channel_username || '') + '"></div>' +
+                '<div class="rc-field"><label>عنوان کانال</label><input type="text" id="ads-ch-title" value="' + adminEscapeAttr(ch.channel_title || '') + '"></div>' +
+                '<div class="rc-field"><label>لینک عضویت</label><input type="text" id="ads-ch-joinurl" value="' + adminEscapeAttr(ch.join_url || '') + '" dir="ltr"></div>' +
                 '<div class="rc-field"><label>ترتیب نمایش</label><input type="number" id="ads-ch-order" value="' + adminFormatNumber(ch.display_order || 0) + '" min="0"></div>' +
                 '<div class="rc-field"><label>وضعیت کمپین</label><select id="ads-ch-status">' +
                     '<option value="draft"' + (currentStatus === 'draft' ? ' selected' : '') + '>پیش‌نویس</option>' +
@@ -3880,10 +3905,12 @@ function _adsPopupFormHtml(p) {
     var headTitle = isEdit ? ('ویرایش پاپ‌آپ: ' + adminEscapeHtml(p.title || '')) : 'پاپ‌آپ جدید';
     var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(p.id)) + '\'') : 'null';
     var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پاپ‌آپ';
-    var titleVal   = isEdit ? adminEscapeHtml(p.title || '') : '';
-    var bodyVal    = isEdit ? adminEscapeHtml(p.body_text || '') : '';
-    var btnLabel   = isEdit ? adminEscapeHtml(p.button_label || '') : '';
-    var btnUrl     = isEdit ? adminEscapeHtml(p.button_url || '') : '';
+    // SEC-01 FIX: attribute-context escaper — these values feed double-quoted
+    // value="…" / src="…" attributes (and textarea bodies) below.
+    var titleVal   = isEdit ? adminEscapeAttr(p.title || '') : '';
+    var bodyVal    = isEdit ? adminEscapeAttr(p.body_text || '') : '';
+    var btnLabel   = isEdit ? adminEscapeAttr(p.button_label || '') : '';
+    var btnUrl     = isEdit ? adminEscapeAttr(p.button_url || '') : '';
     var orderVal   = isEdit ? adminFormatNumber(p.display_order || 0) : '0';
     var cooldown   = isEdit ? (p.cooldown_seconds || 86400) : 86400;
     var cooldownOpts = '<option value="3600">۱ ساعت</option><option value="21600">۶ ساعت</option><option value="43200">۱۲ ساعت</option><option value="86400">۲۴ ساعت</option><option value="151200">۴۲ ساعت</option><option value="259200">۷۲ ساعت</option><option value="604800">هفتگی</option><option value="custom">سفارشی</option>';
@@ -3899,7 +3926,7 @@ function _adsPopupFormHtml(p) {
     var imgUrl     = isEdit ? (p.image_url || '') : '';
     // Image preview — show if URL exists
     var previewInit = imgUrl
-        ? '<img id="ads-pp-preview" class="ads-img-preview" src="' + adminEscapeHtml(imgUrl) + '" alt="preview">'
+        ? '<img id="ads-pp-preview" class="ads-img-preview" src="' + adminEscapeAttr(imgUrl) + '" alt="preview">'
         : '<img id="ads-pp-preview" class="ads-img-preview" style="display:none;" alt="preview">';
     return '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
         '<h4 class="rc-card-title">' + headTitle + '</h4>' +
@@ -3918,7 +3945,7 @@ function _adsPopupFormHtml(p) {
             '</select></div>' +
             '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-pp-active" ' + activeChk + '><span>فعال برای نمایش</span></label></div>' +
             '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر</label>' +
-                '<input type="text" id="ads-pp-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
+                '<input type="text" id="ads-pp-imgurl" value="' + adminEscapeAttr(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
                 '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
                     'onchange="uploadAdImage(this.files[0], \'ads-pp-imgurl\', \'ads-pp-preview\')" style="display:none;"><span>' + _adsIcon('upload', 'adm-btn-icon') + 'انتخاب تصویر</span></label> ' +
                 previewInit +
@@ -4141,14 +4168,16 @@ function _adsMessageFormHtml(m) {
     var headTitle = isEdit ? ('ویرایش پیام: ' + adminEscapeHtml(m.title || '')) : 'پیام جدید';
     var saveArg = isEdit ? ('\'' + adminEscapeJsId(String(m.id)) + '\'') : 'null';
     var saveLabel = isEdit ? 'به‌روزرسانی' : 'ایجاد پیام';
-    var titleVal   = isEdit ? adminEscapeHtml(m.title || '') : '';
-    var bodyVal    = isEdit ? adminEscapeHtml(m.body_text || '') : '';
-    var btnLabel   = isEdit ? adminEscapeHtml(m.button_label || '') : '';
-    var btnUrl     = isEdit ? adminEscapeHtml(m.button_url || '') : '';
+    // SEC-01 FIX: attribute-context escaper — these values feed double-quoted
+    // value="…" / src="…" attributes (and textarea bodies) below.
+    var titleVal   = isEdit ? adminEscapeAttr(m.title || '') : '';
+    var bodyVal    = isEdit ? adminEscapeAttr(m.body_text || '') : '';
+    var btnLabel   = isEdit ? adminEscapeAttr(m.button_label || '') : '';
+    var btnUrl     = isEdit ? adminEscapeAttr(m.button_url || '') : '';
     var activeChk  = isEdit ? (m.is_active ? 'checked' : '') : 'checked';
     var imgUrl     = isEdit ? (m.image_url || '') : '';
     var previewInit = imgUrl
-        ? '<img id="ads-msg-preview" class="ads-img-preview" src="' + adminEscapeHtml(imgUrl) + '" alt="preview">'
+        ? '<img id="ads-msg-preview" class="ads-img-preview" src="' + adminEscapeAttr(imgUrl) + '" alt="preview">'
         : '<img id="ads-msg-preview" class="ads-img-preview" style="display:none;" alt="preview">';
     function radioChecked(val, current) { return val === current ? 'checked' : ''; }
     return '<div class="rc-card" style="border-color:rgba(245,166,35,0.3);">' +
@@ -4176,7 +4205,7 @@ function _adsMessageFormHtml(m) {
             '</select></div>' +
             '<div class="rc-field"><label>نمایش</label><label class="rc-toggle-row"><input type="checkbox" id="ads-msg-active" ' + activeChk + '><span>فعال</span></label></div>' +
             '<div class="rc-field" style="grid-column:1/-1;"><label>تصویر (اختیاری)</label>' +
-                '<input type="text" id="ads-msg-imgurl" value="' + adminEscapeHtml(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
+                '<input type="text" id="ads-msg-imgurl" value="' + adminEscapeAttr(imgUrl) + '" placeholder="https://..." dir="ltr" style="margin-bottom:8px;">' +
                 '<label class="ads-img-upload-btn"><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" ' +
                     'onchange="uploadAdImage(this.files[0], \'ads-msg-imgurl\', \'ads-msg-preview\')" style="display:none;"><span>' + _adsIcon('upload', 'adm-btn-icon') + 'انتخاب تصویر</span></label> ' +
                 previewInit +
@@ -4782,7 +4811,11 @@ function _cmpMarkInvalid(id) {
 
 function _cmpRenderForm(box, c) {
     var isEdit = !!c;
-    var f = function (v) { return v != null ? adminEscapeHtml(String(v)) : ''; };
+    // SEC-01 FIX: attribute-context escaper — every f() call below feeds a
+    // double-quoted value="…" / src="…" attribute (or a textarea body).
+    // adminEscapeHtml (text-node serialization) leaves quotes raw → stored
+    // payloads could break out of the attribute and inject handlers/markup.
+    var f = function (v) { return v != null ? adminEscapeAttr(String(v)) : ''; };
 
     // Language-aware prefill (single-field form, Problem C): the main field
     // shows the ADMIN PANEL's current language text (falling back to the

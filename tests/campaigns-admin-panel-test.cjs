@@ -809,6 +809,10 @@ test('CAMP-AD-97: edit form prefills the STORED registration_url (reopen persist
   };
   const ctx = vm.createContext(sandbox);
   vm.runInContext(fnDeclSrc('adminEscapeHtml'), ctx, { filename: 'admin.js#adminEscapeHtml' });
+  // SEC-01: _cmpRenderForm's value-attribute alias now routes through the
+  // attribute-context escaper — inject the REAL function (same extraction
+  // pattern) so the sandbox evaluates the production form builder verbatim.
+  vm.runInContext(fnDeclSrc('adminEscapeAttr'), ctx, { filename: 'admin.js#adminEscapeAttr' });
   vm.runInContext(fnDeclSrc('_cmpRenderForm'), ctx, { filename: 'admin.js#_cmpRenderForm' });
   const box = { innerHTML: '' };
   ctx._cmpRenderForm(box, {
