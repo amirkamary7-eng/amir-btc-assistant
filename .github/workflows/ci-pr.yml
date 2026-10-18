@@ -38,6 +38,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The pull_request checkout is a depth-1 checkout of the PR MERGE ref
+      # with NO local `main` ref. The baseline suite's NEWS-REGRESSION-04
+      # guard-rail (tests/chat-ai-quota-image-retention-test.cjs) runs
+      # `git diff main -- worker-proxy.js` to verify PR hunks stay out of the
+      # protected Chat AI / News / Translation sections; without a local main
+      # ref it dies with "fatal: bad revision 'main'" (PR CI run #1 failure).
+      # Fetching the base branch tip (depth 1 is enough: the two-argument
+      # worktree diff compares trees, not history) makes the guard-rail
+      # GENUINELY validate the diff instead of failing environmentally.
+      - name: Provide base branch ref
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/heads/main
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
