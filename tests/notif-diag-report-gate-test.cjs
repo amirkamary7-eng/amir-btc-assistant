@@ -50,11 +50,15 @@ test('H2-03: gate is BEFORE the POST/GET handlers (not after)', () => {
 });
 
 test('H2-04: gate mirrors the /api/notif-trace-results pattern', () => {
-  // The trace-results gate is the established pattern for diagnostic endpoints
+  // The trace-results gate is the established pattern for diagnostic endpoints.
+  // SEC-04: upgraded from the APP_ENV==='production' equality check (_isProd)
+  // to the fail-closed !isDevMode(env) idiom (same idiom as this gate).
+  // Window widened 500->700 so the gate AND its 404 stay inside the window.
   const traceGate = SRC.indexOf("url.pathname === '/api/notif-trace-results'");
-  const traceBlock = SRC.slice(traceGate, traceGate + 500);
-  assert.ok(traceBlock.includes("_isProd"), 'trace-results has _isProd gate');
+  const traceBlock = SRC.slice(traceGate, traceGate + 700);
+  assert.ok(traceBlock.includes('!isDevMode(env)'), 'trace-results has the fail-closed !isDevMode gate (SEC-04)');
   assert.ok(traceBlock.includes("status: 404"), 'trace-results returns 404');
+  assert.ok(!traceBlock.includes('_isProd'), 'trace-results must not regress to the old _isProd equality gate');
 
   // The notif-diag-report gate uses the STRONGER AP-2 pattern (dev-only,
   // fail-closed on unknown APP_ENV) since Security Batch 2.

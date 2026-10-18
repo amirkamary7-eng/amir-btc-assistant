@@ -7155,8 +7155,12 @@ export default {
       // (exceededCpu) during that phase.
       if (request.method === 'GET' && url.pathname === '/api/cron-monitor') {
         // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // SEC-04 FIX: fail-closed — the APP_ENV==='production' equality check
+        // was replaced with !isDevMode(env) (same idiom as the H2/H3 gates):
+        // only APP_ENV='development' serves this diagnostic; staging, unset
+        // and invalid APP_ENV values (typos, whitespace padding) all fail
+        // closed with 404.
+        if (!isDevMode(env)) {
           return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
         }
         // Read from KV (persists across isolates)
@@ -7250,8 +7254,12 @@ export default {
       // Use to verify: queue is draining, no permanent 'pending', retries working.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-monitor') {
         // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // SEC-04 FIX: fail-closed — the APP_ENV==='production' equality check
+        // was replaced with !isDevMode(env) (same idiom as the H2/H3 gates):
+        // only APP_ENV='development' serves this diagnostic; staging, unset
+        // and invalid APP_ENV values (typos, whitespace padding) all fail
+        // closed with 404.
+        if (!isDevMode(env)) {
           return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
         }
         try {
@@ -7269,8 +7277,12 @@ export default {
       // Plus avg/max/min for each phase + per-provider breakdown.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-timing') {
         // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // SEC-04 FIX: fail-closed — the APP_ENV==='production' equality check
+        // was replaced with !isDevMode(env) (same idiom as the H2/H3 gates):
+        // only APP_ENV='development' serves this diagnostic; staging, unset
+        // and invalid APP_ENV values (typos, whitespace padding) all fail
+        // closed with 404.
+        if (!isDevMode(env)) {
           return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
         }
         try {
@@ -7289,8 +7301,12 @@ export default {
       // Use to instantly identify which layer has the issue if pending persists.
       if (request.method === 'GET' && url.pathname === '/api/news-ai-pending') {
         // ARCH-BATCH3: Gate diagnostic endpoint behind non-production.
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // SEC-04 FIX: fail-closed — the APP_ENV==='production' equality check
+        // was replaced with !isDevMode(env) (same idiom as the H2/H3 gates):
+        // only APP_ENV='development' serves this diagnostic; staging, unset
+        // and invalid APP_ENV values (typos, whitespace padding) all fail
+        // closed with 404.
+        if (!isDevMode(env)) {
           return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
         }
         try {
@@ -8389,8 +8405,12 @@ export default {
       // No auth required (the traces themselves are keyed by random ID).
       if (request.method === 'GET' && url.pathname === '/api/notif-trace-results') {
         // P1-11 FIX: Gate debug endpoints behind non-production
-        const _isProd = String(env.APP_ENV || '').toLowerCase() === 'production';
-        if (_isProd) {
+        // SEC-04 FIX: fail-closed — the APP_ENV==='production' equality check
+        // was replaced with !isDevMode(env) (same idiom as the H2/H3 gates):
+        // only APP_ENV='development' serves this diagnostic; staging, unset
+        // and invalid APP_ENV values (typos, whitespace padding) all fail
+        // closed with 404.
+        if (!isDevMode(env)) {
           return jsonResponse({ status: 'error', message: 'Not available in production' }, { status: 404 }, env);
         }
         let traces = [];

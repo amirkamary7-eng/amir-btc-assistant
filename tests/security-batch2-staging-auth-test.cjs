@@ -355,14 +355,24 @@ test('B2-SRC-07: isDevMode is the exact-match development definition (S-01 prese
   assert.ok(block.includes("'development'"), "isDevMode must compare against 'development' exactly");
 });
 
-test('B2-SRC-08: the 5 read-only staging diag monitors remain prod-gated (out-of-scope boundary)', () => {
+test('B2-SRC-08: the 5 read-only staging diag monitors are fail-closed via !isDevMode (SEC-04)', () => {
   // cron-monitor, news-ai-monitor, news-ai-timing, news-ai-pending,
-  // notif-trace-results: documented LOW residual — intentionally untouched.
+  // notif-trace-results: formerly a documented LOW residual gated by the
+  // APP_ENV==='production' equality check (_isProd). The SEC-04 remediation
+  // (owner-approved) upgraded all five to the fail-closed !isDevMode(env)
+  // idiom: production AND staging AND unset/invalid APP_ENV all return 404;
+  // only APP_ENV='development' serves them. The behavioral matrix for these
+  // five routes (dev=200, production/staging/unset=404 through the real
+  // worker.fetch) is locked by tests/diagnostics-gates-failclosed-sec04-regression-test.cjs.
   for (const route of ['/api/cron-monitor', '/api/news-ai-monitor', '/api/news-ai-timing', '/api/news-ai-pending', '/api/notif-trace-results']) {
     const idx = WORKER_SRC.indexOf(`url.pathname === '${route}'`);
     assert.ok(idx > -1, `${route} route must exist`);
-    const block = WORKER_SRC.slice(idx, idx + 500);
-    assert.ok(block.includes('_isProd'), `${route} keeps its existing _isProd gate (untouched)`);
+    // Window widened 500->700: the SEC-04 comment block moved the gate to
+    // ~220 chars and its 404 to ~575 chars from the route anchor.
+    const block = WORKER_SRC.slice(idx, idx + 700);
+    assert.ok(block.includes('!isDevMode(env)'), `${route} keeps its fail-closed !isDevMode gate (SEC-04)`);
+    assert.ok(block.includes('status: 404'), `${route} gate returns 404`);
+    assert.ok(!block.includes('_isProd'), `${route} must not regress to the old _isProd equality gate`);
   }
 });
 
