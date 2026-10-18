@@ -367,6 +367,12 @@ const i18n = {
         cd_market_cap: 'مارکت کپ',
         cd_ai_analysis: 'تحلیل هوش مصنوعی AMIRBTC',
         cd_price_section: 'هشدار قیمت',
+        // PHASE 31 ISSUE 4: chart feed source label — the TradingView chart's
+        // last price is its OWN live feed and can legitimately differ from the
+        // list/header price (CoinGecko aggregate, ≤120s) and the alert basis
+        // (exchange USDT spot). The label states the chart's real source so the
+        // difference is explainable instead of looking like a bug.
+        cd_chart_source: 'داده‌های نمودار: فید لحظه‌ای TradingView',
         chart_source_search: 'جستجوی منبع جایگزین',
         chart_unavailable_title: 'نمودار این دارایی در حال حاضر در دسترس نیست',
         chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
@@ -1907,6 +1913,8 @@ const i18n = {
         cd_market_cap: 'Market Cap',
         cd_ai_analysis: 'AMIRBTC AI Analysis',
         cd_price_section: 'Price Alert',
+        // PHASE 31 ISSUE 4: chart feed source label (see fa dictionary note).
+        cd_chart_source: 'Chart data: TradingView live feed',
         chart_source_search: 'Searching alternative source',
         chart_unavailable_title: 'Chart for this asset is currently unavailable',
         chart_unavailable_sub: 'Please try again later or check another symbol.',

@@ -182,6 +182,19 @@
     background: rgba(245,166,35,0.12); border-color: rgba(245,166,35,0.3);
     color: #F5A623;
 }
+/* PHASE 31 ISSUE 4: chart feed source label — sits between the timeframe bar
+   and the chart, stating the chart's REAL data source (TradingView's own live
+   feed). The chart's last price can legitimately differ from the list/header
+   price (market aggregate, ≤120s cache) and the alert basis (exchange USDT
+   spot); the label makes that difference readable instead of bug-like.
+   Muted 10px caption — same premium-muted family as .mkt-subtitle/#6B7A8D.
+   No direction override: the label is one i18n string per locale (fa renders
+   RTL with the Latin brand embedded, en renders LTR) — bidi handles both. */
+.cd-chart-source {
+    margin: -2px 4px 8px;
+    font-size: 10px; font-weight: 500; color: #6B7A8D;
+    text-align: start; letter-spacing: 0.2px;
+}
 .cd-chart {
     background: #0B1220; border: 1px solid rgba(255,255,255,0.06);
     border-radius: 12px; height: 340px !important; overflow: hidden;
