@@ -50,6 +50,46 @@ export function createMembershipHandlers(deps) {
     STATS: 60,          // 1 min
   };
 
+  // ─── SEC-08 FIX: exchange_register_url scheme allowlist ───────────────────
+  // The URL is consumed client-side by membership-user.js openRegisterUrl():
+  //   Telegram.WebApp.openLink(url)  /  window.open(url, '_blank')
+  // A stored value like 'javascript:...' or 'data:text/html;...' is a code-
+  // execution sink once served to the Mini App. Presence-only validation at
+  // the write path previously let ANY non-empty string through, and the read
+  // path served whatever was in the DB verbatim.
+  //
+  // Contract (matches every real requirement URL the project has ever used,
+  // e.g. https://www.bitunix.com/register?vipCode=AMIRBTC):
+  //   * absolute URL, parsed via the URL constructor
+  //   * scheme http: or https: only (case-insensitive — URL lowercases it)
+  //   * trimmed, at most 2048 chars
+  // http:// is deliberately allowed alongside https:// to avoid an
+  // unnecessary restriction on future requirement rows; every dangerous
+  // scheme (javascript:, data:, vbscript:, file:, ...) is excluded by the
+  // allowlist itself.
+  const EXCHANGE_REGISTER_URL_MAX_LENGTH = 2048;
+  function isValidExchangeRegisterUrl(rawUrl) {
+    if (rawUrl === null || rawUrl === undefined) return false;
+    const s = String(rawUrl).trim();
+    if (!s || s.length > EXCHANGE_REGISTER_URL_MAX_LENGTH) return false;
+    let parsed;
+    try { parsed = new URL(s); } catch { return false; }
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  }
+
+  /**
+   * Sanitize a stored exchange_register_url for USER-FACING responses.
+   * Invalid legacy values (pre-validation rows) degrade to null — the
+   * frontend (membership-user.js openRegisterUrl) falls back to its
+   * built-in FALLBACK_REQUIREMENT() URL when the field is null, so the UI
+   * contract is preserved instead of breaking.
+   */
+  function sanitizeExchangeRegisterUrl(rawUrl) {
+    if (!isValidExchangeRegisterUrl(rawUrl)) return null;
+    return String(rawUrl).trim();
+  }
+
+
   const ALLOWED_TRANSITIONS = {
     INACTIVE: ['PENDING'],
     PENDING: ['APPROVED', 'REJECTED'],
@@ -459,7 +499,12 @@ export function createMembershipHandlers(deps) {
       }
       const dto = {
         active: true, id: req.id, version: req.version, label: req.label,
-        exchange_name: req.exchange_name, exchange_register_url: req.exchange_register_url,
+        exchange_name: req.exchange_name,
+        // SEC-08 FIX (read path): legacy rows written before the write-path
+        // allowlist are sanitized here — invalid schemes degrade to null and
+        // the frontend falls back to its built-in exchange URL. Sanitized
+        // BEFORE writeAppCache so cached copies are clean too.
+        exchange_register_url: sanitizeExchangeRegisterUrl(req.exchange_register_url),
         uid_label: req.uid_label, referral_code: req.referral_code,
         requires_first_trade: req.requires_first_trade,
         required_volume: Number(req.required_volume) || 0,
@@ -492,6 +537,17 @@ export function createMembershipHandlers(deps) {
     if (!payload?.exchange_name || !payload?.exchange_register_url) {
       return buildBodyFieldValidationError([{ field: 'exchange_name', message: 'exchange_name and exchange_register_url required' }], env);
     }
+    // SEC-08 FIX (write path): scheme allowlist — reject dangerous-scheme
+    // URLs (javascript:, data:, vbscript:, file:, ...) and non-absolute
+    // strings BEFORE they reach the DB. Previously only presence was
+    // checked, so 'javascript:alert(1)' was stored and later served to
+    // every Mini App client via the read path.
+    const trimmedRegisterUrl = String(payload.exchange_register_url).trim();
+    if (!isValidExchangeRegisterUrl(trimmedRegisterUrl)) {
+      return buildBodyFieldValidationError(
+        [{ field: 'exchange_register_url', message: 'exchange_register_url must be an absolute http(s) URL' }], env);
+    }
+    payload.exchange_register_url = trimmedRegisterUrl;
     try {
       const req = await membershipRepo.createRequirement(env, payload);
       await env.APP_CACHE?.delete?.('mb:req:active');

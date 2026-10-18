@@ -1336,15 +1336,39 @@ async function validateTelegramInitData(initData, botToken, maxAgeSeconds = 8640
       return null;
     }
 
-    // Check auth_date freshness
+    // Check auth_date freshness — SEC-05 FIX (fail-closed).
+    // Root cause (audit SEC-05, Medium): the previous check was OPTIONAL —
+    // initData with a MISSING auth_date or a NON-NUMERIC auth_date passed
+    // validation silently (fail-open), and a future-dated auth_date was
+    // accepted (negative age), extending the acceptance window by its
+    // future offset. Real Telegram clients ALWAYS include a numeric
+    // auth_date in initData, so requiring it breaks no legitimate client.
+    //
+    // Rules:
+    //   1. auth_date is REQUIRED. Missing / non-numeric / non-positive → reject.
+    //   2. auth_date further than MAX_CLOCK_SKEW_SECONDS in the FUTURE →
+    //      reject (a signed payload dated in the future must not extend its
+    //      acceptance window). A small skew tolerance absorbs client/server
+    //      clock drift.
+    //   3. auth_date older than maxAgeSeconds (default 86400 = 24h) → reject.
+    //      The 24h TTL is deliberately KEPT (not shortened): Telegram
+    //      generates initData once per Mini App launch and the user session
+    //      can legitimately stay open for hours; shortening to e.g. 1h would
+    //      401 active sessions until the Mini App is relaunched.
+    //
+    // NOTE: this is data-freshness validation, NOT full replay protection.
+    // No nonce / one-time-use store exists: a captured initData string that
+    // is still within the TTL window would still validate. Adding a replay
+    // store requires a per-request KV/DB write with cross-isolate
+    // consistency implications and is deliberately out of scope here.
+    const AUTH_DATE_MAX_CLOCK_SKEW_SECONDS = 300;
     const authDateValue = pairs.find(([k]) => k === 'auth_date');
-    if (authDateValue) {
-      const authDate = Number(decodeTelegramValue(authDateValue[1]));
-      if (Number.isFinite(authDate)) {
-        const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
-        if (ageSeconds > maxAgeSeconds) return null;
-      }
-    }
+    if (!authDateValue || !authDateValue[1]) return null;
+    const authDate = Number(decodeTelegramValue(authDateValue[1]));
+    if (!Number.isFinite(authDate) || authDate <= 0) return null;
+    const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+    if (ageSeconds < -AUTH_DATE_MAX_CLOCK_SKEW_SECONDS) return null;
+    if (ageSeconds > maxAgeSeconds) return null;
 
     // Parse user
     const userPair = pairs.find(([k]) => k === 'user');

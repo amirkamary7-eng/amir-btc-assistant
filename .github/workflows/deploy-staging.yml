@@ -1,5 +1,7 @@
-# Staging-only deploy workflow
-# Production deploys are MANUAL ONLY (via `npm run cf:deploy:production`)
+# Staging-only deploy workflow.
+# Production deploys are handled by deploy-production.yml (push to main,
+# test-gated; manual dispatch also available — always test-gated after the
+# SEC-09 fix). See docs/DEPLOY_SECURITY.md for the full deploy policy.
 
 name: Deploy Staging
 
@@ -10,6 +12,13 @@ on:
       - "*.md"
       - "docs/**"
       - ".gitignore"
+
+# SEC-09 FIX (Phase 20): least-privilege GITHUB_TOKEN — this workflow only
+# checks out the repo; the deploy authenticates with CLOUDFLARE_* secrets,
+# not GITHUB_TOKEN. Previously no permissions block existed, so the token
+# inherited the repo/org default (potentially read/write).
+permissions:
+  contents: read
 
 concurrency:
   group: deploy-staging
