@@ -41,7 +41,13 @@
 
 .adp-header {
     position: sticky;
-    top: 0;
+    /* PHASE 31 ISSUE 3: top must sit below the sticky app-header (56px,
+       base.css .app-header — verified at 390x844 and 1280x800). top:0 pinned
+       this bar BEHIND the app-header (z-100 > z-10) when the analysis-detail
+       page was scrolled: the whole bar buried (-56px) and the BACK button
+       became unclickable. Same fix pattern as Market .mkt-header and the
+       established News .ni-topbar / analysis-tabs-row (top:56px). */
+    top: 56px;
     display: flex;
     align-items: center;
     gap: 12px;
