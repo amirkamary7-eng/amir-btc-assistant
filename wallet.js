@@ -1703,7 +1703,8 @@ const WalletApp = (() => {
             if (typeof animateBalanceChange === 'function') {
               animateBalanceChange(balanceEl, currentBalance, result.newBalance);
             } else {
-              balanceEl.textContent = result.newBalance.toLocaleString('en-US');
+              // Phase 31 Issue 2: span-preserving write (see shared-utils.js).
+              setBalanceAmountText(balanceEl, result.newBalance.toLocaleString('en-US'));
             }
           }
           // RC-4 FIX (visual): sync badge/colors/progress on both surfaces right
@@ -2408,7 +2409,9 @@ const WalletApp = (() => {
           // canonical selector list. getElementById('wallet-balance-amount')
           // was a no-op (that id never exists in the DOM).
           const balEl = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
-          if (balEl) balEl.textContent = resp.new_balance.toLocaleString('en-US');
+          // Phase 31 Issue 2: span-preserving write (see shared-utils.js) —
+          // a bare textContent assignment destroyed the AB ticker span.
+          if (balEl) setBalanceAmountText(balEl, resp.new_balance.toLocaleString('en-US'));
           // FA-6 FIX: keep walletData.balance in sync with the authoritative
           // server response so closeWallet's profile card render (which uses
           // walletData when _walletCache.wallet is fresh) shows the new
@@ -2578,7 +2581,10 @@ const WalletApp = (() => {
         // .balance-value (Profile preview card) and .wallet-hero-balance-value
         // (Wallet hero). Legacy selectors are retained for compatibility.
         const el = document.querySelector('.balance-value, .wallet-hero-balance-value, .wallet-balance-value, .hero-balance, .wallet-balance-amount, #wallet-balance-amount');
-        if (el) el.textContent = Number(resp.balance).toLocaleString('en-US');
+        // Phase 31 Issue 2: span-preserving write — el.textContent = <number>
+        // destroyed the sibling <span class="balance-ticker">AB</span> /
+        // <span class="hero-ticker">AB</span> on every poll-driven refresh.
+        if (el) setBalanceAmountText(el, Number(resp.balance).toLocaleString('en-US'));
         // PHASE 2 (TIER FRESHNESS — RC-2 fix): /api/wallet/balance now returns
         // the tier computed from the SAME balance value above. Sync badge,
         // tier color vars, progress AND the in-memory/localStorage caches so

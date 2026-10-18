@@ -1038,7 +1038,8 @@ async function _bootstrapUserImpl() {
                 if (typeof animateBalanceChange === 'function') {
                     animateBalanceChange(balanceEl, currentBalance, data.wallet_balance);
                 } else {
-                    balanceEl.textContent = data.wallet_balance.toLocaleString('en-US');
+                    // Phase 31 Issue 2: span-preserving write (see shared-utils.js).
+                    setBalanceAmountText(balanceEl, data.wallet_balance.toLocaleString('en-US'));
                 }
             }
             // If wallet full page is open, refresh ALL wallet data in background
@@ -6055,7 +6056,8 @@ function refreshWalletAfterMutation(newBalance, newTier) {
             if (typeof animateBalanceChange === 'function') {
                 animateBalanceChange(balanceEl, currentBalance, newBalance);
             } else {
-                balanceEl.textContent = newBalance.toLocaleString('en-US');
+                // Phase 31 Issue 2: span-preserving write (see shared-utils.js).
+                setBalanceAmountText(balanceEl, newBalance.toLocaleString('en-US'));
             }
         }
         // Also update walletData.balance (in-memory state used by closeWallet)
@@ -6139,9 +6141,14 @@ function animateBalanceChange(el, from, to) {
         const progress = Math.min(1, elapsed / duration);
         const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
         const current = Math.round(from + diff * eased);
-        el.textContent = current.toLocaleString('en-US');
+        // Phase 31 Issue 2: span-preserving write — a bare el.textContent
+        // assignment destroyed <span class="balance-ticker">AB</span> /
+        // <span class="hero-ticker">AB</span> on the FIRST animation frame
+        // (textContent replaces all child nodes). setBalanceAmountText
+        // (shared-utils.js) updates only the leading text node.
+        setBalanceAmountText(el, current.toLocaleString('en-US'));
         if (progress < 1) requestAnimationFrame(update);
-        else el.textContent = to.toLocaleString('en-US');
+        else setBalanceAmountText(el, to.toLocaleString('en-US'));
     }
     requestAnimationFrame(update);
 }
