@@ -8,6 +8,21 @@
 #
 # Note: The staging workflow (deploy-staging.yml) handles staging. This
 # workflow handles production. Both run in parallel on push to main.
+#
+# SEC-09 FIX (Phase 20):
+#   * permissions: contents: read — the workflow only needs to check out the
+#     repo; deploys authenticate with CLOUDFLARE_* secrets, not GITHUB_TOKEN.
+#     Previously NO permissions block existed, so the token inherited the
+#     repo/org default (potentially read/write).
+#   * the workflow_dispatch `skip_tests` input was REMOVED: it allowed a
+#     manual dispatch to deploy production with the test job fully skipped.
+#     Usage audit (read-only GitHub API, Phase 20): 0 of 651 production
+#     workflow runs ever used workflow_dispatch — the hatch was dead code.
+#     Manual dispatch remains available; tests now ALWAYS run first.
+#   * owner-side hardening (branch protection on main, GitHub Environment
+#     protection/approvals on a `Production` environment, GITHUB_TOKEN
+#     default-permissions repo setting) is documented in
+#     docs/DEPLOY_SECURITY.md — those CANNOT be set from workflow YAML.
 
 name: Deploy Production
 
@@ -20,15 +35,9 @@ on:
       - ".gitignore"
       - "qa-screenshots/**"
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip tests (faster, use only if tests already passed)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
+
+permissions:
+  contents: read
 
 concurrency:
   group: deploy-production
@@ -38,7 +47,6 @@ jobs:
   test:
     name: Run Worker Tests
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip_tests != 'true' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -66,7 +74,12 @@ jobs:
   migrate-db:
     name: Migrate Database (Production)
     needs: test
-    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') }}
+    # SEC-09: strict gate — previously `if: always() && (skip_tests=='true' ||
+    # needs.test.result=='success')`; on push events (the only trigger ever
+    # used — 0 dispatch runs in 651-run history) the condition always
+    # evaluated to `needs.test.result == 'success'`, so this is
+    # behavior-identical for pushes and now unconditionally test-gated for
+    # manual dispatches.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -189,9 +202,9 @@ jobs:
   deploy-worker:
     name: Deploy Worker (Production)
     needs: [test, migrate-db]
-    # Both test AND migrate-db must succeed (or skip_tests=true AND migrate-db succeeds).
+    # Both test AND migrate-db must succeed (strict needs-chain — the
+    # skip_tests bypass arm was removed; see the SEC-09 note at the top).
     # If migrate-db fails, deploy-worker is BLOCKED.
-    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') && needs.migrate-db.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -209,8 +222,8 @@ jobs:
   deploy-pages:
     name: Deploy Pages (Production)
     needs: [test, migrate-db]
-    # Same gate as deploy-worker: migrate-db MUST succeed.
-    if: ${{ always() && (github.event.inputs.skip_tests == 'true' || needs.test.result == 'success') && needs.migrate-db.result == 'success' }}
+    # Same gate as deploy-worker: strict needs-chain (test AND migrate-db
+    # must both succeed; the skip_tests bypass arm was removed).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
