@@ -12,7 +12,13 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 16px 10px;
     background: #020611;
-    position: sticky; top: 0; z-index: 10;
+    /* PHASE 31 ISSUE 3: top must sit below the sticky app-header (56px,
+       base.css .app-header — height verified 56px at 390x844 and 1280x800,
+       no media query alters it). top:0 pinned this bar BEHIND the app-header
+       (z-100 > z-10) when scrolled: only a clipped sliver stayed visible and
+       the refresh button became unclickable. Matches the established pattern
+       of .mkt-list-header below (top:56px) and News .ni-topbar (top:56px). */
+    position: sticky; top: 56px; z-index: 10;
     backdrop-filter: blur(20px);
 }
 .mkt-header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }

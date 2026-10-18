@@ -39,10 +39,23 @@ const ROOT = path.join(__dirname, '..');
 const WALLET_SRC = fs.readFileSync(path.join(ROOT, 'wallet.js'), 'utf8');
 const APP_SRC = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
 const REFERRAL_SRC = fs.readFileSync(path.join(ROOT, 'referral.js'), 'utf8');
+const SHARED_UTILS_SRC = fs.readFileSync(path.join(ROOT, 'shared-utils.js'), 'utf8');
 const CTRL_WALLET_SRC = fs.readFileSync(path.join(ROOT, 'src', 'controllers', 'wallet.js'), 'utf8');
 const CTRL_WHEEL_SRC = fs.readFileSync(path.join(ROOT, 'src', 'controllers', 'wheel.js'), 'utf8');
 const CTRL_PURCHASES_SRC = fs.readFileSync(path.join(ROOT, 'src', 'controllers', 'reward_purchases.js'), 'utf8');
 const ECONOMY_SRC = fs.readFileSync(path.join(ROOT, 'src', 'services', 'economy.js'), 'utf8');
+
+// Phase 31 Issue 2: refreshWalletBalance now writes the balance via the
+// shared setBalanceAmountText helper (shared-utils.js) so the AB ticker
+// span survives. Behavioral sandboxes must run the REAL helper alongside
+// the extracted function — same loader the browser uses (index.html loads
+// shared-utils.js before wallet.js/app.js).
+function runWithSharedHelper(fnSource, sandbox) {
+  vm.createContext(sandbox);
+  vm.runInContext(extractFn(SHARED_UTILS_SRC, 'setBalanceAmountText'), sandbox);
+  vm.runInContext(fnSource, sandbox);
+  return sandbox;
+}
 
 // ── Helper: extract a named function body (paren-match, then brace-match) ──
 function extractFn(src, name) {
@@ -240,10 +253,15 @@ test('TF-B3: refreshWalletBalance syncs DOM, walletData, _walletCache, localStor
     },
     _syncTierVisuals: (t) => { syncedTier = t; },
   };
-  runInSandbox(extractFn(WALLET_SRC, 'refreshWalletBalance'), sandbox);
+  runWithSharedHelper(extractFn(WALLET_SRC, 'refreshWalletBalance'), sandbox);
   await sandbox.refreshWalletBalance();
 
-  // DOM balance updated (existing behavior preserved)
+  // DOM balance updated (existing behavior preserved). The mock element has
+  // no firstChild, so the REAL setBalanceAmountText helper takes its plain
+  // textContent fallback — exactly the pre-Phase-31 observable behavior for
+  // elements without child structure. (The span-preserving text-node path is
+  // covered by phase31-issue2-ab-ticker-persistence-test.cjs with a structural
+  // DOM mock.)
   assert.equal(balanceEl.textContent, '2,500');
   // Tier badge path triggered (RC-2 fix)
   assert.ok(syncedTier && syncedTier.current === 'Silver',

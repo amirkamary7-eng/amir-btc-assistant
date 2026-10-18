@@ -84,7 +84,7 @@ const i18n = {
         terms: 'قوانین و شرایط', privacy: 'حریم خصوصی',
         official_channel: 'کانال رسمی', market_error: 'خطا در دریافت قیمت‌ها. لطفاً دوباره تلاش کنید.',
         summary_mcap: 'مارکت‌کپ کل', summary_volume: 'حجم ۲۴h', summary_btc_dom: 'BTC.D',
-        market_subtitle: 'داده‌های لحظه‌ای بازار ارزهای دیجیتال',
+        market_subtitle: 'داده‌های لحظه‌ای بازارهای جهانی',
         market_sentiment: 'وضعیت بازار',
         top_gainers: 'بیشترین رشد', top_losers: 'بیشترین ریزش',
         sentiment_bullish: 'صعودی', sentiment_neutral: 'خنثی', sentiment_bearish: 'نزولی',
@@ -367,6 +367,12 @@ const i18n = {
         cd_market_cap: 'مارکت کپ',
         cd_ai_analysis: 'تحلیل هوش مصنوعی AMIRBTC',
         cd_price_section: 'هشدار قیمت',
+        // PHASE 31 ISSUE 4: chart feed source label — the TradingView chart's
+        // last price is its OWN live feed and can legitimately differ from the
+        // list/header price (CoinGecko aggregate, ≤120s) and the alert basis
+        // (exchange USDT spot). The label states the chart's real source so the
+        // difference is explainable instead of looking like a bug.
+        cd_chart_source: 'داده‌های نمودار: فید لحظه‌ای TradingView',
         chart_source_search: 'جستجوی منبع جایگزین',
         chart_unavailable_title: 'نمودار این دارایی در حال حاضر در دسترس نیست',
         chart_unavailable_sub: 'لطفاً بعداً دوباره تلاش کنید یا نماد دیگری را بررسی کنید.',
@@ -1617,7 +1623,7 @@ const i18n = {
         terms: 'Terms & Rules', privacy: 'Privacy Policy',
         official_channel: 'Official channel', market_error: 'Failed to load prices. Please try again.',
         summary_mcap: 'Total Market Cap', summary_volume: '24h Volume', summary_btc_dom: 'BTC.D',
-        market_subtitle: 'Live Cryptocurrency Market Data',
+        market_subtitle: 'Live Global Market Data',
         market_sentiment: 'Market Sentiment',
         top_gainers: 'Top Gainers', top_losers: 'Top Losers',
         sentiment_bullish: 'Bullish', sentiment_neutral: 'Neutral', sentiment_bearish: 'Bearish',
@@ -1907,6 +1913,8 @@ const i18n = {
         cd_market_cap: 'Market Cap',
         cd_ai_analysis: 'AMIRBTC AI Analysis',
         cd_price_section: 'Price Alert',
+        // PHASE 31 ISSUE 4: chart feed source label (see fa dictionary note).
+        cd_chart_source: 'Chart data: TradingView live feed',
         chart_source_search: 'Searching alternative source',
         chart_unavailable_title: 'Chart for this asset is currently unavailable',
         chart_unavailable_sub: 'Please try again later or check another symbol.',

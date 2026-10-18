@@ -469,6 +469,7 @@ let _onlineCountLastApplied = -1;
 let _lastHeartbeatSuccessTs = 0; // P0-1: timestamp of last successful heartbeat — suppresses transient 0 from fetchOnlineCount
 let allCoins = [];
 let allForexPairs = []; // Forex data from /api/forex
+let _forexLoadSeq = 0; // PHASE 31 ISSUE 4: loadForexData sequence token — an older /api/forex response must never overwrite a newer one (poll cache-miss racing a manual force refresh)
 let globalMarketData = null; // P2-1: { totalMarketCap, totalVolume, btcDominance }
 let currentMarketTab = 'overview';
 let currentMainTab = 'crypto';   // crypto | forex | watchlist
@@ -1038,7 +1039,8 @@ async function _bootstrapUserImpl() {
                 if (typeof animateBalanceChange === 'function') {
                     animateBalanceChange(balanceEl, currentBalance, data.wallet_balance);
                 } else {
-                    balanceEl.textContent = data.wallet_balance.toLocaleString('en-US');
+                    // Phase 31 Issue 2: span-preserving write (see shared-utils.js).
+                    setBalanceAmountText(balanceEl, data.wallet_balance.toLocaleString('en-US'));
                 }
             }
             // If wallet full page is open, refresh ALL wallet data in background
@@ -4586,32 +4588,66 @@ async function loadMarketData(force = false) {
 
 /**
  * Refresh market data (force reload).
+ * PHASE 31 ISSUE 4 (Refresh contract): the button must refresh the VISIBLE
+ * market surface, not just the crypto list. loadMarketData(true) stays the
+ * always-on path (crypto list + summary + ticker + dashboard status — exactly
+ * the pre-Phase-31 behavior). When the Forex or Watchlist sub-tab is active,
+ * forex pairs are a related VISIBLE consumer (the forex tab renders them
+ * directly; the watchlist merges allForexPairs rows at app.js:6500), so the
+ * same tap force-refreshes them too (skipping the 120s client cache).
+ * NOT wired (by design, per Phase 30 contract map):
+ *   - the open coin-detail modal — unreachable behind the fullscreen overlay;
+ *     its header price is already refreshed by the 60s poll's
+ *     refreshOpenDetailPrice while market/dashboard is the active page.
+ *   - the TradingView chart — it is TradingView's OWN live feed and
+ *     self-updating; reloading the widget on every market refresh would be
+ *     disruptive and is not needed for freshness. The chart area carries a
+ *     source label (cd_chart_source) instead.
+ *   - the alert basis price — one-shot per open (fetchAlertBasisPrice);
+ *     refreshing it mid-view would silently flip the card's basis (MK-11).
  */
 function refreshMarketData() {
     loadMarketData(true);
+    if (currentMainTab === 'forex' || currentMainTab === 'watchlist') {
+        loadForexData(true);
+    }
 }
 
 /**
  * Load forex pair data from backend.
  */
-async function loadForexData() {
+async function loadForexData(force = false) {
     if (!API_BASE) return;
+    // PHASE 31 ISSUE 4 (race guard): sequence token so an older, slower /api/forex
+    // response can never overwrite a newer one (e.g. the 60s poll's cache-miss
+    // fetch racing a manual force refresh). Same pattern as the detail modal's
+    // _detailLoadToken guard.
+    const mySeq = ++_forexLoadSeq;
     try {
-        const cached = Cache.get('forex');
-        if (cached?.length) {
-            allForexPairs = cached;
-            renderMarket();
-            // Also persist to localStorage for instant cold-open hydration
-            try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
-            return;
+        if (!force) {
+            const cached = Cache.get('forex');
+            if (cached?.length) {
+                if (mySeq !== _forexLoadSeq) return; // a newer call owns the state
+                allForexPairs = cached;
+                renderMarket();
+                // Also persist to localStorage for instant cold-open hydration
+                try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
+                return;
+            }
         }
         const res = await apiFetch('/api/forex');
+        if (mySeq !== _forexLoadSeq) return; // stale response rejected
         if (res.status === 'success' && Array.isArray(res.data)) {
             allForexPairs = res.data;
             Cache.set('forex', allForexPairs, 120);
             // Persist to localStorage for instant cold-open hydration
             try { localStorage.setItem('forex_data_cache', JSON.stringify({ data: allForexPairs, ts: Date.now() })); } catch {}
+            // PHASE 31 ISSUE 4: renderWatchlist() added so forex rows inside the
+            // watchlist tab reflect the fresh prices on the same refresh tap
+            // (same renderMarket()+renderWatchlist() pairing loadMarketData uses).
+            // Idempotent for the existing 60s-poll cache-hit callers.
             renderMarket();
+            renderWatchlist();
         }
     } catch (e) {
         console.warn('Forex data load failed:', e);
@@ -6055,7 +6091,8 @@ function refreshWalletAfterMutation(newBalance, newTier) {
             if (typeof animateBalanceChange === 'function') {
                 animateBalanceChange(balanceEl, currentBalance, newBalance);
             } else {
-                balanceEl.textContent = newBalance.toLocaleString('en-US');
+                // Phase 31 Issue 2: span-preserving write (see shared-utils.js).
+                setBalanceAmountText(balanceEl, newBalance.toLocaleString('en-US'));
             }
         }
         // Also update walletData.balance (in-memory state used by closeWallet)
@@ -6139,9 +6176,14 @@ function animateBalanceChange(el, from, to) {
         const progress = Math.min(1, elapsed / duration);
         const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
         const current = Math.round(from + diff * eased);
-        el.textContent = current.toLocaleString('en-US');
+        // Phase 31 Issue 2: span-preserving write — a bare el.textContent
+        // assignment destroyed <span class="balance-ticker">AB</span> /
+        // <span class="hero-ticker">AB</span> on the FIRST animation frame
+        // (textContent replaces all child nodes). setBalanceAmountText
+        // (shared-utils.js) updates only the leading text node.
+        setBalanceAmountText(el, current.toLocaleString('en-US'));
         if (progress < 1) requestAnimationFrame(update);
-        else el.textContent = to.toLocaleString('en-US');
+        else setBalanceAmountText(el, to.toLocaleString('en-US'));
     }
     requestAnimationFrame(update);
 }

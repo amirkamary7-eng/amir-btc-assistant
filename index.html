@@ -1196,6 +1196,13 @@
                     <button type="button" class="cd-tf-btn" data-interval="W" onclick="switchTvTimeframe('W', this)">1W</button>
                     <button type="button" class="cd-tf-btn" data-interval="M" onclick="switchTvTimeframe('M', this)">1M</button>
                 </div>
+                <!-- PHASE 31 ISSUE 4: chart feed source label. The TradingView
+                     widget's last price is its OWN live feed — it can
+                     legitimately differ from the list/header price (market
+                     aggregate, ≤120s cache) and the alert basis (exchange USDT
+                     spot). This label states the chart's real source so the
+                     difference reads as three price semantics, not a bug. -->
+                <div class="cd-chart-source" data-i18n="cd_chart_source">داده‌های نمودار: فید لحظه‌ای TradingView</div>
                 <div id="detail-chart" class="cd-chart"></div>
             </div>
 
