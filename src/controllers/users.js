@@ -134,10 +134,33 @@ export function createUserHandlers(deps) {
       //   - All logBootstrapE2E calls preserved (fire-and-forget via void).
       // ═══════════════════════════════════════════════════════════════════════
 
-      let signedReferrerId = normalizeOptionalString(payload.referrer_id);
+      // SEC-07 FIX (fail-closed referral attribution):
+      // The referrer is accepted ONLY from the SIGNED start_param inside the
+      // HMAC-validated Telegram initData (auth.startParam — covered by the
+      // initData hash, cannot be tampered with by the client).
+      // The unsigned request-body payload.referrer_id is NO LONGER trusted
+      // outside development mode: any client could previously attribute a
+      // new registration to an arbitrary Telegram ID (referral-reward
+      // farming via self-referral of alt accounts).
+      // Legitimate flows are unaffected:
+      //   - Mini App launched via a ref deep link -> Telegram places
+      //     start_param=ref_<id> INSIDE the signed initData (same value the
+      //     frontend used to mirror into the body).
+      //   - Bot /start ref_<id> deep link -> the worker re-attaches
+      //     startapp=ref_<id> to the WebApp button URL it sends, which
+      //     Telegram then signs into initData.
+      //   - Organic launches carry no referrer at all.
+      // In development mode (isDevMode) the body value is still honored for
+      // local testing outside the Telegram Webview (same fail-closed idiom
+      // as SEC-03/SEC-04).
+      let signedReferrerId = null;
       if (auth?.startParam && typeof auth.startParam === 'string') {
         const match = auth.startParam.match(/^ref_(\d+)$/);
         if (match) signedReferrerId = match[1];
+      }
+      if (!signedReferrerId && isDevMode(env)) {
+        // Dev-only fallback: unsigned body referrer_id for local testing.
+        signedReferrerId = normalizeOptionalString(payload.referrer_id);
       }
 
       // ── chainA: getById → bootstrap → processReferral (sequential, side effects) ──
