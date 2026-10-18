@@ -1,0 +1,47 @@
+# Pull Request CI — closes the PR-side CI gap found in Phase 22: the deploy
+# workflows only trigger on push to main, so PRs targeting main previously
+# ran NO checks before merge.
+#
+# Security posture (mirrors the SEC-09 hardening of the deploy workflows):
+#   * `pull_request` trigger (NOT `pull_request_target`): the workflow runs
+#     from the PR merge ref; fork/untrusted PR code never receives repository
+#     secrets (none are referenced anyway) and the automatic GITHUB_TOKEN is
+#     capped below.
+#   * permissions: contents: read — checkout only, no writes of any kind.
+#   * No secrets, no Cloudflare credentials, no database access, no
+#     migration, no Pages publish: the job only runs `npm ci` (hard-fails if
+#     package-lock.json is out of sync) and `npm test` (hermetic suite —
+#     pg-mem / recorded pools, no external services, verified green without
+#     any credentials).
+#   * Job timeout + per-PR concurrency (new pushes cancel superseded runs)
+#     prevent runaway executions.
+#   * Actions pinned to the same commit SHAs already used and verified in
+#     the deploy workflows (both v4.4.0).
+
+name: CI PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  npm-test:
+    name: npm test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install dependencies (validates package-lock.json)
+        run: npm ci
+      - name: Run worker tests
+        run: npm test
