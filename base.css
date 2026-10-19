@@ -230,7 +230,16 @@ body.user-loading .profile-loading-target.skeleton-text {
 /* #region صفحات */
 /* این بخش استایل‌های مرتبط با "صفحات" را در خود نگه می‌دارد. */
 /* ============================================================================ */
-.page { display: none; padding: 12px 0 20px; animation: fadeSlide 0.3s ease; }
+/* PHASE 34 (header-content gap root cause): padding-top 12px -> 4px.
+   The sticky .app-header already terminates with 12px internal bottom padding
+   + 1px border; stacking a full 12px page-level top padding on top of it
+   DUPLICATED the header-content spacing (double top-spacing), producing an
+   excessive blank band under the header on every page (user-reported on
+   News/Market; production pixel-audit confirmed identical geometry to local:
+   header 56px, band = page padding 12 + first-component padding 10-14px).
+   4px keeps a small breathing gap; sticky sub-headers (top:56px) and
+   fullscreen overlays (top:0) are unaffected. */
+.page { display: none; padding: 4px 0 20px; animation: fadeSlide 0.3s ease; }
 .page.active { display: block; }
 @keyframes fadeSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
