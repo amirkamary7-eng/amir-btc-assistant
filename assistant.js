@@ -12,6 +12,9 @@ const AssistantUI = {
         this.injectHTML();
         this.bindEvents();
         this.startBlinking();
+        // PF-04 (Phase 38 Stage A): mascot assets (~441.5KB decorative) load on
+        // idle instead of at DOMContentLoaded — see _scheduleMascotIdleLoad().
+        this._scheduleMascotIdleLoad();
     },
 
     // Mascot avatar HTML helper — shared by chat panel header, bot message avatar,
@@ -63,9 +66,9 @@ const AssistantUI = {
             <button id="ai-fab" class="ai-fab" aria-label="AI Assistant">
                 <span class="ai-fab-halo"></span>
                 <span class="ai-mascot">
-                    <img class="mascot-layer mascot-body" src="assets/mascot/body.webp" alt="" draggable="false" />
-                    <img class="mascot-layer mascot-core" src="assets/mascot/core.webp" alt="" draggable="false" />
-                    <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.webp" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-body" data-mascot-src="assets/mascot/body.webp" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-core" data-mascot-src="assets/mascot/core.webp" alt="" draggable="false" />
+                    <img class="mascot-layer mascot-eyes" data-mascot-src="assets/mascot/eyes.webp" alt="" draggable="false" />
                 </span>
             </button>
             <div id="ai-panel" class="ai-panel" style="display:none;">
@@ -73,9 +76,9 @@ const AssistantUI = {
                     <div class="ai-panel-title">
                         <div class="ai-avatar-mini">
                             <div class="ai-mascot">
-                                <img class="mascot-layer mascot-body" src="assets/mascot/body.webp" alt="" draggable="false" />
-                                <img class="mascot-layer mascot-core" src="assets/mascot/core.webp" alt="" draggable="false" />
-                                <img class="mascot-layer mascot-eyes" src="assets/mascot/eyes.webp" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-body" data-mascot-src="assets/mascot/body.webp" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-core" data-mascot-src="assets/mascot/core.webp" alt="" draggable="false" />
+                                <img class="mascot-layer mascot-eyes" data-mascot-src="assets/mascot/eyes.webp" alt="" draggable="false" />
                             </div>
                         </div>
                         <div class="ai-header-text">
@@ -291,6 +294,16 @@ const AssistantUI = {
             fab.addEventListener('click', (e) => {
                 if (hasMoved) { e.preventDefault(); e.stopPropagation(); hasMoved = false; }
             }, true);
+
+            // PF-04 (Phase 38 Stage A): pointer approaching the FAB (mouse hover
+            // or finger touch) starts the mascot asset load immediately, so the
+            // visuals are usually ready by the time the click lands. Bound once
+            // (dataset flag) — re-running init()/bindEvents() adds no duplicates.
+            if (!fab.dataset.mascotPreloadBound) {
+                fab.dataset.mascotPreloadBound = '1';
+                fab.addEventListener('pointerover', () => this._loadMascotAssets());
+                fab.addEventListener('touchstart', () => this._loadMascotAssets(), { passive: true });
+            }
         }
     },
 
@@ -303,9 +316,48 @@ const AssistantUI = {
         if (fab) fab.classList.toggle('ai-fab-hidden', this.open);
         if (bubble && this.open) { bubble.classList.add('ai-speech-hidden'); localStorage.setItem('ai_speech_dismissed', '1'); }
         if (this.open) {
+            // PF-04 (Phase 38 Stage A): opening the panel needs the mascot visuals now.
+            this._loadMascotAssets();
             this.refreshLimits();
             // Welcome bubble is OUTSIDE chat — it's a UI notification, not a conversation message
             document.getElementById('ai-input')?.focus();
+        }
+    },
+
+    // ═══ PF-04 (Phase 38 Stage A): deferred mascot asset loading ═══
+    // The mascot images (body/core/eyes ≈ 441.5KB) are decorative FAB visuals.
+    // They are injected WITHOUT src (data-mascot-src instead) so they never
+    // compete with first-paint/critical assets, and are promoted to real src
+    // by this idempotent loader from one of three triggers:
+    //   1. requestIdleCallback with a 2.5s hard timeout (setTimeout fallback
+    //      for WebViews without requestIdleCallback);
+    //   2. pointer approaching the FAB (pointerover/touchstart, bound once);
+    //   3. panel open (toggle(true) — the panel avatar needs them immediately).
+    // Idempotency: _mascotAssetsRequested guard + per-img src check → repeated
+    // calls never issue duplicate requests; trigger listeners are bound
+    // exactly once (dataset flag). Steady-state DOM, CSS and appearance are
+    // unchanged; if this loader never ran, the failure mode equals today's
+    // failed-image state (invisible FAB visuals) — app otherwise functional.
+    _mascotAssetsRequested: false,
+    _mascotIdleScheduled: false,
+    _loadMascotAssets() {
+        if (this._mascotAssetsRequested) return;
+        this._mascotAssetsRequested = true;
+        document.querySelectorAll('#ai-assistant-root img[data-mascot-src]').forEach((img) => {
+            if (img.getAttribute('src')) return; // already promoted
+            img.src = img.getAttribute('data-mascot-src');
+        });
+    },
+    _scheduleMascotIdleLoad() {
+        if (this._mascotIdleScheduled) return;
+        this._mascotIdleScheduled = true;
+        const load = () => this._loadMascotAssets();
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(load, { timeout: 2500 });
+        } else {
+            // No requestIdleCallback (some Android WebViews): plain timer keeps
+            // the same hard cap so the mascot appears within ~2.5s regardless.
+            setTimeout(load, 2000);
         }
     },
 
