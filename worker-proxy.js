@@ -119,6 +119,18 @@ import { createChannelMembershipService } from './src/services/channel-membershi
 // ============================================================================
 const CORS_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const CORS_ALLOW_HEADERS = 'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token, Cache-Control';
+// PERF-01 (Phase 40): how long (seconds) browsers may cache the CORS preflight
+// (OPTIONS) response. Every apiFetch call sends Content-Type +
+// X-Telegram-Init-Data headers → non-simple request → the browser fires an
+// OPTIONS preflight before EVERY cross-origin API call (Phase 37 observed 5
+// OPTIONS per page load, each a full extra RTT on the bimodal Worker
+// latency). The preflight response is deterministic (static method/header
+// allow-lists above; ACAO varies only per origin and the browser preflight
+// cache is keyed per origin), so caching it is behavior-safe. Chrome clamps
+// this to 7200s, Firefox honors up to 86400s. Applied ONLY in the OPTIONS
+// handler — withCors() itself never sets it, so normal responses remain
+// byte-identical.
+const CORS_PREFLIGHT_MAX_AGE = '86400';
 
 /**
  * Sanitize an error for safe logging — strips potential secrets (DB URLs, tokens).
@@ -6979,6 +6991,10 @@ export default {
     }
     if (request.method === 'OPTIONS') {
       const _preflightHeaders = withCors({}, env);
+      // PERF-01 (Phase 40): make the preflight cacheable — without this the
+      // browser re-sends OPTIONS before every apiFetch call (full extra RTT
+      // each). Preflight-only header; normal responses never carry it.
+      _preflightHeaders.set('Access-Control-Max-Age', CORS_PREFLIGHT_MAX_AGE);
       // HD-3 FIX (Security Batch 3): nosniff on preflight responses too —
       // the same MIME-sniffing defense as every jsonResponse payload.
       if (!_preflightHeaders.has('X-Content-Type-Options')) {

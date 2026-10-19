@@ -870,6 +870,137 @@ test('OPTIONS: preflight returns 204 with CORS headers', async () => {
 });
 
 // ============================================================================
+// PERF-01 (Phase 40) — CORS preflight caching via Access-Control-Max-Age
+// ============================================================================
+// Every apiFetch call is a non-simple request (Content-Type +
+// X-Telegram-Init-Data headers), so the browser sends an OPTIONS preflight
+// before EVERY cross-origin API call. Without Access-Control-Max-Age the
+// preflight is never cached → a full extra RTT per call (Phase 37 observed
+// 5 OPTIONS per load). These tests verify the fix WITHOUT changing the CORS
+// policy: same origins (localhost echo / WEBAPP_URL pin / fail-closed),
+// same methods, same allowed headers — only the cache hint is added, and
+// ONLY on preflight responses.
+
+const PERF01_WEBAPP_ORIGIN = 'https://amir-btc-assistant.pages.dev';
+
+test('PERF-01 A-1 (static): OPTIONS handler sets Access-Control-Max-Age from the constant', () => {
+  const optsStart = WORKER_SRC.indexOf("if (request.method === 'OPTIONS')");
+  assert.ok(optsStart > -1, 'OPTIONS handler must exist');
+  const optsEnd = WORKER_SRC.indexOf('return new Response(null', optsStart);
+  assert.ok(optsEnd > optsStart, 'OPTIONS handler return must exist');
+  const optsBlock = WORKER_SRC.slice(optsStart, optsEnd);
+  assert.ok(/set\('Access-Control-Max-Age',\s*CORS_PREFLIGHT_MAX_AGE\)/.test(optsBlock),
+    'OPTIONS handler must set Access-Control-Max-Age using the CORS_PREFLIGHT_MAX_AGE constant');
+});
+
+test('PERF-01 A-2 (static): withCors() does NOT set Access-Control-Max-Age (normal responses stay unchanged)', () => {
+  const corsStart = WORKER_SRC.indexOf('function withCors');
+  assert.ok(corsStart > -1, 'withCors function must exist');
+  const corsEnd = WORKER_SRC.indexOf('return merged;', corsStart);
+  assert.ok(corsEnd > corsStart, 'withCors return must exist');
+  const fnSrc = WORKER_SRC.slice(corsStart, corsEnd);
+  assert.ok(!fnSrc.includes('Access-Control-Max-Age'),
+    'withCors() must NOT set Access-Control-Max-Age — only preflight responses may carry it');
+});
+
+test('PERF-01 A-3 (static): CORS_PREFLIGHT_MAX_AGE constant is a sane value', () => {
+  const m = WORKER_SRC.match(/CORS_PREFLIGHT_MAX_AGE = '(\d+)'/);
+  assert.ok(m, "CORS_PREFLIGHT_MAX_AGE = '<digits>' constant must be defined");
+  const v = parseInt(m[1], 10);
+  assert.ok(Number.isInteger(v) && v > 0 && v <= 86400,
+    `Max-Age must be an integer in (0, 86400] — got ${v}`);
+});
+
+test('PERF-01 B-1: OPTIONS preflight carries Access-Control-Max-Age with unchanged policy (allowed origin)', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const res = await sendRequest(worker, env, 'OPTIONS', '/api/health', {
+    headers: { Origin: PERF01_WEBAPP_ORIGIN },
+  });
+  assert.equal(res.status, 204);
+  const maxAge = res.headers.get('Access-Control-Max-Age');
+  assert.ok(maxAge, 'Access-Control-Max-Age must be present on the preflight response');
+  const v = parseInt(maxAge, 10);
+  assert.ok(Number.isInteger(v) && v > 0 && v <= 86400,
+    `sane Max-Age value expected, got ${maxAge}`);
+  // CORS policy must be UNCHANGED by PERF-01:
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), PERF01_WEBAPP_ORIGIN,
+    'allowed origin still pinned to WEBAPP_URL');
+  assert.equal(res.headers.get('Access-Control-Allow-Methods'), 'GET, POST, PUT, DELETE, OPTIONS');
+  assert.equal(res.headers.get('Access-Control-Allow-Headers'),
+    'Content-Type, X-Telegram-Init-Data, X-Telegram-Bot-Api-Secret-Token, Cache-Control');
+});
+
+test('PERF-01 B-2: disallowed (evil) origin — still pinned fail-closed AND cacheable', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const res = await sendRequest(worker, env, 'OPTIONS', '/api/health', {
+    headers: { Origin: 'https://evil.example.net' },
+  });
+  assert.equal(res.status, 204);
+  // M3 fail-closed policy MUST be preserved: ACAO pinned to WEBAPP_URL, never reflected
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), PERF01_WEBAPP_ORIGIN,
+    'ACAO must stay pinned to WEBAPP_URL for disallowed origins');
+  assert.ok(!res.headers.get('Access-Control-Allow-Origin').includes('evil'),
+    'evil origin must never be reflected in ACAO');
+  // Cacheability does not weaken the origin policy — Max-Age is present
+  assert.ok(parseInt(res.headers.get('Access-Control-Max-Age'), 10) > 0,
+    'Max-Age must be present regardless of origin (browser caches per-origin)');
+});
+
+test('PERF-01 B-3: localhost origin echo still works AND carries Max-Age (dev preview)', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const res = await sendRequest(worker, env, 'OPTIONS', '/api/health', {
+    headers: { Origin: 'http://localhost:3000' },
+  });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'http://localhost:3000',
+    'localhost echo behavior must be preserved');
+  assert.ok(parseInt(res.headers.get('Access-Control-Max-Age'), 10) > 0,
+    'localhost preflight must also carry Max-Age');
+});
+
+test('PERF-01 B-4: normal (non-OPTIONS) responses do NOT carry Access-Control-Max-Age', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const res = await sendRequest(worker, env, 'GET', '/api/health');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('Access-Control-Max-Age'), null,
+    'normal responses must remain byte-identical — Max-Age is preflight-only');
+});
+
+test('PERF-01 B-5: preflight response is deterministic across repeats (safe to cache)', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const headerSnapshot = (r) => JSON.stringify([
+    r.headers.get('Access-Control-Allow-Origin'),
+    r.headers.get('Access-Control-Allow-Methods'),
+    r.headers.get('Access-Control-Allow-Headers'),
+    r.headers.get('Access-Control-Max-Age'),
+  ]);
+  const send = () => sendRequest(worker, env, 'OPTIONS', '/api/health', {
+    headers: { Origin: PERF01_WEBAPP_ORIGIN },
+  });
+  const first = headerSnapshot(await send());
+  const second = headerSnapshot(await send());
+  const third = headerSnapshot(await send());
+  assert.equal(first, second, 'repeated preflights must return identical CORS headers');
+  assert.equal(second, third, 'repeated preflights must return identical CORS headers');
+});
+
+test('PERF-01 B-6: HD-3 nosniff still present on the cacheable preflight (security guard)', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ WEBAPP_URL: PERF01_WEBAPP_ORIGIN });
+  const res = await sendRequest(worker, env, 'OPTIONS', '/api/health', {
+    headers: { Origin: PERF01_WEBAPP_ORIGIN },
+  });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff',
+    'HD-3 nosniff must remain on preflight responses');
+});
+
+// ============================================================================
 // Maintenance Mode — /api/system/status + /api/admin/maintenance
 // ============================================================================
 test('Maintenance: GET /api/system/status returns default disabled state (no auth)', async () => {
