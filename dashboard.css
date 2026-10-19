@@ -7,9 +7,12 @@
    MUST load AFTER base.css + components.css and BEFORE style.css.
    ============================================================ */
 
-/* ---- Dashboard root container: aligns sections with proper RTL spacing ---- */
+/* ---- Dashboard root container: aligns sections with proper RTL spacing ----
+   PHASE 34: padding-top 12px -> 4px (same root-cause fix as base.css .page —
+   the sticky .app-header already provides 12px internal bottom padding +
+   1px border; a 12px page-level top padding duplicated the spacing). */
 #dashboard-page {
-    padding: 12px 16px 24px;
+    padding: 4px 16px 24px;
     overflow-x: hidden;
 }
 #dashboard-page .section-header {
@@ -1109,7 +1112,7 @@
    RESPONSIVE — 320 / 360 / 390 / 412 / 430
    ========================================================================== */
 @media (max-width: 360px) {
-    #dashboard-page { padding: 10px 12px 20px; }
+    #dashboard-page { padding: 4px 12px 20px; } /* PHASE 34: top 10px -> 4px (duplication removed) */
     .hero-banner-slider { border-radius: 18px; }
     .hero-slider-dots { top: 8px; right: 10px; }
     .dms-card { padding: 12px; min-height: 124px; border-radius: 18px; }

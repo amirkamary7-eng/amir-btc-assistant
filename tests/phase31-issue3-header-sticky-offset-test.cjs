@@ -235,9 +235,17 @@ test('Issue 3 OVERLAYS: wallet / campaigns / referral own headers KEEP sticky to
 // 6. GLOBAL INVARIANTS — Phase 31 forbids base.css / global styling changes
 // ════════════════════════════════════════════════════════════════════════════
 
-test('Issue 3 INVARIANT: .page padding stays 12px 0 20px (no global spacing change)', () => {
-  assert.match(baseSrc, /\.page\s*\{\s*display:\s*none;\s*padding:\s*12px\s*0\s*20px;/,
-    'the shared 12px top page padding is the designed header-content spacing on ALL pages — unchanged');
+test('Issue 3 INVARIANT: .page padding stays 4px 0 20px (Phase 34 approved spacing change)', () => {
+  // Phase 31 locked 12px 0 20px to forbid UNAUTHORIZED global spacing edits.
+  // Phase 34 (user-approved root-cause fix for the excessive header-content
+  // blank band) reduced padding-top 12px -> 4px: the sticky .app-header already
+  // ends with 12px internal bottom padding + 1px border, so a full 12px
+  // page-level top padding duplicated the header-content spacing. The four
+  // Phase 31 fixes and all sticky offsets (top:56px) remain untouched.
+  assert.match(baseSrc, /\.page\s*\{\s*display:\s*none;\s*padding:\s*4px\s*0\s*20px;/,
+    'the shared page padding is 4px 0 20px after the approved Phase 34 change — bottom padding and fadeSlide unchanged');
+  assert.doesNotMatch(baseSrc, /\.page\s*\{\s*display:\s*none;\s*padding:\s*12px\s*0\s*20px;/,
+    'the old duplicated 12px top padding must not reappear');
 });
 
 test('Issue 3 INVARIANT: body top halo radial-gradient unchanged', () => {
