@@ -1375,7 +1375,7 @@ const AssistantUI = {
                     errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
                     canRetry = true;
                 }
-                this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage: userMsg });
+                this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage: userMsg });
             }
             this.refreshLimits();
         } catch (e) {
@@ -1407,7 +1407,7 @@ const AssistantUI = {
             }
             // Chat AI v2: error styling + retry for 503 and non-quota errors
             const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
-            this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage: userMsg });
+            this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage: userMsg });
             console.warn('AI send error:', e.status || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
@@ -1473,7 +1473,7 @@ const AssistantUI = {
                     errMsg = data.message || data.detail || (typeof t === 'function' ? t('ai_error') : 'Error');
                     canRetry = true;
                 }
-                this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage });
+                this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage });
             }
             this.refreshLimits();
         } catch (e) {
@@ -1498,7 +1498,7 @@ const AssistantUI = {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
             }
             const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
-            this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage });
+            this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage });
             console.warn('AI retry error:', e.status || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
