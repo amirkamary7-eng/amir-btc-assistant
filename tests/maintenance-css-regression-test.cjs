@@ -132,7 +132,9 @@ test('NO-DUP: .mc-core-hex NOT in base.css, components.css, or ai.css', () => {
 
 // Load order
 test('HTML: maintenance.css link exists', () => {
-  assert.match(htmlSrc, /<link\s+rel="stylesheet"\s+href="maintenance\.css">/);
+  // PERF-15 (Phase 40): now non-blocking via the media=print + onload swap
+  // pattern (same as the other async sheets). DOM position unchanged.
+  assert.match(htmlSrc, /<link\s+rel="stylesheet"\s+href="maintenance\.css"\s+media="print"\s+onload="this\.media='all'">/);
 });
 
 test('HTML: maintenance.css loads AFTER ai.css', () => {

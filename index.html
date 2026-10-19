@@ -138,9 +138,25 @@
     <link rel="stylesheet" href="news.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="coin-detail.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="tickets.css" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="membership.css">
+    <!-- PERF-15 (Phase 40): the membership and maintenance stylesheets moved
+         to the proven media=print non-blocking pattern (same as the 10 async
+         sheets here). The CSSOM cascade follows DOM position, which is
+         unchanged — final style order is byte-identical. FOUC guard: the only
+         membership-sheet-styled element with visible default content in the
+         initial DOM is #join-status-bar ("Checking membership…"), hidden
+         solely by the .join-status-bar base rule's opacity:0/pointer-events:
+         none. The tiny inline pre-hide below duplicates EXACTLY those two
+         values (class selector — same specificity as the base rule, still
+         overridable by .join-status-bar.visible), so the bar is invisible
+         before the sheet applies and the computed styles are identical after.
+         The maintenance sheet needs no guard: every maint-*/mc-* element
+         lives inside #maintenance-overlay (inline display:none), shown only
+         after the maintenance-check API round-trip — by then the sheet has
+         loaded. -->
+    <style>.join-status-bar{opacity:0;pointer-events:none}</style>
+    <link rel="stylesheet" href="membership.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="ai.css" media="print" onload="this.media='all'">
-    <link rel="stylesheet" href="maintenance.css">
+    <link rel="stylesheet" href="maintenance.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="announcement.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="price-alerts.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="analysis-detail.css" media="print" onload="this.media='all'">
