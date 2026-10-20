@@ -313,6 +313,88 @@ export function createNotificationRepository(deps) {
   }
 
   /**
+   * List notifications for a user AND count their unread notifications in a
+   * SINGLE query — PERF-04B (Phase 45).
+   *
+   * GET /api/notifications previously issued TWO PARALLEL queryDbDirect
+   * calls (list + unreadCount via Promise.all in the controller) = two
+   * direct pg.Pool constructions (two TLS handshakes) per request on the
+   * highest-frequency authenticated route (the frontend polls every 60s
+   * with error backoff). This function returns the exact same data with
+   * ONE queryDbDirect call — same direct-read routing (bypasses the
+   * Hyperdrive cache → read-after-write consistency), same filters, same
+   * ordering, same serialization, same numeric unread count.
+   *
+   * Shape (mirrors the PERF-04A getTransactionHistory precedent in
+   * wallet.js — json_agg single-row aggregate + scalar COUNT subquery):
+   *   - The page subquery is EXACTLY the old list() SELECT (same columns,
+   *     same WHERE user_id + deleted_at IS NULL, same ORDER BY created_at
+   *     DESC, same LIMIT) wrapped in a FROM subquery.
+   *   - json_agg(n ORDER BY n.created_at DESC) aggregates the page rows in
+   *     the same DESC order; COALESCE(..., '[]') covers the empty page.
+   *   - The unread count comes from a scalar COUNT subquery with the exact
+   *     unreadCount() WHERE clause — INDEPENDENT of LIMIT (the count sees
+   *     all matching rows, not just the page). A bare aggregate always
+   *     returns exactly ONE row: an empty page still yields items='[]'
+   *     plus the TRUE unread count.
+   *   - One snapshot: list and count can no longer diverge under
+   *     concurrent writes (the old parallel pair could) — strictly more
+   *     consistent; for any fixed DB state the output is identical to the
+   *     old pair (regression-proven in
+   *     tests/notif-list-unread-single-query-regression-test.cjs).
+   *
+   * list() and unreadCount() remain exported and UNCHANGED.
+   */
+  async function listWithUnread(env, userId, limit = 50) {
+    if (typeof queryDbDirect !== 'function') {
+      const err = new Error(
+        '[notificationRepo.listWithUnread] queryDbDirect is not injected. ' +
+        'This is a configuration error — the worker bundle is missing the ' +
+        'direct read path injection. Rebuild/redeploy the Worker.'
+      );
+      err.code = 'DIRECT_DB_NOT_INJECTED';
+      throw err;
+    }
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const result = await queryDbDirect(
+      env,
+      `
+        SELECT
+          COALESCE(
+            json_agg(n ORDER BY n.created_at DESC) FILTER (WHERE n.id IS NOT NULL),
+            '[]'
+          ) AS items,
+          (SELECT COUNT(*)::int FROM notifications
+            WHERE user_id = $1 AND read_status = FALSE AND deleted_at IS NULL) AS unread_count
+        FROM (
+          SELECT id, user_id, type, title, message, metadata, read_status, created_at
+          FROM notifications
+          WHERE user_id = $1 AND deleted_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT $2
+        ) n
+      `,
+      [String(userId), safeLimit],
+    );
+    const row = result.rows[0] || {};
+    // items arrives as a parsed array through the pg driver (json type) —
+    // the string branch is defensive for drivers that return JSON as text
+    // (same dual handling as wallet.js getWalletState/getTransactionHistory).
+    let items = [];
+    try {
+      if (row.items && typeof row.items === 'string') {
+        items = JSON.parse(row.items);
+      } else if (Array.isArray(row.items)) {
+        items = row.items;
+      }
+    } catch {}
+    return {
+      notifications: items.map((r) => serializeRow(r)),
+      unreadCount: Number(row.unread_count || 0),
+    };
+  }
+
+  /**
    * Mark a single notification as read.
    */
   async function markRead(env, notificationId, userId) {
@@ -396,5 +478,5 @@ export function createNotificationRepository(deps) {
     return result.rowCount || 0;
   }
 
-  return Object.freeze({ create, createBulk, list, unreadCount, markRead, markAllRead, deleteNotification, deleteAll, serializeRow, ensureTable, getSettings, saveSettings });
+  return Object.freeze({ create, createBulk, list, unreadCount, listWithUnread, markRead, markAllRead, deleteNotification, deleteAll, serializeRow, ensureTable, getSettings, saveSettings });
 }

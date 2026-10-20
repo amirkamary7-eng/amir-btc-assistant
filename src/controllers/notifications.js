@@ -59,10 +59,12 @@ export function createNotificationHandlers(deps) {
     const limit = parseInt(url.searchParams.get('limit') || '50', 10) || 50;
 
     try {
-      const [notifications, unread] = await Promise.all([
-        notificationRepo.list(env, userId, limit),
-        notificationRepo.unreadCount(env, userId),
-      ]);
+      // PERF-04B (Phase 45): ONE repository call — listWithUnread issues a
+      // single queryDbDirect (one direct pg.Pool per request instead of two
+      // parallel ones) and replaces the old Promise.all([list, unreadCount])
+      // pair. Response contract unchanged: { status, notifications,
+      // unread_count }. list/unreadCount remain exported for other callers.
+      const { notifications, unreadCount: unread } = await notificationRepo.listWithUnread(env, userId, limit);
       return jsonResponse({
         status: 'success',
         notifications,
