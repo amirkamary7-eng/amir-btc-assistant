@@ -17,6 +17,11 @@
  *     (or env.DATABASE_URL as fallback), bypassing Hyperdrive's connection
  *     string entirely → bypassing Hyperdrive's edge cache → read-after-write
  *     consistency.
+ *   - PERF-04A (Phase 44): getTransactionHistory now issues ONE combined
+ *     query (page rows via json_agg + total via scalar COUNT subquery)
+ *     instead of two sequential queryDbDirect calls — one direct Pool per
+ *     request instead of two. Full equivalence proof lives in
+ *     wallet-history-single-query-regression-test.cjs.
  *   - All write/credit/debit functions (creditTokens, debitTokens,
  *     claimDailyRewardWithStreak) and the schema bootstrap (ensureSchema)
  *     continue to use queryDb/queryDbTransaction (the existing Hyperdrive path)
@@ -116,18 +121,19 @@ test('getWalletSummary() routes through queryDbDirect, NOT queryDb (bypasses Hyp
   assert.deepEqual(calls.queryDbDirect[0].params, ['user-3'], 'getWalletSummary params are (userId,)');
 });
 
-test('getTransactionHistory() routes BOTH queries through queryDbDirect (COUNT + SELECT)', async () => {
+test('getTransactionHistory() routes ONE combined query through queryDbDirect (page + total; PERF-04A)', async () => {
   const createWalletRepository = loadRepo();
   const { calls, queryDb, queryDbDirect, queryDbTransaction } = makeSpies();
   const repo = createWalletRepository({ queryDb, queryDbDirect, queryDbTransaction });
   await repo.getTransactionHistory(ENV, 'user-4', 0, 20, {});
-  assert.equal(calls.queryDbDirect.length, 2, 'getTransactionHistory must call queryDbDirect twice (COUNT + SELECT)');
+  assert.equal(calls.queryDbDirect.length, 1, 'getTransactionHistory must call queryDbDirect exactly ONCE (combined page+total query — PERF-04A)');
   assert.equal(calls.queryDb.length, 0, 'getTransactionHistory must NOT call queryDb (would hit Hyperdrive cache)');
-  const countSql = calls.queryDbDirect[0].sqlText;
-  const selectSql = calls.queryDbDirect[1].sqlText;
-  assert.match(countSql, /SELECT COUNT\(\*\) as total FROM token_transactions/i, 'first call is the COUNT query');
-  assert.match(selectSql, /SELECT id, amount, tx_type/i, 'second call is the SELECT query');
-  assert.match(selectSql, /ORDER BY created_at DESC/i, 'history is ordered by created_at DESC');
+  const sql = calls.queryDbDirect[0].sqlText;
+  assert.match(sql, /SELECT id, amount, tx_type/i, 'combined query selects the page columns');
+  assert.match(sql, /\(SELECT COUNT\(\*\) FROM token_transactions WHERE user_id = \$1\) AS total/i, 'combined query embeds the total COUNT subquery over the same where clause');
+  assert.match(sql, /ORDER BY created_at DESC/i, 'history is ordered by created_at DESC');
+  assert.match(sql, /json_agg\(p ORDER BY p\.created_at DESC\)/i, 'page rows are aggregated in the same DESC order');
+  assert.deepEqual(calls.queryDbDirect[0].params, ['user-4', 20, 0], 'params are (userId, limit, offset)');
 });
 
 // ────────────────────────────────────────────────────────────────────────────

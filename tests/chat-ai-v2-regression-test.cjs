@@ -930,3 +930,197 @@ test('K14: VPN Market knowledge is factually accurate (1GB for all, 2GB+ Premium
   const vpn2gbLine = rewardPurchasesSrc.substring(vpn2gbLineIdx, vpn2gbLineIdx + 200);
   assert.ok(vpn2gbLine.includes('premiumOnly: true'), 'vpn_2gb+ is premiumOnly:true (source of truth)');
 });
+
+// ─── PERF-10 (Phase 40) — appendBubble error-path argument bug ────────────
+//
+// BUG (confirmed by code evidence): the 4 error call sites passed the
+// options object as the 3rd POSITIONAL argument (imageUrl) instead of the
+// 4th (options):
+//     this.appendBubble('assistant', errMsg, { error: true, canRetry, lastMessage });
+// Consequences inside appendBubble(role, content, imageUrl, options = {}):
+//   1. imageUrl = {object} → truthy → img.src = "[object Object]" → broken
+//      <img> rendered above the error text.
+//   2. options = default {} → options.error undefined → error styling
+//      (ai-msg-bubble-error) NEVER applied, retry button NEVER rendered.
+// FIXED form (4 sites: assistant.js send() ×2, retry() ×2):
+//     this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage });
+
+test('PERF-10 A-1: all 4 error call sites use the fixed 4-argument form', () => {
+  const fixed = FRONTEND_SRC.match(/appendBubble\('assistant', errMsg, null, \{ error: true, canRetry, lastMessage(:| \})/g) || [];
+  assert.equal(fixed.length, 4,
+    `expected exactly 4 fixed error call sites (send ×2 + retry ×2), found ${fixed.length}`);
+});
+
+test('PERF-10 A-2: no remaining buggy 3-argument error call form', () => {
+  const buggy = FRONTEND_SRC.match(/appendBubble\('assistant', errMsg, \{/g) || [];
+  assert.equal(buggy.length, 0,
+    `appendBubble('assistant', errMsg, {…}) passes options as imageUrl — found ${buggy.length} occurrence(s)`);
+});
+
+test('PERF-10 A-3: fixed call sites live in send() and retry() error branches', () => {
+  const sendFn = FRONTEND_SRC.indexOf('async send()');
+  const sendEnd = FRONTEND_SRC.indexOf('async retry(lastMessage)');
+  const retryEnd = FRONTEND_SRC.indexOf('\n};', sendEnd);
+  const sendBody = FRONTEND_SRC.substring(sendFn, sendEnd);
+  const retryBody = FRONTEND_SRC.substring(sendEnd, retryEnd);
+  const sendFixed = (sendBody.match(/appendBubble\('assistant', errMsg, null, \{ error: true/g) || []).length;
+  const retryFixed = (retryBody.match(/appendBubble\('assistant', errMsg, null, \{ error: true/g) || []).length;
+  assert.equal(sendFixed, 2, `send() must contain 2 fixed error call sites, found ${sendFixed}`);
+  assert.equal(retryFixed, 2, `retry() must contain 2 fixed error call sites, found ${retryFixed}`);
+});
+
+// ─── PERF-10 behavioral: evaluate the REAL appendBubble + renderMarkdown ──
+
+/** Extract an object-literal method from assistant.js source. */
+function perf10ExtractMethod(src, signature) {
+  const start = src.indexOf(signature);
+  assert.ok(start > -1, `${signature} not found in assistant.js`);
+  const end = src.indexOf('\n    },', start);
+  assert.ok(end > start, `end of ${signature} not found`);
+  return src.slice(start, end).replace(/\s*$/, '') + '\n    }';
+}
+
+/** Minimal DOM element mock — records children, classList, src, onclick. */
+function perf10MakeElement(tag) {
+  const el = {
+    tagName: tag.toUpperCase(),
+    children: [],
+    className: '',
+    _innerHTML: '',
+    textContent: '',
+    src: null,
+    alt: '',
+    onclick: null,
+    _removed: false,
+    classList: {
+      _set: new Set(),
+      add(c) { this._set.add(c); },
+      contains(c) { return this._set.has(c); },
+    },
+    appendChild(child) { this.children.push(child); return child; },
+    remove() { this._removed = true; },
+    scrollTo() {},
+    scrollHeight: 0,
+  };
+  Object.defineProperty(el, 'innerHTML', {
+    get() { return this._innerHTML; },
+    set(v) { this._innerHTML = String(v); },
+    configurable: true,
+  });
+  return el;
+}
+
+/** Collect elements matching pred from the mock DOM tree (depth-first). */
+function perf10Collect(root, pred, acc = []) {
+  if (root && typeof root === 'object' && pred(root)) acc.push(root);
+  for (const c of (root && root.children) || []) perf10Collect(c, pred, acc);
+  return acc;
+}
+
+/**
+ * Build the REAL appendBubble (with REAL renderMarkdown attached to an
+ * AssistantUI mock) and run it against a mock #ai-messages box.
+ * Returns { box, retrySpy, AssistantUIMock }.
+ */
+function perf10RunAppendBubble(args) {
+  const appendBubbleSrc = perf10ExtractMethod(FRONTEND_SRC,
+    'appendBubble(role, content, imageUrl, options = {}) {');
+  const renderMarkdownSrc = perf10ExtractMethod(FRONTEND_SRC,
+    'renderMarkdown(text) {');
+
+  const box = perf10MakeElement('div');
+  const documentMock = {
+    getElementById: (id) => (id === 'ai-messages' ? box : null),
+    createElement: (tag) => perf10MakeElement(tag),
+  };
+  const rafMock = (cb) => cb();
+
+  const retrySpy = [];
+  const AssistantUIMock = {
+    _mascotAvatarHTML: () => '<svg class="mascot-avatar"></svg>',
+    renderMarkdown: null, // real one attached inside the factory
+    retry: (msg) => retrySpy.push(msg),
+  };
+
+  // Evaluate the extracted methods, exposing the REAL renderMarkdown to the
+  // REAL appendBubble via the AssistantUI mock it references by name.
+  const factory = new Function(
+    'AssistantUIMock_ref',
+    'return function(document, requestAnimationFrame, AssistantUI, currentLang) {' +
+    `  const _m = { ${renderMarkdownSrc} };\n` +
+    '   AssistantUIMock_ref.renderMarkdown = _m.renderMarkdown;\n' +
+    `  return { ${appendBubbleSrc} }.appendBubble;\n` +
+    ' };'
+  );
+  const appendBubble = factory(AssistantUIMock)(documentMock, rafMock, AssistantUIMock, 'fa');
+
+  const ctx = { _hid: 0, hideEmptyState() { this._hid++; } };
+  appendBubble.call(ctx, ...args);
+  return { box, retrySpy, AssistantUIMock };
+}
+
+test('PERF-10 B-1: error message content renders correctly (real renderMarkdown)', () => {
+  const errMsg = 'خطا در دریافت پاسخ';
+  const { box } = perf10RunAppendBubble(['assistant', errMsg, null,
+    { error: true, canRetry: true, lastMessage: 'سلام' }]);
+  const texts = perf10Collect(box, (el) => el.className === 'ai-msg-text');
+  assert.equal(texts.length, 1, 'exactly one .ai-msg-text element');
+  assert.ok(texts[0].innerHTML.includes(errMsg),
+    `error message must be rendered, got: ${texts[0].innerHTML}`);
+});
+
+test('PERF-10 B-2: fixed call produces NO broken image (imageUrl=null)', () => {
+  const { box } = perf10RunAppendBubble(['assistant', 'err', null,
+    { error: true, canRetry: false, lastMessage: 'x' }]);
+  const imgs = perf10Collect(box, (el) => el.tagName === 'IMG');
+  assert.equal(imgs.length, 0,
+    'no <img> element may be created when imageUrl is null (old bug: <img src="[object Object]">)');
+});
+
+test('PERF-10 B-3: error styling applied (ai-msg-bubble-error class)', () => {
+  const { box } = perf10RunAppendBubble(['assistant', 'err', null,
+    { error: true, canRetry: false, lastMessage: 'x' }]);
+  const bubbles = perf10Collect(box, (el) => String(el.className).includes('ai-msg-bubble'));
+  assert.ok(bubbles.length > 0, 'bubble element must exist');
+  const errBubbles = bubbles.filter((b) => b.classList.contains('ai-msg-bubble-error'));
+  assert.equal(errBubbles.length, 1, 'exactly one bubble with ai-msg-bubble-error class');
+});
+
+test('PERF-10 B-4: retry button rendered, clickable, and wired to AssistantUI.retry', () => {
+  const lastMsg = 'آخرین پیام کاربر';
+  const { box, retrySpy } = perf10RunAppendBubble(['assistant', 'err', null,
+    { error: true, canRetry: true, lastMessage: lastMsg }]);
+  const retryBtns = perf10Collect(box, (el) => el.tagName === 'BUTTON' && String(el.className).includes('ai-msg-retry-btn'));
+  assert.equal(retryBtns.length, 1, 'exactly one retry button when canRetry && lastMessage');
+  assert.ok(String(retryBtns[0].textContent).includes('تلاش مجدد'),
+    `retry button label (fa) expected, got: ${retryBtns[0].textContent}`);
+  assert.equal(typeof retryBtns[0].onclick, 'function', 'retry button must have onclick handler');
+  // Simulate the click — must invoke AssistantUI.retry with the LAST message
+  retryBtns[0].onclick();
+  assert.deepEqual(retrySpy, [lastMsg], `AssistantUI.retry must receive lastMessage, got ${JSON.stringify(retrySpy)}`);
+});
+
+test('PERF-10 B-5: NO retry button when canRetry=false (e.g. cooldown errors)', () => {
+  const { box } = perf10RunAppendBubble(['assistant', 'err', null,
+    { error: true, canRetry: false, lastMessage: 'x' }]);
+  const retryBtns = perf10Collect(box, (el) => el.tagName === 'BUTTON');
+  assert.equal(retryBtns.length, 0, 'no retry button when canRetry is false');
+});
+
+test('PERF-10 B-6 (meta): the OLD buggy 3-arg call WOULD fail B-2/B-3/B-4 (test is meaningful)', () => {
+  // Reproduce the exact OLD call form: options object passed as imageUrl.
+  const { box, retrySpy } = perf10RunAppendBubble(['assistant', 'err',
+    { error: true, canRetry: true, lastMessage: 'old' }]);
+  // Old bug 1: broken <img src="[object Object]">
+  const imgs = perf10Collect(box, (el) => el.tagName === 'IMG');
+  assert.equal(imgs.length, 1, 'old form creates an <img> (the broken image)');
+  assert.equal(String(imgs[0].src), '[object Object]', 'old form sets src="[object Object]"');
+  // Old bug 2: error class never applied
+  const bubbles = perf10Collect(box, (el) => String(el.className).includes('ai-msg-bubble'));
+  const errBubbles = bubbles.filter((b) => b.classList.contains('ai-msg-bubble-error'));
+  assert.equal(errBubbles.length, 0, 'old form never applies ai-msg-bubble-error');
+  // Old bug 3: retry button never rendered
+  const retryBtns = perf10Collect(box, (el) => el.tagName === 'BUTTON');
+  assert.equal(retryBtns.length, 0, 'old form never renders the retry button');
+  assert.equal(retrySpy.length, 0, 'old form never wires AssistantUI.retry');
+});
