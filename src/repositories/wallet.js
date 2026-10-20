@@ -236,34 +236,67 @@ export function createWalletRepository(deps) {
       params.push(filters.status);
     }
 
-    // Both queries route through queryDbDirect (bypasses Hyperdrive cache)
+    // PERF-04A: ONE combined query (page rows + total) instead of two
+    // sequential queryDbDirect calls — one direct pg.Pool construction per
+    // request instead of two (halves the TLS handshakes / CPU cost of
+    // GET /api/wallet/history). Mirrors the getWalletState CTE/aggregate
+    // precedent in this repository.
+    //
+    // Shape:
+    //   - The page subquery is EXACTLY the old page SELECT (same columns,
+    //     same where clause, same ORDER BY created_at DESC, same
+    //     LIMIT/OFFSET params) wrapped in a FROM subquery.
+    //   - json_agg(p ORDER BY p.created_at DESC) aggregates the page rows in
+    //     the same DESC order; COALESCE(..., '[]') covers the empty page.
+    //   - The total comes from a scalar COUNT subquery over the SAME where
+    //     clause — LIMIT/OFFSET apply only to the page, so the count is
+    //     pagination-independent (identical to the old standalone COUNT).
+    //   - A bare aggregate always returns exactly ONE row: an empty page
+    //     still yields items='[]' plus the TRUE total.
+    //
+    // Routing is UNCHANGED: still queryDbDirect (bypasses Hyperdrive cache)
     // so a newly-credited transaction appears immediately in history.
-    const countResult = await queryDbDirect(
-      env,
-      `SELECT COUNT(*) as total FROM token_transactions ${whereClause}`,
-      params,
-    );
-    const total = Number(countResult.rows[0]?.total || 0);
-
     params.push(Number(limit), Number(offset));
-    const historyResult = await queryDbDirect(
+    const result = await queryDbDirect(
       env,
       `
-        SELECT id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at
-        FROM token_transactions
-        ${whereClause}
-        ORDER BY created_at DESC
-        LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+        SELECT
+          COALESCE(
+            json_agg(p ORDER BY p.created_at DESC) FILTER (WHERE p.id IS NOT NULL),
+            '[]'
+          ) AS items,
+          (SELECT COUNT(*) FROM token_transactions ${whereClause}) AS total
+        FROM (
+          SELECT id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at
+          FROM token_transactions
+          ${whereClause}
+          ORDER BY created_at DESC
+          LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+        ) p
       `,
       params,
     );
+
+    const row = result.rows[0] || {};
+    const total = Number(row.total || 0);
+    // items arrives as a parsed array through the pg driver (json type) —
+    // the string branch is defensive for drivers that return JSON as text
+    // (same dual handling as getWalletState's history column).
+    let items = [];
+    try {
+      if (row.items && typeof row.items === 'string') {
+        items = JSON.parse(row.items);
+      } else if (Array.isArray(row.items)) {
+        items = row.items;
+      }
+    } catch {}
 
     return {
       total,
       offset,
       limit,
       hasMore: offset + limit < total,
-      transactions: historyResult.rows.map(serializeTxRow),
+      transactions: items.map(serializeTxRow),
     };
   }
 
