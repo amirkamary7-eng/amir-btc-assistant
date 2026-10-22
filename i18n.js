@@ -99,6 +99,13 @@ const i18n = {
         online_users: 'کاربر آنلاین', cal_status_past: 'گذشته', cal_status_live: 'زنده', cal_status_upcoming: 'آینده',
         price_reached: 'قیمت به', ai_title: 'دستیار هوشمند', ai_messages_today: 'پیام امروز',
         ai_cooldown: 'لطفاً چند ثانیه صبر کنید', ai_limit: 'محدودیت روزانه', ai_error: 'دستیار در دسترس نیست',
+        // AI-UNAVAILABLE FIX (2026-10-22): distinct, honest failure messages —
+        // a timeout is NOT a service outage, an auth failure is NOT unavailability,
+        // and an invalid input is NOT a provider problem. Text mirrors the backend
+        // friendlyChatError strings so both layers speak with one voice.
+        ai_timeout: 'پاسخ طولانی شد. لطفاً دوباره امتحان کن.',
+        ai_auth_required: 'برای استفاده از دستیار، باید از داخل تلگرام وارد شوید.',
+        ai_invalid_input: 'ورودی نامعتبره. لطفاً پیام خودت رو بررسی کن.',
         notif_settings: 'اعلانات',
         ns_smart_desc: 'دریافت به‌روزرسانی‌های مهم بازار، تحلیل‌ها و هشدارها از طریق تلگرام.',
         ns_categories: 'دسته‌بندی اعلانات',
@@ -1637,6 +1644,10 @@ const i18n = {
         online_users: 'users online', cal_status_past: 'Past', cal_status_live: 'Live', cal_status_upcoming: 'Upcoming',
         price_reached: 'Price reached', ai_title: 'AI Assistant', ai_messages_today: 'messages today',
         ai_cooldown: 'Please wait a few seconds', ai_limit: 'Daily limit reached', ai_error: 'Assistant unavailable',
+        // AI-UNAVAILABLE FIX (2026-10-22): English counterparts of the new keys above.
+        ai_timeout: 'The response took too long. Please try again.',
+        ai_auth_required: 'Please open the assistant from inside Telegram.',
+        ai_invalid_input: 'Invalid input. Please check your message.',
         notif_settings: 'Notifications',
         ns_smart_desc: 'Receive important market updates, analyses, and alerts directly through Telegram.',
         ns_categories: 'NOTIFICATION CATEGORIES',

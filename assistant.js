@@ -1293,6 +1293,20 @@ const AssistantUI = {
         this.removeFilePreview();
     },
 
+    // AI-UNAVAILABLE FIX (2026-10-22) — dedicated chat request budget:
+    // /api/assistant/chat legitimately needs longer than apiFetch's general
+    // 15s default: real-time context fetching (web search + Wikipedia fallback)
+    // plus a multi-provider fallback chain (groq -> openrouter -> gemini ->
+    // workers-ai), each provider bounded by its own 15s abort, can total 60s+
+    // while STILL producing a good answer. The 15s default aborted those
+    // in-flight requests (production Workers Logs 2026-10-18: two client-canceled
+    // chat invocations with no response field) and surfaced them as the generic
+    // "دستیار در دسترس نیست" (ai_error). Passing our own signal skips the 15s
+    // default (apiFetch only applies it when no signal is set) and gives this
+    // request a dedicated, still-BOUNDED 90s budget. Old-WebView guard: when
+    // AbortSignal.timeout is unavailable the signal stays undefined and apiFetch
+    // falls back to its 15s default (previous behavior) instead of throwing.
+    // Regression: tests/ai-unavailable-responses-regression-test.cjs (F1/F2).
     async send() {
         if (this.sending) return;
         const input = document.getElementById('ai-input');
@@ -1339,7 +1353,10 @@ const AssistantUI = {
 
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget — see the
+                // comment above send() for the full rationale.
+                signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(90000) : undefined
             });
 
             // ITEM 2: Hide typing indicator
@@ -1385,7 +1402,20 @@ const AssistantUI = {
             // generic "AI unavailable" message. Now we parse the error body and
             // show the specific reason (cooldown, daily limit, etc.).
             let errMsg = typeof t === 'function' ? t('ai_error') : 'Assistant unavailable';
-            if (e && e.status === 429) {
+            // AI-UNAVAILABLE FIX (2026-10-22): classify failures instead of mapping
+            // everything to the generic "دستیار در دسترس نیست" (ai_error):
+            //   * TimeoutError/AbortError on OUR chat signal → honest timeout
+            //     message (the backend was still working, this is NOT an outage).
+            //   * 401 → auth guidance (open the app from inside Telegram).
+            //   * 422 → invalid input (e.g. message over 4000 chars).
+            //   * 503 → backend body message first (rate_limits_missing, etc.).
+            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+                errMsg = typeof t === 'function' ? t('ai_timeout') : 'The response took too long. Please try again.';
+            } else if (e && e.status === 401) {
+                errMsg = typeof t === 'function' ? t('ai_auth_required') : 'Please open the assistant from inside Telegram.';
+            } else if (e && e.status === 422) {
+                errMsg = typeof t === 'function' ? t('ai_invalid_input') : 'Invalid input. Please check your message.';
+            } else if (e && e.status === 429) {
                 // Try to parse the response body from the error message
                 try {
                     const parsed = JSON.parse(e.message);
@@ -1404,11 +1434,17 @@ const AssistantUI = {
                 }
             } else if (e && e.status === 503) {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
+                // AI-UNAVAILABLE FIX: prefer the backend's localized body message
+                // (e.g. rate_limits_missing) over the generic ai_error text.
+                try {
+                    const j = JSON.parse(e.message);
+                    if (j && typeof j.message === 'string' && j.message) errMsg = j.message;
+                } catch (_) {}
             }
             // Chat AI v2: error styling + retry for 503 and non-quota errors
             const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
             this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage: userMsg });
-            console.warn('AI send error:', e.status || 'no-status', e.message?.slice(0, 100));
+            console.warn('AI send error:', e.status || e.name || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
         }
@@ -1442,7 +1478,10 @@ const AssistantUI = {
 
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget — see the
+                // comment above send() for the full rationale.
+                signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(90000) : undefined
             });
 
             this.hideTyping();
@@ -1478,8 +1517,17 @@ const AssistantUI = {
             this.refreshLimits();
         } catch (e) {
             this.hideTyping();
+            // AI-UNAVAILABLE FIX (2026-10-22): same failure-classification as
+            // sendMessage — timeout / 401 / 422 / 503 each get their honest,
+            // localized message instead of the generic "دستیار در دسترس نیست".
             let errMsg = typeof t === 'function' ? t('ai_error') : 'Assistant unavailable';
-            if (e && e.status === 429) {
+            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+                errMsg = typeof t === 'function' ? t('ai_timeout') : 'The response took too long. Please try again.';
+            } else if (e && e.status === 401) {
+                errMsg = typeof t === 'function' ? t('ai_auth_required') : 'Please open the assistant from inside Telegram.';
+            } else if (e && e.status === 422) {
+                errMsg = typeof t === 'function' ? t('ai_invalid_input') : 'Invalid input. Please check your message.';
+            } else if (e && e.status === 429) {
                 try {
                     const parsed = JSON.parse(e.message);
                     if (parsed.reason === 'cooldown') {
@@ -1496,10 +1544,14 @@ const AssistantUI = {
                 }
             } else if (e && e.status === 503) {
                 errMsg = typeof t === 'function' ? t('ai_error') : 'AI service temporarily unavailable';
+                try {
+                    const j = JSON.parse(e.message);
+                    if (j && typeof j.message === 'string' && j.message) errMsg = j.message;
+                } catch (_) {}
             }
             const canRetry = (e && (e.status === 503 || (!e.status && e.status !== 429)));
             this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage });
-            console.warn('AI retry error:', e.status || 'no-status', e.message?.slice(0, 100));
+            console.warn('AI retry error:', e.status || e.name || 'no-status', e.message?.slice(0, 100));
         } finally {
             this.sending = false;
         }
