@@ -1757,10 +1757,17 @@ console.log('✅ All FULL AUDIT regression tests loaded.');
 // OpenRouter Emergency Fallback — Implementation Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
-// OR-01: OPENROUTER_MODEL constant exists with correct model
-test('OR-01: OPENROUTER_MODEL constant uses nvidia/nemotron-3-super-120b-a12b:free', () => {
-  assert.ok(PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
-    'OPENROUTER_MODEL must be nvidia/nemotron-3-super-120b-a12b:free');
+// OR-01: OPENROUTER_MODEL constant exists with the evidence-verified LIVE model.
+// OPENROUTER-MODEL-REFRESH (2026-10-22): the old 'nvidia/nemotron-3-super-120b-a12b:free'
+// endpoint was deactivated at OpenRouter (status=-5, uptime 0) → daily production
+// 404s since 2026-10-20. Replaced with 'nvidia/nemotron-3.5-lightning:free'
+// (endpoint status=0 ACTIVE, uptime 5m/30m/1d=100%, $0/$0 — verified via the
+// public /api/v1/models/{id}/endpoints API on 2026-10-22).
+test('OR-01: OPENROUTER_MODEL constant uses nvidia/nemotron-3.5-lightning:free (evidence-verified live)', () => {
+  assert.ok(PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free'"),
+    'OPENROUTER_MODEL must be nvidia/nemotron-3.5-lightning:free (active endpoint)');
+  assert.ok(!PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'OPENROUTER_MODEL must NOT be the deactivated 404ing nemotron-3-super slug');
 });
 
 // OR-02: tryOpenRouter function exists
@@ -1917,11 +1924,14 @@ test('CA-01: Groq is first in TEXT-ONLY Chat AI provider chain', () => {
   assert.ok(groqIdx > 0, 'Groq must be first in text-only chain');
 });
 
-// CA-02: OpenRouter uses correct model
-test('CA-02: Chat AI OpenRouter uses nvidia/nemotron-3-super-120b-a12b:free', () => {
+// CA-02: OpenRouter uses the evidence-verified LIVE model (refreshed 2026-10-22;
+// the old nemotron-3-super-120b:free endpoint was deactivated → production 404s)
+test('CA-02: Chat AI OpenRouter uses nvidia/nemotron-3.5-lightning:free (evidence-verified live)', () => {
   const ASSISTANT_SRC = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/assistant.js'), 'utf8');
-  assert.ok(ASSISTANT_SRC.includes("CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
-    'Chat OpenRouter must use nvidia/nemotron-3-super-120b-a12b:free');
+  assert.ok(ASSISTANT_SRC.includes("CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free'"),
+    'Chat OpenRouter must use nvidia/nemotron-3.5-lightning:free (active endpoint)');
+  assert.ok(!ASSISTANT_SRC.includes("CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'Chat OpenRouter must NOT use the deactivated 404ing nemotron-3-super slug');
 });
 
 // CA-03: DeepSeek removed

@@ -79,7 +79,23 @@ function isNewsQueueEnabled(env) {
 // ────────────────────────────────────────────────────────────────────────────
 const NEWS_AI_PROVIDER_STATS_KEY = 'news:ai_provider_stats';
 const OPENAI_MODEL = 'gpt-4o-mini'; // cheap, fast, good for summarization
-const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'; // free emergency fallback
+// OPENROUTER-MODEL-REFRESH (2026-10-22, PR #96 final review):
+// 'nvidia/nemotron-3-super-120b-a12b:free' started HTTP-404ing in production
+// on 2026-10-20..22 ([OR-DIAG] error=http_404 — one/day, ongoing; the key
+// authenticates: 404, never 401). Verified root cause via OpenRouter's public
+// /api/v1/models/{id}/endpoints API: the slug's only serving endpoint
+// ("Nvidia | nvidia/nemotron-3-super-120b-a12b-20230311:free") is deactivated
+// (status=-5, uptime_last_30m=0) while the model stays LISTED in the catalog —
+// listed-but-unservable is exactly what produces 404 on chat/completions.
+// Replacement 'nvidia/nemotron-3.5-lightning:free' is evidence-verified on the
+// same API (2026-10-22): Nvidia first-party free slot, endpoint status=0
+// ACTIVE, uptime 5m/30m/1d=100%, 1M context, supports ALL parameters this
+// call site sends (max_tokens, temperature, AND reasoning — this file sends
+// reasoning:{enabled:false}), 30B-total/3B-active MoE fits the 15s abort on
+// this hop, pricing $0/$0 (NO cost/quota/security change). Chat AI's
+// CHAT_OPENROUTER_MODEL (src/controllers/assistant.js) carried the same dead
+// slug and is refreshed in the same change.
+const OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free'; // free emergency fallback (evidence-verified active)
 
 function isNewsProviderEnabled(env, flagName, defaultValue) {
   return isNewsFlagEnabled(env, flagName, defaultValue);
@@ -959,8 +975,12 @@ async function tryOpenAI(env, prompt, systemPrompt) {
 
 /**
  * Provider 3: OpenRouter (emergency fallback 3) — free model via OpenRouter.
- * Uses nvidia/nemotron-3-super-120b-a12b:free (120B MoE, 256K context).
- * Called ONLY when Groq + Gemini + Workers AI all fail.
+ * Uses nvidia/nemotron-3.5-lightning:free (30B-total/3B-active MoE, 1M context,
+ * Nvidia first-party free endpoint — active/100% uptime verified 2026-10-22
+ * after the previous nemotron-3-super-120b free endpoint was deactivated and
+ * began 404ing in production).
+ * Called when the Groq Router fails (fallback 1 — BEFORE Workers AI, per the
+ * failover chain in src/news/summary.js: groq → openrouter → workers-ai → openai).
  * OpenAI-compatible API → same response parsing as tryOpenAI.
  * Circuit breaker key: 'openrouter' (via attemptProvider wrapper).
  */
