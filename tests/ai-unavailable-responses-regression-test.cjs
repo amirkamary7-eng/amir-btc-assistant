@@ -69,6 +69,11 @@
 //     T11 Extended enders: ≥500-char reply ending '*' → valid directly.
 //     T12 Cooldown → 429 reason cooldown with specific message (not outage).
 //     T13 Unauthenticated request → 401 (auth stays enforced — D.7/D.9).
+//     T14 Groq 503 (all_keys_unavailable shape) → chain continues → gemini.
+//     T15 EXACT production sequence Groq 503 + OpenRouter HTTP 404 (fetch
+//         mocked to the real 404 shape) → chain STILL continues → gemini.
+//         (PR #96 final review: production 404s 2026-10-20..22 — deactivated
+//         free-model endpoint at OpenRouter; dead hop must not stop the chain.)
 //   Source contracts (frontend): F1..F10 per above.
 //   Legacy WebView timeout (PR #96 review follow-up):
 //     L1  Modern path (AbortSignal.timeout available) → native bounded signal,
@@ -386,6 +391,96 @@ test('T13: unauthenticated request → HTTP 401 (auth enforcement preserved — 
     // no initData header → optionalTelegramAuth rejects
   });
   assert.equal(res.status, 401);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PROVIDER-CHAIN RESILIENCE (PR #96 final review — OpenRouter 404 + Groq quota)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Production evidence (Workers Logs 2026-10-16..22, download/phase63/):
+//   * Groq Router 503 "all_keys_unavailable" ×11 in 7d — all News-cron driven
+//     (windows regularly 3/3 per key). A chat request arriving while the
+//     shared budget is exhausted must still get an answer from LATER hops.
+//   * OpenRouter http_404 ×3 (one/day 2026-10-20..22): the old free model's
+//     only serving endpoint was deactivated at OpenRouter (endpoint status=-5,
+//     uptime 0 — verified via the public /api/v1/models/{id}/endpoints API).
+//     The production sequence "Groq 503 → OpenRouter 404 → NEXT provider" must
+//     NEVER stop the chain early.
+//
+// T14: Groq 503 → chain continues (no early stop) → gemini answers.
+// T15: EXACT production sequence — Groq 503 + OpenRouter HTTP 404 (fetch
+//      mocked to the real 404 shape) → chain STILL continues → gemini answers.
+// M1:  both OpenRouter call sites carry the evidence-verified LIVE model slug.
+
+test('T14: Groq 503 (router all_keys_unavailable shape) → chain continues → gemini answers (HTTP 200)', async () => {
+  const worker = loadWorker();
+  const env = createEnv();
+  // groq gateway returns a 503 (the router's all_keys_unavailable envelope);
+  // OPENROUTER_API_KEY stays undefined → "not configured" fast-fail hop;
+  // gemini must still answer — proving Groq quota exhaustion can never
+  // produce "دستیار در دسترس نیست" while a later provider is healthy.
+  const pool = makeChatPool({
+    groqStatus: 503,
+    geminiReply: 'پاسخ پس از کمبود سهمیه گروک.',
+  });
+  env._reqPool = pool;
+  const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+    body: { message: 'نسبت هابل چیست و چگونه اندازه‌گیری می‌شود؟', history: [], image: null, context: null },
+    initData: buildInitData('test-bot-token', { id: 700114, first_name: 'Test' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.status, 'success');
+  assert.equal(res.body?.provider, 'gemini', 'the chain must advance past a Groq 503 — no early stop');
+  assert.equal(res.body?.reply, 'پاسخ پس از کمبود سهمیه گروک.');
+  assert.ok(pool.captured.gemini.length >= 1, 'gemini gateway must have been called');
+});
+
+test('T15: EXACT production sequence — Groq 503 + OpenRouter HTTP 404 → chain STILL continues → gemini answers', async () => {
+  const worker = loadWorker();
+  const env = createEnv({ OPENROUTER_API_KEY: 'test-or-key' });
+  const pool = makeChatPool({ groqStatus: 503, geminiReply: 'پاسخ نهایی پس از خطای ۴۰۴ اوپن‌روتر.' });
+  env._reqPool = pool;
+  // Stub global fetch ONLY for openrouter.ai → HTTP 404 (the exact production
+  // failure shape of the deactivated free-model endpoint); other URLs pass
+  // through to the real fetch.
+  const realFetch = globalThis.fetch;
+  let orCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.includes('openrouter.ai/')) {
+      orCalls++;
+      return new Response(JSON.stringify({ error: { message: 'Model not found', code: 404 } }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    return realFetch(input, init);
+  };
+  try {
+    const res = await sendRequest(worker, env, 'POST', '/api/assistant/chat', {
+      body: { message: 'فرض کن این پرسش کاملاً نامتعارف باشد؟', history: [], image: null, context: null },
+      initData: buildInitData('test-bot-token', { id: 700115, first_name: 'Test' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body?.status, 'success');
+    assert.equal(res.body?.provider, 'gemini', 'a 404 from one provider must NOT stop the fallback chain');
+    assert.equal(res.body?.reply, 'پاسخ نهایی پس از خطای ۴۰۴ اوپن‌روتر.');
+    assert.ok(orCalls >= 1, 'the OpenRouter hop must actually have been attempted (fetch returned 404)');
+    assert.ok(pool.captured.gemini.length >= 1, 'gemini answered after the 404');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('M1: both OpenRouter call sites use the evidence-verified LIVE model (dead slug absent from both constants)', () => {
+  const NEWS_PROVIDERS_SRC = fs.readFileSync(path.join(ROOT, 'src/news/providers.js'), 'utf8');
+  // Constant declarations (NOT bare mentions — the refresh evidence comments
+  // legitimately document the dead slug for future maintainers):
+  assert.ok(ASSISTANT_SRC.includes("const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free'"),
+    'chat constant must be the live slug (OpenRouter /endpoints API verified 2026-10-22: status=0, uptime 100%)');
+  assert.ok(NEWS_PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free'"),
+    'news constant must be the live slug (same evidence)');
+  assert.ok(!ASSISTANT_SRC.includes("const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'chat constant must NOT be the deactivated 404ing slug');
+  assert.ok(!NEWS_PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'news constant must NOT be the deactivated 404ing slug');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
