@@ -457,7 +457,18 @@
     border-top: 1px solid rgba(255,255,255,0.06);
     border-bottom: 1px solid rgba(255,255,255,0.06);
     position: sticky;
-    top: 56px; /* sits right under the sticky app-header */
+    /* MARKET HEADER/SCROLL OVERLAP FIX (2026-10-22): sticks ONE TITLE BAR
+       below the app-header, not directly under it. Before this, both
+       .mkt-header and .mkt-list-header stuck at top:56px — the column
+       header (z:20) painted OVER the title bar (z:10) and the title bar's
+       lower half hung over the coin rows (measured 33px overlap at 390px).
+       --mkt-header-h is kept in sync with the live .mkt-header height by
+       app.js syncMarketListHeaderOffset() (ResizeObserver) because the
+       title bar height is dynamic: ~64px healthy, ~79px when the MK-08
+       .mkt-data-status line is visible (stale/offline/fallback states).
+       Fallback 64px covers the no-JS/healthy case. 56px base = app-header
+       height (locked by tests/phase31-issue3-header-sticky-offset-test.cjs). */
+    top: calc(56px + var(--mkt-header-h, 64px));
     z-index: 20;
     font-size: 10px; font-weight: 700; color: #6B7A8D;
     text-transform: uppercase; letter-spacing: 0.5px;

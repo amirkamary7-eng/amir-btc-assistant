@@ -145,7 +145,11 @@ test('Phase 34 SCOPE: header brand logo rule untouched (out-of-scope asset styli
 
 test('Phase 34 SCOPE: sticky sub-headers keep top:56px (mkt-header / mkt-list-header / ni-topbar)', () => {
   assert.equal(decl(extractRule(marketSrc, '.mkt-header'), 'top'), '56px');
-  assert.equal(decl(extractRule(marketSrc, '.mkt-list-header'), 'top'), '56px');
+  // 2026-10-22 market header/scroll overlap fix: .mkt-list-header moved from the
+  // flat 56px to the STACKED offset (it sits under the sticky .mkt-header, the
+  // only such bar in the app) — still anchored to the 56px app-header. Contract
+  // locked by tests/market-header-sticky-stack-test.cjs.
+  assert.equal(decl(extractRule(marketSrc, '.mkt-list-header'), 'top'), 'calc(56px + var(--mkt-header-h, 64px))');
   assert.equal(decl(extractRule(newsSrc, '.ni-topbar'), 'top'), '56px');
 });
 

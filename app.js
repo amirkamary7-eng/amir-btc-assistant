@@ -4440,6 +4440,46 @@ function setMarketDataStatus(mode) {
     }
 }
 
+/* ── Market sticky-stack sync (header/scroll overlap fix, 2026-10-22) ────────
+ * ROOT CAUSE: market.css pins BOTH .mkt-header (title bar) and .mkt-list-header
+ * (coin-list column header) as sticky. After Phase 31 Issue 3 moved the title
+ * bar to top:56px, both bars stuck at the SAME offset — the column header
+ * (z:20) painted over the title bar (z:10) and the title bar's lower half hung
+ * over the coin rows (measured 33px overlap at 390x844).
+ * FIX: .mkt-list-header now sticks at calc(56px + var(--mkt-header-h, 64px)).
+ * This function keeps --mkt-header-h equal to the LIVE .mkt-header height,
+ * because that height is dynamic: ~64px healthy, ~79px when the MK-08 status
+ * line above is visible (stale/offline/fallback states), plus font-load and
+ * viewport changes. A ResizeObserver on .mkt-header covers all of those
+ * (including the display:none -> block transition when the Market tab is
+ * opened — #market-page pages toggle display, which resizes the bar to/from
+ * 0 and fires the observer). Guard: a 0/hidden measurement is never
+ * published, so the sticky offset cannot collapse back onto the title bar.
+ */
+let _mktHeaderStackRO = null;
+function syncMarketListHeaderOffset() {
+    const listHeader = document.getElementById('mkt-list-header');
+    const mktHeader = document.querySelector('.mkt-header');
+    if (!listHeader || !mktHeader) return;
+    const h = mktHeader.getBoundingClientRect().height; // 0 while the page is hidden
+    if (h > 0) listHeader.style.setProperty('--mkt-header-h', h.toFixed(2) + 'px');
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const mktHeader = document.querySelector('.mkt-header');
+    if (!mktHeader) return;
+    if (typeof ResizeObserver === 'undefined') {
+        // No ResizeObserver (very old WebView): keep the CSS fallback offset
+        // (64px) — stacking is still correct in the healthy state.
+        syncMarketListHeaderOffset();
+        window.addEventListener('resize', syncMarketListHeaderOffset, { passive: true });
+        return;
+    }
+    _mktHeaderStackRO = new ResizeObserver(syncMarketListHeaderOffset);
+    _mktHeaderStackRO.observe(mktHeader);
+    window.addEventListener('resize', syncMarketListHeaderOffset, { passive: true });
+    syncMarketListHeaderOffset(); // immediate first paint if the page is already visible
+});
+
 async function loadMarketData(force = false) {
     console.log('[TICKER] loadMarketData called — force:', force, '| allCoins length:', allCoins.length);
     const listEl = document.getElementById('coin-list-rows');
