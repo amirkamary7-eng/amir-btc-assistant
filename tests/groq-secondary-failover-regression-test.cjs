@@ -346,9 +346,18 @@ test('GS-025: Current model names verified in providers.js', () => {
     'Groq model must be openai/gpt-oss-120b (router architecture)');
   assert.ok(PROVIDERS_SRC.includes('@cf/meta/llama-3.3-70b-instruct-fp8-fast'),
     'Workers AI model must still be llama-3.3-70b-instruct-fp8-fast (unchanged)');
-  // OpenRouter model
-  assert.ok(PROVIDERS_SRC.includes('nvidia/nemotron-3-super-120b-a12b:free') || ASSISTANT.includes('nvidia/nemotron-3-super-120b-a12b:free'),
-    'OpenRouter model must be unchanged');
+  // OpenRouter model — OPENROUTER-MODEL-REFRESH (2026-10-22): the previous
+  // 'nvidia/nemotron-3-super-120b-a12b:free' slug's only endpoint was
+  // deactivated at OpenRouter (status=-5, uptime 0 → production 404s daily
+  // since 2026-10-20) and was replaced with the evidence-verified ACTIVE
+  // 'nvidia/nemotron-3.5-lightning:free' (endpoint status=0, uptime 100%,
+  // $0/$0). The contract now locks the LIVE slug and forbids the dead one.
+  assert.ok(PROVIDERS_SRC.includes('nvidia/nemotron-3.5-lightning:free'),
+    'OpenRouter model must be the refreshed live slug nvidia/nemotron-3.5-lightning:free');
+  // Check the CONSTANT declaration (not bare mentions — the refresh evidence
+  // comments legitimately reference the dead slug for documentation):
+  assert.ok(!PROVIDERS_SRC.includes("const OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'"),
+    'the OPENROUTER_MODEL constant must NOT be the deactivated 404ing nemotron-3-super slug');
 });
 
 test('GS-026: No DB schema changes (no CREATE/ALTER/DROP in this task)', () => {

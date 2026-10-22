@@ -7,7 +7,7 @@
  *
  * Provider chain (GROQ-ROUTER-4KEY — Gemini restored for Chat ONLY):
  *   1. Groq Router     (primary)    — 4-key router (groqRouterExecute), openai/gpt-oss-120b
- *   2. OpenRouter      (fallback 1) — nvidia/nemotron-3-super-120b-a12b:free
+ *   2. OpenRouter      (fallback 1) — nvidia/nemotron-3.5-lightning:free
  *   3. Gemini          (fallback 2) — gemini-3.5-flash (restored for Chat text + vision/image)
  *   4. Workers AI      (fallback 3) — @cf/meta/llama-3.3-70b-instruct-fp8-fast
  *   5. OpenAI          (fallback 4, opt-in) — gpt-4o-mini
@@ -66,7 +66,24 @@ export function createAssistantHandlers(deps) {
   const MAX_HISTORY_CONTENT_LENGTH = 4000;
   const MAX_CONTEXT_FIELD_LENGTH = 200;
   const CHAT_GROQ_MODEL = 'openai/gpt-oss-120b';
-  const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free';
+  // OPENROUTER-MODEL-REFRESH (2026-10-22, PR #96 final review):
+  // The previous slug 'nvidia/nemotron-3-super-120b-a12b:free' began returning
+  // HTTP 404 in production ([OR-DIAG]/[NEWS-AI-FALLBACK] logs 2026-10-20..22,
+  // one failure per day — key authenticated fine: 404, never 401). Root cause
+  // (verified via OpenRouter's public /api/v1/models/{id}/endpoints API):
+  // the slug's ONLY serving endpoint ("Nvidia | nvidia/nemotron-3-super-120b-
+  // a12b-20230311:free") is deactivated — status=-5, uptime_last_30m=0 — while
+  // the model itself remains LISTED in the public catalog, which is exactly
+  // why the slug "exists" yet cannot serve (no active endpoint → 404).
+  // Replacement: 'nvidia/nemotron-3.5-lightning:free' — evidence-verified
+  // (same OpenRouter /endpoints API, 2026-10-22): same vendor + free slot
+  // (Nvidia first-party), endpoint status=0 ACTIVE, uptime 5m/30m/1d = 100%,
+  // 1M-token context (4× the old 262K), supports every parameter this call
+  // site sends (max_tokens, temperature), 30B-total/3B-active MoE = fast
+  // enough to finish inside this hop's 15s abort, pricing $0/$0 (NO cost,
+  // quota, or security change). News AI's OPENROUTER_MODEL (src/news/
+  // providers.js) used the SAME dead slug and is refreshed in the same change.
+  const CHAT_OPENROUTER_MODEL = 'nvidia/nemotron-3.5-lightning:free';
   const CHAT_OPENAI_MODEL = 'gpt-4o-mini';
 
   // ── Chat AI v2: Modular Prompt Architecture ──────────────────────────────
