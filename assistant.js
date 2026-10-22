@@ -2,6 +2,60 @@
 // AI Assistant — Premium Chat UI with typing indicator
 // ============================================================
 
+// AI-UNAVAILABLE FIX, legacy-WebView follow-up (2026-10-22, PR #96 review):
+// AbortSignal.timeout() exists only on Safari/WebKit 16+ (iOS 16+) and
+// Chromium 103+ (mid-2022). Telegram Mini Apps also run in OLDER WebViews —
+// iOS 15.x WKWebView, un-updated Android System WebView, and desktop builds
+// bundling older QtWebEngine (Chromium 87-102). In those clients the previous
+// guard passed `undefined`, and apiFetch's general 15s default ALSO silently
+// no-ops there (it is try/catch-guarded around AbortSignal.timeout), so the
+// chat POST was left completely UNBOUNDED — not the "15s fallback" the old
+// comment claimed. This helper bounds the chat request on EVERY generation
+// that supports fetch signals (Chromium 66+ / Safari 11.1+, both far older
+// than .timeout()):
+//   modern → AbortSignal.timeout(ms) — rejects with a TimeoutError DOMException
+//   legacy → AbortController + setTimeout — rejects with AbortError; the
+//            timedOut() flag lets the catch blocks classify it as a timeout
+//            even on engines that ignore abort reasons
+//   ancient (no AbortController at all) → null (previous behavior preserved)
+// clear() releases the legacy timer after the request settles (the
+// AbortController+setTimeout pattern MDN recommends when the timeout must be
+// cancellable). Unrelated apiFetch calls keep their general 15s default —
+// apiFetch itself is NOT modified. Regression tests: F1/F8-F10 + L1-L4 in
+// tests/ai-unavailable-responses-regression-test.cjs.
+function createChatTimeout(ms) {
+    let timedOut = false;
+    let timer = null;
+    try {
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+            // Modern WebViews: native bounded signal (no timer to clean up).
+            return { signal: AbortSignal.timeout(ms), timedOut: () => false, clear: () => {} };
+        }
+        if (typeof AbortController !== 'undefined') {
+            // Legacy WebViews: manual bounded signal — fetch has honored
+            // AbortController signals since Chromium 66 / Safari 11.1.
+            const controller = new AbortController();
+            timer = setTimeout(() => {
+                timedOut = true;
+                // Best effort: engines that support abort reasons surface this
+                // as TimeoutError; older ones ignore the argument (AbortError)
+                // and timedOut() covers classification either way.
+                try {
+                    controller.abort(typeof DOMException !== 'undefined'
+                        ? new DOMException('The chat request timed out.', 'TimeoutError')
+                        : undefined);
+                } catch (_) { controller.abort(); }
+            }, ms);
+            return {
+                signal: controller.signal,
+                timedOut: () => timedOut,
+                clear: () => { if (timer) clearTimeout(timer); }
+            };
+        }
+    } catch (_) { /* stay null on ancient clients */ }
+    return null;
+}
+
 const AssistantUI = {
     sessionId: localStorage.getItem('ai_session') || null,
     history: [],
@@ -1303,10 +1357,12 @@ const AssistantUI = {
     // chat invocations with no response field) and surfaced them as the generic
     // "دستیار در دسترس نیست" (ai_error). Passing our own signal skips the 15s
     // default (apiFetch only applies it when no signal is set) and gives this
-    // request a dedicated, still-BOUNDED 90s budget. Old-WebView guard: when
-    // AbortSignal.timeout is unavailable the signal stays undefined and apiFetch
-    // falls back to its 15s default (previous behavior) instead of throwing.
-    // Regression: tests/ai-unavailable-responses-regression-test.cjs (F1/F2).
+    // request a dedicated, still-BOUNDED 90s budget. Legacy WebViews (no
+    // AbortSignal.timeout) now get the SAME 90s bound via createChatTimeout's
+    // AbortController+setTimeout fallback — previously they silently got NO
+    // timeout at all (apiFetch's 15s default also no-ops there).
+    // Regression: tests/ai-unavailable-responses-regression-test.cjs
+    // (F1/F2/F8-F10 + L1-L4).
     async send() {
         if (this.sending) return;
         const input = document.getElementById('ai-input');
@@ -1343,6 +1399,7 @@ const AssistantUI = {
             this.pendingFileText = null;
         }
 
+        let chatTimeout = null; // AI-UNAVAILABLE FIX: bounded 90s chat signal (legacy-WebView safe)
         try {
             const payload = {
                 message: fullMessage,
@@ -1351,12 +1408,14 @@ const AssistantUI = {
                 context: this.getContext ? this.getContext() : null
             };
 
+            chatTimeout = createChatTimeout(90000);
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
                 body: JSON.stringify(payload),
-                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget — see the
-                // comment above send() for the full rationale.
-                signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(90000) : undefined
+                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget on ALL
+                // WebView generations (modern + legacy fallback) — see
+                // createChatTimeout at the top of this file.
+                signal: chatTimeout ? chatTimeout.signal : undefined
             });
 
             // ITEM 2: Hide typing indicator
@@ -1409,7 +1468,7 @@ const AssistantUI = {
             //   * 401 → auth guidance (open the app from inside Telegram).
             //   * 422 → invalid input (e.g. message over 4000 chars).
             //   * 503 → backend body message first (rate_limits_missing, etc.).
-            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError' || (chatTimeout && chatTimeout.timedOut()))) {
                 errMsg = typeof t === 'function' ? t('ai_timeout') : 'The response took too long. Please try again.';
             } else if (e && e.status === 401) {
                 errMsg = typeof t === 'function' ? t('ai_auth_required') : 'Please open the assistant from inside Telegram.';
@@ -1446,6 +1505,7 @@ const AssistantUI = {
             this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage: userMsg });
             console.warn('AI send error:', e.status || e.name || 'no-status', e.message?.slice(0, 100));
         } finally {
+            if (chatTimeout) chatTimeout.clear(); // AI-UNAVAILABLE FIX: release the legacy fallback timer
             this.sending = false;
         }
     },
@@ -1468,6 +1528,7 @@ const AssistantUI = {
             this.pendingFileText = null;
         }
 
+        let chatTimeout = null; // AI-UNAVAILABLE FIX: bounded 90s chat signal (legacy-WebView safe)
         try {
             const payload = {
                 message: fullMessage,
@@ -1476,12 +1537,14 @@ const AssistantUI = {
                 context: this.getContext ? this.getContext() : null
             };
 
+            chatTimeout = createChatTimeout(90000);
             const data = await apiFetch('/api/assistant/chat', {
                 method: 'POST',
                 body: JSON.stringify(payload),
-                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget — see the
-                // comment above send() for the full rationale.
-                signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(90000) : undefined
+                // AI-UNAVAILABLE FIX: dedicated bounded 90s chat budget on ALL
+                // WebView generations (modern + legacy fallback) — see
+                // createChatTimeout at the top of this file.
+                signal: chatTimeout ? chatTimeout.signal : undefined
             });
 
             this.hideTyping();
@@ -1521,7 +1584,7 @@ const AssistantUI = {
             // sendMessage — timeout / 401 / 422 / 503 each get their honest,
             // localized message instead of the generic "دستیار در دسترس نیست".
             let errMsg = typeof t === 'function' ? t('ai_error') : 'Assistant unavailable';
-            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+            if (e && (e.name === 'TimeoutError' || e.name === 'AbortError' || (chatTimeout && chatTimeout.timedOut()))) {
                 errMsg = typeof t === 'function' ? t('ai_timeout') : 'The response took too long. Please try again.';
             } else if (e && e.status === 401) {
                 errMsg = typeof t === 'function' ? t('ai_auth_required') : 'Please open the assistant from inside Telegram.';
@@ -1553,6 +1616,7 @@ const AssistantUI = {
             this.appendBubble('assistant', errMsg, null, { error: true, canRetry, lastMessage });
             console.warn('AI retry error:', e.status || e.name || 'no-status', e.message?.slice(0, 100));
         } finally {
+            if (chatTimeout) chatTimeout.clear(); // AI-UNAVAILABLE FIX: release the legacy fallback timer
             this.sending = false;
         }
     }

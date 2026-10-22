@@ -820,8 +820,14 @@ test('K11: all providers failed → friendly structured error (HTTP 200)', () =>
   assert.ok(block.includes('friendlyChatError'), 'uses friendlyChatError');
   assert.ok(block.includes("reason: 'all_providers_failed'"), 'has structured reason field');
   // Frontend must handle all_providers_failed in the else branch (not catch)
+  // Window is bounded STRUCTURALLY (send() up to the next method, async retry()
+  // ) instead of the old fixed 4000 chars: the PR #96 legacy-WebView timeout
+  // fix added a few lines inside send() (createChatTimeout wiring) which pushed
+  // this branch to char ~3998 — past the old fixed window with NO behavior
+  // change. The structural bound keeps this contract robust to future growth.
   const sendFn = FRONTEND_SRC.indexOf('async send()');
-  const sendBlock = FRONTEND_SRC.substring(sendFn, sendFn + 4000);
+  const sendEnd = FRONTEND_SRC.indexOf('async retry(', sendFn);
+  const sendBlock = FRONTEND_SRC.substring(sendFn, sendEnd);
   assert.ok(sendBlock.includes("data.reason === 'all_providers_failed'"), 'frontend handles all_providers_failed in else branch');
   assert.ok(sendBlock.includes('canRetry = true'), 'frontend marks all_providers_failed as retryable');
   // apiFetch throws on non-200, so 200 is required for the else branch to run

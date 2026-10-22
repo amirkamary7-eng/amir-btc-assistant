@@ -24,10 +24,17 @@
 //
 // FIX UNDER TEST (smallest maintainable correction):
 //   assistant.js (frontend):
-//     F-A. sendMessage/retry pass their OWN signal (AbortSignal.timeout(90000))
-//          to apiFetch for /api/assistant/chat — apiFetch only applies its 15s
-//          default when no signal is set, so the chat request gets a dedicated,
-//          still-BOUNDED 90s budget matching the backend's per-provider bounds.
+//     F-A. sendMessage/retry pass their OWN bounded 90s chat signal to apiFetch
+//          for /api/assistant/chat via createChatTimeout() — apiFetch only
+//          applies its 15s default when no signal is set, so the chat request
+//          gets a dedicated, still-BOUNDED 90s budget matching the backend's
+//          per-provider bounds. PR #96 review follow-up: createChatTimeout ALSO
+//          bounds LEGACY WebViews without AbortSignal.timeout (iOS 15.x
+//          WKWebView, un-updated Android WebView < Chromium 103, old
+//          QtWebEngine desktop builds) via AbortController+setTimeout —
+//          previously those clients silently had NO timeout at all (apiFetch's
+//          15s default no-ops there too, despite the old comment's claim).
+//          Unrelated apiFetch calls keep their general 15s default untouched.
 //     F-B. Failure classification in both catch blocks: timeout (TimeoutError/
 //          AbortError) → ai_timeout; 401 → ai_auth_required; 422 →
 //          ai_invalid_input; 503 → backend body message first. The generic
@@ -62,7 +69,16 @@
 //     T11 Extended enders: ≥500-char reply ending '*' → valid directly.
 //     T12 Cooldown → 429 reason cooldown with specific message (not outage).
 //     T13 Unauthenticated request → 401 (auth stays enforced — D.7/D.9).
-//   Source contracts (frontend): F1..F7 per above.
+//   Source contracts (frontend): F1..F10 per above.
+//   Legacy WebView timeout (PR #96 review follow-up):
+//     L1  Modern path (AbortSignal.timeout available) → native bounded signal,
+//         rejects as TimeoutError after the deadline.
+//     L2  Legacy path (AbortSignal.timeout MISSING — iOS 15.x / Chromium <103)
+//         → AbortController+setTimeout still bounds the request; timedOut()
+//         flag set for engine-independent classification.
+//     L3  clear() cancels the pending legacy timer (no dangling timeout).
+//     L4  Ancient path (no AbortController at all) → null, previous behavior.
+//     F8/F9/F10 — source contracts wiring the helper into send()/retry().
 //   Source contracts (backend): B1..B3 + friendlyChatError text unchanged.
 //   i18n: new keys present in BOTH dictionaries with exact copy.
 //
@@ -376,10 +392,11 @@ test('T13: unauthenticated request → HTTP 401 (auth enforcement preserved — 
 // FRONTEND SOURCE CONTRACTS
 // ═════════════════════════════════════════════════════════════════════════════
 
-test('F1: sendMessage AND retry pass a dedicated long timeout signal to /api/assistant/chat', () => {
-  const callRe = /apiFetch\('\/api\/assistant\/chat',\s*\{[\s\S]*?signal:\s*typeof AbortSignal\.timeout === 'function'\s*\?\s*AbortSignal\.timeout\(90000\)/g;
-  const matches = FRONTEND_SRC.match(callRe) || [];
-  assert.equal(matches.length, 2, 'both sendMessage and retry must pass the 90s chat signal (found ' + matches.length + ')');
+test('F1: sendMessage AND retry pass a dedicated bounded 90s chat signal on ALL WebView generations', () => {
+  assert.equal((FRONTEND_SRC.match(/chatTimeout = createChatTimeout\(90000\);/g) || []).length, 2,
+    'both sendMessage and retry must create the bounded chat timeout');
+  assert.equal((FRONTEND_SRC.match(/signal: chatTimeout \? chatTimeout\.signal : undefined/g) || []).length, 2,
+    'both chat calls must pass the helper signal (modern AND legacy paths)');
 });
 
 test('F2: apiFetch default 15s timeout is UNCHANGED for all other endpoints', () => {
@@ -430,6 +447,91 @@ test('F6: timeout stays retryable (canRetry true for no-status errors)', () => {
 
 test('F7: error log line distinguishes timeouts (logs e.name)', () => {
   assert.match(FRONTEND_SRC, /e\.status \|\| e\.name \|\| 'no-status'/, 'console.warn must log e.name so timeout aborts are traceable');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEGACY WEBVIEW TIMEOUT — PR #96 review follow-up (both paths bounded)
+// The helper is extracted VERBATIM from assistant.js and executed in a vm
+// sandbox whose globals model each WebView generation. No network, no DOM.
+// ═════════════════════════════════════════════════════════════════════════
+
+const vm = require('node:vm');
+
+function extractCreateChatTimeoutSource() {
+  const start = FRONTEND_SRC.indexOf('function createChatTimeout(');
+  assert.ok(start !== -1, 'createChatTimeout must be defined at module scope in assistant.js');
+  const end = FRONTEND_SRC.indexOf('\n}\n', start);
+  assert.ok(end !== -1, 'createChatTimeout body must terminate at column 0');
+  return FRONTEND_SRC.slice(start, end + 2);
+}
+
+function runCreateChatTimeout(sandbox) {
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(extractCreateChatTimeoutSource(), ctx);
+  return sandbox.createChatTimeout;
+}
+
+test('F8: createChatTimeout covers BOTH paths — native .timeout() and AbortController+setTimeout fallback', () => {
+  const src = extractCreateChatTimeoutSource();
+  assert.match(src, /typeof AbortSignal\.timeout === 'function'/, 'modern path uses AbortSignal.timeout');
+  assert.match(src, /new AbortController\(\)/, 'legacy path builds a manual controller');
+  assert.match(src, /setTimeout\(/, 'legacy path bounds the request with setTimeout');
+  assert.match(src, /return null/, 'ancient clients (no AbortController) keep previous behavior');
+});
+
+test('L1: modern path — AbortSignal.timeout available → native bounded signal rejects as TimeoutError', async () => {
+  const createChatTimeout = runCreateChatTimeout({ AbortSignal, AbortController, setTimeout, clearTimeout, DOMException });
+  const ct = createChatTimeout(80);
+  assert.ok(ct && ct.signal instanceof AbortSignal, 'modern path returns a native signal');
+  assert.equal(ct.signal.aborted, false, 'not aborted before the deadline');
+  await assert.rejects(
+    () => new Promise((_, rej) => ct.signal.addEventListener('abort', () => rej(ct.signal.reason))),
+    (e) => e.name === 'TimeoutError'
+  );
+  ct.clear(); // no timer on the modern path — clear() must still be safe
+});
+
+test('L2: legacy path — AbortSignal.timeout MISSING → AbortController+setTimeout still bounds the request', async () => {
+  // AbortSignal present but WITHOUT .timeout models iOS 15.x WKWebView /
+  // Chromium <103 WebViews — the exact population the PR #96 review flagged.
+  const createChatTimeout = runCreateChatTimeout({ AbortSignal: {}, AbortController, setTimeout, clearTimeout, DOMException });
+  const ct = createChatTimeout(60);
+  assert.ok(ct, 'legacy fallback must produce a signal object');
+  assert.ok(ct.signal instanceof AbortSignal, 'legacy fallback uses a REAL AbortController signal fetch can honor');
+  assert.equal(ct.signal.aborted, false, 'not aborted before the deadline');
+  // fetch-like consumer that honors the signal (real fetch semantics):
+  await assert.rejects(
+    () => new Promise((resolve, reject) => {
+      if (ct.signal.aborted) return reject(ct.signal.reason);
+      ct.signal.addEventListener('abort', () => reject(ct.signal.reason || new DOMException('aborted', 'AbortError')));
+    }),
+    (e) => e.name === 'TimeoutError' || e.name === 'AbortError'
+  );
+  assert.equal(ct.timedOut(), true, 'timedOut() flag set — engine-independent timeout classification');
+});
+
+test('L3: legacy path — clear() cancels the pending timer (no dangling 90s timeout after settle)', async () => {
+  const createChatTimeout = runCreateChatTimeout({ AbortSignal: {}, AbortController, setTimeout, clearTimeout, DOMException });
+  const ct = createChatTimeout(50);
+  ct.clear();
+  await new Promise(r => setTimeout(r, 120));
+  assert.equal(ct.signal.aborted, false, 'timer must have been cleared by clear()');
+  assert.equal(ct.timedOut(), false, 'flag must stay false after clear()');
+});
+
+test('L4: ancient path — no AbortController at all → returns null (previous behavior preserved)', () => {
+  const createChatTimeout = runCreateChatTimeout({ setTimeout, clearTimeout });
+  assert.equal(createChatTimeout(90000), null);
+});
+
+test('F9: both finally blocks release the legacy fallback timer', () => {
+  assert.equal((FRONTEND_SRC.match(/if \(chatTimeout\) chatTimeout\.clear\(\);/g) || []).length, 2,
+    'send() and retry() finally blocks must clear the fallback timer');
+});
+
+test('F10: timeout classification honors the timedOut() flag (legacy engines without abort reasons)', () => {
+  assert.equal((FRONTEND_SRC.match(/\(chatTimeout && chatTimeout\.timedOut\(\)\)/g) || []).length, 2,
+    'both catch blocks must classify timeouts via the flag as well as the error name');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
