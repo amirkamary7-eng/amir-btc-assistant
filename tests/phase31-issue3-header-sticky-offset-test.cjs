@@ -20,9 +20,11 @@
  *
  *   CORRECT precedent already in the codebase (anchor + family):
  *     .app-header           base.css            height:56px, sticky top:0, z:100
- *     .mkt-list-header      market.css:453      sticky top:56px, z:20
+ *     .mkt-list-header      market.css          sticky top:calc(56px + var(--mkt-header-h,64px)), z:20
  *     .ni-topbar            news.css:392        sticky top:56px, z:15
  *     .analysis-tabs-row    style.css:2386      sticky top:56px, z:5
+ *     (2026-10-22 update: .mkt-list-header moved OFF the flat 56px family
+ *      offset — see the stacked-sticky note in test 3 below.)
  *
  * Phase 31 fix under test (two one-line offsets, zero visual change at rest):
  *     market.css          .mkt-header  top: 0  -> top: 56px
@@ -39,9 +41,13 @@
  * the evidence, this file is the permanent guard):
  *   1. ANCHOR: .app-header keeps height:56px + sticky top:0 + z-index:100.
  *   2. FIX: .mkt-header and .adp-header are sticky with top:56px (not 0).
- *   3. FAMILY: every page-level sub-header that lives under the app-header
- *      uses the SAME 56px offset (.mkt-list-header, .ni-topbar,
- *      .analysis-tabs-row) — cross-page consistency contract.
+ *   3. FAMILY: every page-level sub-header that lives DIRECTLY under the
+ *      app-header uses the SAME 56px offset (.ni-topbar,
+ *      .analysis-tabs-row) — cross-page consistency contract. EXCEPTION
+ *      (2026-10-22): .mkt-list-header is the only bar in the app that lives
+ *      under ANOTHER sticky bar (.mkt-header), so it uses the stacked
+ *      offset calc(56px + var(--mkt-header-h, 64px)) — see
+ *      tests/market-header-sticky-stack-test.cjs for that contract.
  *   4. NO-CLIPPING GUARD: neither fixed bar may return to top:0 with a
  *      z-index below the app-header's 100 (the burial mechanism).
  *   5. OVERLAY PATTERN PROTECTED: full-page overlays' own headers KEEP
@@ -159,12 +165,6 @@ test('Issue 3 FIX: .adp-header (Analysis Detail) is sticky at top:56px — not t
 // ════════════════════════════════════════════════════════════════════════════
 // 3. FAMILY — cross-page consistency of every under-app-header sticky bar
 // ════════════════════════════════════════════════════════════════════════════
-
-test('Issue 3 FAMILY: .mkt-list-header (Market column header) keeps top:56px', () => {
-  const rule = extractRule(marketSrc, '.mkt-list-header');
-  assert.equal(decl(rule, 'position'), 'sticky');
-  assert.equal(decl(rule, 'top'), '56px');
-});
 
 test('Issue 3 FAMILY: .ni-topbar (News) keeps top:56px', () => {
   const rule = extractRule(newsSrc, '.ni-topbar');
