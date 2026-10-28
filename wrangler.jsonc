@@ -73,7 +73,6 @@
                 "AI_COOLDOWN_SECONDS": 4,
                 "REFERRAL_TOKENS_PER_INVITE": 3,
                 "BOT_USERNAME": "Amir_BTC_AssistantBot",
-                "ZAI_API_KEY": "Z.ai",
                 "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
         },
         "env": {
@@ -140,7 +139,6 @@
                                 "AI_COOLDOWN_SECONDS": 4,
                                 "REFERRAL_TOKENS_PER_INVITE": 3,
                                 "BOT_USERNAME": "Amir_BTC_AssistantBot",
-                                "ZAI_API_KEY": "Z.ai",
                                 "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
                         },
                         "hyperdrive": [
@@ -224,7 +222,6 @@
                                 "BOT_USERNAME": "Amir_BTC_AssistantBot",
                                 "NEWS_PROVIDER_OPENROUTER": "true",
                                 "GROQ_RPM_LIMIT": 20,
-                                "ZAI_API_KEY": "Z.ai",
                                 "ZAI_BASE_URL": "https://internal-api.z.ai/v1"
                         },
                         "hyperdrive": [
