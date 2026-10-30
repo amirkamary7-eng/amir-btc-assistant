@@ -637,18 +637,67 @@ export function createRewardPurchaseHandlers(deps) {
   }
 
   // ── POST /api/admin/reward-purchases/:id/cancel ────────────────────────
+  // FIN-001 FIX: Atomic purchase cancellation + Ledger verification + Refund / Outbox reconciliation.
   async function handleAdminCancel(request, env, purchaseId) {
-    const { error: authErr } = await requireAdmin(request, env, 'wallet.manage');
+    const { error: authErr, admin } = await requireAdmin(request, env, 'wallet.manage');
     if (authErr) return authErr;
-    if (!purchaseId) {
-      return jsonResponse({ status: 'error', message: 'purchase id required' }, { status: 422 }, env);
+    const numericId = Number(purchaseId);
+    if (!purchaseId || !Number.isInteger(numericId) || numericId <= 0) {
+      return jsonResponse({ status: 'error', code: 'INVALID_PURCHASE_ID', message: 'purchase id required' }, { status: 422 }, env);
     }
     try {
-      const cancelled = await rewardPurchaseRepo.cancelPurchase(env, purchaseId);
-      if (!cancelled) {
-        return jsonResponse({ status: 'error', message: 'Purchase not found or not pending' }, { status: 404 }, env);
+      const result = await rewardPurchaseRepo.cancelPurchase(env, numericId, {
+        adminId: admin?.telegram_id || 'admin',
+      });
+      // Backward compatibility if a lightweight test stub returns a bare boolean
+      if (typeof result === 'boolean') {
+        if (!result) {
+          return jsonResponse({ status: 'error', code: 'PURCHASE_NOT_FOUND', message: 'Purchase not found or not pending' }, { status: 404 }, env);
+        }
+        return jsonResponse({ status: 'success', cancelled: true }, {}, env);
       }
-      return jsonResponse({ status: 'success', cancelled: true }, {}, env);
+      if (!result || result.status === 'not_found' || result.code === 'PURCHASE_NOT_FOUND') {
+        return jsonResponse({
+          status: 'error',
+          code: 'PURCHASE_NOT_FOUND',
+          message: 'Purchase not found',
+        }, { status: 404 }, env);
+      }
+      if (result.status === 'already_fulfilled' || result.code === 'PURCHASE_ALREADY_FULFILLED') {
+        return jsonResponse({
+          status: 'error',
+          code: 'PURCHASE_ALREADY_FULFILLED',
+          message: 'Purchase is already fulfilled and cannot be cancelled',
+          current_status: result.currentStatus || 'fulfilled',
+        }, { status: 409 }, env);
+      }
+      if (result.status === 'ledger_mismatch' || result.code === 'LEDGER_MISMATCH') {
+        return jsonResponse({
+          status: 'error',
+          code: 'LEDGER_MISMATCH',
+          reason: result.reason || 'debit_ledger_mismatch',
+          message: result.message || 'Cannot cancel purchase: debit transaction missing or mismatched in ledger',
+        }, { status: 409 }, env);
+      }
+      if (!result.cancelled) {
+        return jsonResponse({
+          status: 'error',
+          code: result.code || 'CANCEL_FAILED',
+          message: result.message || 'Purchase could not be cancelled',
+        }, { status: 409 }, env);
+      }
+      return jsonResponse({
+        status: 'success',
+        cancelled: true,
+        refunded: Boolean(result.refunded),
+        outbox_queued: Boolean(result.outboxQueued),
+        idempotent: Boolean(result.idempotent),
+        code: result.code || 'CANCELLED_AND_REFUNDED',
+        purchase_id: result.purchaseId || numericId,
+        refund_ref_id: result.refundRefId || null,
+        tx_id: result.txId ?? null,
+        new_balance: result.newBalance ?? null,
+      }, {}, env);
     } catch (e) {
       return safeDbErrorResponse(e, {}, env);
     }

@@ -307,16 +307,26 @@ function makePgHarness() {
   async function queryDbTransaction(env, queries) {
     const pool = new Pool();
     const client = await pool.connect();
+    const hasValidator = Array.isArray(queries) && queries.some(q => q && typeof q.validate === 'function');
+    const savepoint = hasValidator ? db.backup() : null;
     try {
       await client.query('BEGIN');
       const results = [];
-      for (const { sql, params } of queries) {
+      for (const queryItem of queries) {
+        const { sql, params, validate } = queryItem;
         const r = await client.query(interpolate(String(sql), params || []), []);
-        results.push({ rows: normalizeRows(r.rows), rowCount: r.rowCount });
+        const res = { rows: normalizeRows(r.rows), rowCount: r.rowCount };
+        results.push(res);
+        if (typeof validate === 'function') {
+          await validate(res, results);
+        }
       }
       await client.query('COMMIT');
       return results;
     } catch (error) {
+      if (savepoint) {
+        try { savepoint.restore(); } catch { /* ignore */ }
+      }
       try { await client.query('ROLLBACK'); } catch { /* ignore */ }
       throw error;
     } finally {

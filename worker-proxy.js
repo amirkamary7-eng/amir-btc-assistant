@@ -3246,8 +3246,17 @@ async function queryDbTransaction(env, queries) {
     // ROLLBACK may also fail on a poisoned connection — wrapped in try/catch.
     await _poolQueryWithTimeout(client, 'BEGIN', [], { poolLabel: 'txn' });
     const results = [];
-    for (const { sql, params } of queries) {
-      results.push(await _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' }));
+    for (const queryItem of queries) {
+      const { sql, params, validate } = queryItem;
+      const res = await _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' });
+      results.push(res);
+      // FIN-001 FIX: Execute optional pre-commit validator BEFORE COMMIT.
+      // Because queryDbTransaction commits before returning results to the caller,
+      // any conditional rollback based on query results MUST happen here inside the
+      // try block prior to COMMIT so throwing triggers ROLLBACK in catch (error).
+      if (typeof validate === 'function') {
+        await validate(res, results);
+      }
     }
     await _poolQueryWithTimeout(client, 'COMMIT', [], { poolLabel: 'txn' });
     const _t1 = Date.now();
