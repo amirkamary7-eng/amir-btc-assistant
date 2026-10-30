@@ -17,7 +17,7 @@
  */
 
 export function createRewardPurchaseRepository(deps) {
-  const { queryDb, isDatabaseConfigured } = deps;
+  const { queryDb, queryDbTransaction, isDatabaseConfigured } = deps;
 
   let _schemaVerified = false;
 
@@ -72,6 +72,29 @@ export function createRewardPurchaseRepository(deps) {
       await queryDb(env, `CREATE UNIQUE INDEX IF NOT EXISTS uq_rp_pending_plan
         ON reward_purchases (user_id, reward_type, vpn_gb)
         WHERE status = 'pending'`);
+      // FIN-001: Ensure pending_refunds Outbox table and partial unique index exist
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS pending_refunds (
+          id              SERIAL PRIMARY KEY,
+          user_id         VARCHAR(64) NOT NULL,
+          amount          INTEGER NOT NULL,
+          refund_ref_id   VARCHAR(64) NOT NULL,
+          original_ref_id VARCHAR(64),
+          source          VARCHAR(32) NOT NULL DEFAULT 'vpn',
+          description     VARCHAR(256),
+          metadata        JSONB DEFAULT '{}',
+          status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+          retry_count     INTEGER NOT NULL DEFAULT 0,
+          last_retry_at   TIMESTAMPTZ,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `).catch(() => {});
+      await queryDb(env, `
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_refunds_ref_id
+          ON pending_refunds (refund_ref_id)
+          WHERE status = 'pending'
+      `).catch(() => {});
       // W-STAB-3 FIX (mirrors wallet.js M4 fix): only mark schema as verified
       // on SUCCESS. Previously _schemaVerified was set to true in BOTH try and
       // catch blocks — meaning a failed unique-index creation (e.g. due to
@@ -229,16 +252,445 @@ export function createRewardPurchaseRepository(deps) {
   // ─── Fulfillment ────────────────────────────────────────────────────────
 
   /**
-   * Cancel a purchase. Only pending purchases can be cancelled.
+   * FIN-001 FIX: Atomic VPN purchase cancellation + Ledger verification + Refund / Outbox reconciliation.
+   *
+   * Invariants enforced BOTH in SQL (single CTE data dependency) AND in queryDbTransaction's
+   * pre-commit validate(res, results) hook BEFORE COMMIT:
+   *   1. Purchase not found -> ROLLBACK before COMMIT, returns { cancelled: false, status: 'not_found', code: 'PURCHASE_NOT_FOUND' }
+   *   2. Purchase already fulfilled (or non-pending/non-cancelled) -> ROLLBACK before COMMIT, returns { cancelled: false, status: 'already_fulfilled', code: 'PURCHASE_ALREADY_FULFILLED' }
+   *   3. Missing or mismatched debit row in token_transactions -> ROLLBACK before COMMIT, returns { cancelled: false, status: 'ledger_mismatch', code: 'LEDGER_MISMATCH' }
+   *   4. Purchase already cancelled:
+   *      - If valid refund already completed -> idempotent return (no double refund), reconciles any lingering pending Outbox row
+   *      - If legacy cancelled row lacked refund and valid debit exists -> reconciles refund atomically
+   *   5. Refund already completed while purchase still pending -> transitions purchase to 'cancelled' without double-crediting balance (idempotent_refund)
+   *   6. Duplicate/existing row in Outbox (pending_refunds):
+   *      - Verified against purchase user_id and cost_ab (mismatched Outbox row triggers LEDGER_MISMATCH rollback)
+   *      - In direct refund mode: atomically marked status = 'completed' so retryFailedRefunds cron never double-credits
+   *      - In outboxOnly fallback mode: deduplicated via WHERE NOT EXISTS + ON CONFLICT DO NOTHING
+   *   7. Purchase status NEVER transitions to 'cancelled' without a valid completed refund or valid pending Outbox record.
    */
-  async function cancelPurchase(env, purchaseId) {
+  async function cancelPurchase(env, purchaseId, options = {}) {
+    if (typeof queryDbTransaction !== 'function') {
+      throw new Error('queryDbTransaction not available');
+    }
     await ensureSchema(env).catch(() => {});
-    const result = await queryDb(env,
-      `UPDATE reward_purchases SET status = 'cancelled', updated_at = NOW()
-       WHERE id = $1 AND status = 'pending' RETURNING id`,
-      [Number(purchaseId)],
-    );
-    return result.rows.length > 0;
+    const numericId = Number(purchaseId);
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return {
+        cancelled: false,
+        status: 'not_found',
+        code: 'PURCHASE_NOT_FOUND',
+        refunded: false,
+        idempotent: false,
+      };
+    }
+
+    const outboxOnly = Boolean(options && options.outboxOnly);
+    const metadataJson = JSON.stringify({
+      reason: (options && options.reason) ? String(options.reason) : 'admin_cancelled',
+      purchase_id: numericId,
+      ...(options && options.adminId ? { actor: String(options.adminId) } : {}),
+    });
+
+    const directRefundCteSql = `
+      WITH target_rp AS (
+        SELECT
+          id, user_id, reward_type, plan_id, plan_name, vpn_gb, cost_ab, duration_days,
+          status, tracking_id, tx_ref_id,
+          CASE
+            WHEN tx_ref_id IS NOT NULL AND tx_ref_id <> '' THEN tx_ref_id || '_refund'
+            ELSE 'vpn_cancel_refund_' || id::text
+          END AS refund_ref_id,
+          'Refund: ' || COALESCE(plan_name, 'VPN') || ' cancelled' AS refund_desc
+        FROM reward_purchases
+        WHERE id = $1
+        FOR UPDATE
+      ),
+      valid_debit AS (
+        SELECT tt.id AS debit_tx_id, tt.amount AS debit_amount
+        FROM token_transactions tt
+        INNER JOIN target_rp rp ON tt.user_id = rp.user_id
+        WHERE tt.tx_type = 'vpn_purchase'
+          AND rp.tx_ref_id IS NOT NULL
+          AND rp.tx_ref_id <> ''
+          AND tt.ref_id = rp.tx_ref_id
+          AND tt.status = 'completed'
+          AND rp.cost_ab > 0
+          AND tt.amount = -rp.cost_ab
+        LIMIT 1
+      ),
+      existing_refund AS (
+        SELECT tt.id AS refund_tx_id, tt.amount AS refund_amount
+        FROM token_transactions tt
+        INNER JOIN target_rp rp ON tt.user_id = rp.user_id
+        WHERE tt.tx_type = 'marketplace_refund'
+          AND tt.ref_id = rp.refund_ref_id
+          AND tt.status = 'completed'
+        LIMIT 1
+      ),
+      existing_valid_refund AS (
+        SELECT er.refund_tx_id, er.refund_amount
+        FROM existing_refund er
+        INNER JOIN target_rp rp ON rp.cost_ab > 0 AND er.refund_amount = rp.cost_ab
+        LIMIT 1
+      ),
+      existing_outbox AS (
+        SELECT pr.id AS outbox_id, pr.user_id AS outbox_user_id, pr.amount AS outbox_amount
+        FROM pending_refunds pr
+        INNER JOIN target_rp rp ON (
+          pr.refund_ref_id = rp.refund_ref_id
+          OR (rp.tx_ref_id IS NOT NULL AND rp.tx_ref_id <> '' AND pr.original_ref_id = rp.tx_ref_id AND pr.source = 'vpn')
+        )
+        WHERE pr.status = 'pending'
+        LIMIT 1
+      ),
+      existing_valid_outbox AS (
+        SELECT eo.outbox_id, eo.outbox_amount
+        FROM existing_outbox eo
+        INNER JOIN target_rp rp ON eo.outbox_user_id = rp.user_id AND rp.cost_ab > 0 AND eo.outbox_amount = rp.cost_ab
+        LIMIT 1
+      ),
+      refund_insert AS (
+        INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
+        SELECT rp.user_id, rp.cost_ab, 'marketplace_refund', 'reward', 'completed', rp.refund_desc, rp.refund_ref_id, $2, NOW(), NOW()
+        FROM target_rp rp
+        WHERE rp.status IN ('pending', 'cancelled')
+          AND EXISTS (SELECT 1 FROM valid_debit)
+          AND NOT EXISTS (SELECT 1 FROM existing_refund)
+          AND (NOT EXISTS (SELECT 1 FROM existing_outbox) OR EXISTS (SELECT 1 FROM existing_valid_outbox))
+        ON CONFLICT DO NOTHING
+        RETURNING id, user_id, amount
+      ),
+      balance_upsert AS (
+        INSERT INTO token_balances (user_id, balance, updated_at)
+        SELECT ri.user_id, ri.amount, NOW()
+        FROM refund_insert ri
+        ON CONFLICT (user_id) DO UPDATE
+          SET balance = token_balances.balance + EXCLUDED.balance,
+              updated_at = NOW()
+        RETURNING balance
+      ),
+      cancelled_rp AS (
+        UPDATE reward_purchases
+        SET status = 'cancelled', updated_at = NOW()
+        WHERE id = $1
+          AND status = 'pending'
+          AND EXISTS (SELECT 1 FROM valid_debit)
+          AND (NOT EXISTS (SELECT 1 FROM existing_outbox) OR EXISTS (SELECT 1 FROM existing_valid_outbox))
+          AND (
+            (EXISTS (SELECT 1 FROM refund_insert) AND EXISTS (SELECT 1 FROM balance_upsert))
+            OR EXISTS (SELECT 1 FROM existing_valid_refund)
+          )
+        RETURNING id, status
+      ),
+      outbox_reconcile AS (
+        UPDATE pending_refunds
+        SET status = 'completed', last_retry_at = NOW(), updated_at = NOW()
+        WHERE (
+            refund_ref_id IN (SELECT refund_ref_id FROM target_rp)
+            OR (
+              original_ref_id IN (SELECT tx_ref_id FROM target_rp WHERE tx_ref_id IS NOT NULL AND tx_ref_id <> '')
+              AND source = 'vpn'
+            )
+          )
+          AND status = 'pending'
+          AND (NOT EXISTS (SELECT 1 FROM existing_outbox) OR EXISTS (SELECT 1 FROM existing_valid_outbox))
+          AND (
+            (EXISTS (SELECT 1 FROM refund_insert) AND EXISTS (SELECT 1 FROM balance_upsert))
+            OR EXISTS (SELECT 1 FROM existing_valid_refund)
+          )
+        RETURNING id
+      )
+      SELECT
+        (SELECT id FROM target_rp) AS rp_id,
+        (SELECT user_id FROM target_rp) AS user_id,
+        (SELECT status FROM target_rp) AS prev_status,
+        (SELECT cost_ab FROM target_rp) AS cost_ab,
+        (SELECT tx_ref_id FROM target_rp) AS tx_ref_id,
+        (SELECT refund_ref_id FROM target_rp) AS refund_ref_id,
+        (SELECT debit_tx_id FROM valid_debit) AS debit_tx_id,
+        (SELECT refund_tx_id FROM existing_refund) AS existing_refund_tx_id,
+        (SELECT refund_tx_id FROM existing_valid_refund) AS existing_valid_refund_tx_id,
+        (SELECT outbox_id FROM existing_outbox) AS existing_outbox_id,
+        (SELECT outbox_id FROM existing_valid_outbox) AS existing_valid_outbox_id,
+        (SELECT id FROM cancelled_rp) AS cancelled_rp_id,
+        (SELECT id FROM refund_insert) AS new_refund_tx_id,
+        NULL::int AS new_outbox_id,
+        (SELECT COUNT(*)::int FROM outbox_reconcile) AS reconciled_outbox_count,
+        (SELECT balance FROM balance_upsert LIMIT 1) AS upserted_balance,
+        (SELECT tb.balance FROM token_balances tb INNER JOIN target_rp rp ON tb.user_id = rp.user_id LIMIT 1) AS current_balance
+    `;
+
+    const outboxFallbackCteSql = `
+      WITH target_rp AS (
+        SELECT
+          id, user_id, reward_type, plan_id, plan_name, vpn_gb, cost_ab, duration_days,
+          status, tracking_id, tx_ref_id,
+          CASE
+            WHEN tx_ref_id IS NOT NULL AND tx_ref_id <> '' THEN tx_ref_id || '_refund'
+            ELSE 'vpn_cancel_refund_' || id::text
+          END AS refund_ref_id,
+          'Refund: ' || COALESCE(plan_name, 'VPN') || ' cancelled' AS refund_desc
+        FROM reward_purchases
+        WHERE id = $1
+        FOR UPDATE
+      ),
+      valid_debit AS (
+        SELECT tt.id AS debit_tx_id, tt.amount AS debit_amount
+        FROM token_transactions tt
+        INNER JOIN target_rp rp ON tt.user_id = rp.user_id
+        WHERE tt.tx_type = 'vpn_purchase'
+          AND rp.tx_ref_id IS NOT NULL
+          AND rp.tx_ref_id <> ''
+          AND tt.ref_id = rp.tx_ref_id
+          AND tt.status = 'completed'
+          AND rp.cost_ab > 0
+          AND tt.amount = -rp.cost_ab
+        LIMIT 1
+      ),
+      existing_refund AS (
+        SELECT tt.id AS refund_tx_id, tt.amount AS refund_amount
+        FROM token_transactions tt
+        INNER JOIN target_rp rp ON tt.user_id = rp.user_id
+        WHERE tt.tx_type = 'marketplace_refund'
+          AND tt.ref_id = rp.refund_ref_id
+          AND tt.status = 'completed'
+        LIMIT 1
+      ),
+      existing_valid_refund AS (
+        SELECT er.refund_tx_id, er.refund_amount
+        FROM existing_refund er
+        INNER JOIN target_rp rp ON rp.cost_ab > 0 AND er.refund_amount = rp.cost_ab
+        LIMIT 1
+      ),
+      existing_outbox AS (
+        SELECT pr.id AS outbox_id, pr.user_id AS outbox_user_id, pr.amount AS outbox_amount
+        FROM pending_refunds pr
+        INNER JOIN target_rp rp ON (
+          pr.refund_ref_id = rp.refund_ref_id
+          OR (rp.tx_ref_id IS NOT NULL AND rp.tx_ref_id <> '' AND pr.original_ref_id = rp.tx_ref_id AND pr.source = 'vpn')
+        )
+        WHERE pr.status = 'pending'
+        LIMIT 1
+      ),
+      existing_valid_outbox AS (
+        SELECT eo.outbox_id, eo.outbox_amount
+        FROM existing_outbox eo
+        INNER JOIN target_rp rp ON eo.outbox_user_id = rp.user_id AND rp.cost_ab > 0 AND eo.outbox_amount = rp.cost_ab
+        LIMIT 1
+      ),
+      outbox_insert AS (
+        INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status, created_at, updated_at)
+        SELECT rp.user_id, rp.cost_ab, rp.refund_ref_id, rp.tx_ref_id, 'vpn', rp.refund_desc, $2, 'pending', NOW(), NOW()
+        FROM target_rp rp
+        WHERE rp.status IN ('pending', 'cancelled')
+          AND EXISTS (SELECT 1 FROM valid_debit)
+          AND NOT EXISTS (SELECT 1 FROM existing_refund)
+          AND NOT EXISTS (SELECT 1 FROM existing_outbox)
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      ),
+      cancelled_rp AS (
+        UPDATE reward_purchases
+        SET status = 'cancelled', updated_at = NOW()
+        WHERE id = $1
+          AND status = 'pending'
+          AND EXISTS (SELECT 1 FROM valid_debit)
+          AND (NOT EXISTS (SELECT 1 FROM existing_outbox) OR EXISTS (SELECT 1 FROM existing_valid_outbox))
+          AND (
+            EXISTS (SELECT 1 FROM outbox_insert)
+            OR EXISTS (SELECT 1 FROM existing_valid_outbox)
+            OR EXISTS (SELECT 1 FROM existing_valid_refund)
+          )
+        RETURNING id, status
+      ),
+      outbox_reconcile AS (
+        UPDATE pending_refunds
+        SET status = 'completed', last_retry_at = NOW(), updated_at = NOW()
+        WHERE (
+            refund_ref_id IN (SELECT refund_ref_id FROM target_rp)
+            OR (
+              original_ref_id IN (SELECT tx_ref_id FROM target_rp WHERE tx_ref_id IS NOT NULL AND tx_ref_id <> '')
+              AND source = 'vpn'
+            )
+          )
+          AND status = 'pending'
+          AND EXISTS (SELECT 1 FROM existing_valid_refund)
+          AND (NOT EXISTS (SELECT 1 FROM existing_outbox) OR EXISTS (SELECT 1 FROM existing_valid_outbox))
+        RETURNING id
+      )
+      SELECT
+        (SELECT id FROM target_rp) AS rp_id,
+        (SELECT user_id FROM target_rp) AS user_id,
+        (SELECT status FROM target_rp) AS prev_status,
+        (SELECT cost_ab FROM target_rp) AS cost_ab,
+        (SELECT tx_ref_id FROM target_rp) AS tx_ref_id,
+        (SELECT refund_ref_id FROM target_rp) AS refund_ref_id,
+        (SELECT debit_tx_id FROM valid_debit) AS debit_tx_id,
+        (SELECT refund_tx_id FROM existing_refund) AS existing_refund_tx_id,
+        (SELECT refund_tx_id FROM existing_valid_refund) AS existing_valid_refund_tx_id,
+        (SELECT outbox_id FROM existing_outbox) AS existing_outbox_id,
+        (SELECT outbox_id FROM existing_valid_outbox) AS existing_valid_outbox_id,
+        (SELECT id FROM cancelled_rp) AS cancelled_rp_id,
+        NULL::int AS new_refund_tx_id,
+        (SELECT id FROM outbox_insert) AS new_outbox_id,
+        (SELECT COUNT(*)::int FROM outbox_reconcile) AS reconciled_outbox_count,
+        NULL::int AS upserted_balance,
+        (SELECT tb.balance FROM token_balances tb INNER JOIN target_rp rp ON tb.user_id = rp.user_id LIMIT 1) AS current_balance
+    `;
+
+    let results;
+    try {
+      results = await queryDbTransaction(env, [
+        {
+          sql: outboxOnly ? outboxFallbackCteSql : directRefundCteSql,
+          params: [numericId, metadataJson],
+          validate: async (res) => {
+            const r = res && res.rows ? res.rows[0] : null;
+            if (!r || r.rp_id === null || r.rp_id === undefined) {
+              throw Object.assign(new Error('PURCHASE_NOT_FOUND'), {
+                code: 'PURCHASE_NOT_FOUND',
+              });
+            }
+            if (r.prev_status !== 'pending' && r.prev_status !== 'cancelled') {
+              throw Object.assign(new Error('PURCHASE_ALREADY_FULFILLED'), {
+                code: 'PURCHASE_ALREADY_FULFILLED',
+                currentStatus: String(r.prev_status),
+              });
+            }
+            if (r.debit_tx_id === null || r.debit_tx_id === undefined) {
+              throw Object.assign(
+                new Error('Ledger mismatch: original completed vpn_purchase debit transaction is missing or amount does not match cost_ab'),
+                { code: 'LEDGER_MISMATCH', reason: 'missing_or_mismatched_debit' },
+              );
+            }
+            if (r.existing_refund_tx_id !== null && r.existing_refund_tx_id !== undefined &&
+                (r.existing_valid_refund_tx_id === null || r.existing_valid_refund_tx_id === undefined)) {
+              throw Object.assign(
+                new Error('Ledger mismatch: existing marketplace_refund amount does not match purchase cost_ab'),
+                { code: 'LEDGER_MISMATCH', reason: 'mismatched_existing_refund' },
+              );
+            }
+            if (r.existing_outbox_id !== null && r.existing_outbox_id !== undefined &&
+                (r.existing_valid_outbox_id === null || r.existing_valid_outbox_id === undefined)) {
+              throw Object.assign(
+                new Error('Ledger mismatch: existing pending_refunds Outbox row does not match purchase user_id or cost_ab'),
+                { code: 'LEDGER_MISMATCH', reason: 'mismatched_pending_outbox' },
+              );
+            }
+
+            if (outboxOnly) {
+              const hasValidOutboxOrRefund =
+                r.new_outbox_id != null ||
+                r.existing_valid_outbox_id != null ||
+                r.existing_valid_refund_tx_id != null;
+              const statusTransitionOk =
+                r.prev_status === 'cancelled' || r.cancelled_rp_id != null;
+              if (!hasValidOutboxOrRefund || !statusTransitionOk) {
+                throw Object.assign(
+                  new Error('Refund invariant violation: purchase cannot be cancelled without valid Outbox entry or completed refund'),
+                  { code: 'REFUND_INVARIANT_VIOLATION' },
+                );
+              }
+            } else {
+              const hasValidRefund =
+                (r.new_refund_tx_id != null && r.upserted_balance != null) ||
+                r.existing_valid_refund_tx_id != null;
+              const statusTransitionOk =
+                r.prev_status === 'cancelled' || r.cancelled_rp_id != null;
+              if (!hasValidRefund || !statusTransitionOk) {
+                throw Object.assign(
+                  new Error('Refund invariant violation: purchase cannot be cancelled without valid refund credit'),
+                  { code: 'REFUND_INVARIANT_VIOLATION' },
+                );
+              }
+            }
+          },
+        },
+      ]);
+    } catch (err) {
+      if (err && err.code === 'PURCHASE_NOT_FOUND') {
+        return {
+          cancelled: false,
+          status: 'not_found',
+          code: 'PURCHASE_NOT_FOUND',
+          refunded: false,
+          idempotent: false,
+        };
+      }
+      if (err && err.code === 'PURCHASE_ALREADY_FULFILLED') {
+        return {
+          cancelled: false,
+          status: 'already_fulfilled',
+          code: 'PURCHASE_ALREADY_FULFILLED',
+          currentStatus: err.currentStatus || 'fulfilled',
+          refunded: false,
+          idempotent: false,
+        };
+      }
+      if (err && err.code === 'LEDGER_MISMATCH') {
+        return {
+          cancelled: false,
+          status: 'ledger_mismatch',
+          code: 'LEDGER_MISMATCH',
+          reason: err.reason || 'debit_ledger_mismatch',
+          message: err.message,
+          refunded: false,
+          idempotent: false,
+        };
+      }
+      throw err;
+    }
+
+    const r = results[0].rows[0];
+    const wasAlreadyCancelled = r.prev_status === 'cancelled';
+    const refundWasAlreadyCompleted = r.existing_valid_refund_tx_id != null && r.new_refund_tx_id == null;
+    const outboxWasAlreadyQueued = Boolean(outboxOnly && r.existing_valid_outbox_id != null && r.new_outbox_id == null);
+    const idempotent =
+      (wasAlreadyCancelled && refundWasAlreadyCompleted) ||
+      (!wasAlreadyCancelled && refundWasAlreadyCompleted) ||
+      (wasAlreadyCancelled && outboxWasAlreadyQueued);
+
+    let status = 'cancelled';
+    let code = 'CANCELLED_AND_REFUNDED';
+    if (wasAlreadyCancelled && refundWasAlreadyCompleted) {
+      status = 'already_cancelled';
+      code = 'ALREADY_CANCELLED';
+    } else if (wasAlreadyCancelled && r.new_refund_tx_id != null) {
+      status = 'cancelled';
+      code = 'REFUND_RECONCILED';
+    } else if (!wasAlreadyCancelled && refundWasAlreadyCompleted) {
+      status = 'cancelled';
+      code = 'IDEMPOTENT_REFUND';
+    } else if (outboxOnly) {
+      status = wasAlreadyCancelled ? 'already_cancelled' : 'cancelled';
+      code = outboxWasAlreadyQueued ? 'OUTBOX_ALREADY_QUEUED' : 'CANCELLED_OUTBOX_QUEUED';
+    }
+
+    return {
+      cancelled: true,
+      status,
+      code,
+      refunded: Boolean(r.new_refund_tx_id != null || r.existing_valid_refund_tx_id != null),
+      outboxQueued: Boolean(r.new_outbox_id != null || r.existing_valid_outbox_id != null),
+      reconciledOutboxCount: Number(r.reconciled_outbox_count || 0),
+      idempotent,
+      purchaseId: Number(r.rp_id),
+      userId: String(r.user_id),
+      costAb: Number(r.cost_ab),
+      txRefId: r.tx_ref_id || null,
+      refundRefId: r.refund_ref_id || null,
+      debitTxId: Number(r.debit_tx_id),
+      txId: r.new_refund_tx_id != null
+        ? Number(r.new_refund_tx_id)
+        : (r.existing_valid_refund_tx_id != null ? Number(r.existing_valid_refund_tx_id) : null),
+      outboxId: r.new_outbox_id != null
+        ? Number(r.new_outbox_id)
+        : (r.existing_valid_outbox_id != null ? Number(r.existing_valid_outbox_id) : null),
+      newBalance: r.upserted_balance != null
+        ? Number(r.upserted_balance)
+        : (r.current_balance != null ? Number(r.current_balance) : null),
+    };
   }
 
   /**
