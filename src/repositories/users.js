@@ -274,18 +274,30 @@ export function createUserRepository(deps) {
    * reward. This prevents abuse where a user deletes + re-registers repeatedly
    * to farm referral rewards for themselves.
    *
+   * OPTION B ANTI-FARMING (P0 REMEDIATION NEW-DB-01):
+   * Quota and reward state (wheel_spins, wheel_history, mission_progress,
+   * alert_quota) are intentionally NOT deleted. These tables do NOT have
+   * foreign keys to users. Retaining them prevents an attacker from cycling
+   * account deletion to reset daily free wheel spins or replay completed
+   * daily missions for infinite token farming.
+   *
    * Cascade order (child → parent to avoid FK violations):
    *   1. referrals (as invitee AND as inviter)
    *   2. token_transactions
-   *   3. token_balances (if table exists)
-   *   4. watchlist_items
-   *   5. alerts
-   *   6. notifications
-   *  6b. notification_queue (no FK to users — manual cleanup, SETTINGS-002)
-   *   7. tickets
-   *   8. mission_progress
-   *   9. calendar_reminders (if table exists)
-   *  10. users (the root row)
+   *   3. token_balances
+   *   4. pending_refunds
+   *   5. watchlist_items
+   *   6. promo_campaign_registrations
+   *   7. price_alerts
+   *   8. notifications
+   *  8b. notification_queue (no FK to users — manual cleanup, SETTINGS-002)
+   *   9. notification_settings
+   *  10. daily_checkin_streaks
+   *  11. calendar_reminders
+   *  12. ticket_replies (child of tickets)
+   *  13. tickets
+   *  14. admins
+   *  15. users (the root row)
    *
    * Each DELETE is wrapped in its own try/catch so that a missing table or
    * transient error doesn't abort the cascade — the user row is still deleted.
@@ -362,26 +374,29 @@ export function createUserRepository(deps) {
       { sql: 'DELETE FROM referrals WHERE inviter_id = $1', params: [uid] },
       { sql: 'DELETE FROM token_transactions WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM token_balances WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM pending_refunds WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM watchlist_items WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM alerts WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM promo_campaign_registrations WHERE telegram_id = $1', params: [uid] },
+      { sql: 'DELETE FROM price_alerts WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM notifications WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM notification_queue WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM tickets WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM mission_progress WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM notification_settings WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM daily_checkin_streaks WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM calendar_reminders WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM wheel_history WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM wheel_spins WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM support_messages WHERE user_id = $1', params: [uid] },
+      { sql: 'DELETE FROM ticket_replies WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = $1)', params: [uid] },
+      { sql: 'DELETE FROM tickets WHERE user_id = $1', params: [uid] },
       { sql: 'DELETE FROM admins WHERE telegram_id = $1', params: [uid] },
       { sql: 'DELETE FROM users WHERE telegram_id = $1', params: [uid] },
     ];
 
     const results = await queryDbTransaction(env, cascadeQueries);
+
     const tableNames = [
       'referrals_as_invitee', 'referrals_as_inviter', 'token_transactions',
-      'token_balances', 'watchlist_items', 'alerts', 'notifications',
-      'notification_queue', 'tickets', 'mission_progress', 'calendar_reminders',
-      'wheel_history', 'wheel_spins', 'support_messages', 'admins', 'users',
+      'token_balances', 'pending_refunds', 'watchlist_items',
+      'promo_campaign_registrations', 'price_alerts', 'notifications',
+      'notification_queue', 'notification_settings', 'daily_checkin_streaks',
+      'calendar_reminders', 'ticket_replies', 'tickets', 'admins', 'users',
     ];
     for (let i = 0; i < tableNames.length; i++) {
       summary.tables[tableNames[i]] = results[i]?.rowCount || 0;
