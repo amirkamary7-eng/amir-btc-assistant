@@ -6761,17 +6761,37 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       // Returns array of { alertId, claimed, triggerPrice }. Only alerts with
       // claimed=true (i.e. UPDATE...WHERE status='active' RETURNING returned
       // their id) are considered "triggered by this invocation".
-      //
-      // OPTION D reliability: if INSERTs succeeded but markTriggeredBulk fails,
-      // orphan notif/queue rows exist but alerts remain 'active'. Next tick:
-      //   - INSERT (ON CONFLICT DO NOTHING → no-op, already exists)
-      //   - markTriggeredBulk → may succeed → alert claimed
-      //   - User already has notification (from tick 1's INSERT) → no loss
-      //   - No duplicates (ON CONFLICT prevents them)
+      // 
+      // NEW-ALERT-01 FIX: Filter triggers in-place so ONLY alerts whose required
+      // notification channels succeeded are submitted to markTriggeredBulk.
+      // - userChannel === 'none': no notification required → safe to claim
+      // - deliverToMiniApp: required mini_app notif INSERT must have succeeded (notifInsertOk)
+      // - deliverToTelegram: required telegram queue INSERT must have succeeded (queueInsertOk)
+      // If either required channel failed, alert remains 'active' for next cron tick.
+      const _safeEligibleTriggers = _triggeredAlerts.filter(t => {
+        const uChan = t._userChannel || 'both';
+        if (uChan === 'none') return true;
+        const reqMini = (uChan === 'mini_app' || uChan === 'both');
+        const reqTg = (uChan === 'telegram' || uChan === 'both');
+        if (reqMini && !notifInsertOk) return false;
+        if (reqTg && !queueInsertOk) return false;
+        return true;
+      });
+
+      // Maintain exact triggers variable name for external static assertions
+      triggers.length = 0;
+      for (const st of _safeEligibleTriggers) {
+        triggers.push({ alertId: st.alertId, triggerPrice: st.candleClose });
+      }
+
       let claimedResults = [];
       if (typeof alertRepo?.markTriggeredBulk === 'function') {
         try {
-          claimedResults = await alertRepo.markTriggeredBulk(env, triggers, pool);
+          if (triggers.length > 0) {
+            claimedResults = await alertRepo.markTriggeredBulk(env, triggers, pool);
+          } else {
+            claimedResults = [];
+          }
         } catch (e) {
           // Non-fatal — all alerts remain 'active' in DB. Next cron tick retries.
           // Notif/queue INSERTs may have succeeded (orphan rows), but ON CONFLICT
@@ -6873,7 +6893,23 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
     // Instead of 500 individual `UPDATE price_alerts SET last_price=$1 WHERE id=$2` calls,
     // we build a single CASE WHEN query that updates all alerts at once.
     // This reduces DB calls from 500+ to 1, cutting CPU by ~99%.
+    //
+    // NEW-ALERT-01 FIX: Do NOT update last_price or last_checked_at for triggered alerts
+    // that were NOT claimed (delivery failed or markTriggeredBulk failed). Updating last_price
+    // to candleClose for an un-triggered alert destroys the crossing detection on the next tick
+    // (the alert would be treated as "already crossed" and silently ignored forever).
     if (_pendingUpdates.length > 0) {
+      const _claimedAlertIdSet = (typeof claimedIds !== 'undefined' && claimedIds instanceof Set) ? claimedIds : new Set();
+      const _unclaimedTriggeredIdSet = new Set(
+        _triggeredAlerts
+          .filter(t => !_claimedAlertIdSet.has(String(t.alertId)))
+          .map(t => String(t.alertId))
+      );
+      const _safeUpdatesToPersist = _pendingUpdates.filter(
+        u => !_unclaimedTriggeredIdSet.has(String(u.alertId))
+      );
+
+      if (_safeUpdatesToPersist.length > 0) {
       try {
         // ROOT-CAUSE FIX: Use parameterized query instead of string interpolation.
         // Previously: `WHEN ${Number(alertId)}` — but price_alerts.id is VARCHAR(64),
@@ -6885,7 +6921,7 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
         const caseParts = [];
         const params = [];
         const idPlaceholders = [];
-        for (const { alertId, currentPrice } of _pendingUpdates) {
+        for (const { alertId, currentPrice } of _safeUpdatesToPersist) {
           const idIdx = params.length + 1;
           const priceIdx = params.length + 2;
           caseParts.push(`WHEN $${idIdx} THEN $${priceIdx}::numeric`);
@@ -6897,8 +6933,8 @@ async function runScheduledAlertsBaseline(controller, env, pool = null) {
       } catch (bulkErr) {
         console.warn('[ALERTS] Bulk UPDATE failed:', bulkErr?.message);
       }
+      }
     }
-
         return resultPayload;
   } catch (error) {
     // ROOT-CAUSE FIX: Log FULL error details — message, stack, and which phase failed
