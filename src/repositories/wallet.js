@@ -28,6 +28,7 @@ export function createWalletRepository(deps) {
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS source VARCHAR(32) NOT NULL DEFAULT 'system';
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
       ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+      ALTER TABLE token_transactions ALTER COLUMN ref_id TYPE VARCHAR(128);
       ALTER TABLE token_balances ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
       CREATE INDEX IF NOT EXISTS idx_token_tx_user_created ON token_transactions (user_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_token_tx_type ON token_transactions (user_id, tx_type);

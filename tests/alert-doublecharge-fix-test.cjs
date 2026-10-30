@@ -226,3 +226,253 @@ test('SIM-08: deleted/triggered alert recreation → still charged (reactivated=
 });
 
 console.log('✅ Alert double-charge fix (H1) regression tests loaded.');
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION 3 — NEW-FIN-01 Executable Runtime Tests (pg-mem + Real Controllers)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const {
+  makeRealStack,
+  loadFactory,
+  balanceOf,
+  txCount,
+} = require("./wallet-test-harness.cjs");
+
+const createAlertHandlers = loadFactory("src/controllers/alerts.js", "createAlertHandlers");
+const createReferralRewardsService = loadFactory("src/services/referral-rewards.js", "createReferralRewardsService");
+
+test("FIN01-01 (runtime pg-mem): 10-digit Telegram user + long symbol/price → alertRefId & _refund fit in VARCHAR(64) and immediate refund restores balance", async () => {
+  const stack = makeRealStack();
+  const { h, economyService } = stack;
+  const USER_10_DIGIT = "6842219966";
+  await h.insertBalance(USER_10_DIGIT, 100);
+
+  const norm = (v) => (v == null ? null : String(v).trim() || null);
+  const jsonResponse = (body, init = {}) => ({ status: init.status || 200, body });
+  const safeDbErrorResponse = () => ({ status: 500, body: { status: "error" } });
+  const safeError = (_s, e) => e;
+  const buildBodyFieldValidationError = (errs) => ({ status: 422, body: { errors: errs } });
+  const authenticateTelegramRequest = async () => ({ error: null, user: { id: USER_10_DIGIT } });
+  const readJsonBody = async (req) => ({ error: null, payload: req.__payload });
+
+  const ecoRepo = {
+    checkQuota: async () => ({
+      allowed: true,
+      isFree: false,
+      costInTokens: 5,
+      effectiveFreePerDay: 3,
+      config: { free_per_day: 3, cost_per_extra: 5 },
+    }),
+    claimFreeSlot: async () => ({ claimed: false, usedNow: 3 }),
+    incrementQuota: async () => {},
+    releaseFreeSlot: async () => {},
+  };
+
+  const failingAlertRepo = {
+    create: async () => {
+      throw new Error("simulated DB error on price_alerts INSERT");
+    },
+  };
+
+  const handlers = createAlertHandlers({
+    jsonResponse,
+    authenticateTelegramRequest,
+    readJsonBody,
+    safeDbErrorResponse,
+    safeError,
+    buildBodyFieldValidationError,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: norm,
+    alertRepo: failingAlertRepo,
+    alertEconomyRepo: ecoRepo,
+    economyService,
+    membershipAuthority: { isPremium: async () => false },
+    isUserRateLimited: async () => false,
+    queryDb: h.queryDb,
+  });
+
+  // Previously: alert_6842219966_1000SHIBUSDT_0.00028491_above_2026-10-30_1761814200000_refund = 78 chars (> 64) → SQLSTATE 22001!
+  const res = await handlers.handleCreate(
+    {
+      __payload: {
+        user_id: USER_10_DIGIT,
+        symbol: "1000SHIBUSDT",
+        price: "0.00028491",
+        direction: "above",
+      },
+    },
+    {}
+  );
+
+  assert.equal(res.status, 500, "create failure returns 500");
+  assert.equal(await balanceOf(h, USER_10_DIGIT), 100, "balance must be restored to 100 AB after immediate refund");
+
+  const txs = await h.raw(
+    "SELECT tx_type, amount, ref_id FROM token_transactions WHERE user_id = $1 ORDER BY id ASC",
+    [USER_10_DIGIT]
+  );
+  assert.equal(txs.rows.length, 2, "must record both alert_debit and marketplace_refund");
+  assert.equal(txs.rows[0].tx_type, "alert_debit");
+  assert.equal(Number(txs.rows[0].amount), -5);
+  assert.ok(txs.rows[0].ref_id.length <= 50, `debit ref_id must be compact (got ${txs.rows[0].ref_id.length}: ${txs.rows[0].ref_id})`);
+
+  assert.equal(txs.rows[1].tx_type, "marketplace_refund");
+  assert.equal(Number(txs.rows[1].amount), 5);
+  assert.equal(txs.rows[1].ref_id, `${txs.rows[0].ref_id}_refund`);
+  assert.ok(txs.rows[1].ref_id.length <= 64, `refund ref_id must fit in VARCHAR(64) (got ${txs.rows[1].ref_id.length})`);
+});
+
+test("FIN01-02 (runtime pg-mem): create fails AND immediate refund fails → persists to pending_refunds and retryFailedRefunds recovers balance", async () => {
+  const stack = makeRealStack();
+  const { h, economyService } = stack;
+  const USER_10_DIGIT = "6842219966";
+  await h.insertBalance(USER_10_DIGIT, 100);
+
+  // Apply the NEW-FIN-01 migration widening ref_id & pending_refunds to VARCHAR(128)
+  await h.raw("ALTER TABLE token_transactions ALTER COLUMN ref_id TYPE VARCHAR(128);");
+  await h.raw(`
+    CREATE TABLE IF NOT EXISTS pending_refunds (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      amount INTEGER NOT NULL,
+      refund_ref_id VARCHAR(128) NOT NULL,
+      original_ref_id VARCHAR(128),
+      source VARCHAR(32) NOT NULL DEFAULT 'alert',
+      description VARCHAR(256),
+      metadata JSONB DEFAULT '{}',
+      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_retry_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_refunds_ref_id ON pending_refunds (refund_ref_id);
+  `);
+
+  const pgMemOutboxQueryDb = async (env, sql, params) => {
+    const s = String(sql);
+    if (s.includes("INSERT INTO pending_refunds")) {
+      return h.queryDb(
+        env,
+        s.replace(
+          "ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING",
+          "ON CONFLICT (refund_ref_id) DO NOTHING"
+        ),
+        params
+      );
+    }
+    return h.queryDb(env, sql, params);
+  };
+
+  let shouldFailRefund = true;
+  const flakyEconomy = {
+    ...economyService,
+    grantReward: async (args) => {
+      if (shouldFailRefund) throw new Error("temporary DB outage during immediate refund");
+      return economyService.grantReward(args);
+    },
+  };
+
+  const norm = (v) => (v == null ? null : String(v).trim() || null);
+  const handlers = createAlertHandlers({
+    jsonResponse: (body, init = {}) => ({ status: init.status || 200, body }),
+    authenticateTelegramRequest: async () => ({ error: null, user: { id: USER_10_DIGIT } }),
+    readJsonBody: async (req) => ({ error: null, payload: req.__payload }),
+    safeDbErrorResponse: () => ({ status: 500, body: { status: "error" } }),
+    safeError: (_s, e) => e,
+    buildBodyFieldValidationError: (errs) => ({ status: 422, body: { errors: errs } }),
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: norm,
+    alertRepo: { create: async () => { throw new Error("alert DB insert failed"); } },
+    alertEconomyRepo: {
+      checkQuota: async () => ({ allowed: true, isFree: false, costInTokens: 5, effectiveFreePerDay: 3 }),
+      claimFreeSlot: async () => ({ claimed: false, usedNow: 3 }),
+      incrementQuota: async () => {},
+      releaseFreeSlot: async () => {},
+    },
+    economyService: flakyEconomy,
+    membershipAuthority: { isPremium: async () => false },
+    isUserRateLimited: async () => false,
+    queryDb: pgMemOutboxQueryDb,
+  });
+
+  const res = await handlers.handleCreate(
+    {
+      __payload: {
+        user_id: USER_10_DIGIT,
+        symbol: "MATICUSDT",
+        price: "123456.789",
+        direction: "below",
+      },
+    },
+    {}
+  );
+  assert.equal(res.status, 500);
+  assert.equal(await balanceOf(h, USER_10_DIGIT), 95, "balance is 95 while refund is pending in outbox");
+
+  const pending = await h.raw("SELECT * FROM pending_refunds WHERE user_id = $1", [USER_10_DIGIT]);
+  assert.equal(pending.rows.length, 1, "pending_refunds must contain 1 pending row");
+  assert.equal(pending.rows[0].status, "pending");
+  assert.equal(Number(pending.rows[0].amount), 5);
+
+  // Now run the real retryFailedRefunds cron logic
+  shouldFailRefund = false;
+  const referralService = createReferralRewardsService({
+    isDatabaseConfigured: () => true,
+    queryDb: pgMemOutboxQueryDb,
+    economyService: flakyEconomy,
+  });
+  await referralService.retryFailedRefunds({});
+
+  assert.equal(await balanceOf(h, USER_10_DIGIT), 100, "retryFailedRefunds must restore balance to 100 AB");
+  const afterRetry = await h.raw("SELECT status FROM pending_refunds WHERE user_id = $1", [USER_10_DIGIT]);
+  assert.equal(afterRetry.rows[0].status, "completed", "pending_refunds row must be marked completed");
+});
+
+test("FIN01-03: 64-bit FNV-1a spec digest uniqueness + VARCHAR(128) schema migration verification", async () => {
+  const MIGRATE_SQL = fs.readFileSync(path.join(__dirname, "..", "scripts/00-migrate.sql"), "utf8");
+  const WALLET_SRC = fs.readFileSync(path.join(__dirname, "..", "src/repositories/wallet.js"), "utf8");
+
+  assert.ok(
+    MIGRATE_SQL.includes("ALTER TABLE token_transactions ALTER COLUMN ref_id TYPE VARCHAR(128);"),
+    "00-migrate.sql must widen token_transactions.ref_id to VARCHAR(128)"
+  );
+  assert.ok(
+    MIGRATE_SQL.includes("ALTER TABLE pending_refunds ALTER COLUMN refund_ref_id TYPE VARCHAR(128);"),
+    "00-migrate.sql must widen pending_refunds.refund_ref_id to VARCHAR(128)"
+  );
+  assert.ok(
+    MIGRATE_SQL.includes("ALTER TABLE pending_refunds ALTER COLUMN original_ref_id TYPE VARCHAR(128);"),
+    "00-migrate.sql must widen pending_refunds.original_ref_id to VARCHAR(128)"
+  );
+  assert.ok(
+    WALLET_SRC.includes("ALTER TABLE token_transactions ALTER COLUMN ref_id TYPE VARCHAR(128);"),
+    "wallet.js ensureSchema must widen token_transactions.ref_id to VARCHAR(128)"
+  );
+
+  // Verify 0 collisions across 1,200 distinct (symbol, price, direction) specs
+  function computeDigest(sym, price, dir) {
+    const input = `${sym}:${price}:${dir}`;
+    let h = 0xcbf29ce484222325n;
+    for (let i = 0; i < input.length; i++) {
+      h ^= BigInt(input.charCodeAt(i));
+      h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+    }
+    return h.toString(16).padStart(16, "0");
+  }
+
+  const seen = new Set();
+  const symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "TONUSDT", "MATICUSDT", "1000SHIBUSDT", "DOGEUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT"];
+  for (const sym of symbols) {
+    for (let p = 1; p <= 60; p++) {
+      for (const dir of ["above", "below"]) {
+        const d = computeDigest(sym, String(p * 123.4567), dir);
+        assert.equal(d.length, 16);
+        assert.ok(!seen.has(d), `collision detected for ${sym}:${p}:${dir}`);
+        seen.add(d);
+      }
+    }
+  }
+  assert.equal(seen.size, 1200, "all 1,200 distinct alert specs must produce distinct 16-char digests");
+});
