@@ -98,6 +98,29 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
       [Number(referralId)],
     );
 
+    // PERMANENT ANTI-FRAUD (P0 NEW-DB-01): Record claimed referral hashes
+    try {
+      const { createHmac } = await import("node:crypto");
+      const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
+      const pairHash = createHmac("sha256", salt).update(`${String(inviterId)}:${String(inviteeId)}`).digest("hex");
+      const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
+          pair_hash VARCHAR(64) PRIMARY KEY,
+          claim_type VARCHAR(32) NOT NULL DEFAULT 'pair',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `).catch(() => {});
+      await queryDb(env, `
+        INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'pair') ON CONFLICT (pair_hash) DO NOTHING
+      `, [pairHash]).catch(() => {});
+      await queryDb(env, `
+        INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'invitee') ON CONFLICT (pair_hash) DO NOTHING
+      `, [inviteeHash]).catch(() => {});
+    } catch (claimErr) {
+      console.warn("[REFERRAL-ANTI-FRAUD] Recording claimed pair failed (non-fatal):", claimErr?.message);
+    }
+
   // Send referral + reward notifications via NotificationService (single entry point)
   // ROOT CAUSE FIX (4.5): Only dispatch notifications if the reward was NOT
   // idempotent (i.e., this is the first time the reward is credited). If
@@ -763,6 +786,27 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     if (cooldown.inCooldown) {
       return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
     }
+  }
+
+  // ── PERMANENT ANTI-FRAUD (P0 NEW-DB-01): Check claimed_referral_pairs ──
+  // Check if this (referrer, invitee) pair OR this invitee was EVER previously
+  // rewarded in past lifetimes (e.g. account deleted and recreated after 15 days).
+  try {
+    const { createHmac } = await import("node:crypto");
+    const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
+    const pairHash = createHmac("sha256", salt).update(`${normalizedReferrerId}:${String(inviteeId)}`).digest("hex");
+    const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+    const claimedCheck = await queryDb(env,
+      'SELECT pair_hash FROM claimed_referral_pairs WHERE pair_hash IN ($1, $2) LIMIT 1',
+      [pairHash, inviteeHash]
+    );
+    if (claimedCheck.rows && claimedCheck.rows.length > 0) {
+      console.log("[REFERRAL-ANTI-FRAUD] Permanent block triggered for invitee", String(inviteeId));
+      return { referral_id: null, rejected: true, reason: "Permanent referral anti-fraud: reward already claimed in past lifetime" };
+    }
+  } catch (claimErr) {
+    // If table does not exist yet (e.g. before migration), non-fatal
+    console.warn("[REFERRAL-ANTI-FRAUD] Check failed (non-fatal):", claimErr?.message);
   }
 
   // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──

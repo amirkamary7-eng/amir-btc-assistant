@@ -304,27 +304,92 @@ export function createUserRepository(deps) {
    *
    * @returns {Object} summary of what was deleted (for debug logging)
    */
+  
+/**
+ * P0 NEW-DB-01: Scrub PII from a token_transactions row for financial archiving.
+ * Masks raw Telegram IDs in ref_id and description, and strips PII keys from metadata.
+ */
+function scrubTransactionForArchive(tx, tombstoneId) {
+  const scrubbedRef = tx.ref_id ? String(tx.ref_id).replace(/(?<=^|[^0-9])\d{5,15}(?=[^0-9]|$)/g, "ANON") : null;
+  const scrubbedDesc = tx.description ? String(tx.description).replace(/(?<=^|[^0-9])\d{5,15}(?=[^0-9]|$)/g, "[SCRUBBED]") : null;
+  let scrubbedMeta = {};
+  if (tx.metadata) {
+    try {
+      const raw = typeof tx.metadata === "string" ? JSON.parse(tx.metadata) : tx.metadata;
+      const piiKeys = ["invitee_id", "inviter_id", "telegram_id", "user_id", "username", "first_name", "last_name"];
+      scrubbedMeta = Object.fromEntries(Object.entries(raw).filter(([k]) => !piiKeys.includes(k)));
+    } catch {
+      scrubbedMeta = {};
+    }
+  }
+  return {
+    original_tx_id: Number(tx.id),
+    account_tombstone_id: String(tombstoneId),
+    amount: Number(tx.amount),
+    tx_type: String(tx.tx_type || "unknown"),
+    source: String(tx.source || "system"),
+    status: String(tx.status || "completed"),
+    description: scrubbedDesc,
+    ref_id: scrubbedRef,
+    metadata: JSON.stringify(scrubbedMeta),
+    original_created_at: tx.created_at || new Date().toISOString()
+  };
+}
+
   async function deleteAccount(env, userId) {
     const uid = String(userId);
     const summary = { userId: uid, tables: {}, errors: [] };
+    const { createHmac, randomUUID } = await import("node:crypto");
 
-    // ── ANTI-ABUSE: Record in deleted_users cooldown table BEFORE cascade ──
-    // This must happen BEFORE the user row is deleted, so we can look up
-    // their existing referral data (to store the referral_hash).
+    // ── STEP 1: Settle open pending refunds ──
     try {
-      // Get the user's existing referral (if any) to store the inviter
-      const existingRef = await queryDb(env,
-        'SELECT inviter_id FROM referrals WHERE invitee_id = $1 LIMIT 1',
-        [uid]);
-      const previousInviterId = existingRef.rows[0]?.inviter_id || null;
+      const pendingRefundsRes = await queryDb(env,
+        "SELECT id, amount, status FROM pending_refunds WHERE user_id = $1 AND status = 'pending'",
+        [uid]
+      );
+      summary.openPendingRefunds = pendingRefundsRes.rows?.length || 0;
+      if (summary.openPendingRefunds > 0) {
+        await queryDb(env,
+          "UPDATE pending_refunds SET status = 'cancelled', updated_at = NOW() WHERE user_id = $1 AND status = 'pending'",
+          [uid]
+        );
+      }
+    } catch (e) {
+      console.warn("[DELETE-ACCOUNT] Pending refunds settlement failed (non-fatal):", e?.message);
+    }
 
-      // Create the deleted_users table if it doesn't exist (idempotent).
-      // SETTINGS-001 FIX: telegram_id MUST be UNIQUE so that the
-      // INSERT ... ON CONFLICT (telegram_id) below works. Previously this DDL
-      // omitted UNIQUE (while checkReferralCooldown's DDL included it), so if
-      // deleteAccount ran first the ON CONFLICT would error with
-      // "there is no unique or exclusion constraint matching the ON CONFLICT
-      // specification". The two DDLs are now identical.
+    // ── STEP 2: Record in claimed_referral_pairs (Permanent Anti-Fraud) ──
+    let previousInviterId = null;
+    try {
+      const existingRef = await queryDb(env,
+        "SELECT inviter_id, rewarded FROM referrals WHERE invitee_id = $1 LIMIT 1",
+        [uid]);
+      previousInviterId = existingRef.rows[0]?.inviter_id || null;
+      if (previousInviterId) {
+        const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
+        const pairHash = createHmac("sha256", salt).update(`${previousInviterId}:${uid}`).digest("hex");
+        const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${uid}`).digest("hex");
+        await queryDb(env, `
+          CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
+            pair_hash VARCHAR(64) PRIMARY KEY,
+            claim_type VARCHAR(32) NOT NULL DEFAULT 'pair',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `).catch(() => {});
+        await queryDb(env, `
+          INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'pair') ON CONFLICT (pair_hash) DO NOTHING
+        `, [pairHash]).catch(() => {});
+        await queryDb(env, `
+          INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'invitee') ON CONFLICT (pair_hash) DO NOTHING
+        `, [inviteeHash]).catch(() => {});
+        summary.permanentReferralLockRecorded = true;
+      }
+    } catch (e) {
+      console.warn("[DELETE-ACCOUNT] Permanent referral anti-fraud recording failed (non-fatal):", e?.message);
+    }
+
+    // ── STEP 3: Ensure tables exist ──
+    try {
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS deleted_users (
           id SERIAL PRIMARY KEY,
@@ -334,86 +399,137 @@ export function createUserRepository(deps) {
           cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
         )
       `);
-      // Defensive idempotent migration: if the table was created by an older
-      // version of deleteAccount (without UNIQUE), add the unique index now.
-      // CREATE UNIQUE INDEX IF NOT EXISTS is a no-op if the index already
-      // exists (either from the UNIQUE column constraint above or a prior run).
-      // Safe because telegram_id logically identifies one cooldown record.
-      await queryDb(env,
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq ON deleted_users (telegram_id)`
-      ).catch(() => {});
-      // Insert the cooldown record (ON CONFLICT updates cooldown if already exists)
       await queryDb(env, `
-        INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
-        VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
-        ON CONFLICT (telegram_id) DO UPDATE
-        SET deleted_at = NOW(), cooldown_until = NOW() + INTERVAL '15 days'
-      `, [uid, previousInviterId]);
-      summary.cooldownRecorded = true;
-      console.log('[DELETE-ACCOUNT] Cooldown recorded for', uid, 'until', new Date(Date.now() + 15*24*60*60*1000).toISOString());
+        CREATE TABLE IF NOT EXISTS token_transactions_archive (
+          id BIGSERIAL PRIMARY KEY,
+          original_tx_id INTEGER NOT NULL UNIQUE,
+          account_tombstone_id TEXT NOT NULL,
+          amount INTEGER NOT NULL,
+          tx_type VARCHAR(32) NOT NULL,
+          source VARCHAR(32) NOT NULL DEFAULT 'system',
+          status VARCHAR(16) NOT NULL DEFAULT 'completed',
+          description VARCHAR(256),
+          ref_id VARCHAR(128),
+          metadata JSONB DEFAULT '{}',
+          original_created_at TIMESTAMPTZ NOT NULL,
+          archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
     } catch (e) {
-      summary.cooldownRecorded = false;
-      summary.cooldownError = e?.message;
-      console.warn('[DELETE-ACCOUNT] Failed to record cooldown (non-fatal):', e?.message);
+      console.warn("[DELETE-ACCOUNT] Table ensure failed (non-fatal):", e?.message);
     }
 
-    // DB-001 FIX: Wrap ALL cascade DELETEs in a single transaction.
-    // Previously, each DELETE was a separate queryDb call with its own
-    // try/catch. If any middle DELETE failed, the remaining DELETEs still
-    // ran, potentially leaving orphan rows (user deleted but child rows remain).
-    // Now: ALL DELETEs run in one queryDbTransaction. If any fails, the
-    // entire transaction ROLLBACKs — no partial deletion.
-    //
-    // Note: The deleted_users cooldown INSERT (above) is intentionally
-    // OUTSIDE this transaction — it must persist even if the cascade fails,
-    // so the user is blocked from re-registering during cooldown regardless.
-    //
-    // Order matters: wheel_history before wheel_spins (FK), users last.
-    const cascadeQueries = [
-      { sql: 'DELETE FROM referrals WHERE invitee_id = $1', params: [uid] },
-      { sql: 'DELETE FROM referrals WHERE inviter_id = $1', params: [uid] },
-      { sql: 'DELETE FROM token_transactions WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM token_balances WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM pending_refunds WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM watchlist_items WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM promo_campaign_registrations WHERE telegram_id = $1', params: [uid] },
-      { sql: 'DELETE FROM price_alerts WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM notifications WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM notification_queue WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM notification_settings WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM daily_checkin_streaks WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM calendar_reminders WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM ticket_replies WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = $1)', params: [uid] },
-      { sql: 'DELETE FROM tickets WHERE user_id = $1', params: [uid] },
-      { sql: 'DELETE FROM admins WHERE telegram_id = $1', params: [uid] },
-      { sql: 'DELETE FROM users WHERE telegram_id = $1', params: [uid] },
-    ];
+    // ── STEP 4: Burn remaining token balance to bring ledger sum to 0 ──
+    let balanceToBurn = 0;
+    let burnTxId = null;
+    try {
+      const balRes = await queryDb(env, "SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1", [uid]);
+      balanceToBurn = Number(balRes.rows[0]?.balance || 0);
+      if (balanceToBurn > 0) {
+        const burnRefId = `burn_${uid}_${Date.now()}`;
+        const burnRes = await queryDb(env, `
+          INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+          VALUES ($1, $2, 'account_deletion_burn', 'Account deletion token burn', $3, NOW())
+          RETURNING id
+        `, [uid, -balanceToBurn, burnRefId]);
+        burnTxId = burnRes.rows[0]?.id || null;
+        await queryDb(env, "UPDATE token_balances SET balance = 0, updated_at = NOW() WHERE user_id = $1", [uid]);
+        summary.burnedBalance = balanceToBurn;
+      } else {
+        summary.burnedBalance = 0;
+      }
+    } catch (burnErr) {
+      console.error("[DELETE-ACCOUNT] Token burn failed:", burnErr?.message);
+      throw new Error(`Token burn failed: ${burnErr?.message}`);
+    }
 
-    const results = await queryDbTransaction(env, cascadeQueries);
+    // ── STEP 5: Prepare archive records with PII scrubbing ──
+    const tombstoneId = randomUUID();
+    summary.tombstoneId = tombstoneId;
 
+    const txsResult = await queryDb(env, "SELECT * FROM token_transactions WHERE user_id = $1 ORDER BY id ASC", [uid]);
+    const rawTxs = txsResult.rows || [];
+    summary.sourceTxCount = rawTxs.length;
+
+    const scrubbedRows = rawTxs.map(tx => scrubTransactionForArchive(tx, tombstoneId));
+
+    // ── STEP 6: Execute Atomic Transaction (Archive Inserts + deleted_users + Cascade Deletes) ──
+    const cascadeQueries = [];
+
+    // 6a. Archive Inserts
+    for (const s of scrubbedRows) {
+      cascadeQueries.push({
+        sql: `INSERT INTO token_transactions_archive
+              (original_tx_id, account_tombstone_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at, archived_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+              ON CONFLICT (original_tx_id) DO NOTHING`,
+        params: [
+          s.original_tx_id, s.account_tombstone_id, s.amount, s.tx_type, s.source,
+          s.status, s.description, s.ref_id, s.metadata, s.original_created_at
+        ]
+      });
+    }
+
+    // 6b. deleted_users cooldown insert (atomic within the transaction)
+    cascadeQueries.push({
+      sql: `INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
+            VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
+            ON CONFLICT (telegram_id) DO UPDATE
+            SET deleted_at = NOW(), cooldown_until = NOW() + INTERVAL '15 days'`,
+      params: [uid, previousInviterId]
+    });
+
+    // 6c. Cascade DELETEs (child tables before parent users table)
+    cascadeQueries.push(
+      { sql: "DELETE FROM referrals WHERE invitee_id = $1", params: [uid] },
+      { sql: "DELETE FROM referrals WHERE inviter_id = $1", params: [uid] },
+      { sql: "DELETE FROM token_transactions WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM token_balances WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM pending_refunds WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM watchlist_items WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM promo_campaign_registrations WHERE telegram_id = $1", params: [uid] },
+      { sql: "DELETE FROM price_alerts WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM notifications WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM notification_queue WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM notification_settings WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM daily_checkin_streaks WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM calendar_reminders WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM ticket_replies WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = $1)", params: [uid] },
+      { sql: "DELETE FROM tickets WHERE user_id = $1", params: [uid] },
+      { sql: "DELETE FROM admins WHERE telegram_id = $1", params: [uid] },
+      { sql: "DELETE FROM users WHERE telegram_id = $1", params: [uid] }
+    );
+
+    let results;
+    try {
+      results = await queryDbTransaction(env, cascadeQueries);
+    } catch (cascadeErr) {
+      // ROLLBACK: If cascade failed, rollback the burn transaction
+      if (burnTxId) {
+        await queryDb(env, "DELETE FROM token_transactions WHERE id = $1", [burnTxId]).catch(() => {});
+        await queryDb(env, "UPDATE token_balances SET balance = balance + $1, updated_at = NOW() WHERE user_id = $2", [balanceToBurn, uid]).catch(() => {});
+      }
+      console.error("[DELETE-ACCOUNT] Cascade transaction failed and rolled back:", cascadeErr?.message);
+      throw cascadeErr;
+    }
+
+    summary.cooldownRecorded = true;
+    summary.archivedCount = scrubbedRows.length;
     const tableNames = [
-      'referrals_as_invitee', 'referrals_as_inviter', 'token_transactions',
-      'token_balances', 'pending_refunds', 'watchlist_items',
-      'promo_campaign_registrations', 'price_alerts', 'notifications',
-      'notification_queue', 'notification_settings', 'daily_checkin_streaks',
-      'calendar_reminders', 'ticket_replies', 'tickets', 'admins', 'users',
+      "referrals_as_invitee", "referrals_as_inviter", "token_transactions",
+      "token_balances", "pending_refunds", "watchlist_items",
+      "promo_campaign_registrations", "price_alerts", "notifications",
+      "notification_queue", "notification_settings", "daily_checkin_streaks",
+      "calendar_reminders", "ticket_replies", "tickets", "admins", "users",
     ];
+    const deleteResults = results.slice(scrubbedRows.length + 1); // skip archive inserts and deleted_users
     for (let i = 0; i < tableNames.length; i++) {
-      summary.tables[tableNames[i]] = results[i]?.rowCount || 0;
+      summary.tables[tableNames[i]] = deleteResults[i]?.rowCount || 0;
     }
-
-    console.log('[DELETE-ACCOUNT] Cascade complete (transactional):', JSON.stringify(summary));
+    console.log("[DELETE-ACCOUNT] Cascade complete with financial archive:", JSON.stringify(summary));
     return summary;
   }
 
-  /**
-   * Check if a Telegram ID is in the 15-day referral cooldown period.
-   * Returns { inCooldown: boolean, cooldownUntil: string|null, reason: string }
-   *
-   * Used by processReferralOnBootstrap to reject referrals from recently
-   * deleted accounts. The user CAN still use the app — they just can't
-   * generate a new referral reward for 15 days after deletion.
-   */
   async function checkReferralCooldown(env, userId) {
     const uid = String(userId);
     try {

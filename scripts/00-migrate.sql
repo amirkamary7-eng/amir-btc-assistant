@@ -957,6 +957,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_token_tx_user_type_ref
   ON token_transactions (user_id, tx_type, ref_id)
   WHERE ref_id IS NOT NULL AND status = 'completed';
 
+-- ── token_transactions_archive (P0 NEW-DB-01) ──────────────────────────────
+-- Independent financial ledger archive preserving transaction history for
+-- deleted accounts without foreign key constraints to users(telegram_id).
+-- Anonymized/pseudonymized via account_tombstone_id (UUID) and PII scrubbing.
+CREATE TABLE IF NOT EXISTS token_transactions_archive (
+  id                   BIGSERIAL PRIMARY KEY,
+  original_tx_id       INTEGER NOT NULL UNIQUE,
+  account_tombstone_id TEXT NOT NULL,
+  amount               INTEGER NOT NULL,
+  tx_type              VARCHAR(32) NOT NULL,
+  source               VARCHAR(32) NOT NULL DEFAULT 'system',
+  status               VARCHAR(16) NOT NULL DEFAULT 'completed',
+  description          VARCHAR(256),
+  ref_id               VARCHAR(128),
+  metadata             JSONB DEFAULT '{}',
+  original_created_at  TIMESTAMPTZ NOT NULL,
+  archived_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tt_archive_tombstone   ON token_transactions_archive (account_tombstone_id);
+CREATE INDEX IF NOT EXISTS idx_tt_archive_type        ON token_transactions_archive (tx_type);
+CREATE INDEX IF NOT EXISTS idx_tt_archive_archived_at ON token_transactions_archive (archived_at DESC);
+
+-- ── claimed_referral_pairs (P0 NEW-DB-01) ──────────────────────────────────
+-- Permanent anti-fraud registry storing HMAC-SHA256 hashes of claimed referrals.
+-- Prevents referral reward farming across account deletion and recreation cycles.
+CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
+  pair_hash   VARCHAR(64) PRIMARY KEY,
+  claim_type  VARCHAR(32) NOT NULL DEFAULT 'pair',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_claimed_referral_pairs_created ON claimed_referral_pairs (created_at DESC);
+
 -- ── pending_refunds (BUG 4+5 FIX) ──────────────────────────────────────────
 -- Stores failed refund attempts for cron-based retry. When a debit succeeds
 -- but the subsequent operation fails AND the refund also fails, the refund
