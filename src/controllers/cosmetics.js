@@ -139,8 +139,11 @@ export function createCosmeticsHandlers(deps) {
       return buildBodyFieldValidationError([{ field: 'id', message: 'Cosmetic ID required' }], env);
     }
 
+    let cosmetic = null;
+    let refId = null;
+    let debitResult = null;
     try {
-      const cosmetic = await cosmeticsRepo.getById(env, cosmeticId);
+      cosmetic = await cosmeticsRepo.getById(env, cosmeticId);
       if (!cosmetic) {
         return jsonResponse({ status: 'error', message: 'Cosmetic not found', code: 'NOT_FOUND' }, { status: 404 }, env);
       }
@@ -152,8 +155,7 @@ export function createCosmeticsHandlers(deps) {
 
       // Atomic AB debit (via economyService — FIX C1: single atomic CTE,
       // insufficient balance can no longer leave a phantom completed tx)
-      const refId = `cosmetic_purchase_${userId}_${cosmeticId}`;
-      let debitResult;
+      refId = `cosmetic_purchase_${userId}_${cosmeticId}`;
       try {
         debitResult = await economyService.debitUser({
           userId,
@@ -228,13 +230,15 @@ export function createCosmeticsHandlers(deps) {
       // wouldn't have thrown). Either way, attempting the refund is safe
       // because the deterministic refId prevents double-refund.
       if (debitResult && !debitResult.idempotent) {
+        const refundAmount = Number(debitResult.amount || cosmetic?.token_cost || 0);
+        const refundRefId = `cosmetic_purchase_${userId}_${cosmeticId}_refund`;
         try {
           await economyService.grantReward({
             userId,
-            amount: debitResult.amount || cosmetic.token_cost,
+            amount: refundAmount,
             rewardType: 'marketplace_refund',
             description: `Refund: Cosmetic purchase failed (${cosmeticId})`,
-            refId: `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
+            refId: refundRefId,
             metadata: { cosmetic_id: cosmeticId, original_ref_id: refId, reason: 'createOwnership_failed' },
             env,
           });
@@ -247,27 +251,29 @@ export function createCosmeticsHandlers(deps) {
             user_id: userId,
             cosmetic_id: cosmeticId,
             original_ref_id: refId,
-            refund_ref_id: `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
-            amount: debitResult.amount || cosmetic.token_cost,
+            refund_ref_id: refundRefId,
+            amount: refundAmount,
             original_error: String(e?.message || e).slice(0, 200),
             refund_error: String(refundErr?.message || refundErr).slice(0, 200),
           }));
-          try {
-            await queryDb(env,
-              `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
-               VALUES ($1, $2, $3, $4, 'cosmetic', $5, $6, 'pending')
-               ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
-              [
-                String(userId),
-                Number(debitResult.amount || cosmetic.token_cost),
-                `cosmetic_purchase_${userId}_${cosmeticId}_refund`,
-                refId,
-                `Refund: Cosmetic purchase failed (${cosmeticId})`,
-                JSON.stringify({ cosmetic_id: cosmeticId, original_ref_id: refId, reason: 'createOwnership_failed' }),
-              ],
-            );
-          } catch (persistErr) {
-            console.error('[cosmetics] Failed to persist pending refund:', persistErr?.message);
+          if (typeof queryDb === "function") {
+            try {
+              await queryDb(env,
+                `INSERT INTO pending_refunds (user_id, amount, refund_ref_id, original_ref_id, source, description, metadata, status)
+                 VALUES ($1, $2, $3, $4, 'cosmetic', $5, $6, 'pending')
+                 ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING`,
+                [
+                  String(userId),
+                  refundAmount,
+                  refundRefId,
+                  refId,
+                  `Refund: Cosmetic purchase failed (${cosmeticId})`,
+                  JSON.stringify({ cosmetic_id: cosmeticId, original_ref_id: refId, reason: 'createOwnership_failed' }),
+                ],
+              );
+            } catch (persistErr) {
+              console.error('[cosmetics] Failed to persist pending refund:', persistErr?.message);
+            }
           }
         }
       }
