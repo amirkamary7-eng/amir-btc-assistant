@@ -71,6 +71,7 @@ function setupMockDatabase() {
       user_id VARCHAR(64) NOT NULL REFERENCES users(telegram_id),
       amount INTEGER NOT NULL,
       tx_type VARCHAR(32) NOT NULL,
+      source VARCHAR(32) DEFAULT 'system',
       description VARCHAR(256),
       ref_id VARCHAR(128),
       metadata JSONB DEFAULT '{}',
@@ -766,4 +767,82 @@ test("H3-REMEDIATION: Production Fail-Closed when REFERRAL_SECRET_SALT is unconf
   const bootstrapRes = await referralRewardsService.processReferralOnBootstrap(envProdMissingSalt, "80005", USER_H3, true, true);
   assert.equal(bootstrapRes?.rejected, true);
   assert.match(bootstrapRes?.reason, /REFERRAL_SECRET_SALT is not configured/);
+});
+
+
+test("J1-REMEDIATION: Single atomic transaction rolls back refund settlement, burn, and user deletion on failure", async () => {
+  const { db, queryDb } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+
+  // Failing transaction mock
+  const failingTx = async (env, queries) => {
+    throw new Error("Simulated DB connection drop inside queryDbTransaction");
+  };
+
+  const repo = createUserRepository({ queryDb, queryDbTransaction: failingTx, queryDbDirect: queryDb });
+
+  const USER_J1 = "90001";
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_J1}', 'j1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_J1}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('${USER_J1}', 50, 'ref_j1_fail', 'pending');
+  `);
+
+  await assert.rejects(
+    async () => repo.deleteAccount(env, USER_J1),
+    /Simulated DB connection drop/
+  );
+
+  // User MUST still exist
+  assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_J1}'`).length, 1);
+  // Balance MUST remain unchanged at 100
+  assert.equal(db.public.many(`SELECT * FROM token_balances WHERE user_id = '${USER_J1}'`)[0].balance, 100);
+  // Pending refund MUST remain pending
+  assert.equal(db.public.many(`SELECT * FROM pending_refunds WHERE user_id = '${USER_J1}'`)[0].status, 'pending');
+});
+
+test("J2-REMEDIATION: Complete archive duplicate verification across description, ref_id, source, and metadata", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_J2 = "90002";
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_J2}', 'j2_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_J2}', 0);
+    INSERT INTO token_transactions (id, user_id, amount, tx_type, source, description, ref_id) VALUES
+      (9501, '${USER_J2}', 100, 'daily_claim', 'daily_system', 'Daily login', 'ref_9501');
+    INSERT INTO token_transactions_archive (original_tx_id, account_tombstone_id, amount, tx_type, source, description, ref_id, original_created_at) VALUES
+      (9501, 'old_tombstone', 100, 'daily_claim', 'DIFFERENT_SOURCE', 'Daily login', 'ref_9501', NOW());
+  `);
+
+  await assert.rejects(
+    async () => repo.deleteAccount(env, USER_J2),
+    /Archive duplicate content mismatch across fields/
+  );
+});
+
+test("J2-REMEDIATION: Archive duplicate with identical content and differently-ordered JSON metadata keys PASSES", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_J2_PASS = "90003";
+  const now = new Date().toISOString();
+  const metaSrc = JSON.stringify({ a: 1, b: 2 });
+  const metaArch = JSON.stringify({ b: 2, a: 1 }); // Same content, different key order
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_J2_PASS}', 'j2_pass_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_J2_PASS}', 0);
+    INSERT INTO token_transactions (id, user_id, amount, tx_type, source, description, ref_id, metadata, created_at) VALUES
+      (9502, '${USER_J2_PASS}', 100, 'daily_claim', 'system', 'Daily', 'ref_9502', '${metaSrc}', '${now}');
+    INSERT INTO token_transactions_archive (original_tx_id, account_tombstone_id, amount, tx_type, source, description, ref_id, metadata, original_created_at) VALUES
+      (9502, 'existing_tombstone', 100, 'daily_claim', 'system', 'Daily', 'ref_9502', '${metaArch}', '${now}');
+  `);
+
+  const summary = await repo.deleteAccount(env, USER_J2_PASS);
+  assert.equal(summary.userId, USER_J2_PASS);
+  assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_J2_PASS}'`).length, 0);
 });
