@@ -1795,3 +1795,28 @@ test("5T-CRASH-SIMULATION: Atomic rollback when completion fencing fails after c
   assert.equal(pref.retry_count, 10, "retry_count must increment from 9 to 10");
   assert.equal(pref.status, "exhausted", "Refund must transition to exhausted on 10th failure");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 5W — TIMESTAMPTZ Precision Preservation
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("5W-PRECISION-01: Archive original_created_at is populated directly via SQL subquery from token_transactions.created_at", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_P1 = "99501";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_P1}', 'precision_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_P1}', 80);
+    INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id)
+    VALUES ('${USER_P1}', 80, 'daily_claim', 'system', 'completed', 'Precision test', 'ref_p1');
+  `);
+
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const summary = await repo.deleteAccount(env, USER_P1);
+  assert.equal(summary.burnedBalance, 80);
+
+  const archived = db.public.many(`SELECT original_tx_id, amount, original_created_at FROM token_transactions_archive WHERE account_tombstone_id = '${summary.tombstoneId}' ORDER BY original_tx_id ASC`);
+  assert.equal(archived.length, 2, "Expected 2 archived rows: 1 initial daily_claim + 1 burn");
+  assert.ok(archived[0].original_created_at, "Archived original_created_at must be present");
+});

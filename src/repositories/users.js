@@ -631,11 +631,11 @@ function scrubTransactionForArchive(tx, tombstoneId) {
           await txQuery(
             `INSERT INTO token_transactions_archive
              (original_tx_id, account_tombstone_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at, archived_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, (SELECT created_at FROM token_transactions WHERE id = $1), NOW())
              ON CONFLICT (original_tx_id) DO NOTHING`,
             [
               s.original_tx_id, s.account_tombstone_id, s.amount, s.tx_type, s.source,
-              s.status, s.description, s.ref_id, s.metadata, s.original_created_at
+              s.status, s.description, s.ref_id, s.metadata
             ]
           );
         }
