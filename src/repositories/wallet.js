@@ -709,8 +709,16 @@ export function createWalletRepository(deps) {
    * @returns {Promise<{success: boolean, newBalance: number, txId: string}>}
    */
   async function creditTokens(env, userId, amount, txType, description, refId, metadata = {}, auditInfo = {}) {
-    if (!queryDbTransaction) throw new Error('queryDbTransaction not available');
-    await ensureSchema(env).catch(() => {});
+    const runQuery = typeof auditInfo?._txQuery === 'function'
+      ? (_e, sql, params) => auditInfo._txQuery(sql, params)
+      : queryDb;
+    const runTx = typeof auditInfo?._txRunner === 'function'
+      ? auditInfo._txRunner
+      : (e, q) => queryDbTransaction(e, q);
+    if (!runTx) throw new Error('queryDbTransaction not available');
+    if (typeof auditInfo?._txQuery !== 'function') {
+      await ensureSchema(env).catch(() => {});
+    }
     const uid = String(userId);
     const amt = Math.abs(Number(amount)); // always positive
     if (amt <= 0) throw new Error('Amount must be positive');
@@ -741,7 +749,7 @@ export function createWalletRepository(deps) {
     // concurrent caller already credited — we read the existing row and
     // return idempotent success.
     if (refId) {
-      const existing = await queryDb(
+      const existing = await runQuery(
         env,
         `SELECT id, amount FROM token_transactions
          WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed'
@@ -775,7 +783,7 @@ export function createWalletRepository(deps) {
     // This creates the balance row if missing, and increments it if present.
     // Idempotency preserved: if tx conflict, balance is NOT touched.
     // Race-safe: ON CONFLICT DO UPDATE is atomic in PostgreSQL.
-    const results = await queryDbTransaction(env, [
+    const results = await runTx(env, [
       {
         sql: `WITH tx_insert AS (
                 INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at, updated_at)
@@ -806,7 +814,7 @@ export function createWalletRepository(deps) {
     // (because the CTE's UPSERT only runs when tx_insert returns a row).
     if (!txId) {
       // Read the existing transaction for the return value
-      const existing = await queryDb(env,
+      const existing = await runQuery(env,
         `SELECT id, amount FROM token_transactions WHERE user_id = $1 AND tx_type = $2 AND ref_id = $3 AND status = 'completed' LIMIT 1`,
         [uid, txType, refId],
       );

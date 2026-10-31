@@ -41,6 +41,7 @@
 
 export function createReferralRewardsService({
   queryDb,
+  queryDbTransaction,
   notificationService,
   walletRepo,
   rewardCenterRepo,
@@ -68,6 +69,19 @@ export function createReferralRewardsService({
   ENTITLEMENT,
   getUserRepo,
 }) {
+  const runDbTransaction = typeof queryDbTransaction === "function"
+    ? queryDbTransaction
+    : async (envArg, fnOrQueries) => {
+        const txQuery = (sql, params = []) => queryDb(envArg, sql, params);
+        if (typeof fnOrQueries === "function") {
+          return await fnOrQueries(txQuery);
+        }
+        const out = [];
+        for (const q of fnOrQueries) {
+          out.push(await txQuery(q.sql, q.params || []));
+        }
+        return out;
+      };
 
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
   try {
@@ -97,6 +111,35 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
         : 'UPDATE referrals SET rewarded = TRUE WHERE id = $1 AND rewarded = FALSE',
       [Number(referralId)],
     );
+
+    // PERMANENT ANTI-FRAUD (P0 NEW-DB-01): Record claimed referral hashes
+    try {
+      const { createHmac } = await import("node:crypto");
+      const salt = env?.REFERRAL_SECRET_SALT;
+      const isProd = String(env?.APP_ENV || "").toLowerCase() === "production";
+      if (isProd && (!salt || salt === "amir-btc-referral-secret-default-salt")) {
+        console.error("[REFERRAL-ANTI-FRAUD] Fail-Closed: REFERRAL_SECRET_SALT is not configured in production");
+        return;
+      }
+      const activeSalt = salt || "amir-btc-referral-secret-default-salt";
+      const pairHash = createHmac("sha256", activeSalt).update(`${String(inviterId)}:${String(inviteeId)}`).digest("hex");
+      const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+      await queryDb(env, `
+        CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
+          pair_hash VARCHAR(64) PRIMARY KEY,
+          claim_type VARCHAR(32) NOT NULL DEFAULT 'pair',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `).catch(() => {});
+      await queryDb(env, `
+        INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'pair') ON CONFLICT (pair_hash) DO NOTHING
+      `, [pairHash]).catch(() => {});
+      await queryDb(env, `
+        INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'invitee') ON CONFLICT (pair_hash) DO NOTHING
+      `, [inviteeHash]).catch(() => {});
+    } catch (claimErr) {
+      console.warn("[REFERRAL-ANTI-FRAUD] Recording claimed pair failed (non-fatal):", claimErr?.message);
+    }
 
   // Send referral + reward notifications via NotificationService (single entry point)
   // ROOT CAUSE FIX (4.5): Only dispatch notifications if the reward was NOT
@@ -643,7 +686,7 @@ async function retryFailedRefunds(env) {
       `SELECT id, user_id, amount, refund_ref_id, original_ref_id, source,
               description, metadata, retry_count
        FROM pending_refunds
-       WHERE status = 'pending' AND retry_count < 10
+       WHERE (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) AND retry_count < 10
        ORDER BY created_at ASC
        LIMIT 1`,
     );
@@ -652,37 +695,190 @@ async function retryFailedRefunds(env) {
     // correctness risk.
     if (result.rows.length === 0) return;
 
+    if (walletRepo && typeof walletRepo.ensureSchema === 'function') {
+      await walletRepo.ensureSchema(env).catch(() => {});
+    }
+
     let succeeded = 0;
     for (const row of result.rows) {
+      const rowId = Number(row.id);
+      const uid = String(row.user_id);
+      const refAmount = Number(row.amount || 0);
+      const canonicalRefId = String(row.refund_ref_id || '').trim();
+      const expectedRetryCount = Number(row.retry_count || 0);
+      const claimToken = `claim_${rowId}_${expectedRetryCount}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+      let rawRowMeta = {};
+      if (row.metadata) {
+        try {
+          rawRowMeta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : { ...row.metadata };
+        } catch {
+          rawRowMeta = {};
+        }
+      }
+      const priorClaimToken = String(rawRowMeta?._claim_token || '');
+      const cleanMeta = { ...(rawRowMeta || {}) };
+      delete cleanMeta._claim_token;
+      delete cleanMeta._claim_version;
+      const fencedMeta = { ...cleanMeta, _claim_token: claimToken, _claim_version: expectedRetryCount };
+      const fencedMetaJson = JSON.stringify(fencedMeta);
+      const failedMeta = { ...cleanMeta, _claim_token: claimToken, _claim_version: expectedRetryCount + 1 };
+      const failedMetaJson = JSON.stringify(failedMeta);
+
+      let claimAcquired = false;
       try {
-        await economyService.grantReward({
-          userId: String(row.user_id),
-          amount: Number(row.amount),
-          rewardType: 'marketplace_refund',
-          description: row.description || `Refund retry (${row.source})`,
-          refId: String(row.refund_ref_id),
-          metadata: row.metadata || {},
-          auditInfo: { actor: 'cron_retry' },
-          env,
+        // Phase 5T: Single atomic transaction with shared lock order:
+        // 1. users (FOR UPDATE) -> 2. token_balances (FOR UPDATE) -> 3. pending_refunds (FOR UPDATE) -> 4. token_transactions (FOR UPDATE)
+        const txOutcome = await runDbTransaction(env, async (txQuery) => {
+          // 1. Lock user row (Lock Order #1 — serializes with deleteAccount)
+          const userLockRes = await txQuery(
+            'SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE',
+            [uid],
+          );
+          if (!userLockRes.rows || userLockRes.rows.length === 0) {
+            return { skipped: true };
+          }
+
+          // 2. Lock wallet balance row (Lock Order #2)
+          await txQuery(
+            'SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE',
+            [uid],
+          );
+
+          // 3. Lock pending_refunds row (Lock Order #3) and atomically claim with fencing token & version
+          const refundLockRes = await txQuery(
+            'SELECT id, user_id, amount, refund_ref_id, status, retry_count, metadata FROM pending_refunds WHERE id = $1 FOR UPDATE',
+            [rowId],
+          );
+          if (!refundLockRes.rows || refundLockRes.rows.length === 0) {
+            return { skipped: true };
+          }
+          const claimRes = await txQuery(
+            "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW(), metadata = $2 WHERE id = $1 AND retry_count = $3 AND (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) RETURNING id, retry_count, metadata",
+            [rowId, fencedMetaJson, expectedRetryCount],
+          );
+          if (!claimRes.rows || claimRes.rows.length === 0) {
+            return { skipped: true };
+          }
+          claimAcquired = true;
+
+          if (!canonicalRefId || refAmount <= 0) {
+            throw new Error(`Invalid pending refund id=${rowId}: missing canonical refund_ref_id or non-positive amount`);
+          }
+
+          const validateRefundTxRow = (txRow, label) => {
+            if (
+              String(txRow.user_id) !== uid ||
+              Number(txRow.amount) !== refAmount ||
+              String(txRow.tx_type) !== 'marketplace_refund' ||
+              String(txRow.status || 'completed') !== 'completed'
+            ) {
+              throw new Error(`${label} mismatch for ${canonicalRefId}`);
+            }
+          };
+
+          // 4. Lock and inspect ALL matching token_transactions rows (Lock Order #4 — no LIMIT 1 hiding composite conflicts)
+          let alreadyCredited = false;
+          const existingTx = await txQuery(
+            'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE',
+            [canonicalRefId],
+          );
+          if (existingTx.rows && existingTx.rows.length > 0) {
+            for (const ex of existingTx.rows) {
+              validateRefundTxRow(ex, 'Refund ref_id conflict');
+            }
+            if (existingTx.rows.length > 1) {
+              throw new Error(`Refund ref_id conflict mismatch for ${canonicalRefId}: multiple transactions found`);
+            }
+            const balCheck = await txQuery(
+              'SELECT balance FROM token_balances WHERE user_id = $1',
+              [uid],
+            );
+            if (!balCheck.rows || balCheck.rows.length === 0) {
+              throw new Error(`Refund transaction ${canonicalRefId} exists without token_balances row for user ${uid}`);
+            }
+            alreadyCredited = true;
+          }
+
+          // 5. Credit wallet inside the same transaction via scoped _txQuery / _txRunner
+          if (!alreadyCredited) {
+            const scopedTxRunner = async (_e, fnOrQueries) => {
+              if (typeof fnOrQueries === 'function') {
+                return await fnOrQueries(txQuery);
+              }
+              const out = [];
+              for (const q of fnOrQueries) {
+                out.push(await txQuery(q.sql, q.params || []));
+              }
+              return out;
+            };
+            const grantRes = await economyService.grantReward({
+              userId: uid,
+              amount: refAmount,
+              rewardType: 'marketplace_refund',
+              description: row.description || `Refund retry (${row.source})`,
+              refId: canonicalRefId,
+              metadata: cleanMeta,
+              auditInfo: {
+                actor: 'cron_retry',
+                _txQuery: txQuery,
+                _txRunner: scopedTxRunner,
+              },
+              env,
+            });
+            if (!grantRes || grantRes.success === false) {
+              throw new Error(grantRes?.error || 'grantReward returned success=false');
+            }
+            // Verify post-credit transaction record and wallet balance before transitioning to completed
+            const postTx = await txQuery(
+              'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE',
+              [canonicalRefId],
+            );
+            if (postTx.rows && postTx.rows.length > 0) {
+              for (const pt of postTx.rows) {
+                validateRefundTxRow(pt, 'Post-credit refund transaction');
+              }
+              if (postTx.rows.length > 1) {
+                throw new Error(`Post-credit refund transaction mismatch for ${canonicalRefId}: multiple transactions found`);
+              }
+              const postBal = await txQuery(
+                'SELECT balance FROM token_balances WHERE user_id = $1',
+                [uid],
+              );
+              if (!postBal.rows || postBal.rows.length === 0) {
+                throw new Error(`Post-credit wallet balance missing for user ${uid}`);
+              }
+            } else if (!grantRes.txId) {
+              throw new Error(`Refund transaction not recorded for ${canonicalRefId}`);
+            }
+          }
+
+          // 6. Fenced completion update — conditioned on exact status, retry_count version, and claimToken in metadata
+          const completeRes = await txQuery(
+            `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'processing' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+            [rowId, expectedRetryCount, claimToken],
+          );
+          if (!completeRes.rows || completeRes.rows.length === 0) {
+            throw new Error(`Failed to mark pending_refund id=${row.id} as completed`);
+          }
+          return { skipped: false, completed: true };
         });
-        // Success — mark as completed
-        await queryDb(env,
-          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [Number(row.id)],
-        );
+
+        if (txOutcome && txOutcome.skipped) continue;
         succeeded++;
       } catch (retryErr) {
-        // Retry failed — increment retry_count, stay pending
-        await queryDb(env,
-          `UPDATE pending_refunds SET retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [Number(row.id)],
+        if (!claimAcquired) continue;
+        // Fenced failure update — stale worker cannot overwrite a newer claim or completed/settled row
+        const failUpdRes = await queryDb(env,
+          `UPDATE pending_refunds SET status = 'pending', retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW(), metadata = $5 WHERE id = $1 AND retry_count = $2 AND ((status = 'processing' AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3) OR ((status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) AND COALESCE(metadata::jsonb->>'_claim_token', '') = $4)) RETURNING id, retry_count`,
+          [rowId, expectedRetryCount, claimToken, priorClaimToken, failedMetaJson],
         );
         console.warn(`[retryFailedRefunds] Refund ${row.refund_ref_id} retry ${row.retry_count + 1} failed:`, retryErr?.message);
-        // Mark as exhausted after 10 retries
-        if (row.retry_count + 1 >= 10) {
+        // Mark as exhausted after 10 retries, fenced on the exact failed claim token & version
+        if (row.retry_count + 1 >= 10 && failUpdRes?.rows?.length > 0) {
           await queryDb(env,
-            `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1`,
-            [Number(row.id)],
+            `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1 AND status = 'pending' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+            [rowId, expectedRetryCount + 1, claimToken],
           );
           console.error(JSON.stringify({
             scope: 'refund-retry-exhausted',
@@ -763,6 +959,33 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
     if (cooldown.inCooldown) {
       return { referral_id: null, rejected: true, reason: cooldown.reason, cooldownUntil: cooldown.cooldownUntil };
     }
+  }
+
+  // ── PERMANENT ANTI-FRAUD (P0 NEW-DB-01): Check claimed_referral_pairs ──
+  // Check if this (referrer, invitee) pair OR this invitee was EVER previously
+  // rewarded in past lifetimes (e.g. account deleted and recreated after 15 days).
+  try {
+    const { createHmac } = await import("node:crypto");
+    const salt = env?.REFERRAL_SECRET_SALT;
+    const isProd = String(env?.APP_ENV || "").toLowerCase() === "production";
+    if (isProd && (!salt || salt === "amir-btc-referral-secret-default-salt")) {
+      console.error("[REFERRAL-ANTI-FRAUD] Fail-Closed: REFERRAL_SECRET_SALT is not configured in production");
+      return { referral_id: null, rejected: true, reason: "REFERRAL_SECRET_SALT is not configured in production" };
+    }
+    const activeSalt = salt || "amir-btc-referral-secret-default-salt";
+    const pairHash = createHmac("sha256", activeSalt).update(`${normalizedReferrerId}:${String(inviteeId)}`).digest("hex");
+    const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+    const claimedCheck = await queryDb(env,
+      'SELECT pair_hash FROM claimed_referral_pairs WHERE pair_hash IN ($1, $2) LIMIT 1',
+      [pairHash, inviteeHash]
+    );
+    if (claimedCheck.rows && claimedCheck.rows.length > 0) {
+      console.log("[REFERRAL-ANTI-FRAUD] Permanent block triggered for invitee", String(inviteeId));
+      return { referral_id: null, rejected: true, reason: "Permanent referral anti-fraud: reward already claimed in past lifetime" };
+    }
+  } catch (claimErr) {
+    // If table does not exist yet (e.g. before migration), non-fatal
+    console.warn("[REFERRAL-ANTI-FRAUD] Check failed (non-fatal):", claimErr?.message);
   }
 
   // ── ROOT-CAUSE FIX: `isNewUser` gate REMOVED ──
