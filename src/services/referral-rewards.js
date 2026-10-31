@@ -41,6 +41,7 @@
 
 export function createReferralRewardsService({
   queryDb,
+  queryDbTransaction,
   notificationService,
   walletRepo,
   rewardCenterRepo,
@@ -68,6 +69,19 @@ export function createReferralRewardsService({
   ENTITLEMENT,
   getUserRepo,
 }) {
+  const runDbTransaction = typeof queryDbTransaction === "function"
+    ? queryDbTransaction
+    : async (envArg, fnOrQueries) => {
+        const txQuery = (sql, params = []) => queryDb(envArg, sql, params);
+        if (typeof fnOrQueries === "function") {
+          return await fnOrQueries(txQuery);
+        }
+        const out = [];
+        for (const q of fnOrQueries) {
+          out.push(await txQuery(q.sql, q.params || []));
+        }
+        return out;
+      };
 
 async function creditReferralWithReward(env, inviterId, referralId, inviteeId, amount, alsoVerifyChannel) {
   try {
@@ -681,95 +695,190 @@ async function retryFailedRefunds(env) {
     // correctness risk.
     if (result.rows.length === 0) return;
 
+    if (walletRepo && typeof walletRepo.ensureSchema === 'function') {
+      await walletRepo.ensureSchema(env).catch(() => {});
+    }
+
     let succeeded = 0;
     for (const row of result.rows) {
-      try {
-        // Phase 5R: Atomically claim pending or stale-processing (>5m) refund row
-        const claimRes = await queryDb(env,
-          "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) RETURNING id",
-          [Number(row.id)],
-        );
-        if (!claimRes.rows || claimRes.rows.length === 0) continue;
+      const rowId = Number(row.id);
+      const uid = String(row.user_id);
+      const refAmount = Number(row.amount || 0);
+      const canonicalRefId = String(row.refund_ref_id || '').trim();
+      const expectedRetryCount = Number(row.retry_count || 0);
+      const claimToken = `claim_${rowId}_${expectedRetryCount}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-        // Pre-check canonical refund_ref_id for prior settlement or conflicting transaction
-        let alreadyCredited = false;
-        const existingTx = await queryDb(env,
-          'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1',
-          [String(row.refund_ref_id)],
-        );
-        if (existingTx.rows && existingTx.rows.length > 0) {
-          const ex = existingTx.rows[0];
-          if (
-            String(ex.user_id) !== String(row.user_id) ||
-            Number(ex.amount) !== Number(row.amount) ||
-            String(ex.tx_type) !== 'marketplace_refund' ||
-            String(ex.status || 'completed') !== 'completed'
-          ) {
-            throw new Error(`Refund ref_id conflict mismatch for ${row.refund_ref_id}`);
-          }
-          const balCheck = await queryDb(env,
-            'SELECT balance FROM token_balances WHERE user_id = $1',
-            [String(row.user_id)],
+      let rawRowMeta = {};
+      if (row.metadata) {
+        try {
+          rawRowMeta = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : { ...row.metadata };
+        } catch {
+          rawRowMeta = {};
+        }
+      }
+      const priorClaimToken = String(rawRowMeta?._claim_token || '');
+      const cleanMeta = { ...(rawRowMeta || {}) };
+      delete cleanMeta._claim_token;
+      delete cleanMeta._claim_version;
+      const fencedMeta = { ...cleanMeta, _claim_token: claimToken, _claim_version: expectedRetryCount };
+      const fencedMetaJson = JSON.stringify(fencedMeta);
+      const failedMeta = { ...cleanMeta, _claim_token: claimToken, _claim_version: expectedRetryCount + 1 };
+      const failedMetaJson = JSON.stringify(failedMeta);
+
+      let claimAcquired = false;
+      try {
+        // Phase 5T: Single atomic transaction with shared lock order:
+        // 1. users (FOR UPDATE) -> 2. token_balances (FOR UPDATE) -> 3. pending_refunds (FOR UPDATE) -> 4. token_transactions (FOR UPDATE)
+        const txOutcome = await runDbTransaction(env, async (txQuery) => {
+          // 1. Lock user row (Lock Order #1 — serializes with deleteAccount)
+          const userLockRes = await txQuery(
+            'SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE',
+            [uid],
           );
-          if (balCheck.rows && balCheck.rows.length > 0) {
+          if (!userLockRes.rows || userLockRes.rows.length === 0) {
+            return { skipped: true };
+          }
+
+          // 2. Lock wallet balance row (Lock Order #2)
+          await txQuery(
+            'SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE',
+            [uid],
+          );
+
+          // 3. Lock pending_refunds row (Lock Order #3) and atomically claim with fencing token & version
+          const refundLockRes = await txQuery(
+            'SELECT id, user_id, amount, refund_ref_id, status, retry_count, metadata FROM pending_refunds WHERE id = $1 FOR UPDATE',
+            [rowId],
+          );
+          if (!refundLockRes.rows || refundLockRes.rows.length === 0) {
+            return { skipped: true };
+          }
+          const claimRes = await txQuery(
+            "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW(), metadata = $2 WHERE id = $1 AND retry_count = $3 AND (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) RETURNING id, retry_count, metadata",
+            [rowId, fencedMetaJson, expectedRetryCount],
+          );
+          if (!claimRes.rows || claimRes.rows.length === 0) {
+            return { skipped: true };
+          }
+          claimAcquired = true;
+
+          if (!canonicalRefId || refAmount <= 0) {
+            throw new Error(`Invalid pending refund id=${rowId}: missing canonical refund_ref_id or non-positive amount`);
+          }
+
+          const validateRefundTxRow = (txRow, label) => {
+            if (
+              String(txRow.user_id) !== uid ||
+              Number(txRow.amount) !== refAmount ||
+              String(txRow.tx_type) !== 'marketplace_refund' ||
+              String(txRow.status || 'completed') !== 'completed'
+            ) {
+              throw new Error(`${label} mismatch for ${canonicalRefId}`);
+            }
+          };
+
+          // 4. Lock and inspect ALL matching token_transactions rows (Lock Order #4 — no LIMIT 1 hiding composite conflicts)
+          let alreadyCredited = false;
+          const existingTx = await txQuery(
+            'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE',
+            [canonicalRefId],
+          );
+          if (existingTx.rows && existingTx.rows.length > 0) {
+            for (const ex of existingTx.rows) {
+              validateRefundTxRow(ex, 'Refund ref_id conflict');
+            }
+            if (existingTx.rows.length > 1) {
+              throw new Error(`Refund ref_id conflict mismatch for ${canonicalRefId}: multiple transactions found`);
+            }
+            const balCheck = await txQuery(
+              'SELECT balance FROM token_balances WHERE user_id = $1',
+              [uid],
+            );
+            if (!balCheck.rows || balCheck.rows.length === 0) {
+              throw new Error(`Refund transaction ${canonicalRefId} exists without token_balances row for user ${uid}`);
+            }
             alreadyCredited = true;
           }
-        }
 
-        if (!alreadyCredited) {
-          const grantRes = await economyService.grantReward({
-            userId: String(row.user_id),
-            amount: Number(row.amount),
-            rewardType: 'marketplace_refund',
-            description: row.description || `Refund retry (${row.source})`,
-            refId: String(row.refund_ref_id),
-            metadata: row.metadata || {},
-            auditInfo: { actor: 'cron_retry' },
-            env,
-          });
-          if (!grantRes || grantRes.success === false) {
-            throw new Error(grantRes?.error || 'grantReward returned success=false');
-          }
-          // Verify post-credit transaction record before transitioning to completed
-          const postTx = await queryDb(env,
-            'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1',
-            [String(row.refund_ref_id)],
-          );
-          if (postTx.rows && postTx.rows.length > 0) {
-            const pt = postTx.rows[0];
-            if (
-              String(pt.user_id) !== String(row.user_id) ||
-              Number(pt.amount) !== Number(row.amount) ||
-              String(pt.tx_type) !== 'marketplace_refund' ||
-              String(pt.status || 'completed') !== 'completed'
-            ) {
-              throw new Error(`Post-credit refund transaction mismatch for ${row.refund_ref_id}`);
+          // 5. Credit wallet inside the same transaction via scoped _txQuery / _txRunner
+          if (!alreadyCredited) {
+            const scopedTxRunner = async (_e, fnOrQueries) => {
+              if (typeof fnOrQueries === 'function') {
+                return await fnOrQueries(txQuery);
+              }
+              const out = [];
+              for (const q of fnOrQueries) {
+                out.push(await txQuery(q.sql, q.params || []));
+              }
+              return out;
+            };
+            const grantRes = await economyService.grantReward({
+              userId: uid,
+              amount: refAmount,
+              rewardType: 'marketplace_refund',
+              description: row.description || `Refund retry (${row.source})`,
+              refId: canonicalRefId,
+              metadata: cleanMeta,
+              auditInfo: {
+                actor: 'cron_retry',
+                _txQuery: txQuery,
+                _txRunner: scopedTxRunner,
+              },
+              env,
+            });
+            if (!grantRes || grantRes.success === false) {
+              throw new Error(grantRes?.error || 'grantReward returned success=false');
             }
-          } else if (!grantRes.txId) {
-            throw new Error(`Refund transaction not recorded for ${row.refund_ref_id}`);
+            // Verify post-credit transaction record and wallet balance before transitioning to completed
+            const postTx = await txQuery(
+              'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE',
+              [canonicalRefId],
+            );
+            if (postTx.rows && postTx.rows.length > 0) {
+              for (const pt of postTx.rows) {
+                validateRefundTxRow(pt, 'Post-credit refund transaction');
+              }
+              if (postTx.rows.length > 1) {
+                throw new Error(`Post-credit refund transaction mismatch for ${canonicalRefId}: multiple transactions found`);
+              }
+              const postBal = await txQuery(
+                'SELECT balance FROM token_balances WHERE user_id = $1',
+                [uid],
+              );
+              if (!postBal.rows || postBal.rows.length === 0) {
+                throw new Error(`Post-credit wallet balance missing for user ${uid}`);
+              }
+            } else if (!grantRes.txId) {
+              throw new Error(`Refund transaction not recorded for ${canonicalRefId}`);
+            }
           }
-        }
-        // Success — mark as completed only from active processing/pending state
-        const completeRes = await queryDb(env,
-          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status IN ('processing', 'pending') RETURNING id`,
-          [Number(row.id)],
-        );
-        if (!completeRes.rows || completeRes.rows.length === 0) {
-          throw new Error(`Failed to mark pending_refund id=${row.id} as completed`);
-        }
+
+          // 6. Fenced completion update — conditioned on exact status, retry_count version, and claimToken in metadata
+          const completeRes = await txQuery(
+            `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'processing' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+            [rowId, expectedRetryCount, claimToken],
+          );
+          if (!completeRes.rows || completeRes.rows.length === 0) {
+            throw new Error(`Failed to mark pending_refund id=${row.id} as completed`);
+          }
+          return { skipped: false, completed: true };
+        });
+
+        if (txOutcome && txOutcome.skipped) continue;
         succeeded++;
       } catch (retryErr) {
-        // Retry failed — revert status to pending and increment retry_count
-        await queryDb(env,
-          `UPDATE pending_refunds SET status = 'pending', retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [Number(row.id)],
+        if (!claimAcquired) continue;
+        // Fenced failure update — stale worker cannot overwrite a newer claim or completed/settled row
+        const failUpdRes = await queryDb(env,
+          `UPDATE pending_refunds SET status = 'pending', retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW(), metadata = $5 WHERE id = $1 AND retry_count = $2 AND ((status = 'processing' AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3) OR ((status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) AND COALESCE(metadata::jsonb->>'_claim_token', '') = $4)) RETURNING id, retry_count`,
+          [rowId, expectedRetryCount, claimToken, priorClaimToken, failedMetaJson],
         );
         console.warn(`[retryFailedRefunds] Refund ${row.refund_ref_id} retry ${row.retry_count + 1} failed:`, retryErr?.message);
-        // Mark as exhausted after 10 retries
-        if (row.retry_count + 1 >= 10) {
+        // Mark as exhausted after 10 retries, fenced on the exact failed claim token & version
+        if (row.retry_count + 1 >= 10 && failUpdRes?.rows?.length > 0) {
           await queryDb(env,
-            `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1`,
-            [Number(row.id)],
+            `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1 AND status = 'pending' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+            [rowId, expectedRetryCount + 1, claimToken],
           );
           console.error(JSON.stringify({
             scope: 'refund-retry-exhausted',

@@ -4134,6 +4134,7 @@ const {
   processReferralOnBootstrap,
 } = createReferralRewardsService({
   queryDb,
+  queryDbTransaction,
   notificationService,
   walletRepo,
   rewardCenterRepo,

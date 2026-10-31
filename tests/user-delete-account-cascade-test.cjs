@@ -100,11 +100,14 @@ function setupMockDatabase() {
       source VARCHAR(32) DEFAULT 'system',
       status VARCHAR(16) DEFAULT 'completed',
       description VARCHAR(256),
-      ref_id VARCHAR(128) UNIQUE,
+      ref_id VARCHAR(128),
       metadata JSONB DEFAULT '{}',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE UNIQUE INDEX idx_token_tx_user_type_ref
+      ON token_transactions (user_id, tx_type, ref_id)
+      WHERE ref_id IS NOT NULL AND status = 'completed';
 
     CREATE TABLE pending_refunds (
       id SERIAL PRIMARY KEY,
@@ -922,8 +925,9 @@ test("5P-CONCURRENCY-01: Concurrent deleteAccount and retryFailedRefunds for sam
 
   const referralRewardsService = createReferralRewardsService({
     queryDb,
+    queryDbTransaction,
     notificationService: null,
-    walletRepo: null,
+    walletRepo,
     rewardCenterRepo: null,
     getReferralRewardPerInvite: () => 3,
     isDatabaseConfigured: () => true,
@@ -965,19 +969,8 @@ test("5P-CONCURRENCY-02: Two concurrent retryFailedRefunds workers for the same 
   `);
 
   let grantCallCount = 0;
-  // Serialize atomic claim UPDATE in queryDb for pg-mem concurrency simulation
-  let claimLock = Promise.resolve();
-  const serializedQueryDb = (e, sql, params) => {
-    if (String(sql).includes("SET status = 'processing'")) {
-      const next = claimLock.then(() => queryDb(e, sql, params));
-      claimLock = next.catch(() => {});
-      return next;
-    }
-    return queryDb(e, sql, params);
-  };
-
-  const walletRepo = createWalletRepository({ queryDb: serializedQueryDb, queryDbTransaction, queryDbDirect: serializedQueryDb });
-  const realEconomy = createEconomyService({ walletRepo, queryDb: serializedQueryDb });
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const realEconomy = createEconomyService({ walletRepo, queryDb });
   const economyService = {
     grantReward: async (opts) => {
       grantCallCount++;
@@ -986,9 +979,10 @@ test("5P-CONCURRENCY-02: Two concurrent retryFailedRefunds workers for the same 
   };
 
   const makeWorker = () => createReferralRewardsService({
-    queryDb: serializedQueryDb,
+    queryDb,
+    queryDbTransaction,
     notificationService: null,
-    walletRepo: null,
+    walletRepo,
     rewardCenterRepo: null,
     getReferralRewardPerInvite: () => 3,
     isDatabaseConfigured: () => true,
@@ -1372,6 +1366,7 @@ test("5R-STALE-RECOVERY-01: Crash after claim (before creditTokens) leaves stale
   const economyService = createEconomyService({ walletRepo, queryDb });
   const referralService = createReferralRewardsService({
     queryDb,
+    queryDbTransaction,
     notificationService: null,
     walletRepo,
     rewardCenterRepo: null,
@@ -1423,6 +1418,7 @@ test("5R-STALE-RECOVERY-02: Crash after creditTokens committed (before status=co
   };
   const referralService = createReferralRewardsService({
     queryDb,
+    queryDbTransaction,
     notificationService: null,
     walletRepo,
     rewardCenterRepo: null,
@@ -1463,6 +1459,7 @@ test("5R-STALE-RECOVERY-03: Fresh active processing refund (< 5 minutes) is NOT 
   const economyService = { grantReward: async () => { grantCalled++; return { success: true, txId: 1 }; } };
   const referralService = createReferralRewardsService({
     queryDb,
+    queryDbTransaction,
     notificationService: null,
     walletRepo: null,
     rewardCenterRepo: null,
@@ -1544,4 +1541,257 @@ test("5R-ON-CONFLICT-RACE: Concurrent creditTokens insert between deleteAccount 
     );
     assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_RACE_BAD}'`).length, 1, "User must not be deleted when concurrent conflicting ref_id is detected");
   }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 5T — Fencing Token Protection, Single-Tx Lock Order, Schema Parity & Crash Simulations
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("5T-FENCING-01: Stale worker waking up after timeout cannot overwrite a newer worker claim or completed/settled status", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_F1 = "99001";
+
+  // Initial state: Worker A claimed the row 10 minutes ago with token_A, then stalled
+  const staleMetaA = JSON.stringify({ order_id: "ord_1", _claim_token: "claim_1_0_stale_worker_A", _claim_version: 0 });
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_F1}', 'f1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_F1}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, metadata, status, retry_count, last_retry_at, updated_at, created_at)
+    VALUES ('${USER_F1}', 40, 'fenced_ref_1', 'alert', 'Fenced refund', '${staleMetaA}', 'processing', 0, NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes');
+  `);
+
+  // Worker B runs retryFailedRefunds, reclaims the stale row with a new claimToken, credits +40, and marks status = completed
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
+  const workerB = createReferralRewardsService({
+    queryDb,
+    queryDbTransaction,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await workerB.retryFailedRefunds(env);
+
+  const afterB = db.public.many(`SELECT status, retry_count, metadata FROM pending_refunds WHERE user_id = '${USER_F1}'`)[0];
+  assert.equal(afterB.status, "completed", "Worker B must mark the refund completed");
+  const metaB = typeof afterB.metadata === "string" ? JSON.parse(afterB.metadata) : afterB.metadata;
+  assert.notEqual(metaB._claim_token, "claim_1_0_stale_worker_A", "Worker B must have stamped a fresh fencing claim token");
+
+  // Now Stale Worker A wakes up and attempts:
+  // (a) Fenced completion UPDATE with token_A
+  const staleCompleteRes = await queryDb(
+    env,
+    `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'processing' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+    [1, 0, "claim_1_0_stale_worker_A"]
+  );
+  assert.equal(staleCompleteRes.rows.length, 0, "Stale Worker A completion UPDATE must be rejected by fencing check");
+
+  // (b) Fenced failure (pending + retry_count + 1) UPDATE with token_A
+  const staleFailMetaA = JSON.stringify({ order_id: "ord_1", _claim_token: "claim_1_0_stale_worker_A", _claim_version: 1 });
+  const stalePendingRes = await queryDb(
+    env,
+    `UPDATE pending_refunds SET status = 'pending', retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW(), metadata = $5 WHERE id = $1 AND retry_count = $2 AND ((status = 'processing' AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3) OR ((status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) AND COALESCE(metadata::jsonb->>'_claim_token', '') = $4)) RETURNING id, retry_count`,
+    [1, 0, "claim_1_0_stale_worker_A", "", staleFailMetaA]
+  );
+  assert.equal(stalePendingRes.rows.length, 0, "Stale Worker A pending/retry_count UPDATE must be rejected by fencing check");
+
+  // (c) Fenced exhausted UPDATE with token_A
+  const staleExhaustedRes = await queryDb(
+    env,
+    `UPDATE pending_refunds SET status = 'exhausted', updated_at = NOW() WHERE id = $1 AND status = 'pending' AND retry_count = $2 AND COALESCE(metadata::jsonb->>'_claim_token', '') = $3 RETURNING id`,
+    [1, 1, "claim_1_0_stale_worker_A"]
+  );
+  assert.equal(staleExhaustedRes.rows.length, 0, "Stale Worker A exhausted UPDATE must be rejected by fencing check");
+
+  // Verify Worker B state is completely untouched
+  const finalRow = db.public.many(`SELECT status, retry_count FROM pending_refunds WHERE user_id = '${USER_F1}'`)[0];
+  assert.equal(finalRow.status, "completed");
+  assert.equal(finalRow.retry_count, 0);
+  const finalBal = db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_F1}'`)[0].balance;
+  assert.equal(finalBal, 140, "Balance must remain 140 (credited once by Worker B)");
+});
+
+test("5T-LOCK-ORDER-01: retryFailedRefunds runs in a single queryDbTransaction and acquires locks in identical order to deleteAccount", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_LO = "99002";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_LO}', 'lo_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_LO}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status)
+    VALUES ('${USER_LO}', 25, 'lo_ref_1', 'alert', 'Lock order refund', 'pending');
+  `);
+
+  let txCount = 0;
+  const txQueries = [];
+  const trackingTx = (e, fn) => {
+    txCount++;
+    return queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        txQueries.push(String(sql).replace(/\s+/g, " ").trim());
+        return txQuery(sql, params);
+      });
+    });
+  };
+
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction: trackingTx, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
+  const referralService = createReferralRewardsService({
+    queryDb,
+    queryDbTransaction: trackingTx,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+
+  assert.equal(txCount, 1, "retryFailedRefunds + grantReward + creditTokens must execute inside a SINGLE queryDbTransaction");
+
+  const lock1Idx = txQueries.findIndex(q => q.includes("SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE"));
+  const lock2Idx = txQueries.findIndex(q => q.includes("SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE"));
+  const lock3Idx = txQueries.findIndex(q => q.includes("FROM pending_refunds WHERE id = $1 FOR UPDATE"));
+  const claimIdx = txQueries.findIndex(q => q.includes("UPDATE pending_refunds SET status = 'processing'"));
+  const lock4Idx = txQueries.findIndex(q => q.includes("FROM token_transactions WHERE ref_id = $1 FOR UPDATE"));
+  const creditIdx = txQueries.findIndex(q => q.includes("WITH tx_insert AS"));
+  const completeIdx = txQueries.findIndex(q => q.includes("UPDATE pending_refunds SET status = 'completed'"));
+
+  assert.ok(lock1Idx > -1 && lock2Idx > -1 && lock3Idx > -1 && claimIdx > -1 && lock4Idx > -1 && creditIdx > -1 && completeIdx > -1, "All lifecycle steps must run inside txQuery");
+  assert.ok(lock1Idx < lock2Idx, "Lock 1 (users FOR UPDATE) must precede Lock 2 (token_balances FOR UPDATE)");
+  assert.ok(lock2Idx < lock3Idx, "Lock 2 (token_balances FOR UPDATE) must precede Lock 3 (pending_refunds FOR UPDATE)");
+  assert.ok(lock3Idx < claimIdx && claimIdx < lock4Idx, "Lock 3 + claim must precede Lock 4 (token_transactions FOR UPDATE)");
+  assert.ok(lock4Idx < creditIdx && creditIdx < completeIdx, "Lock 4 must precede credit CTE, which must precede fenced status=completed");
+});
+
+test("5T-SCHEMA-PARITY-01: Composite index (user_id, tx_type, ref_id) does not hide cross-user or cross-type ref_id conflicts even when multiple rows exist", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+
+  // With the real composite index (user_id, tx_type, ref_id), insert TWO rows with the same ref_id:
+  // Row 1: valid row for user 99003 (marketplace_refund, 50)
+  // Row 2: conflicting row for user 99004 (marketplace_refund, 50) sharing the same ref_id
+  // Previously LIMIT 1 would only see Row 1 and miss Row 2!
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('99003', 'u_99003'), ('99004', 'u_99004');
+    INSERT INTO token_balances (user_id, balance) VALUES ('99003', 100), ('99004', 100);
+    INSERT INTO token_transactions (user_id, amount, tx_type, source, status, ref_id) VALUES
+      ('99003', 50, 'marketplace_refund', 'marketplace', 'completed', 'dup_composite_ref'),
+      ('99004', 50, 'marketplace_refund', 'marketplace', 'completed', 'dup_composite_ref');
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('99003', 50, 'dup_composite_ref', 'pending');
+  `);
+
+  // 1. deleteAccount must detect the second conflicting row and rollback
+  const userRepo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  await assert.rejects(
+    async () => userRepo.deleteAccount(env, "99003"),
+    /Refund ref_id conflict mismatch/
+  );
+  assert.equal(db.public.many("SELECT * FROM users WHERE telegram_id = '99003'").length, 1, "User 99003 must not be deleted when composite conflict exists");
+
+  // 2. retryFailedRefunds must also detect the second conflicting row, rollback, and increment retry_count
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
+  const referralService = createReferralRewardsService({
+    queryDb,
+    queryDbTransaction,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+  const pref = db.public.many("SELECT status, retry_count FROM pending_refunds WHERE user_id = '99003'")[0];
+  assert.equal(pref.status, "pending", "Conflicting refund must not be marked completed");
+  assert.equal(pref.retry_count, 1, "Failed conflict must increment retry_count via fenced catch handler");
+});
+
+test("5T-CRASH-SIMULATION: Atomic rollback when completion fencing fails after creditTokens, and exhausted transition at retry 10", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_CS = "99005";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_CS}', 'cs_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_CS}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status, retry_count)
+    VALUES ('${USER_CS}', 60, 'cs_ref_1', 'alert', 'Crash sim refund', 'pending', 9);
+  `);
+
+  // Simulate failure at the final UPDATE pending_refunds SET status = 'completed' AFTER creditTokens has already inserted tx and updated balance inside txQuery
+  const failOnCompleteTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+    return fn(async (sql, params) => {
+      if (String(sql).includes("UPDATE pending_refunds SET status = 'completed'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      return txQuery(sql, params);
+    });
+  });
+
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction: failOnCompleteTx, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
+  const referralService = createReferralRewardsService({
+    queryDb,
+    queryDbTransaction: failOnCompleteTx,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+
+  // Because creditTokens and UPDATE status='completed' share the same transaction, the +60 credit MUST be rolled back!
+  const bal = db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_CS}'`)[0].balance;
+  assert.equal(bal, 100, "Wallet balance must roll back to 100 when status=completed fails inside the shared transaction");
+  const txs = db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_CS}'`);
+  assert.equal(txs.length, 0, "Inserted token_transactions row must roll back when status=completed fails");
+
+  // And because retry_count was 9 (9 + 1 >= 10), the fenced catch handler must transition status to exhausted
+  const pref = db.public.many(`SELECT status, retry_count FROM pending_refunds WHERE user_id = '${USER_CS}'`)[0];
+  assert.equal(pref.retry_count, 10, "retry_count must increment from 9 to 10");
+  assert.equal(pref.status, "exhausted", "Refund must transition to exhausted on 10th failure");
 });

@@ -497,13 +497,25 @@ function scrubTransactionForArchive(tx, tombstoneId) {
             }
           };
 
-          // Check for any existing transaction with the canonical ref_id before crediting
+          // Check for any existing transactions with the canonical ref_id before crediting (Lock Order #4 — no LIMIT 1)
           const existingTxRes = await txQuery(
-            "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1",
+            "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE",
             [canonicalRefId]
           );
           if (existingTxRes.rows && existingTxRes.rows.length > 0) {
-            validateExistingRefundTx(existingTxRes.rows[0]);
+            for (const exTx of existingTxRes.rows) {
+              validateExistingRefundTx(exTx);
+            }
+            if (existingTxRes.rows.length > 1) {
+              throw new Error(`Refund ref_id conflict mismatch for ${canonicalRefId}: multiple transactions found`);
+            }
+            const balCheckRes = await txQuery(
+              "SELECT balance FROM token_balances WHERE user_id = $1",
+              [uid]
+            );
+            if (!balCheckRes.rows || balCheckRes.rows.length === 0) {
+              throw new Error(`Refund transaction ${canonicalRefId} exists without token_balances row for user ${uid}`);
+            }
             // Valid idempotent match already exists in token_transactions and token_balances; do not double-credit
           } else {
             const refundDesc = pref.description || "Account deletion auto-settled refund";
@@ -518,6 +530,16 @@ function scrubTransactionForArchive(tx, tombstoneId) {
               [uid, refAmount, refundDesc, canonicalRefId, refundMeta]
             );
             if (insTxRes.rows && insTxRes.rows.length === 1) {
+              const postInsTxRes = await txQuery(
+                "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE",
+                [canonicalRefId]
+              );
+              for (const pTx of (postInsTxRes.rows || [])) {
+                validateExistingRefundTx(pTx);
+              }
+              if (!postInsTxRes.rows || postInsTxRes.rows.length !== 1) {
+                throw new Error(`Refund ref_id conflict mismatch for ${canonicalRefId}: concurrent conflicting row detected`);
+              }
               const balUpdRes = await txQuery(
                 `INSERT INTO token_balances (user_id, balance, updated_at)
                  VALUES ($1, $2, NOW())
@@ -530,15 +552,27 @@ function scrubTransactionForArchive(tx, tombstoneId) {
                 throw new Error(`Failed to credit wallet balance for refund ${canonicalRefId}`);
               }
             } else {
-              // Concurrent insert occurred between SELECT and INSERT; verify the winning row
+              // Concurrent insert occurred between SELECT and INSERT; verify all rows matching canonicalRefId
               const raceTxRes = await txQuery(
-                "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1",
+                "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 FOR UPDATE",
                 [canonicalRefId]
               );
               if (!raceTxRes.rows || raceTxRes.rows.length === 0) {
                 throw new Error(`Failed to insert refund transaction for canonical ref_id ${canonicalRefId}`);
               }
-              validateExistingRefundTx(raceTxRes.rows[0]);
+              for (const rTx of raceTxRes.rows) {
+                validateExistingRefundTx(rTx);
+              }
+              if (raceTxRes.rows.length > 1) {
+                throw new Error(`Refund ref_id conflict mismatch for ${canonicalRefId}: multiple transactions found`);
+              }
+              const raceBalRes = await txQuery(
+                "SELECT balance FROM token_balances WHERE user_id = $1",
+                [uid]
+              );
+              if (!raceBalRes.rows || raceBalRes.rows.length === 0) {
+                throw new Error(`Refund transaction ${canonicalRefId} exists without token_balances row for user ${uid}`);
+              }
             }
           }
 
