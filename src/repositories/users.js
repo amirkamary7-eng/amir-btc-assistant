@@ -309,19 +309,49 @@ export function createUserRepository(deps) {
  * P0 NEW-DB-01: Scrub PII from a token_transactions row for financial archiving.
  * Masks raw Telegram IDs in ref_id and description, and strips PII keys from metadata.
  */
+/**
+ * P0 NEW-DB-01: Scrub PII from a token_transactions row for financial archiving.
+ * Deep recursive scrubbing for nested JSON objects/arrays, ref_id, description, and metadata.
+ */
 function scrubTransactionForArchive(tx, tombstoneId) {
+  const piiKeys = new Set(["invitee_id", "inviter_id", "telegram_id", "user_id", "username", "first_name", "last_name", "telegramid", "userid"]);
+
+  function deepScrub(val) {
+    if (val === null || val === undefined) return val;
+    if (typeof val === "string") {
+      return val.replace(/(?<=^|[^0-9])\d{5,15}(?=[^0-9]|$)/g, "ANON");
+    }
+    if (typeof val === "number") {
+      if (val >= 10000 && val <= 99999999995) return "ANON";
+      return val;
+    }
+    if (Array.isArray(val)) {
+      return val.map(item => deepScrub(item));
+    }
+    if (typeof val === "object") {
+      const scrubbed = {};
+      for (const [k, v] of Object.entries(val)) {
+        if (piiKeys.has(k.toLowerCase())) continue;
+        scrubbed[k] = deepScrub(v);
+      }
+      return scrubbed;
+    }
+    return val;
+  }
+
   const scrubbedRef = tx.ref_id ? String(tx.ref_id).replace(/(?<=^|[^0-9])\d{5,15}(?=[^0-9]|$)/g, "ANON") : null;
   const scrubbedDesc = tx.description ? String(tx.description).replace(/(?<=^|[^0-9])\d{5,15}(?=[^0-9]|$)/g, "[SCRUBBED]") : null;
+
   let scrubbedMeta = {};
   if (tx.metadata) {
     try {
       const raw = typeof tx.metadata === "string" ? JSON.parse(tx.metadata) : tx.metadata;
-      const piiKeys = ["invitee_id", "inviter_id", "telegram_id", "user_id", "username", "first_name", "last_name"];
-      scrubbedMeta = Object.fromEntries(Object.entries(raw).filter(([k]) => !piiKeys.includes(k)));
+      scrubbedMeta = deepScrub(raw);
     } catch {
       scrubbedMeta = {};
     }
   }
+
   return {
     original_tx_id: Number(tx.id),
     account_tombstone_id: String(tombstoneId),
@@ -341,22 +371,54 @@ function scrubTransactionForArchive(tx, tombstoneId) {
     const summary = { userId: uid, tables: {}, errors: [] };
     const { createHmac, randomUUID } = await import("node:crypto");
 
-    // ── STEP 1: Settle open pending refunds ──
+    // ── H1 FIX: Safely settle open pending refunds BEFORE deletion ──
+    // Outstanding pending refunds are real unpaid financial obligations.
+    // They MUST be credited back to the user's balance before computing the burn.
     try {
       const pendingRefundsRes = await queryDb(env,
-        "SELECT id, amount, status FROM pending_refunds WHERE user_id = $1 AND status = 'pending'",
+        "SELECT id, amount, refund_ref_id FROM pending_refunds WHERE user_id = $1 AND status = 'pending'",
         [uid]
       );
-      summary.openPendingRefunds = pendingRefundsRes.rows?.length || 0;
-      if (summary.openPendingRefunds > 0) {
+      const pendingRows = pendingRefundsRes.rows || [];
+      summary.openPendingRefunds = pendingRows.length;
+
+      for (const pref of pendingRows) {
+        const refAmount = Number(pref.amount || 0);
+        if (refAmount > 0) {
+          // Refund credit transaction
+          await queryDb(env, `
+            INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
+            VALUES ($1, $2, 'marketplace_refund', 'Account deletion auto-settled refund', $3, NOW())
+            ON CONFLICT DO NOTHING
+          `, [uid, refAmount, `auto_refund_${pref.id}_${uid}`]);
+
+          // Increase balance
+          await queryDb(env, `
+            INSERT INTO token_balances (user_id, balance, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (user_id) DO UPDATE SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()
+          `, [uid, refAmount]);
+        }
+        // Mark pending_refund as completed_on_deletion
         await queryDb(env,
-          "UPDATE pending_refunds SET status = 'cancelled', updated_at = NOW() WHERE user_id = $1 AND status = 'pending'",
-          [uid]
+          "UPDATE pending_refunds SET status = 'settled', updated_at = NOW() WHERE id = $1",
+          [pref.id]
         );
       }
-    } catch (e) {
-      console.warn("[DELETE-ACCOUNT] Pending refunds settlement failed (non-fatal):", e?.message);
+    } catch (refundErr) {
+      console.error("[DELETE-ACCOUNT] Failed to safely settle pending refunds:", refundErr?.message);
+      throw new Error(`Failed to settle pending refunds prior to account deletion: ${refundErr?.message}`);
     }
+
+    // ── H3 FIX: Validate REFERRAL_SECRET_SALT configuration ──
+    // Fail-Closed: If REFERRAL_SECRET_SALT is not configured in production, block referral lock write
+    const salt = env?.REFERRAL_SECRET_SALT;
+    const isProd = String(env?.APP_ENV || "").toLowerCase() === "production";
+    if (isProd && (!salt || salt === "amir-btc-referral-secret-default-salt")) {
+      console.error("[DELETE-ACCOUNT] Fail-Closed: REFERRAL_SECRET_SALT is not configured in production");
+      throw new Error("REFERRAL_SECRET_SALT must be securely configured in production environment");
+    }
+    const activeSalt = salt || "amir-btc-referral-secret-default-salt";
 
     // ── STEP 2: Record in claimed_referral_pairs (Permanent Anti-Fraud) ──
     let previousInviterId = null;
@@ -366,9 +428,8 @@ function scrubTransactionForArchive(tx, tombstoneId) {
         [uid]);
       previousInviterId = existingRef.rows[0]?.inviter_id || null;
       if (previousInviterId) {
-        const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
-        const pairHash = createHmac("sha256", salt).update(`${previousInviterId}:${uid}`).digest("hex");
-        const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${uid}`).digest("hex");
+        const pairHash = createHmac("sha256", activeSalt).update(`${previousInviterId}:${uid}`).digest("hex");
+        const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${uid}`).digest("hex");
         await queryDb(env, `
           CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
             pair_hash VARCHAR(64) PRIMARY KEY,
@@ -443,7 +504,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
       throw new Error(`Token burn failed: ${burnErr?.message}`);
     }
 
-    // ── STEP 5: Prepare archive records with PII scrubbing ──
+    // ── STEP 5: Prepare archive records with deep PII scrubbing ──
     const tombstoneId = randomUUID();
     summary.tombstoneId = tombstoneId;
 
@@ -452,6 +513,24 @@ function scrubTransactionForArchive(tx, tombstoneId) {
     summary.sourceTxCount = rawTxs.length;
 
     const scrubbedRows = rawTxs.map(tx => scrubTransactionForArchive(tx, tombstoneId));
+
+    // ── H2 FIX: Pre-check existing archive duplicates for strict content equality ──
+    for (const s of scrubbedRows) {
+      const existingArch = await queryDb(env,
+        "SELECT original_tx_id, amount, tx_type, source, status FROM token_transactions_archive WHERE original_tx_id = $1 LIMIT 1",
+        [s.original_tx_id]
+      );
+      if (existingArch.rows && existingArch.rows.length > 0) {
+        const existing = existingArch.rows[0];
+        if (
+          Number(existing.amount) !== Number(s.amount) ||
+          String(existing.tx_type) !== String(s.tx_type) ||
+          String(existing.status) !== String(s.status)
+        ) {
+          throw new Error(`Archive duplicate content mismatch for original_tx_id ${s.original_tx_id}: amount/type/status differ`);
+        }
+      }
+    }
 
     // ── STEP 6: Execute Atomic Transaction (Archive Inserts + deleted_users + Cascade Deletes) ──
     const cascadeQueries = [];
@@ -470,7 +549,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
       });
     }
 
-    // 6b. deleted_users cooldown insert (atomic within the transaction)
+    // 6b. deleted_users cooldown insert
     cascadeQueries.push({
       sql: `INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
             VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
@@ -479,7 +558,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
       params: [uid, previousInviterId]
     });
 
-    // 6c. Cascade DELETEs (child tables before parent users table)
+    // 6c. Cascade DELETEs
     cascadeQueries.push(
       { sql: "DELETE FROM referrals WHERE invitee_id = $1", params: [uid] },
       { sql: "DELETE FROM referrals WHERE inviter_id = $1", params: [uid] },
@@ -504,7 +583,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
     try {
       results = await queryDbTransaction(env, cascadeQueries);
     } catch (cascadeErr) {
-      // ROLLBACK: If cascade failed, rollback the burn transaction
+      // ROLLBACK: Roll back token burn transaction if cascade transaction fails
       if (burnTxId) {
         await queryDb(env, "DELETE FROM token_transactions WHERE id = $1", [burnTxId]).catch(() => {});
         await queryDb(env, "UPDATE token_balances SET balance = balance + $1, updated_at = NOW() WHERE user_id = $2", [balanceToBurn, uid]).catch(() => {});
@@ -513,8 +592,18 @@ function scrubTransactionForArchive(tx, tombstoneId) {
       throw cascadeErr;
     }
 
+    // ── H2 FIX: Verify total archived count in database matches source transactions count ──
+    const verifyArchivedCountRes = await queryDb(env,
+      "SELECT COUNT(*)::int AS cnt FROM token_transactions_archive WHERE account_tombstone_id = $1",
+      [tombstoneId]
+    );
+    const archivedCnt = Number(verifyArchivedCountRes.rows[0]?.cnt || 0);
+    if (archivedCnt !== rawTxs.length) {
+      throw new Error(`Archive count mismatch: source had ${rawTxs.length} transactions, archive has ${archivedCnt}`);
+    }
+
     summary.cooldownRecorded = true;
-    summary.archivedCount = scrubbedRows.length;
+    summary.archivedCount = archivedCnt;
     const tableNames = [
       "referrals_as_invitee", "referrals_as_inviter", "token_transactions",
       "token_balances", "pending_refunds", "watchlist_items",
@@ -522,7 +611,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
       "notification_queue", "notification_settings", "daily_checkin_streaks",
       "calendar_reminders", "ticket_replies", "tickets", "admins", "users",
     ];
-    const deleteResults = results.slice(scrubbedRows.length + 1); // skip archive inserts and deleted_users
+    const deleteResults = results.slice(scrubbedRows.length + 1);
     for (let i = 0; i < tableNames.length; i++) {
       summary.tables[tableNames[i]] = deleteResults[i]?.rowCount || 0;
     }

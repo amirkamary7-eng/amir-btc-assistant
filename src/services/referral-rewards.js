@@ -101,9 +101,15 @@ async function creditReferralWithReward(env, inviterId, referralId, inviteeId, a
     // PERMANENT ANTI-FRAUD (P0 NEW-DB-01): Record claimed referral hashes
     try {
       const { createHmac } = await import("node:crypto");
-      const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
-      const pairHash = createHmac("sha256", salt).update(`${String(inviterId)}:${String(inviteeId)}`).digest("hex");
-      const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+      const salt = env?.REFERRAL_SECRET_SALT;
+      const isProd = String(env?.APP_ENV || "").toLowerCase() === "production";
+      if (isProd && (!salt || salt === "amir-btc-referral-secret-default-salt")) {
+        console.error("[REFERRAL-ANTI-FRAUD] Fail-Closed: REFERRAL_SECRET_SALT is not configured in production");
+        return;
+      }
+      const activeSalt = salt || "amir-btc-referral-secret-default-salt";
+      const pairHash = createHmac("sha256", activeSalt).update(`${String(inviterId)}:${String(inviteeId)}`).digest("hex");
+      const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
       await queryDb(env, `
         CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
           pair_hash VARCHAR(64) PRIMARY KEY,
@@ -793,9 +799,15 @@ async function processReferralOnBootstrap(env, inviteeId, referrerId, channelJoi
   // rewarded in past lifetimes (e.g. account deleted and recreated after 15 days).
   try {
     const { createHmac } = await import("node:crypto");
-    const salt = env?.REFERRAL_SECRET_SALT || "amir-btc-referral-secret-default-salt";
-    const pairHash = createHmac("sha256", salt).update(`${normalizedReferrerId}:${String(inviteeId)}`).digest("hex");
-    const inviteeHash = createHmac("sha256", salt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
+    const salt = env?.REFERRAL_SECRET_SALT;
+    const isProd = String(env?.APP_ENV || "").toLowerCase() === "production";
+    if (isProd && (!salt || salt === "amir-btc-referral-secret-default-salt")) {
+      console.error("[REFERRAL-ANTI-FRAUD] Fail-Closed: REFERRAL_SECRET_SALT is not configured in production");
+      return { referral_id: null, rejected: true, reason: "REFERRAL_SECRET_SALT is not configured in production" };
+    }
+    const activeSalt = salt || "amir-btc-referral-secret-default-salt";
+    const pairHash = createHmac("sha256", activeSalt).update(`${normalizedReferrerId}:${String(inviteeId)}`).digest("hex");
+    const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${String(inviteeId)}`).digest("hex");
     const claimedCheck = await queryDb(env,
       'SELECT pair_hash FROM claimed_referral_pairs WHERE pair_hash IN ($1, $2) LIMIT 1',
       [pairHash, inviteeHash]

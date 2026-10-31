@@ -73,6 +73,7 @@ function setupMockDatabase() {
       tx_type VARCHAR(32) NOT NULL,
       description VARCHAR(256),
       ref_id VARCHAR(128),
+      metadata JSONB DEFAULT '{}',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -641,4 +642,128 @@ test("NEW-DB-01: Permanent referral anti-fraud blocks re-claim even past 15-day 
   const attemptNew = await referralRewardsService.processReferralOnBootstrap(env, INVITEE_B, INVITER_C, true, true);
   assert.equal(attemptNew?.rejected, true, "New inviter must also be permanently rejected for already-rewarded invitee");
   assert.match(attemptNew?.reason, /Permanent referral anti-fraud/);
+});
+
+
+test("H1-REMEDIATION: Account deletion auto-settles pending refunds prior to burn", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_H1 = "80001";
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_H1}', 'h1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_H1}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('${USER_H1}', 30, 'ref_p1', 'pending');
+    INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id) VALUES
+      ('${USER_H1}', 100, 'daily_claim', 'Claim', 'tx_h1_1');
+  `);
+
+  const summary = await repo.deleteAccount(env, USER_H1);
+
+  assert.equal(summary.openPendingRefunds, 1, "Must detect 1 pending refund");
+  assert.equal(summary.burnedBalance, 130, "Burned balance must equal initial 100 + auto-settled refund 30");
+
+  const archived = db.public.many(`SELECT * FROM token_transactions_archive WHERE account_tombstone_id = '${summary.tombstoneId}'`);
+  assert.equal(archived.length, 3, "Archived txs must contain original 1, auto-settled refund 1, and burn 1");
+
+  const sumAmount = archived.reduce((acc, row) => acc + Number(row.amount), 0);
+  assert.equal(sumAmount, 0, "Ledger total sum across archive including auto-settled refund must equal exactly 0");
+});
+
+test("H2-REMEDIATION: Deep recursive PII scrubbing for nested JSON objects, arrays, and numeric keys", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_H2 = "80002";
+  const nestedMeta = JSON.stringify({
+    details: {
+      user_id: "80002",
+      telegram_id: "80002",
+      nested_array: [{ invitee_id: "80002", num_id: 80002, comment: "user 80002 referred" }],
+      raw_num: 80002
+    }
+  });
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_H2}', 'h2_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_H2}', 0);
+    INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, metadata) VALUES
+      ('${USER_H2}', 0, 'test_meta', 'User 80002 action', 'ref_80002_meta', '${nestedMeta.replace(/'/g, "''")}');
+  `);
+
+  const summary = await repo.deleteAccount(env, USER_H2);
+
+  const archived = db.public.many(`SELECT * FROM token_transactions_archive WHERE account_tombstone_id = '${summary.tombstoneId}'`);
+  assert.equal(archived.length, 1);
+
+  const meta = typeof archived[0].metadata === 'string' ? JSON.parse(archived[0].metadata) : archived[0].metadata;
+  assert.equal(meta.details.user_id, undefined, "Nested user_id must be stripped");
+  assert.equal(meta.details.telegram_id, undefined, "Nested telegram_id must be stripped");
+  assert.equal(meta.details.nested_array[0].invitee_id, undefined, "Array item invitee_id must be stripped");
+  assert.equal(meta.details.nested_array[0].num_id, "ANON", "Numeric ID inside array item must be scrubbed");
+  assert.match(meta.details.nested_array[0].comment, /ANON/, "String text inside array item must be scrubbed");
+});
+
+test("H2-REMEDIATION: Archive duplicate content mismatch triggers rollback", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_H2_DUP = "80003";
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_H2_DUP}', 'h2_dup_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_H2_DUP}', 50);
+    INSERT INTO token_transactions (id, user_id, amount, tx_type, description, ref_id) VALUES
+      (9001, '${USER_H2_DUP}', 50, 'daily_claim', 'Claim', 'ref_9001');
+    INSERT INTO token_transactions_archive (original_tx_id, account_tombstone_id, amount, tx_type, description, ref_id, original_created_at) VALUES
+      (9001, 'old_tombstone_id', 9999, 'DIFFERENT_TYPE', 'Old claim', 'ref_9001', NOW());
+  `);
+
+  await assert.rejects(
+    async () => repo.deleteAccount(env, USER_H2_DUP),
+    /Archive duplicate content mismatch/
+  );
+
+  const userCheck = db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_H2_DUP}'`);
+  assert.equal(userCheck.length, 1, "User must NOT be deleted when archive duplicate mismatch occurs");
+});
+
+test("H3-REMEDIATION: Production Fail-Closed when REFERRAL_SECRET_SALT is unconfigured", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const envProdMissingSalt = { APP_ENV: "production" };
+  const userRepo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+
+  const USER_H3 = "80004";
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_H3}', 'h3_user');
+  `);
+
+  await assert.rejects(
+    async () => userRepo.deleteAccount(envProdMissingSalt, USER_H3),
+    /REFERRAL_SECRET_SALT must be securely configured/
+  );
+
+  const referralRewardsService = createReferralRewardsService({
+    queryDb,
+    notificationService: null,
+    walletRepo: null,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => s ? String(s) : null,
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService: { grantReward: async () => ({ success: true }) },
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => userRepo
+  });
+
+  const bootstrapRes = await referralRewardsService.processReferralOnBootstrap(envProdMissingSalt, "80005", USER_H3, true, true);
+  assert.equal(bootstrapRes?.rejected, true);
+  assert.match(bootstrapRes?.reason, /REFERRAL_SECRET_SALT is not configured/);
 });
