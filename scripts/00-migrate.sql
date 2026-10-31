@@ -930,7 +930,7 @@ CREATE TABLE IF NOT EXISTS token_transactions (
   amount      INTEGER NOT NULL,
   tx_type     VARCHAR(32) NOT NULL,
   description VARCHAR(256),
-  ref_id      VARCHAR(64),
+  ref_id      VARCHAR(128),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   status      VARCHAR(16) NOT NULL DEFAULT 'completed',
   source      VARCHAR(32) NOT NULL DEFAULT 'system',
@@ -943,6 +943,8 @@ ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS status     VARCHAR(16) N
 ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS source     VARCHAR(32) NOT NULL DEFAULT 'system';
 ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS metadata   JSONB DEFAULT '{}';
 ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- NEW-FIN-01 FIX: widen ref_id from VARCHAR(64) to VARCHAR(128) (matches reward_purchases.tx_ref_id)
+ALTER TABLE token_transactions ALTER COLUMN ref_id TYPE VARCHAR(128);
 
 CREATE INDEX IF NOT EXISTS idx_token_tx_user_created ON token_transactions (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_token_tx_type         ON token_transactions (user_id, tx_type);
@@ -966,8 +968,8 @@ CREATE TABLE IF NOT EXISTS pending_refunds (
   id              SERIAL PRIMARY KEY,
   user_id         VARCHAR(64) NOT NULL REFERENCES users(telegram_id),
   amount          INTEGER NOT NULL,
-  refund_ref_id   VARCHAR(64) NOT NULL,
-  original_ref_id VARCHAR(64),
+  refund_ref_id   VARCHAR(128) NOT NULL,
+  original_ref_id VARCHAR(128),
   source          VARCHAR(32) NOT NULL DEFAULT 'alert',
   description     VARCHAR(256),
   metadata        JSONB DEFAULT '{}',
@@ -977,6 +979,10 @@ CREATE TABLE IF NOT EXISTS pending_refunds (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- NEW-FIN-01 FIX: widen refund_ref_id and original_ref_id from VARCHAR(64) to VARCHAR(128)
+ALTER TABLE pending_refunds ALTER COLUMN refund_ref_id TYPE VARCHAR(128);
+ALTER TABLE pending_refunds ALTER COLUMN original_ref_id TYPE VARCHAR(128);
 
 -- Only one pending refund per refund_ref_id (idempotency)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_refunds_ref_id
