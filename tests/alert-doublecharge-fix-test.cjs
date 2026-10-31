@@ -327,6 +327,7 @@ test("FIN01-02 (runtime pg-mem): create fails AND immediate refund fails → per
   const stack = makeRealStack();
   const { h, economyService } = stack;
   const USER_10_DIGIT = "6842219966";
+  await h.raw("INSERT INTO users (telegram_id) VALUES ($1);", [USER_10_DIGIT]);
   await h.insertBalance(USER_10_DIGIT, 100);
 
   // Apply the NEW-FIN-01 migration widening ref_id & pending_refunds to VARCHAR(128)
