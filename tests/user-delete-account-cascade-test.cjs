@@ -35,6 +35,32 @@ function loadReferralRewardsService() {
 }
 const createReferralRewardsService = loadReferralRewardsService();
 
+function loadWalletRepo() {
+  const walletPath = path.join(__dirname, "..", "src", "repositories", "wallet.js");
+  const wSrc = fs.readFileSync(walletPath, "utf8");
+  const cjsSource = wSrc
+    .replace(/^export\s+function\s+createWalletRepository/m, "function createWalletRepository")
+    + "\nmodule.exports = { createWalletRepository };";
+  const mod = { exports: {} };
+  const fn = new Function("require", "module", "exports", cjsSource);
+  fn(require, mod, mod.exports);
+  return mod.exports.createWalletRepository;
+}
+const createWalletRepository = loadWalletRepo();
+
+function loadEconomyService() {
+  const econPath = path.join(__dirname, "..", "src", "services", "economy.js");
+  const eSrc = fs.readFileSync(econPath, "utf8");
+  const cjsSource = eSrc
+    .replace(/^export\s+function\s+createEconomyService/m, "function createEconomyService")
+    + "\nmodule.exports = { createEconomyService };";
+  const mod = { exports: {} };
+  const fn = new Function("require", "module", "exports", cjsSource);
+  fn(require, mod, mod.exports);
+  return mod.exports.createEconomyService;
+}
+const createEconomyService = loadEconomyService();
+
 
 function setupMockDatabase() {
   const db = newDb();
@@ -255,10 +281,12 @@ function setupMockDatabase() {
   const pool = new Pool();
 
   function rewriteDistinctFrom(sql) {
-    return String(sql).replace(
-      /([a-zA-Z0-9_.$:]+)\s+IS\s+DISTINCT\s+FROM\s+([a-zA-Z0-9_.$:]+)/gi,
-      (_, l, r) => `((${l} IS NULL AND ${r} IS NOT NULL) OR (${l} IS NOT NULL AND ${r} IS NULL) OR (${l} <> ${r}))`
-    );
+    return String(sql)
+      .replace("SELECT $1, $2, NOW() FROM tx_insert", "SELECT $1, $2::integer, NOW() FROM tx_insert")
+      .replace(
+        /([a-zA-Z0-9_.$:]+)\s+IS\s+DISTINCT\s+FROM\s+([a-zA-Z0-9_.$:]+)/gi,
+        (_, l, r) => `((${l} IS NULL AND ${r} IS NOT NULL) OR (${l} IS NOT NULL AND ${r} IS NULL) OR (${l} <> ${r}))`
+      );
   }
 
   // Transaction serialization lock for pg-mem (simulates row-level FOR UPDATE serialization across concurrent connections)
@@ -274,7 +302,8 @@ function setupMockDatabase() {
     if (s.includes('CREATE TABLE IF NOT EXISTS deleted_users') ||
         s.includes('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq') ||
         s.includes('CREATE TABLE IF NOT EXISTS token_transactions_archive') ||
-        s.includes('CREATE TABLE IF NOT EXISTS claimed_referral_pairs')) {
+        s.includes('CREATE TABLE IF NOT EXISTS claimed_referral_pairs') ||
+        s.includes('idx_token_tx_user_type_ref')) {
       return { rows: [], rowCount: 0 };
     }
     return pool.query(s, params);
@@ -887,33 +916,9 @@ test("5P-CONCURRENCY-01: Concurrent deleteAccount and retryFailedRefunds for sam
       ('${USER_C1}', 40, 'canon_refund_c1', 'alert', 'Refund 40', 'pending');
   `);
 
-  // Wire economyService.grantReward to perform atomic tx insert + balance upsert using canonical refId
-  const economyService = {
-    grantReward: async ({ userId, amount, rewardType, description, refId }) => {
-      return queryDbTransaction(env, async (txQuery) => {
-        const uLock = await txQuery("SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE", [userId]);
-        if (!uLock.rows || uLock.rows.length === 0) throw new Error("User already deleted");
-        await txQuery("SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE", [userId]);
-        const ins = await txQuery(
-          `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
-           VALUES ($1, $2, $3, 'marketplace', 'completed', $4, $5, '{}', NOW())
-           ON CONFLICT DO NOTHING
-           RETURNING id`,
-          [userId, amount, rewardType, description, refId]
-        );
-        if (ins.rows && ins.rows.length === 1) {
-          await txQuery(
-            `INSERT INTO token_balances (user_id, balance, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (user_id) DO UPDATE SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()`,
-            [userId, amount]
-          );
-          return { success: true, txId: ins.rows[0].id };
-        }
-        return { success: true, alreadyCredited: true };
-      });
-    }
-  };
+  // Wire REAL createWalletRepository and REAL createEconomyService
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
 
   const referralRewardsService = createReferralRewardsService({
     queryDb,
@@ -971,26 +976,12 @@ test("5P-CONCURRENCY-02: Two concurrent retryFailedRefunds workers for the same 
     return queryDb(e, sql, params);
   };
 
+  const walletRepo = createWalletRepository({ queryDb: serializedQueryDb, queryDbTransaction, queryDbDirect: serializedQueryDb });
+  const realEconomy = createEconomyService({ walletRepo, queryDb: serializedQueryDb });
   const economyService = {
-    grantReward: async ({ userId, amount, rewardType, description, refId }) => {
+    grantReward: async (opts) => {
       grantCallCount++;
-      return queryDbTransaction(env, async (txQuery) => {
-        const ins = await txQuery(
-          `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
-           VALUES ($1, $2, $3, 'marketplace', 'completed', $4, $5, '{}', NOW())
-           ON CONFLICT DO NOTHING
-           RETURNING id`,
-          [userId, amount, rewardType, description, refId]
-        );
-        if (ins.rows && ins.rows.length === 1) {
-          await txQuery(
-            "UPDATE token_balances SET balance = balance + $2, updated_at = NOW() WHERE user_id = $1",
-            [userId, amount]
-          );
-          return { success: true, txId: ins.rows[0].id };
-        }
-        return { success: true, alreadyCredited: true };
-      });
+      return realEconomy.grantReward(opts);
     }
   };
 
@@ -1357,4 +1348,200 @@ test("5P-PRE-DELETE-PROOF: Archive verification queries execute strictly BEFORE 
   assert.ok(verifyMissingIdx < deleteTxIdx, "Missing-archive check must execute BEFORE DELETE FROM token_transactions");
   assert.ok(verifyExtraIdx < deleteTxIdx, "Extra-archive check must execute BEFORE DELETE FROM token_transactions");
   assert.ok(verifyFieldsIdx < deleteTxIdx, "8-field archive comparison must execute BEFORE DELETE FROM token_transactions");
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 5R — Stale Processing Recovery, Real Economy Stack & ON CONFLICT Race
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("5R-STALE-RECOVERY-01: Crash after claim (before creditTokens) leaves stale processing row -> recovered after 5m and credited exactly once", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_SR1 = "98001";
+
+  // Insert user with a refund stuck in status=processing from 10 minutes ago (crash before creditTokens)
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_SR1}', 'sr1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_SR1}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status, last_retry_at, updated_at, created_at)
+    VALUES ('${USER_SR1}', 35, 'stale_ref_sr1', 'alert', 'Stale refund 35', 'processing', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes');
+  `);
+
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const economyService = createEconomyService({ walletRepo, queryDb });
+  const referralService = createReferralRewardsService({
+    queryDb,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+
+  const bal = db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_SR1}'`)[0].balance;
+  assert.equal(bal, 135, "Wallet balance must be credited once (100 + 35 = 135)");
+  const pref = db.public.many(`SELECT status FROM pending_refunds WHERE user_id = '${USER_SR1}'`)[0];
+  assert.equal(pref.status, "completed", "Stale processing refund must transition to completed");
+  const txs = db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_SR1}' AND ref_id = 'stale_ref_sr1'`);
+  assert.equal(txs.length, 1, "Exactly 1 refund transaction must exist");
+});
+
+test("5R-STALE-RECOVERY-02: Crash after creditTokens committed (before status=completed) -> recovered without double-credit", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_SR2 = "98002";
+
+  // Simulate state where worker claimed row (status=processing, 10m ago), creditTokens succeeded (+45 already in balance & token_transactions), then worker crashed before UPDATE status=completed
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_SR2}', 'sr2_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_SR2}', 145);
+    INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id)
+    VALUES ('${USER_SR2}', 45, 'marketplace_refund', 'marketplace', 'completed', 'Prior refund credit', 'stale_ref_sr2');
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status, last_retry_at, updated_at, created_at)
+    VALUES ('${USER_SR2}', 45, 'stale_ref_sr2', 'alert', 'Stale refund 45', 'processing', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes');
+  `);
+
+  let grantCalled = 0;
+  const walletRepo = createWalletRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const realEcon = createEconomyService({ walletRepo, queryDb });
+  const economyService = {
+    grantReward: async (opts) => {
+      grantCalled++;
+      return realEcon.grantReward(opts);
+    }
+  };
+  const referralService = createReferralRewardsService({
+    queryDb,
+    notificationService: null,
+    walletRepo,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+
+  assert.equal(grantCalled, 0, "Pre-credit check must detect existing valid transaction + balance and skip grantReward");
+  const bal = db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_SR2}'`)[0].balance;
+  assert.equal(bal, 145, "Wallet balance must remain 145 (no double credit)");
+  const pref = db.public.many(`SELECT status FROM pending_refunds WHERE user_id = '${USER_SR2}'`)[0];
+  assert.equal(pref.status, "completed", "Stale processing refund must transition to completed");
+});
+
+test("5R-STALE-RECOVERY-03: Fresh active processing refund (< 5 minutes) is NOT stolen by another retry worker", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_SR3 = "98003";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_SR3}', 'sr3_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_SR3}', 100);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status, last_retry_at, updated_at, created_at)
+    VALUES ('${USER_SR3}', 20, 'fresh_ref_sr3', 'alert', 'Fresh active refund', 'processing', NOW(), NOW(), NOW());
+  `);
+
+  let grantCalled = 0;
+  const economyService = { grantReward: async () => { grantCalled++; return { success: true, txId: 1 }; } };
+  const referralService = createReferralRewardsService({
+    queryDb,
+    notificationService: null,
+    walletRepo: null,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await referralService.retryFailedRefunds(env);
+  assert.equal(grantCalled, 0, "Fresh in-flight processing row must not be re-claimed before 5-minute timeout");
+});
+
+test("5R-ON-CONFLICT-RACE: Concurrent creditTokens insert between deleteAccount SELECT and INSERT is handled idempotently if valid and rolled back if mismatched", async () => {
+  const env = { APP_ENV: "test" };
+
+  // Case A: Concurrent valid insert (same user, same amount, marketplace_refund) -> idempotent settle, no double credit
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const USER_RACE_OK = "98004";
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('${USER_RACE_OK}', 'race_ok');
+      INSERT INTO token_balances (user_id, balance) VALUES ('${USER_RACE_OK}', 100);
+      INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES ('${USER_RACE_OK}', 30, 'race_ref_ok', 'pending');
+    `);
+
+    // Simulate concurrent creditTokens inserting the tx and updating balance right before deleteAccount runs INSERT INTO token_transactions
+    const raceSimTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        if (String(sql).includes("INSERT INTO token_transactions") && String(sql).includes("marketplace_refund")) {
+          // Concurrent creditTokens just inserted the row and credited +30
+          await txQuery(
+            "INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id) VALUES ($1, $2, 'marketplace_refund', 'marketplace', 'completed', 'Concurrent credit', $3)",
+            [USER_RACE_OK, 30, "race_ref_ok"]
+          );
+          await txQuery("UPDATE token_balances SET balance = balance + 30 WHERE user_id = $1", [USER_RACE_OK]);
+        }
+        return txQuery(sql, params);
+      });
+    });
+
+    const repo = createUserRepository({ queryDb, queryDbTransaction: raceSimTx, queryDbDirect: queryDb });
+    const summary = await repo.deleteAccount(env, USER_RACE_OK);
+    assert.equal(summary.burnedBalance, 130, "Balance must be credited only once (100 + 30 = 130) even when ON CONFLICT DO NOTHING returns 0 rows");
+  }
+
+  // Case B: Concurrent mismatched insert (different amount) -> full rollback
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const USER_RACE_BAD = "98005";
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('${USER_RACE_BAD}', 'race_bad');
+      INSERT INTO token_balances (user_id, balance) VALUES ('${USER_RACE_BAD}', 100);
+      INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES ('${USER_RACE_BAD}', 30, 'race_ref_bad', 'pending');
+    `);
+
+    const raceBadSimTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        if (String(sql).includes("INSERT INTO token_transactions") && String(sql).includes("marketplace_refund")) {
+          await txQuery(
+            "INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id) VALUES ($1, $2, 'marketplace_refund', 'marketplace', 'completed', 'Tampered', $3)",
+            [USER_RACE_BAD, 999, "race_ref_bad"]
+          );
+        }
+        return txQuery(sql, params);
+      });
+    });
+
+    const repo = createUserRepository({ queryDb, queryDbTransaction: raceBadSimTx, queryDbDirect: queryDb });
+    await assert.rejects(
+      async () => repo.deleteAccount(env, USER_RACE_BAD),
+      /Refund ref_id conflict mismatch/
+    );
+    assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_RACE_BAD}'`).length, 1, "User must not be deleted when concurrent conflicting ref_id is detected");
+  }
 });

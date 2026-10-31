@@ -672,7 +672,7 @@ async function retryFailedRefunds(env) {
       `SELECT id, user_id, amount, refund_ref_id, original_ref_id, source,
               description, metadata, retry_count
        FROM pending_refunds
-       WHERE status = 'pending' AND retry_count < 10
+       WHERE (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) AND retry_count < 10
        ORDER BY created_at ASC
        LIMIT 1`,
     );
@@ -684,14 +684,15 @@ async function retryFailedRefunds(env) {
     let succeeded = 0;
     for (const row of result.rows) {
       try {
-        // Phase 5P: Atomically claim pending refund row before granting reward
+        // Phase 5R: Atomically claim pending or stale-processing (>5m) refund row
         const claimRes = await queryDb(env,
-          "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id",
+          "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND (status = 'pending' OR (status = 'processing' AND COALESCE(last_retry_at, updated_at, created_at) < NOW() - INTERVAL '5 minutes')) RETURNING id",
           [Number(row.id)],
         );
         if (!claimRes.rows || claimRes.rows.length === 0) continue;
 
-        // Pre-check canonical refund_ref_id for conflicting transaction owner/amount/type
+        // Pre-check canonical refund_ref_id for prior settlement or conflicting transaction
+        let alreadyCredited = false;
         const existingTx = await queryDb(env,
           'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1',
           [String(row.refund_ref_id)],
@@ -706,26 +707,56 @@ async function retryFailedRefunds(env) {
           ) {
             throw new Error(`Refund ref_id conflict mismatch for ${row.refund_ref_id}`);
           }
+          const balCheck = await queryDb(env,
+            'SELECT balance FROM token_balances WHERE user_id = $1',
+            [String(row.user_id)],
+          );
+          if (balCheck.rows && balCheck.rows.length > 0) {
+            alreadyCredited = true;
+          }
         }
 
-        const grantRes = await economyService.grantReward({
-          userId: String(row.user_id),
-          amount: Number(row.amount),
-          rewardType: 'marketplace_refund',
-          description: row.description || `Refund retry (${row.source})`,
-          refId: String(row.refund_ref_id),
-          metadata: row.metadata || {},
-          auditInfo: { actor: 'cron_retry' },
-          env,
-        });
-        if (grantRes && grantRes.success === false) {
-          throw new Error(grantRes.error || 'grantReward returned success=false');
+        if (!alreadyCredited) {
+          const grantRes = await economyService.grantReward({
+            userId: String(row.user_id),
+            amount: Number(row.amount),
+            rewardType: 'marketplace_refund',
+            description: row.description || `Refund retry (${row.source})`,
+            refId: String(row.refund_ref_id),
+            metadata: row.metadata || {},
+            auditInfo: { actor: 'cron_retry' },
+            env,
+          });
+          if (!grantRes || grantRes.success === false) {
+            throw new Error(grantRes?.error || 'grantReward returned success=false');
+          }
+          // Verify post-credit transaction record before transitioning to completed
+          const postTx = await queryDb(env,
+            'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1',
+            [String(row.refund_ref_id)],
+          );
+          if (postTx.rows && postTx.rows.length > 0) {
+            const pt = postTx.rows[0];
+            if (
+              String(pt.user_id) !== String(row.user_id) ||
+              Number(pt.amount) !== Number(row.amount) ||
+              String(pt.tx_type) !== 'marketplace_refund' ||
+              String(pt.status || 'completed') !== 'completed'
+            ) {
+              throw new Error(`Post-credit refund transaction mismatch for ${row.refund_ref_id}`);
+            }
+          } else if (!grantRes.txId) {
+            throw new Error(`Refund transaction not recorded for ${row.refund_ref_id}`);
+          }
         }
-        // Success — mark as completed
-        await queryDb(env,
-          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status IN ('processing', 'pending')`,
+        // Success — mark as completed only from active processing/pending state
+        const completeRes = await queryDb(env,
+          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status IN ('processing', 'pending') RETURNING id`,
           [Number(row.id)],
         );
+        if (!completeRes.rows || completeRes.rows.length === 0) {
+          throw new Error(`Failed to mark pending_refund id=${row.id} as completed`);
+        }
         succeeded++;
       } catch (retryErr) {
         // Retry failed — revert status to pending and increment retry_count
