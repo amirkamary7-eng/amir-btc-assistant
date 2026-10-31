@@ -684,7 +684,31 @@ async function retryFailedRefunds(env) {
     let succeeded = 0;
     for (const row of result.rows) {
       try {
-        await economyService.grantReward({
+        // Phase 5P: Atomically claim pending refund row before granting reward
+        const claimRes = await queryDb(env,
+          "UPDATE pending_refunds SET status = 'processing', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'pending' RETURNING id",
+          [Number(row.id)],
+        );
+        if (!claimRes.rows || claimRes.rows.length === 0) continue;
+
+        // Pre-check canonical refund_ref_id for conflicting transaction owner/amount/type
+        const existingTx = await queryDb(env,
+          'SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1',
+          [String(row.refund_ref_id)],
+        );
+        if (existingTx.rows && existingTx.rows.length > 0) {
+          const ex = existingTx.rows[0];
+          if (
+            String(ex.user_id) !== String(row.user_id) ||
+            Number(ex.amount) !== Number(row.amount) ||
+            String(ex.tx_type) !== 'marketplace_refund' ||
+            String(ex.status || 'completed') !== 'completed'
+          ) {
+            throw new Error(`Refund ref_id conflict mismatch for ${row.refund_ref_id}`);
+          }
+        }
+
+        const grantRes = await economyService.grantReward({
           userId: String(row.user_id),
           amount: Number(row.amount),
           rewardType: 'marketplace_refund',
@@ -694,16 +718,19 @@ async function retryFailedRefunds(env) {
           auditInfo: { actor: 'cron_retry' },
           env,
         });
+        if (grantRes && grantRes.success === false) {
+          throw new Error(grantRes.error || 'grantReward returned success=false');
+        }
         // Success — mark as completed
         await queryDb(env,
-          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          `UPDATE pending_refunds SET status = 'completed', last_retry_at = NOW(), updated_at = NOW() WHERE id = $1 AND status IN ('processing', 'pending')`,
           [Number(row.id)],
         );
         succeeded++;
       } catch (retryErr) {
-        // Retry failed — increment retry_count, stay pending
+        // Retry failed — revert status to pending and increment retry_count
         await queryDb(env,
-          `UPDATE pending_refunds SET retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          `UPDATE pending_refunds SET status = 'pending', retry_count = retry_count + 1, last_retry_at = NOW(), updated_at = NOW() WHERE id = $1`,
           [Number(row.id)],
         );
         console.warn(`[retryFailedRefunds] Refund ${row.refund_ref_id} retry ${row.retry_count + 1} failed:`, retryErr?.message);

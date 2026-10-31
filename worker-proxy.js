@@ -3222,8 +3222,9 @@ async function queryDbDirect(env, sqlText, params = []) {
 async function queryDbTransaction(env, queries) {
   const _seq = _nextQuerySeq();
   const _t0 = Date.now();
-  const _numQueries = queries ? queries.length : 0;
-  const _sqlPreviews = queries ? queries.map(q => String(q.sql).replace(/\s+/g, ' ').slice(0, 80)).join(' | ') : '';
+  const _isFn = typeof queries === 'function';
+  const _numQueries = _isFn ? 1 : (queries ? queries.length : 0);
+  const _sqlPreviews = _isFn ? '[interactive-tx]' : (queries ? queries.map(q => String(q.sql).replace(/\s+/g, ' ').slice(0, 80)).join(' | ') : '');
   const _tPoolCreate = Date.now();
   const pool = createPool(env);
   if (!pool) throw new Error('Database not configured');
@@ -3245,9 +3246,14 @@ async function queryDbTransaction(env, queries) {
     // release it in finally (not return to pool) and the pool is ended.
     // ROLLBACK may also fail on a poisoned connection — wrapped in try/catch.
     await _poolQueryWithTimeout(client, 'BEGIN', [], { poolLabel: 'txn' });
-    const results = [];
-    for (const { sql, params } of queries) {
-      results.push(await _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' }));
+    let results = [];
+    if (_isFn) {
+      const txQuery = (sql, params = []) => _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' });
+      results = await queries(txQuery);
+    } else {
+      for (const { sql, params } of queries) {
+        results.push(await _poolQueryWithTimeout(client, sql, params, { poolLabel: 'txn' }));
+      }
     }
     await _poolQueryWithTimeout(client, 'COMMIT', [], { poolLabel: 'txn' });
     const _t1 = Date.now();

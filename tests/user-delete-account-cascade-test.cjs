@@ -72,10 +72,12 @@ function setupMockDatabase() {
       amount INTEGER NOT NULL,
       tx_type VARCHAR(32) NOT NULL,
       source VARCHAR(32) DEFAULT 'system',
+      status VARCHAR(16) DEFAULT 'completed',
       description VARCHAR(256),
-      ref_id VARCHAR(128),
+      ref_id VARCHAR(128) UNIQUE,
       metadata JSONB DEFAULT '{}',
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE pending_refunds (
@@ -85,7 +87,11 @@ function setupMockDatabase() {
       refund_ref_id VARCHAR(128) NOT NULL,
       original_ref_id VARCHAR(128),
       source VARCHAR(32) DEFAULT 'alert',
+      description VARCHAR(256),
+      metadata JSONB DEFAULT '{}',
       status VARCHAR(16) DEFAULT 'pending',
+      retry_count SMALLINT DEFAULT 0,
+      last_retry_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -248,44 +254,58 @@ function setupMockDatabase() {
   const Pool = db.adapters.createPg().Pool;
   const pool = new Pool();
 
+  function rewriteDistinctFrom(sql) {
+    return String(sql).replace(
+      /([a-zA-Z0-9_.$:]+)\s+IS\s+DISTINCT\s+FROM\s+([a-zA-Z0-9_.$:]+)/gi,
+      (_, l, r) => `((${l} IS NULL AND ${r} IS NOT NULL) OR (${l} IS NOT NULL AND ${r} IS NULL) OR (${l} <> ${r}))`
+    );
+  }
+
+  // Transaction serialization lock for pg-mem (simulates row-level FOR UPDATE serialization across concurrent connections)
+  let _txQueue = Promise.resolve();
+  function withTxLock(fn) {
+    const next = _txQueue.then(fn, fn);
+    _txQueue = next.catch(() => {});
+    return next;
+  }
+
   async function queryDb(env, sqlText, params = []) {
-    const s = String(sqlText || '');
-    // Harness shim: intercept CREATE TABLE / INDEX on deleted_users (already created above)
+    const s = rewriteDistinctFrom(String(sqlText || ''));
     if (s.includes('CREATE TABLE IF NOT EXISTS deleted_users') ||
-        s.includes('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq') || s.includes('CREATE TABLE IF NOT EXISTS token_transactions_archive') || s.includes('CREATE TABLE IF NOT EXISTS claimed_referral_pairs')) {
+        s.includes('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq') ||
+        s.includes('CREATE TABLE IF NOT EXISTS token_transactions_archive') ||
+        s.includes('CREATE TABLE IF NOT EXISTS claimed_referral_pairs')) {
       return { rows: [], rowCount: 0 };
     }
-    // Handle INTERVAL arithmetic in pg-mem
-    if (s.includes('INSERT INTO deleted_users')) {
-      const uid = params[0];
-      const prev = params[1] || null;
-      db.public.many(`
-        INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
-        VALUES ('${uid}', ${prev ? `'${prev}'` : 'NULL'}, NOW(), NOW())
-        ON CONFLICT (telegram_id) DO UPDATE SET deleted_at = NOW()
-      `);
-      return { rows: [], rowCount: 1 };
-    }
-    return pool.query(sqlText, params);
+    return pool.query(s, params);
   }
 
   async function queryDbTransaction(env, queries) {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const results = [];
-      for (const q of queries) {
-        const res = await client.query(q.sql, q.params || []);
-        results.push(res);
+    return withTxLock(async () => {
+      const backup = db.backup();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        let results = [];
+        if (typeof queries === "function") {
+          const txQuery = (sql, params = []) => client.query(rewriteDistinctFrom(sql), params);
+          results = await queries(txQuery);
+        } else {
+          for (const q of queries) {
+            const res = await client.query(rewriteDistinctFrom(q.sql), q.params || []);
+            results.push(res);
+          }
+        }
+        await client.query("COMMIT");
+        return results;
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        backup.restore();
+        throw err;
+      } finally {
+        client.release();
       }
-      await client.query("COMMIT");
-      return results;
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   return { db, pool, queryDb, queryDbTransaction };
@@ -845,4 +865,496 @@ test("J2-REMEDIATION: Archive duplicate with identical content and differently-o
   const summary = await repo.deleteAccount(env, USER_J2_PASS);
   assert.equal(summary.userId, USER_J2_PASS);
   assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_J2_PASS}'`).length, 0);
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 5P — Concurrency, Canonical Refund Idempotency & Archive Integrity
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("5P-CONCURRENCY-01: Concurrent deleteAccount and retryFailedRefunds for same user and refund never double-credits", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const userRepo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const USER_C1 = "91001";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_C1}', 'c1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_C1}', 100);
+    INSERT INTO token_transactions (user_id, amount, tx_type, source, description, ref_id) VALUES
+      ('${USER_C1}', 100, 'daily_claim', 'system', 'Initial claim', 'ref_c1_init');
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status) VALUES
+      ('${USER_C1}', 40, 'canon_refund_c1', 'alert', 'Refund 40', 'pending');
+  `);
+
+  // Wire economyService.grantReward to perform atomic tx insert + balance upsert using canonical refId
+  const economyService = {
+    grantReward: async ({ userId, amount, rewardType, description, refId }) => {
+      return queryDbTransaction(env, async (txQuery) => {
+        const uLock = await txQuery("SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE", [userId]);
+        if (!uLock.rows || uLock.rows.length === 0) throw new Error("User already deleted");
+        await txQuery("SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE", [userId]);
+        const ins = await txQuery(
+          `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
+           VALUES ($1, $2, $3, 'marketplace', 'completed', $4, $5, '{}', NOW())
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [userId, amount, rewardType, description, refId]
+        );
+        if (ins.rows && ins.rows.length === 1) {
+          await txQuery(
+            `INSERT INTO token_balances (user_id, balance, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (user_id) DO UPDATE SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()`,
+            [userId, amount]
+          );
+          return { success: true, txId: ins.rows[0].id };
+        }
+        return { success: true, alreadyCredited: true };
+      });
+    }
+  };
+
+  const referralRewardsService = createReferralRewardsService({
+    queryDb,
+    notificationService: null,
+    walletRepo: null,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => userRepo
+  });
+
+  const [delSummary] = await Promise.all([
+    userRepo.deleteAccount(env, USER_C1),
+    referralRewardsService.retryFailedRefunds(env)
+  ]);
+
+  assert.equal(delSummary.burnedBalance, 140, "Total burned balance must be exactly 100 + 40 = 140 (never 180)");
+  const archived = db.public.many(`SELECT * FROM token_transactions_archive WHERE account_tombstone_id = '${delSummary.tombstoneId}' ORDER BY original_tx_id ASC`);
+  assert.equal(archived.length, 3, "Exactly 3 archived rows: initial (+100), single refund (+40), single burn (-140)");
+  const refundArch = archived.filter(r => r.tx_type === "marketplace_refund");
+  assert.equal(refundArch.length, 1, "Refund must be credited and archived exactly once");
+  assert.equal(refundArch[0].ref_id, "canon_refund_c1", "Canonical refund_ref_id must be used");
+  const netSum = archived.reduce((acc, r) => acc + Number(r.amount), 0);
+  assert.equal(netSum, 0, "Archived ledger must net to 0");
+});
+
+test("5P-CONCURRENCY-02: Two concurrent retryFailedRefunds workers for the same pending refund credit only once", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_C2 = "91002";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_C2}', 'c2_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_C2}', 50);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, source, description, status) VALUES
+      ('${USER_C2}', 25, 'canon_refund_c2', 'alert', 'Refund 25', 'pending');
+  `);
+
+  let grantCallCount = 0;
+  // Serialize atomic claim UPDATE in queryDb for pg-mem concurrency simulation
+  let claimLock = Promise.resolve();
+  const serializedQueryDb = (e, sql, params) => {
+    if (String(sql).includes("SET status = 'processing'")) {
+      const next = claimLock.then(() => queryDb(e, sql, params));
+      claimLock = next.catch(() => {});
+      return next;
+    }
+    return queryDb(e, sql, params);
+  };
+
+  const economyService = {
+    grantReward: async ({ userId, amount, rewardType, description, refId }) => {
+      grantCallCount++;
+      return queryDbTransaction(env, async (txQuery) => {
+        const ins = await txQuery(
+          `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
+           VALUES ($1, $2, $3, 'marketplace', 'completed', $4, $5, '{}', NOW())
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+          [userId, amount, rewardType, description, refId]
+        );
+        if (ins.rows && ins.rows.length === 1) {
+          await txQuery(
+            "UPDATE token_balances SET balance = balance + $2, updated_at = NOW() WHERE user_id = $1",
+            [userId, amount]
+          );
+          return { success: true, txId: ins.rows[0].id };
+        }
+        return { success: true, alreadyCredited: true };
+      });
+    }
+  };
+
+  const makeWorker = () => createReferralRewardsService({
+    queryDb: serializedQueryDb,
+    notificationService: null,
+    walletRepo: null,
+    rewardCenterRepo: null,
+    getReferralRewardPerInvite: () => 3,
+    isDatabaseConfigured: () => true,
+    normalizeOptionalString: (s) => (s ? String(s) : null),
+    resolveWebAppUrl: () => "https://example.com",
+    safeError: () => "error",
+    getMissionRewardAmount: () => 10,
+    economyService,
+    membershipAuthority: null,
+    ENTITLEMENT: {},
+    getUserRepo: () => null
+  });
+
+  await Promise.all([
+    makeWorker().retryFailedRefunds(env),
+    makeWorker().retryFailedRefunds(env)
+  ]);
+
+  assert.equal(grantCallCount, 1, "Atomic status=processing claim must prevent second worker from calling grantReward");
+  const bal = db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_C2}'`)[0].balance;
+  assert.equal(bal, 75, "Wallet balance must increase exactly once (50 + 25 = 75)");
+  const pref = db.public.many(`SELECT status FROM pending_refunds WHERE user_id = '${USER_C2}'`)[0];
+  assert.equal(pref.status, "completed", "Pending refund must be marked completed");
+});
+
+test("5P-CONCURRENCY-03: Two concurrent deleteAccount calls for the same user settle and archive only once", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const USER_C3 = "91003";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_C3}', 'c3_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_C3}', 60);
+    INSERT INTO token_transactions (user_id, amount, tx_type, source, description, ref_id) VALUES
+      ('${USER_C3}', 60, 'daily_claim', 'system', 'Initial', 'ref_c3_init');
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('${USER_C3}', 40, 'canon_refund_c3', 'pending');
+  `);
+
+  const [res1, res2] = await Promise.all([
+    repo.deleteAccount(env, USER_C3),
+    repo.deleteAccount(env, USER_C3)
+  ]);
+
+  const primary = res1.alreadyDeleted ? res2 : res1;
+  const secondary = res1.alreadyDeleted ? res1 : res2;
+  assert.equal(primary.burnedBalance, 100, "Primary deleteAccount must settle +40 and burn 100");
+  assert.equal(secondary.alreadyDeleted, true, "Secondary concurrent deleteAccount must detect alreadyDeleted and exit cleanly");
+  assert.equal(secondary.burnedBalance, 0, "Secondary call must not burn anything");
+
+  const allArchived = db.public.many("SELECT * FROM token_transactions_archive ORDER BY original_tx_id ASC");
+  assert.equal(allArchived.length, 3, "Only 3 archive rows must exist across both concurrent calls");
+});
+
+test("5P-REF-CONFLICT: ref_id conflict with different owner, amount, or tx_type rolls back entire deleteAccount", async () => {
+  const env = { APP_ENV: "test" };
+
+  // Case A: Different owner (user_id mismatch)
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('92001', 'u1'), ('92002', 'u2');
+      INSERT INTO token_balances (user_id, balance) VALUES ('92001', 50), ('92002', 50);
+      INSERT INTO token_transactions (user_id, amount, tx_type, source, status, ref_id) VALUES
+        ('92002', 30, 'marketplace_refund', 'marketplace', 'completed', 'shared_conflict_ref');
+      INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+        ('92001', 30, 'shared_conflict_ref', 'pending');
+    `);
+    await assert.rejects(
+      async () => repo.deleteAccount(env, "92001"),
+      /Refund ref_id conflict mismatch/
+    );
+    assert.equal(db.public.many("SELECT * FROM users WHERE telegram_id = '92001'").length, 1, "User must not be deleted on owner conflict");
+    assert.equal(db.public.many("SELECT balance FROM token_balances WHERE user_id = '92001'")[0].balance, 50);
+  }
+
+  // Case B: Different amount
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('92003', 'u3');
+      INSERT INTO token_balances (user_id, balance) VALUES ('92003', 50);
+      INSERT INTO token_transactions (user_id, amount, tx_type, source, status, ref_id) VALUES
+        ('92003', 999, 'marketplace_refund', 'marketplace', 'completed', 'amt_conflict_ref');
+      INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+        ('92003', 30, 'amt_conflict_ref', 'pending');
+    `);
+    await assert.rejects(
+      async () => repo.deleteAccount(env, "92003"),
+      /Refund ref_id conflict mismatch/
+    );
+    assert.equal(db.public.many("SELECT * FROM users WHERE telegram_id = '92003'").length, 1);
+  }
+
+  // Case C: Different tx_type
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('92004', 'u4');
+      INSERT INTO token_balances (user_id, balance) VALUES ('92004', 50);
+      INSERT INTO token_transactions (user_id, amount, tx_type, source, status, ref_id) VALUES
+        ('92004', 30, 'daily_claim', 'system', 'completed', 'type_conflict_ref');
+      INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+        ('92004', 30, 'type_conflict_ref', 'pending');
+    `);
+    await assert.rejects(
+      async () => repo.deleteAccount(env, "92004"),
+      /Refund ref_id conflict mismatch/
+    );
+    assert.equal(db.public.many("SELECT * FROM users WHERE telegram_id = '92004'").length, 1);
+  }
+});
+
+test("5P-ROLLBACK-SETTLEMENT: Failure during refund insert or pending_refunds settlement rolls back completely", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_R1 = "93001";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_R1}', 'r1_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_R1}', 80);
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('${USER_R1}', 20, 'ref_r1', 'pending');
+  `);
+
+  // Wrap queryDbTransaction so UPDATE pending_refunds returns 0 rows (simulating settlement failure)
+  const interceptTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+    const wrappedTxQuery = async (sql, params) => {
+      if (String(sql).includes("UPDATE pending_refunds SET status = 'settled'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      return txQuery(sql, params);
+    };
+    return fn(wrappedTxQuery);
+  });
+
+  const repo = createUserRepository({ queryDb, queryDbTransaction: interceptTx, queryDbDirect: queryDb });
+  await assert.rejects(
+    async () => repo.deleteAccount(env, USER_R1),
+    /Failed to mark pending_refund/
+  );
+
+  assert.equal(db.public.many(`SELECT * FROM users WHERE telegram_id = '${USER_R1}'`).length, 1, "User must remain after settlement failure rollback");
+  assert.equal(db.public.many(`SELECT balance FROM token_balances WHERE user_id = '${USER_R1}'`)[0].balance, 80, "Wallet balance must roll back to 80");
+  assert.equal(db.public.many(`SELECT status FROM pending_refunds WHERE user_id = '${USER_R1}'`)[0].status, "pending", "Refund must remain pending");
+  assert.equal(db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_R1}'`).length, 0, "Inserted refund tx must be rolled back");
+});
+
+test("5P-NO-FAKE-ID: nextFakeId is completely removed and all archive original_tx_id values come from real PostgreSQL SERIAL sequence", async () => {
+  const usersSrc = fs.readFileSync(path.join(__dirname, "../src/repositories/users.js"), "utf8");
+  assert.equal(usersSrc.includes("nextFakeId"), false, "nextFakeId must be completely removed from src/repositories/users.js");
+  assert.equal(usersSrc.includes("900000"), false, "Synthetic 900000 ID offset must be completely removed from src/repositories/users.js");
+  assert.equal(usersSrc.includes("auto_refund_"), false, "Synthetic auto_refund_ ref_id must be completely removed from src/repositories/users.js");
+
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+  const USER_REAL_ID = "94001";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_REAL_ID}', 'real_id_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_REAL_ID}', 50);
+    INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id) VALUES
+      ('${USER_REAL_ID}', 50, 'daily_claim', 'Claim', 'claim_94001');
+    INSERT INTO pending_refunds (user_id, amount, refund_ref_id, status) VALUES
+      ('${USER_REAL_ID}', 25, 'refund_canon_94001', 'pending');
+  `);
+
+  const summary = await repo.deleteAccount(env, USER_REAL_ID);
+  const archived = db.public.many(`SELECT original_tx_id, tx_type, amount FROM token_transactions_archive WHERE account_tombstone_id = '${summary.tombstoneId}' ORDER BY original_tx_id ASC`);
+  assert.equal(archived.length, 3);
+  assert.deepEqual(
+    archived.map(r => r.original_tx_id),
+    [1, 2, 3],
+    "All 3 archived rows (original + refund + burn) must have sequential PostgreSQL SERIAL IDs [1, 2, 3], never 900000+"
+  );
+});
+
+test("5P-ARCHIVE-COMPLETENESS: Missing or extra archive records trigger rollback before any DELETE FROM token_transactions", async () => {
+  const env = { APP_ENV: "test" };
+
+  // Case A: Missing archive record (simulate archive INSERT skipped)
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const USER_MISS = "95001";
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('${USER_MISS}', 'miss_user');
+      INSERT INTO token_balances (user_id, balance) VALUES ('${USER_MISS}', 0);
+      INSERT INTO token_transactions (user_id, amount, tx_type, ref_id) VALUES ('${USER_MISS}', 10, 'daily_claim', 'ref_m1');
+    `);
+    const skipArchiveInsertTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        if (String(sql).includes("INSERT INTO token_transactions_archive")) {
+          return { rows: [], rowCount: 0 };
+        }
+        return txQuery(sql, params);
+      });
+    });
+    const repo = createUserRepository({ queryDb, queryDbTransaction: skipArchiveInsertTx, queryDbDirect: queryDb });
+    await assert.rejects(
+      async () => repo.deleteAccount(env, USER_MISS),
+      /Archive verification failed: missing archive record/
+    );
+    assert.equal(db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_MISS}'`).length, 1, "Source token_transactions row must NOT be deleted when archive is missing");
+  }
+
+  // Case B: Extra archive record under the same tombstone_id
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const USER_EXTRA = "95002";
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('${USER_EXTRA}', 'extra_user');
+      INSERT INTO token_balances (user_id, balance) VALUES ('${USER_EXTRA}', 0);
+      INSERT INTO token_transactions (user_id, amount, tx_type, ref_id) VALUES ('${USER_EXTRA}', 10, 'daily_claim', 'ref_e1');
+    `);
+    const injectExtraArchiveTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        const res = await txQuery(sql, params);
+        if (String(sql).includes("INSERT INTO token_transactions_archive")) {
+          const tombstone = params[1];
+          await txQuery(
+            `INSERT INTO token_transactions_archive (original_tx_id, account_tombstone_id, amount, tx_type, source, status, original_created_at)
+             VALUES (99999, $1, 500, 'phantom_tx', 'system', 'completed', NOW())`,
+            [tombstone]
+          );
+        }
+        return res;
+      });
+    });
+    const repo = createUserRepository({ queryDb, queryDbTransaction: injectExtraArchiveTx, queryDbDirect: queryDb });
+    await assert.rejects(
+      async () => repo.deleteAccount(env, USER_EXTRA),
+      /Archive verification failed: extra archive record/
+    );
+    assert.equal(db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_EXTRA}'`).length, 1, "Source token_transactions row must NOT be deleted when extra archive row exists");
+  }
+
+  // Case C: Duplicate archive record for same original_tx_id (simulated viadupArchRes returning duplicate)
+  {
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const USER_DUP = "95003";
+    db.public.many(`
+      INSERT INTO users (telegram_id, username) VALUES ('${USER_DUP}', 'dup_user');
+      INSERT INTO token_balances (user_id, balance) VALUES ('${USER_DUP}', 0);
+      INSERT INTO token_transactions (user_id, amount, tx_type, ref_id) VALUES ('${USER_DUP}', 10, 'daily_claim', 'ref_d1');
+    `);
+    const simulateDuplicateArchiveTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+      return fn(async (sql, params) => {
+        if (String(sql).includes("INNER JOIN token_transactions_archive a2")) {
+          return { rows: [{ original_tx_id: 1 }], rowCount: 1 };
+        }
+        return txQuery(sql, params);
+      });
+    });
+    const repo = createUserRepository({ queryDb, queryDbTransaction: simulateDuplicateArchiveTx, queryDbDirect: queryDb });
+    await assert.rejects(
+      async () => repo.deleteAccount(env, USER_DUP),
+      /Archive verification failed: duplicate archive record/
+    );
+    assert.equal(db.public.many(`SELECT * FROM token_transactions WHERE user_id = '${USER_DUP}'`).length, 1, "Source token_transactions row must NOT be deleted when duplicate archive row exists");
+  }
+});
+
+test("5P-ARCHIVE-8-FIELDS: Mismatch in any of the 8 archive fields (amount, tx_type, source, status, description, ref_id, metadata, original_created_at) triggers rollback", async () => {
+  const env = { APP_ENV: "test" };
+  const baseNow = "2026-10-31T00:00:00.000Z";
+  const baseRow = {
+    amount: 100,
+    tx_type: "daily_claim",
+    source: "system",
+    status: "completed",
+    description: "Clean description",
+    ref_id: "clean_ref_id",
+    metadata: JSON.stringify({ tier: "gold", nested: { ok: true } }),
+    original_created_at: baseNow
+  };
+
+  const mutations = [
+    { field: "amount", override: { amount: 101 } },
+    { field: "tx_type", override: { tx_type: "tampered_type" } },
+    { field: "source", override: { source: "tampered_source" } },
+    { field: "status", override: { status: "failed" } },
+    { field: "description (value mismatch)", override: { description: "Tampered description" } },
+    { field: "description (NULL vs non-NULL)", override: { description: null } },
+    { field: "ref_id (value mismatch)", override: { ref_id: "tampered_ref" } },
+    { field: "ref_id (NULL vs non-NULL)", override: { ref_id: null } },
+    { field: "metadata (JSONB structural mismatch)", override: { metadata: JSON.stringify({ tier: "silver", nested: { ok: true } }) } },
+    { field: "original_created_at (timestamp mismatch)", override: { original_created_at: "2025-01-01T00:00:00.000Z" } }
+  ];
+
+  for (let i = 0; i < mutations.length; i++) {
+    const { field, override } = mutations[i];
+    const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+    const repo = createUserRepository({ queryDb, queryDbTransaction, queryDbDirect: queryDb });
+    const uid = String(96000 + i);
+    const txId = 7000 + i;
+    const arch = { ...baseRow, ...override };
+
+    await queryDb(env, "INSERT INTO users (telegram_id, username) VALUES ($1, $2)", [uid, "u_" + i]);
+    await queryDb(env, "INSERT INTO token_balances (user_id, balance) VALUES ($1, 0)", [uid]);
+    await queryDb(
+      env,
+      `INSERT INTO token_transactions (id, user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [txId, uid, baseRow.amount, baseRow.tx_type, baseRow.source, baseRow.status, baseRow.description, baseRow.ref_id, baseRow.metadata, baseRow.original_created_at]
+    );
+    await queryDb(
+      env,
+      `INSERT INTO token_transactions_archive (original_tx_id, account_tombstone_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at)
+       VALUES ($1, 'pre_existing_tomb', $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [txId, arch.amount, arch.tx_type, arch.source, arch.status, arch.description, arch.ref_id, arch.metadata, arch.original_created_at]
+    );
+
+    await assert.rejects(
+      async () => repo.deleteAccount(env, uid),
+      /Archive duplicate content mismatch across fields/,
+      `Mismatch on field [${field}] must reject and rollback`
+    );
+
+    const remainingTx = db.public.many(`SELECT * FROM token_transactions WHERE id = ${txId}`);
+    assert.equal(remainingTx.length, 1, `Source transaction must NOT be deleted when [${field}] mismatches`);
+  }
+});
+
+test("5P-PRE-DELETE-PROOF: Archive verification queries execute strictly BEFORE any DELETE FROM token_transactions", async () => {
+  const { db, queryDb, queryDbTransaction } = setupMockDatabase();
+  const env = { APP_ENV: "test" };
+  const USER_ORDER = "97001";
+
+  db.public.many(`
+    INSERT INTO users (telegram_id, username) VALUES ('${USER_ORDER}', 'order_user');
+    INSERT INTO token_balances (user_id, balance) VALUES ('${USER_ORDER}', 50);
+    INSERT INTO token_transactions (user_id, amount, tx_type, ref_id) VALUES ('${USER_ORDER}', 50, 'daily_claim', 'ref_ord_1');
+  `);
+
+  const sqlLog = [];
+  const loggingTx = (e, fn) => queryDbTransaction(e, async (txQuery) => {
+    return fn(async (sql, params) => {
+      sqlLog.push(String(sql).replace(/\s+/g, " ").trim());
+      return txQuery(sql, params);
+    });
+  });
+
+  const repo = createUserRepository({ queryDb, queryDbTransaction: loggingTx, queryDbDirect: queryDb });
+  await repo.deleteAccount(env, USER_ORDER);
+
+  const verifyMissingIdx = sqlLog.findIndex(s => s.includes("LEFT JOIN token_transactions_archive a ON a.original_tx_id = s.id"));
+  const verifyExtraIdx = sqlLog.findIndex(s => s.includes("WHERE a.account_tombstone_id = $2 AND s.id IS NULL"));
+  const verifyFieldsIdx = sqlLog.findIndex(s => s.includes("INNER JOIN token_transactions src ON src.id = a.original_tx_id"));
+  const deleteTxIdx = sqlLog.findIndex(s => s.includes("DELETE FROM token_transactions WHERE user_id = $1"));
+
+  assert.ok(verifyMissingIdx > -1 && verifyExtraIdx > -1 && verifyFieldsIdx > -1 && deleteTxIdx > -1, "All verification queries and DELETE query must be logged");
+  assert.ok(verifyMissingIdx < deleteTxIdx, "Missing-archive check must execute BEFORE DELETE FROM token_transactions");
+  assert.ok(verifyExtraIdx < deleteTxIdx, "Extra-archive check must execute BEFORE DELETE FROM token_transactions");
+  assert.ok(verifyFieldsIdx < deleteTxIdx, "8-field archive comparison must execute BEFORE DELETE FROM token_transactions");
 });

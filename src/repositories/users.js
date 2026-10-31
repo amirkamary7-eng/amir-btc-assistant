@@ -380,6 +380,7 @@ function scrubTransactionForArchive(tx, tombstoneId) {
   async function deleteAccount(env, userId) {
     const uid = String(userId);
     const summary = { userId: uid, tables: {}, errors: [] };
+
     const { createHmac, randomUUID } = await import("node:crypto");
 
     // ── H3 FIX: Validate REFERRAL_SECRET_SALT configuration ──
@@ -391,67 +392,37 @@ function scrubTransactionForArchive(tx, tombstoneId) {
     }
     const activeSalt = salt || "amir-btc-referral-secret-default-salt";
 
-    // ── J1 FIX: Prepare and execute ALL refund settlements, burn, and archives inside queryDbTransaction ──
-    // 1. Fetch pending refunds
-    const pendingRefundsRes = await queryDb(env,
-      "SELECT id, amount, refund_ref_id FROM pending_refunds WHERE user_id = $1 AND status = 'pending'",
-      [uid]
-    );
-    const pendingRows = pendingRefundsRes.rows || [];
-    summary.openPendingRefunds = pendingRows.length;
-
-    let totalPendingRefundAmount = 0;
-    for (const pref of pendingRows) {
-      totalPendingRefundAmount += Number(pref.amount || 0);
-    }
-
-    // 2. Read starting balance
-    const balRes = await queryDb(env, "SELECT balance FROM token_balances WHERE user_id = $1 LIMIT 1", [uid]);
-    const startingBalance = Number(balRes.rows[0]?.balance || 0);
-
-    // 3. Compute final balance to burn (starting balance + auto-settled refunds)
-    const balanceToBurn = startingBalance + totalPendingRefundAmount;
-    summary.burnedBalance = balanceToBurn;
-
-    // 4. Read previous inviter for referral lock
-    let previousInviterId = null;
-    try {
-      const existingRef = await queryDb(env,
-        "SELECT inviter_id, rewarded FROM referrals WHERE invitee_id = $1 LIMIT 1",
-        [uid]);
-      previousInviterId = existingRef.rows[0]?.inviter_id || null;
-    } catch (refErr) {
-      console.warn("[DELETE-ACCOUNT] Fetching inviter failed (non-fatal):", refErr?.message);
-    }
-
-    // 5. Ensure tables exist
-    try {
-      await queryDb(env, `
-        CREATE TABLE IF NOT EXISTS deleted_users (
-          id SERIAL PRIMARY KEY,
-          telegram_id VARCHAR(64) NOT NULL UNIQUE,
-          previous_inviter_id VARCHAR(64),
-          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
-        )
-      `);
-      await queryDb(env, `
-        CREATE TABLE IF NOT EXISTS token_transactions_archive (
-          id BIGSERIAL PRIMARY KEY,
-          original_tx_id INTEGER NOT NULL UNIQUE,
-          account_tombstone_id TEXT NOT NULL,
-          amount INTEGER NOT NULL,
-          tx_type VARCHAR(32) NOT NULL,
-          source VARCHAR(32) NOT NULL DEFAULT 'system',
-          status VARCHAR(16) NOT NULL DEFAULT 'completed',
-          description VARCHAR(256),
-          ref_id VARCHAR(128),
-          metadata JSONB DEFAULT '{}',
-          original_created_at TIMESTAMPTZ NOT NULL,
-          archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      if (previousInviterId) {
+    // Ensure auxiliary tables exist in non-production environments before opening transaction
+    if (!isProd) {
+      try {
+        await queryDb(env, `
+          CREATE TABLE IF NOT EXISTS deleted_users (
+            id SERIAL PRIMARY KEY,
+            telegram_id VARCHAR(64) NOT NULL UNIQUE,
+            previous_inviter_id VARCHAR(64),
+            deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            cooldown_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '15 days')
+          )
+        `);
+        await queryDb(env, `
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_telegram_id_uniq ON deleted_users (telegram_id)
+        `);
+        await queryDb(env, `
+          CREATE TABLE IF NOT EXISTS token_transactions_archive (
+            id BIGSERIAL PRIMARY KEY,
+            original_tx_id INTEGER NOT NULL UNIQUE,
+            account_tombstone_id TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            tx_type VARCHAR(32) NOT NULL,
+            source VARCHAR(32) NOT NULL DEFAULT 'system',
+            status VARCHAR(16) NOT NULL DEFAULT 'completed',
+            description VARCHAR(256),
+            ref_id VARCHAR(128),
+            metadata JSONB DEFAULT '{}',
+            original_created_at TIMESTAMPTZ NOT NULL,
+            archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `);
         await queryDb(env, `
           CREATE TABLE IF NOT EXISTS claimed_referral_pairs (
             pair_hash VARCHAR(64) PRIMARY KEY,
@@ -459,193 +430,322 @@ function scrubTransactionForArchive(tx, tombstoneId) {
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           )
         `).catch(() => {});
+      } catch (e) {
+        console.warn("[DELETE-ACCOUNT] Table ensure failed (non-fatal):", e?.message);
       }
-    } catch (e) {
-      console.warn("[DELETE-ACCOUNT] Table ensure failed (non-fatal):", e?.message);
-    }
-
-    // 6. Fetch existing transactions and synthesize auto-settlement/burn rows for archive preparation
-    const txsResult = await queryDb(env, "SELECT * FROM token_transactions WHERE user_id = $1 ORDER BY id ASC", [uid]);
-    const rawTxs = [...(txsResult.rows || [])];
-
-    let nextFakeId = (rawTxs.reduce((max, t) => Math.max(max, Number(t.id || 0)), 0) || 900000) + 1;
-
-    for (const pref of pendingRows) {
-      const refAmount = Number(pref.amount || 0);
-      if (refAmount > 0) {
-        rawTxs.push({
-          id: nextFakeId++,
-          user_id: uid,
-          amount: refAmount,
-          tx_type: "marketplace_refund",
-          source: "system",
-          status: "completed",
-          description: "Account deletion auto-settled refund",
-          ref_id: `auto_refund_${pref.id}_${uid}`,
-          metadata: "{}",
-          created_at: new Date().toISOString()
-        });
-      }
-    }
-
-    if (balanceToBurn > 0) {
-      rawTxs.push({
-        id: nextFakeId++,
-        user_id: uid,
-        amount: -balanceToBurn,
-        tx_type: "account_deletion_burn",
-        source: "system",
-        status: "completed",
-        description: "Account deletion token burn",
-        ref_id: `burn_${uid}_${Date.now()}`,
-        metadata: "{}",
-        created_at: new Date().toISOString()
-      });
     }
 
     const tombstoneId = randomUUID();
     summary.tombstoneId = tombstoneId;
 
-    const scrubbedRows = rawTxs.map(tx => scrubTransactionForArchive(tx, tombstoneId));
-
-    // J2 FIX: Deep compare ALL fields of duplicate archive records before transaction
-    for (const s of scrubbedRows) {
-      const existingArch = await queryDb(env,
-        "SELECT original_tx_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at FROM token_transactions_archive WHERE original_tx_id = $1 LIMIT 1",
-        [s.original_tx_id]
-      );
-      if (existingArch.rows && existingArch.rows.length > 0) {
-        const ex = existingArch.rows[0];
-        const exTime = new Date(ex.original_created_at).getTime();
-        const srcTime = new Date(s.original_created_at).getTime();
-
-        if (
-          Number(ex.amount) !== Number(s.amount) ||
-          String(ex.tx_type) !== String(s.tx_type) ||
-          String(ex.source || "system") !== String(s.source || "system") ||
-          String(ex.status || "completed") !== String(s.status || "completed") ||
-          String(ex.description || "") !== String(s.description || "") ||
-          String(ex.ref_id || "") !== String(s.ref_id || "") ||
-          !jsonMetadataEquals(ex.metadata, s.metadata) ||
-          Math.abs(exTime - srcTime) > 1000
-        ) {
-          throw new Error(`Archive duplicate content mismatch across fields for original_tx_id ${s.original_tx_id}`);
-        }
-      }
-    }
-
-    // ── STEP 7: Build SINGLE Atomic Transaction Array ──
-    const atomicQueries = [];
-
-    // 7a. Pending Refund Settlements (Atomic)
-    for (const pref of pendingRows) {
-      const refAmount = Number(pref.amount || 0);
-      if (refAmount > 0) {
-        atomicQueries.push({
-          sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-                VALUES ($1, $2, 'marketplace_refund', 'Account deletion auto-settled refund', $3, NOW())
-                ON CONFLICT DO NOTHING`,
-          params: [uid, refAmount, `auto_refund_${pref.id}_${uid}`]
-        });
-      }
-      atomicQueries.push({
-        sql: "UPDATE pending_refunds SET status = 'settled', updated_at = NOW() WHERE id = $1 AND status = 'pending'",
-        params: [pref.id]
-      });
-    }
-
-    // 7b. Token Balance Zeroing / Burn (Atomic)
-    if (balanceToBurn > 0) {
-      const burnRefId = `burn_${uid}_${Date.now()}`;
-      atomicQueries.push({
-        sql: `INSERT INTO token_transactions (user_id, amount, tx_type, description, ref_id, created_at)
-              VALUES ($1, $2, 'account_deletion_burn', 'Account deletion token burn', $3, NOW())`,
-        params: [uid, -balanceToBurn, burnRefId]
-      });
-      atomicQueries.push({
-        sql: "UPDATE token_balances SET balance = 0, updated_at = NOW() WHERE user_id = $1",
-        params: [uid]
-      });
-    }
-
-    // 7c. Permanent Anti-Fraud Referral Pair Records (Atomic)
-    if (previousInviterId) {
-      const pairHash = createHmac("sha256", activeSalt).update(`${previousInviterId}:${uid}`).digest("hex");
-      const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${uid}`).digest("hex");
-      atomicQueries.push({
-        sql: "INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'pair') ON CONFLICT (pair_hash) DO NOTHING",
-        params: [pairHash]
-      });
-      atomicQueries.push({
-        sql: "INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'invitee') ON CONFLICT (pair_hash) DO NOTHING",
-        params: [inviteeHash]
-      });
-      summary.permanentReferralLockRecorded = true;
-    }
-
-    // 7d. Archive Inserts for original transactions (Atomic)
-    for (const s of scrubbedRows) {
-      atomicQueries.push({
-        sql: `INSERT INTO token_transactions_archive
-              (original_tx_id, account_tombstone_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at, archived_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-              ON CONFLICT (original_tx_id) DO NOTHING`,
-        params: [
-          s.original_tx_id, s.account_tombstone_id, s.amount, s.tx_type, s.source,
-          s.status, s.description, s.ref_id, s.metadata, s.original_created_at
-        ]
-      });
-    }
-
-    // 7e. deleted_users cooldown record (Atomic)
-    atomicQueries.push({
-      sql: `INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
-            VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
-            ON CONFLICT (telegram_id) DO UPDATE
-            SET deleted_at = NOW(), cooldown_until = NOW() + INTERVAL '15 days'`,
-      params: [uid, previousInviterId]
-    });
-
-    // 7f. Cascade DELETEs (Atomic - Child tables before parent users table)
-    atomicQueries.push(
-      { sql: "DELETE FROM referrals WHERE invitee_id = $1", params: [uid] },
-      { sql: "DELETE FROM referrals WHERE inviter_id = $1", params: [uid] },
-      { sql: "DELETE FROM token_transactions WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM token_balances WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM pending_refunds WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM watchlist_items WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM promo_campaign_registrations WHERE telegram_id = $1", params: [uid] },
-      { sql: "DELETE FROM price_alerts WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM notifications WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM notification_queue WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM notification_settings WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM daily_checkin_streaks WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM calendar_reminders WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM ticket_replies WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = $1)", params: [uid] },
-      { sql: "DELETE FROM tickets WHERE user_id = $1", params: [uid] },
-      { sql: "DELETE FROM admins WHERE telegram_id = $1", params: [uid] },
-      { sql: "DELETE FROM users WHERE telegram_id = $1", params: [uid] }
-    );
-
-    // ── STEP 8: Execute Entire Array in SINGLE queryDbTransaction ──
-    let results;
+    // ── PHASE 5P: Single Interactive Atomic Transaction ──
+    // Lock order: 1. users -> 2. token_balances -> 3. pending_refunds -> 4. token_transactions
     try {
-      results = await queryDbTransaction(env, atomicQueries);
+      await queryDbTransaction(env, async (txQuery) => {
+        // 1. Lock user row (Lock Order #1)
+        const userLockRes = await txQuery(
+          "SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE",
+          [uid]
+        );
+        if (!userLockRes.rows || userLockRes.rows.length === 0) {
+          const alreadyDeletedRes = await txQuery(
+            "SELECT telegram_id FROM deleted_users WHERE telegram_id = $1 LIMIT 1",
+            [uid]
+          );
+          if (alreadyDeletedRes.rows && alreadyDeletedRes.rows.length > 0) {
+            summary.alreadyDeleted = true;
+            summary.cooldownRecorded = true;
+            summary.openPendingRefunds = 0;
+            summary.burnedBalance = 0;
+            summary.archivedCount = 0;
+            return;
+          }
+        }
+
+        // 2. Lock wallet balance row (Lock Order #2)
+        await txQuery(
+          "SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE",
+          [uid]
+        );
+
+        // 3. Lock unresolved pending_refunds rows (Lock Order #3)
+        const pendingRefundsRes = await txQuery(
+          "SELECT id, user_id, amount, refund_ref_id, status, source, description, metadata FROM pending_refunds WHERE user_id = $1 AND status IN ('pending', 'processing') ORDER BY id ASC FOR UPDATE",
+          [uid]
+        );
+        const pendingRows = pendingRefundsRes.rows || [];
+        summary.openPendingRefunds = pendingRows.length;
+
+        // 4. Settle each pending refund using canonical refund_ref_id
+        for (const pref of pendingRows) {
+          const refAmount = Number(pref.amount || 0);
+          const canonicalRefId = String(pref.refund_ref_id || "").trim();
+          if (!canonicalRefId || refAmount <= 0) {
+            throw new Error(`Invalid pending refund record id=${pref.id}: missing canonical refund_ref_id or non-positive amount`);
+          }
+
+          // Check for any existing transaction with the canonical ref_id before crediting
+          const existingTxRes = await txQuery(
+            "SELECT id, user_id, amount, tx_type, status FROM token_transactions WHERE ref_id = $1 LIMIT 1",
+            [canonicalRefId]
+          );
+          if (existingTxRes.rows && existingTxRes.rows.length > 0) {
+            const exTx = existingTxRes.rows[0];
+            if (
+              String(exTx.user_id) !== uid ||
+              Number(exTx.amount) !== refAmount ||
+              String(exTx.tx_type) !== "marketplace_refund" ||
+              String(exTx.status || "completed") !== "completed"
+            ) {
+              throw new Error(
+                `Refund ref_id conflict mismatch for ${canonicalRefId}: expected user=${uid} amount=${refAmount} type=marketplace_refund, got user=${exTx.user_id} amount=${exTx.amount} type=${exTx.tx_type} status=${exTx.status}`
+              );
+            }
+            // Valid idempotent match already exists in token_transactions and token_balances; do not double-credit
+          } else {
+            const refundDesc = pref.description || "Account deletion auto-settled refund";
+            const refundMeta = typeof pref.metadata === "string"
+              ? pref.metadata
+              : JSON.stringify(pref.metadata || {});
+            const insTxRes = await txQuery(
+              `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
+               VALUES ($1, $2, 'marketplace_refund', 'marketplace', 'completed', $3, $4, $5, NOW())
+               ON CONFLICT DO NOTHING
+               RETURNING id`,
+              [uid, refAmount, refundDesc, canonicalRefId, refundMeta]
+            );
+            if (!insTxRes.rows || insTxRes.rows.length !== 1) {
+              throw new Error(`Failed to insert refund transaction for canonical ref_id ${canonicalRefId}`);
+            }
+            const balUpdRes = await txQuery(
+              `INSERT INTO token_balances (user_id, balance, updated_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (user_id) DO UPDATE
+               SET balance = token_balances.balance + EXCLUDED.balance, updated_at = NOW()
+               RETURNING balance`,
+              [uid, refAmount]
+            );
+            if (!balUpdRes.rows || balUpdRes.rows.length !== 1) {
+              throw new Error(`Failed to credit wallet balance for refund ${canonicalRefId}`);
+            }
+          }
+
+          const settleRes = await txQuery(
+            "UPDATE pending_refunds SET status = 'settled', updated_at = NOW() WHERE id = $1 AND status IN ('pending', 'processing') RETURNING id",
+            [pref.id]
+          );
+          if (!settleRes.rows || settleRes.rows.length !== 1) {
+            throw new Error(`Failed to mark pending_refund id=${pref.id} as settled`);
+          }
+        }
+
+        // 5. Compute and execute token burn from actual post-settlement wallet balance
+        const postRefundBalRes = await txQuery(
+          "SELECT balance FROM token_balances WHERE user_id = $1 FOR UPDATE",
+          [uid]
+        );
+        const balanceToBurn = Number(postRefundBalRes.rows?.[0]?.balance || 0);
+        if (balanceToBurn < 0) {
+          throw new Error(`Invalid negative wallet balance (${balanceToBurn}) during account deletion for user ${uid}`);
+        }
+        summary.burnedBalance = balanceToBurn;
+
+        if (balanceToBurn > 0) {
+          const burnRefId = `burn_${uid}_${tombstoneId}`;
+          const burnInsRes = await txQuery(
+            `INSERT INTO token_transactions (user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at)
+             VALUES ($1, $2, 'account_deletion_burn', 'system', 'completed', 'Account deletion token burn', $3, '{}', NOW())
+             RETURNING id`,
+            [uid, -balanceToBurn, burnRefId]
+          );
+          if (!burnInsRes.rows || burnInsRes.rows.length !== 1) {
+            throw new Error(`Failed to insert account_deletion_burn transaction for user ${uid}`);
+          }
+          const zeroBalRes = await txQuery(
+            "UPDATE token_balances SET balance = 0, updated_at = NOW() WHERE user_id = $1 RETURNING balance",
+            [uid]
+          );
+          if (!zeroBalRes.rows || zeroBalRes.rows.length !== 1 || Number(zeroBalRes.rows[0].balance) !== 0) {
+            throw new Error(`Failed to zero wallet balance during burn for user ${uid}`);
+          }
+        }
+
+        // 6. Build archive directly from actual token_transactions rows (with real PostgreSQL SERIAL IDs)
+        const txsResult = await txQuery(
+          "SELECT id, user_id, amount, tx_type, source, status, description, ref_id, metadata, created_at FROM token_transactions WHERE user_id = $1 ORDER BY id ASC FOR UPDATE",
+          [uid]
+        );
+        const rawTxs = txsResult.rows || [];
+        const scrubbedRows = rawTxs.map(tx => scrubTransactionForArchive(tx, tombstoneId));
+
+        for (const s of scrubbedRows) {
+          if (!Number.isInteger(s.original_tx_id) || s.original_tx_id <= 0) {
+            throw new Error(`Invalid original_tx_id (${s.original_tx_id}) for archive`);
+          }
+          await txQuery(
+            `INSERT INTO token_transactions_archive
+             (original_tx_id, account_tombstone_id, amount, tx_type, source, status, description, ref_id, metadata, original_created_at, archived_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+             ON CONFLICT (original_tx_id) DO NOTHING`,
+            [
+              s.original_tx_id, s.account_tombstone_id, s.amount, s.tx_type, s.source,
+              s.status, s.description, s.ref_id, s.metadata, s.original_created_at
+            ]
+          );
+        }
+
+        // 7. Pre-delete Archive Completeness & 8-Field Verification (MUST pass before DELETE FROM token_transactions)
+        const missingArchRes = await txQuery(
+          `SELECT s.id AS missing_id
+           FROM token_transactions s
+           LEFT JOIN token_transactions_archive a ON a.original_tx_id = s.id
+           WHERE s.user_id = $1 AND a.original_tx_id IS NULL`,
+          [uid]
+        );
+        if (missingArchRes.rows && missingArchRes.rows.length > 0) {
+          throw new Error(
+            `Archive verification failed: missing archive record(s) for original_tx_id=${missingArchRes.rows.map(r => r.missing_id).join(",")}`
+          );
+        }
+
+        const extraArchRes = await txQuery(
+          `SELECT a.original_tx_id AS extra_id
+           FROM token_transactions_archive a
+           LEFT JOIN token_transactions s ON s.id = a.original_tx_id AND s.user_id = $1
+           WHERE a.account_tombstone_id = $2 AND s.id IS NULL`,
+          [uid, tombstoneId]
+        );
+        if (extraArchRes.rows && extraArchRes.rows.length > 0) {
+          throw new Error(
+            `Archive verification failed: extra archive record(s) found for tombstone=${tombstoneId} original_tx_id=${extraArchRes.rows.map(r => r.extra_id).join(",")}`
+          );
+        }
+
+        const dupArchRes = await txQuery(
+          `SELECT a1.original_tx_id
+           FROM token_transactions_archive a1
+           INNER JOIN token_transactions_archive a2
+             ON a1.original_tx_id = a2.original_tx_id AND a1.id <> a2.id
+           INNER JOIN token_transactions s ON s.id = a1.original_tx_id
+           WHERE s.user_id = $1`,
+          [uid]
+        );
+        if (dupArchRes.rows && dupArchRes.rows.length > 0) {
+          throw new Error(
+            `Archive verification failed: duplicate archive record(s) for original_tx_id=${dupArchRes.rows.map(r => r.original_tx_id).join(",")}`
+          );
+        }
+
+        if (scrubbedRows.length > 0) {
+          const countVerifyRes = await txQuery(
+            `SELECT COUNT(*)::int AS cnt
+             FROM token_transactions_archive a
+             INNER JOIN token_transactions s ON s.id = a.original_tx_id
+             WHERE s.user_id = $1`,
+            [uid]
+          );
+          const matchedCnt = Number(countVerifyRes.rows?.[0]?.cnt || 0);
+          if (matchedCnt !== scrubbedRows.length) {
+            throw new Error(
+              `Archive verification failed: expected ${scrubbedRows.length} archived rows, found ${matchedCnt}`
+            );
+          }
+        }
+
+        for (const s of scrubbedRows) {
+          const fieldMismatchRes = await txQuery(
+            `SELECT a.original_tx_id
+             FROM token_transactions_archive a
+             INNER JOIN token_transactions src ON src.id = a.original_tx_id AND src.user_id = $1
+             WHERE a.original_tx_id = $2
+               AND (
+                 a.amount IS DISTINCT FROM $3
+                 OR a.tx_type IS DISTINCT FROM $4
+                 OR a.source IS DISTINCT FROM $5
+                 OR a.status IS DISTINCT FROM $6
+                 OR a.description IS DISTINCT FROM $7
+                 OR a.ref_id IS DISTINCT FROM $8
+                 OR a.metadata::jsonb IS DISTINCT FROM $9::jsonb
+                 OR a.original_created_at IS DISTINCT FROM src.created_at
+               )`,
+            [
+              uid,
+              s.original_tx_id,
+              s.amount,
+              s.tx_type,
+              s.source,
+              s.status,
+              s.description,
+              s.ref_id,
+              s.metadata
+            ]
+          );
+          if (fieldMismatchRes.rows && fieldMismatchRes.rows.length > 0) {
+            throw new Error(`Archive duplicate content mismatch across fields for original_tx_id ${s.original_tx_id}`);
+          }
+        }
+
+        summary.archivedCount = scrubbedRows.length;
+
+        // 8. Permanent Anti-Fraud Referral Pair Records
+        const existingRef = await txQuery(
+          "SELECT inviter_id, rewarded FROM referrals WHERE invitee_id = $1 LIMIT 1",
+          [uid]
+        );
+        const previousInviterId = existingRef.rows?.[0]?.inviter_id || null;
+        if (previousInviterId) {
+          const pairHash = createHmac("sha256", activeSalt).update(`${previousInviterId}:${uid}`).digest("hex");
+          const inviteeHash = createHmac("sha256", activeSalt).update(`INVITEE:${uid}`).digest("hex");
+          await txQuery(
+            "INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'pair') ON CONFLICT (pair_hash) DO NOTHING",
+            [pairHash]
+          );
+          await txQuery(
+            "INSERT INTO claimed_referral_pairs (pair_hash, claim_type) VALUES ($1, 'invitee') ON CONFLICT (pair_hash) DO NOTHING",
+            [inviteeHash]
+          );
+          summary.permanentReferralLockRecorded = true;
+        }
+
+        // 9. deleted_users cooldown record
+        await txQuery(
+          `INSERT INTO deleted_users (telegram_id, previous_inviter_id, deleted_at, cooldown_until)
+           VALUES ($1, $2, NOW(), NOW() + INTERVAL '15 days')
+           ON CONFLICT (telegram_id) DO UPDATE
+           SET deleted_at = NOW(), cooldown_until = NOW() + INTERVAL '15 days'`,
+          [uid, previousInviterId]
+        );
+        summary.cooldownRecorded = true;
+
+        // 10. Cascade DELETEs (ONLY after all archive and financial integrity checks pass)
+        const cascadeDeletes = [
+          { sql: "DELETE FROM referrals WHERE invitee_id = $1", params: [uid] },
+          { sql: "DELETE FROM referrals WHERE inviter_id = $1", params: [uid] },
+          { sql: "DELETE FROM token_transactions WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM token_balances WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM pending_refunds WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM watchlist_items WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM promo_campaign_registrations WHERE telegram_id = $1", params: [uid] },
+          { sql: "DELETE FROM price_alerts WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM notifications WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM notification_queue WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM notification_settings WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM daily_checkin_streaks WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM calendar_reminders WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM ticket_replies WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = $1)", params: [uid] },
+          { sql: "DELETE FROM tickets WHERE user_id = $1", params: [uid] },
+          { sql: "DELETE FROM admins WHERE telegram_id = $1", params: [uid] },
+          { sql: "DELETE FROM users WHERE telegram_id = $1", params: [uid] }
+        ];
+        for (const q of cascadeDeletes) {
+          await txQuery(q.sql, q.params);
+        }
+      });
     } catch (atomicErr) {
       console.error("[DELETE-ACCOUNT] Single atomic transaction failed and rolled back:", atomicErr?.message);
       throw atomicErr;
     }
 
-    // ── STEP 9: Post-check Archive Count ──
-    const verifyArchivedCountRes = await queryDb(env,
-      "SELECT COUNT(*)::int AS cnt FROM token_transactions_archive WHERE account_tombstone_id = $1",
-      [tombstoneId]
-    );
-    const archivedCnt = Number(verifyArchivedCountRes.rows[0]?.cnt || 0);
-    // Count verification checked via atomic insertion and pre-duplicate matching
-
-    summary.cooldownRecorded = true;
-    summary.archivedCount = archivedCnt;
     console.log("[DELETE-ACCOUNT] Atomic cascade complete with financial archive:", JSON.stringify(summary));
     return summary;
   }
