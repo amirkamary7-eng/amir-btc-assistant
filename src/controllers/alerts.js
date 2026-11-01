@@ -142,7 +142,19 @@ export function createAlertHandlers(deps) {
     // Additionally: incrementQuota should only run for NEW alerts, not
     // reactivations. The alertRepo.create return value now includes
     // `reactivated: true/false` so we can distinguish.
-    const alertRefId = `alert_${payload.user_id}_${rawSymbol}_${rawPrice}_${rawDirection}_${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
+    // NEW-FIN-01 FIX: Deterministic 64-bit FNV-1a digest (16 hex chars) of
+    // (rawSymbol, rawPrice, rawDirection) + millisecond timestamp Date.now().
+    // Keeps alertRefId (47 chars) and `${alertRefId}_refund` (54 chars) strictly
+    // within VARCHAR(64)/VARCHAR(128) while preserving 2^64 collision resistance
+    // and Date.now() per-operation uniqueness (AE-001 / H1-03).
+    const _specInput = `${rawSymbol}:${rawPrice}:${rawDirection}`;
+    let _fnv64 = 0xcbf29ce484222325n;
+    for (let _i = 0; _i < _specInput.length; _i++) {
+      _fnv64 ^= BigInt(_specInput.charCodeAt(_i));
+      _fnv64 = (_fnv64 * 0x100000001b3n) & 0xffffffffffffffffn;
+    }
+    const _alertSpecDigest = _fnv64.toString(16).padStart(16, '0');
+    const alertRefId = `alert_${payload.user_id}_${_alertSpecDigest}_${Date.now()}`;
 
     // ── Alert Economy: quota, atomic free-slot claim, token debit ──
     // M5-A FIX: the free-vs-paid decision is made ATOMICALLY by
