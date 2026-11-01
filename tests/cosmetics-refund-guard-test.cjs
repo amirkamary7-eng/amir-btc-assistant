@@ -297,3 +297,166 @@ test('CSM7 (unit): REAL debit + ownership conflict → refund MUST also be skipp
   assert.equal(res.body.code, 'ALREADY_OWNED');
   assert.equal(refundCalls.length, 0, 'the real-debit loser of the ownership race MUST NOT refund — the debit paid for the delivered cosmetic');
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW-FIN-02 — Executable Runtime Tests for Catch-Scope Refund & Outbox
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("CSM8 (runtime pg-mem): createOwnership throws after real debit → immediate refund restores balance without ReferenceError", async () => {
+  const stack = await makeStack();
+  const { h, cosmeticsRepo, economyService } = stack;
+  await h.insertBalance(USER, 1000);
+
+  const failingRepo = {
+    ...cosmeticsRepo,
+    createOwnership: async () => {
+      throw new Error("simulated DB connection drop during createOwnership");
+    },
+  };
+
+  const handlers = createCosmeticsHandlers({
+    jsonResponse,
+    authenticateTelegramRequest,
+    readJsonBody,
+    safeDbErrorResponse,
+    safeError,
+    buildBodyFieldValidationError,
+    isDatabaseConfigured,
+    cosmeticsRepo: failingRepo,
+    membershipAuthority,
+    economyService,
+    queryDb: h.queryDb,
+  });
+
+  const res = await purchase(handlers);
+  assert.equal(res.status, 500, "controller must return 500 safeDbErrorResponse, not throw ReferenceError");
+  assert.equal(await debitCount(h), 1, "debit was committed before createOwnership threw");
+
+  const mktRefunds = await txCount(
+    h,
+    "WHERE tx_type = 'marketplace_refund' AND amount = 500 AND ref_id = 'cosmetic_purchase_700000001_9_refund'"
+  );
+  assert.equal(mktRefunds, 1, "immediate marketplace_refund must be recorded in token_transactions");
+  assert.equal(await balanceOf(h, USER), 1000, "user balance must be fully restored to 1000 AB");
+});
+
+test("CSM9 (runtime pg-mem): createOwnership throws AND grantReward fails → persists pending_refunds outbox row", async () => {
+  const stack = await makeStack();
+  const { h, cosmeticsRepo, economyService } = stack;
+  await h.insertBalance(USER, 1000);
+
+  await h.raw(`
+    CREATE TABLE IF NOT EXISTS pending_refunds (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      amount INTEGER NOT NULL,
+      refund_ref_id VARCHAR(64) NOT NULL,
+      original_ref_id VARCHAR(64),
+      source VARCHAR(32) NOT NULL DEFAULT 'system',
+      description VARCHAR(256),
+      metadata JSONB DEFAULT '{}',
+      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_retry_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_refunds_ref_id
+      ON pending_refunds (refund_ref_id);
+  `);
+
+  const failingRepo = {
+    ...cosmeticsRepo,
+    createOwnership: async () => {
+      throw new Error("simulated createOwnership failure");
+    },
+  };
+
+  const failingRefundEconomy = {
+    ...economyService,
+    grantReward: async () => {
+      throw new Error("simulated grantReward DB outage");
+    },
+  };
+
+  const capturedOutboxSql = [];
+  const pgMemOutboxQueryDb = async (env, sql, params) => {
+    const s = String(sql);
+    if (s.includes("INSERT INTO pending_refunds")) {
+      capturedOutboxSql.push({ sql: s, params });
+      // pg-mem parser does not support partial index predicate in ON CONFLICT (...) WHERE ... DO NOTHING
+      const pgMemCompatibleSql = s.replace(
+        "ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING",
+        "ON CONFLICT (refund_ref_id) DO NOTHING"
+      );
+      return h.queryDb(env, pgMemCompatibleSql, params);
+    }
+    return h.queryDb(env, sql, params);
+  };
+
+  const handlers = createCosmeticsHandlers({
+    jsonResponse,
+    authenticateTelegramRequest,
+    readJsonBody,
+    safeDbErrorResponse,
+    safeError,
+    buildBodyFieldValidationError,
+    isDatabaseConfigured,
+    cosmeticsRepo: failingRepo,
+    membershipAuthority,
+    economyService: failingRefundEconomy,
+    queryDb: pgMemOutboxQueryDb,
+  });
+
+  const res = await purchase(handlers);
+  assert.equal(res.status, 500, "controller must return 500 safeDbErrorResponse when both ownership and refund fail");
+  assert.equal(await debitCount(h), 1, "debit occurred once");
+  assert.equal(await balanceOf(h, USER), 500, "balance remains debited until outbox cron runs");
+
+  const outbox = await h.raw(
+    "SELECT user_id, amount, refund_ref_id, original_ref_id, source, status, description FROM pending_refunds WHERE user_id = $1",
+    [USER]
+  );
+  assert.equal(capturedOutboxSql.length, 1, "queryDb must be called once for pending_refunds");
+  assert.ok(capturedOutboxSql[0].sql.includes("ON CONFLICT (refund_ref_id) WHERE status = 'pending' DO NOTHING"));
+  assert.equal(outbox.rows.length, 1, "must persist exactly 1 row in pending_refunds");
+  assert.equal(outbox.rows[0].user_id, USER);
+  assert.equal(Number(outbox.rows[0].amount), COST);
+  assert.equal(outbox.rows[0].refund_ref_id, `cosmetic_purchase_${USER}_${COSMETIC_ID}_refund`);
+  assert.equal(outbox.rows[0].original_ref_id, `cosmetic_purchase_${USER}_${COSMETIC_ID}`);
+  assert.equal(outbox.rows[0].source, "cosmetic");
+  assert.equal(outbox.rows[0].status, "pending");
+});
+
+test("CSM10 (runtime): error before debitUser (debitResult is null) → catch block skips refund and returns 500 cleanly", async () => {
+  const stack = await makeStack();
+  const { h, cosmeticsRepo, economyService } = stack;
+  await h.insertBalance(USER, 1000);
+
+  const earlyFailRepo = {
+    ...cosmeticsRepo,
+    getOwnership: async () => {
+      throw new Error("simulated DB error before debit");
+    },
+  };
+
+  const handlers = createCosmeticsHandlers({
+    jsonResponse,
+    authenticateTelegramRequest,
+    readJsonBody,
+    safeDbErrorResponse,
+    safeError,
+    buildBodyFieldValidationError,
+    isDatabaseConfigured,
+    cosmeticsRepo: earlyFailRepo,
+    membershipAuthority,
+    economyService,
+    queryDb: h.queryDb,
+  });
+
+  const res = await purchase(handlers);
+  assert.equal(res.status, 500);
+  assert.equal(await txCount(h), 0, "no debit or refund transactions when error occurs before debitUser");
+  assert.equal(await balanceOf(h, USER), 1000);
+});
