@@ -157,6 +157,7 @@ function createEnv(o = {}) {
     ADMIN_TELEGRAM_ID: '831704732',
     DATABASE_URL: 'postgres://mock',
     APP_ENV: 'production',
+    REFERRAL_SECRET_SALT: 'sec07-test-referral-secret-salt-64chars-configured',
     BOT_USERNAME: '',
     APP_CACHE: createMemoryKv(),
     RATE_LIMITS: createMemoryKv(),
